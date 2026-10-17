@@ -121,6 +121,21 @@ target_sources(lynx_core PRIVATE
 target_sources(lynx_core PRIVATE
     src/core/WaveAnalysis.cpp)
 
+# export options + MP3, plugin performance monitor, clip properties / arrangements (round 84)
+target_sources(lynx_core PRIVATE
+    src/core/ExportOptions.cpp
+    src/core/Mp3Encoder.cpp
+    src/core/PluginMonitor.cpp
+    src/core/PlaylistOps.cpp)
+
+# LAME's libmp3lame (LGPL; third_party/lame, encoder only, configured by third_party/lame/src/config.h)
+file(GLOB LAME_SOURCES third_party/lame/src/*.c)
+add_library(lame_encoder STATIC ${LAME_SOURCES})
+target_include_directories(lame_encoder PUBLIC third_party/lame/include PRIVATE third_party/lame/src)
+target_compile_definitions(lame_encoder PRIVATE HAVE_CONFIG_H)
+target_compile_options(lame_encoder PRIVATE $<$<NOT:$<C_COMPILER_ID:MSVC>>:-w>)
+target_link_libraries(lynx_core PUBLIC lame_encoder)
+
 # WavPack decoder (BSD; read-only) for the .wv samples in the FL packs
 file(GLOB WAVPACK_SOURCES third_party/wavpack/src/*.c)
 add_library(wavpack_decoder STATIC ${WAVPACK_SOURCES})
@@ -186,6 +201,7 @@ if(LYNX_BUILD_APP)
         src/engine/Exporter.cpp
         src/engine/StreamPrefetcher.cpp
         src/engine/ClapFormat.cpp
+        src/engine/Vst2Format.cpp
         src/engine/MidiFileIo.cpp
         src/engine/PreviewPlayer.cpp
         src/ui/MainComponent.cpp
@@ -233,6 +249,10 @@ if(LYNX_BUILD_APP)
         src/ui/SettingsPages.cpp
         src/ui/PluginManager.cpp
         src/ui/ShortcutManager.cpp
+        src/ui/NewProjectDialog.cpp
+        src/ui/ClipProperties.cpp
+        src/ui/PluginMonitorWindow.cpp
+        src/ui/TouchKeyboard.cpp
         src/ui/QuickAddPalette.cpp)
 
     target_include_directories(LYNX PRIVATE third_party/asiosdk/common)

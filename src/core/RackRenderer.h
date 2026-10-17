@@ -4,6 +4,9 @@
 // a block of stereo audio with notes triggered at the exact sample.
 
 #include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -129,9 +132,30 @@ struct RackState
 
 class WorkerPool;
 
+// Whether a parallel container slot (FL's Patcher) can keep its built effect: same branches, children and links.
+bool sameContainer (const EffectSlot& a, const EffectSlot& b);
+// Time spent in each instrument and effect slot (the Plugin performance monitor, round 84). Counted only while
+// `enabled` is on; nanoseconds of processing and of audio rendered, accumulated (the reader takes differences).
+struct ProcessTimes
+{
+    static constexpr int channels = 1024;
+    std::atomic<bool> enabled { false };
+    std::array<std::atomic<std::uint64_t>, channels> channelNs {};
+    std::array<std::atomic<std::uint64_t>, maxMixerTracks * maxEffectSlots> effectNs {}; // [track * maxEffectSlots + slot]
+    std::atomic<std::uint64_t> audioNs { 0 };  // duration of the audio rendered while enabled
+    std::atomic<std::uint64_t> wallNs { 0 };   // time the whole rack took for it
+
+    static std::uint64_t now() noexcept
+    {
+        return (std::uint64_t) std::chrono::duration_cast<std::chrono::nanoseconds> (std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+};
+
 class RackRenderer
 {
 public:
+    ProcessTimes& processTimes() noexcept { return *times; }
+
     // Extra threads for channels and mixer layers (nullptr = everything on the audio thread).
     void setWorkerPool (WorkerPool* pool) noexcept { workers = pool; }
 
@@ -152,6 +176,23 @@ public:
                   LiveEventQueue* moreLive = nullptr) noexcept;
 
     static void applyStereoForTest (const MixerTrack& t, float* l, float* r, int n) noexcept { applyStereo (t, l, r, n); }
+
+    // Per-unit CPU profile (REA round 87): the time spent in each channel (instrument, notes, PDC) and in each insert
+    // effect slot, accumulated while profiling is on. Off by default (it costs two clock reads per unit and chunk).
+    // Written by the audio thread and the workers, read by any thread (relaxed counters, nanoseconds).
+    static constexpr int maxChannels = 1024;
+    struct UnitTimes
+    {
+        std::array<std::atomic<std::uint64_t>, maxChannels> channelNs {};
+        std::array<std::atomic<std::uint64_t>, (std::size_t) maxMixerTracks * maxEffectSlots> effectNs {}; // [track * maxEffectSlots + slot]
+        std::array<std::atomic<std::uint64_t>, maxChannels> channelMaxNs {}; // longest single call (spikes)
+        std::array<std::atomic<std::uint64_t>, (std::size_t) maxMixerTracks * maxEffectSlots> effectMaxNs {};
+        std::atomic<std::uint64_t> processNs { 0 }, processedSamples { 0 };
+    };
+    void setProfiling (bool on) noexcept { profiling.store (on, std::memory_order_relaxed); }
+    bool isProfiling() const noexcept { return profiling.load (std::memory_order_relaxed); }
+    const UnitTimes& unitTimes() const noexcept { return *units; }
+    void resetUnitTimes() noexcept;
 
     // Tempo used in the last block (changes with tempo automation). The transport advances with it.
     double currentBpm() const noexcept { return bpm; }
@@ -188,13 +229,15 @@ private:
     std::array<float, RackState::maxAutomations> automationValues {}; // NaN = not evaluated yet
     std::array<float, maxMixerTracks * 2> lastTrackGain {}; // L/R gain of the previous block, for the ramp
     std::array<char, maxMixerTracks> trackActive {};        // the track output has sound in this block
-    static constexpr int maxChannels = 1024;
     std::array<char, maxChannels> channelSilent {};          // channel skipped in this chunk (idle, no notes)
     static constexpr int chunkCapacity = 512;               // chunks processed at once
     std::vector<float> channelBuffers;                      // maxChannels * 2 * chunkCapacity
     std::vector<float> trackScratchBuffers;                 // maxMixerTracks * 2 * chunkCapacity
     double chunkStartTick = 0.0, chunkTps = 1.0;            // of the chunk being rendered (for the arpeggiator)
     WorkerPool* workers = nullptr;
+    std::atomic<bool> profiling { false };
+    std::unique_ptr<UnitTimes> units = std::make_unique<UnitTimes>();
+    std::unique_ptr<ProcessTimes> times = std::make_unique<ProcessTimes>();
 
     struct SmartDisableState
     {

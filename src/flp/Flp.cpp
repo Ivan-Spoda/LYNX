@@ -1,6 +1,7 @@
 #include "flp/Flp.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace flp
@@ -301,17 +302,27 @@ ControlId normalizeControlId (std::uint32_t raw)
     return { raw };
 }
 
-std::size_t playlistRecordSize (std::uint32_t versionNumber, std::size_t payloadSize)
+std::size_t playlistRecordSize (std::uint32_t versionNumber, std::size_t payloadSize, std::uint32_t flagsA9)
 {
-    // Sizes observed in the FL 2026 demos; the 60 → 80 change falls between 24.1.0 and 24.2.99.
-    const std::size_t preferred = versionNumber < version (20, 99, 1)   ? 32
-                                  : versionNumber < version (24, 2, 99) ? 60
-                                                                         : 80;
+    // REA_rodada2 §4.2: before 20.99.1 the record is 32 B; after it the file flags (0xA9) choose the layout:
+    // bit 1 off -> 60 B, bit 1 on and bit 3 off -> 80 B (24.2 ... 25.2), bits 1 and 3 on -> 88 B (25.2.99, 26.x).
+    // Files without 0xA9 fall back to the sizes seen in the demos for their version.
+    std::size_t preferred = 32;
+
+    if (versionNumber >= version (20, 99, 1))
+    {
+        if ((flagsA9 & 2) != 0)
+            preferred = (flagsA9 & 8) != 0 ? 88 : 80;
+        else if (flagsA9 != 0)
+            preferred = 60;
+        else
+            preferred = versionNumber < version (24, 2, 99) ? 60 : 80;
+    }
 
     if (payloadSize % preferred == 0)
         return preferred;
 
-    for (std::size_t size : { 80u, 60u, 32u })
+    for (std::size_t size : { 88u, 80u, 60u, 32u })
         if (payloadSize % size == 0)
             return size;
 
@@ -646,7 +657,7 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                     arrangement(); // old files do not have the arrangement event
                 }
 
-                const auto recordSize = playlistRecordSize (project.versionNumber, e.data.size());
+                const auto recordSize = playlistRecordSize (project.versionNumber, e.data.size(), project.flagsA9);
 
                 if (recordSize == 0)
                 {
@@ -671,6 +682,16 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                     item.endOffset = readLE<float> (e.data, o + 28);
                     item.patternStartTick = readLE<std::int32_t> (e.data, o + 24);
                     item.patternEndTick = readLE<std::int32_t> (e.data, o + 28);
+
+                    if (recordSize >= 60)
+                    {
+                        // REA_rodada2 §4.2 (+0x24 fade-in, +0x2C fade-out, +0x34 clip gain); fades in ms
+                        // (e.g. 923.08 = 2 beats at 130 BPM in a 26.1 project).
+                        const auto finiteOr = [] (float v, float fallback) { return std::isfinite (v) ? v : fallback; };
+                        item.fadeInMs = std::max (0.0f, finiteOr (readLE<float> (e.data, o + 0x24), 0.0f));
+                        item.fadeOutMs = std::max (0.0f, finiteOr (readLE<float> (e.data, o + 0x2C), 0.0f));
+                        item.gain = std::max (0.0f, finiteOr (readLE<float> (e.data, o + 0x34), 1.0f));
+                    }
 
                     const auto patternBase = base != 0 ? base : playlistPatternBase;
 

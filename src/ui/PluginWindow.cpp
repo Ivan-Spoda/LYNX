@@ -66,7 +66,7 @@ class ScanThread final : public juce::ThreadWithProgressWindow
 {
 public:
     ScanThread (AudioEngine& e, std::function<void (int)> done)
-        : juce::ThreadWithProgressWindow (tr ("Scanning for plugins (VST3 and CLAP)..."), true, true),
+        : juce::ThreadWithProgressWindow (tr ("Scanning for plugins (VST, VST3 and CLAP)..."), true, true),
           engine (e),
           onDone (std::move (done))
     {
@@ -229,6 +229,6 @@ void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instrument
         menu.addItem (tr ("(no plugins found; use \"Scan for plugins\")"), false, false, [] {});
 
     menu.addSeparator();
-    menu.addItem (tr ("Scan for plugins (VST3 and CLAP)..."), [&engine] { engine.getPluginHost().startBackgroundScan(); });
+    menu.addItem (tr ("Scan for plugins (VST, VST3 and CLAP)..."), [&engine] { engine.getPluginHost().startBackgroundScan(); });
 }
 } // namespace lynx

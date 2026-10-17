@@ -7,6 +7,9 @@
 #include "core/NewtoneFx.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
+#include <ctime>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -209,7 +212,8 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 
             if (previous != nullptr && t < previous->song.mixer.size() && t < previous->effects.size()
                 && i < previous->song.mixer[t].effects.size() && i < previous->effects[t].size()
-                && previous->song.mixer[t].effects[i].kind == kind && kind != EffectKind::parallel // the container is rebuilt
+                && previous->song.mixer[t].effects[i].kind == kind
+                && (kind != EffectKind::parallel || sameContainer (previous->song.mixer[t].effects[i], slots[i])) // children are built in
                 && previous->song.mixer[t].effects[i].state == slots[i].state
                 && previous->song.mixer[t].effects[i].samplePath == slots[i].samplePath
                 && (kind != EffectKind::plugin
@@ -609,6 +613,104 @@ bool anyAbove (const float* l, const float* r, int n, float level) noexcept
 }
 } // namespace
 
+namespace
+{
+// A Patcher-style container bakes its children (kinds, states, parameters, routing) in when it is built, so it can be
+// reused only if all of that is unchanged. (It used to be rebuilt on every edit: its children's tails and delay lines
+// restarted, and a fresh linear-phase child reporting its latency only after the first block made the engine re-plan
+// PDC and rebuild it again, over and over — REA round 87.)
+bool sameSlotSetup (const EffectSlot& a, const EffectSlot& b);
+
+bool sameBranches (const EffectSlot& a, const EffectSlot& b)
+{
+    if (a.branches.size() != b.branches.size() || a.links.size() != b.links.size())
+        return false;
+    for (std::size_t i = 0; i < a.branches.size(); ++i)
+    {
+        const auto& x = a.branches[i];
+        const auto& y = b.branches[i];
+        if (x.gain != y.gain || x.chain.size() != y.chain.size())
+            return false;
+        for (std::size_t k = 0; k < x.chain.size(); ++k)
+            if (! sameSlotSetup (x.chain[k], y.chain[k]))
+                return false;
+    }
+    for (std::size_t i = 0; i < a.links.size(); ++i)
+    {
+        const auto& x = a.links[i];
+        const auto& y = b.links[i];
+        if (x.branch != y.branch || x.source != y.source || x.target != y.target || x.param != y.param || x.curve != y.curve)
+            return false;
+    }
+    return true;
+}
+
+bool sameSlotSetup (const EffectSlot& a, const EffectSlot& b)
+{
+    return a.kind == b.kind && a.enabled == b.enabled && a.params == b.params && a.mix == b.mix && a.plugin.id == b.plugin.id
+           && a.sidechain == b.sidechain && a.sidechain2 == b.sidechain2 && a.state == b.state && a.samplePath == b.samplePath
+           && sameBranches (a, b);
+}
+} // namespace
+
+bool sameContainer (const EffectSlot& a, const EffectSlot& b) { return sameBranches (a, b); }
+
+namespace
+{
+std::uint64_t nowNs() noexcept
+{
+#if defined(__linux__)
+    // diagnostics on a busy machine: LYNX_PROFILE_CPU=1 measures each unit in its thread's CPU time (renderwav)
+    static const bool threadCpu = std::getenv ("LYNX_PROFILE_CPU") != nullptr;
+    if (threadCpu)
+    {
+        timespec ts {};
+        clock_gettime (CLOCK_THREAD_CPUTIME_ID, &ts);
+        return (std::uint64_t) ts.tv_sec * 1000000000ull + (std::uint64_t) ts.tv_nsec;
+    }
+#endif
+    return (std::uint64_t) std::chrono::duration_cast<std::chrono::nanoseconds> (std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+// Adds the time since `start` to `slot` when profiling (start = 0: profiling was off when the unit began)
+struct UnitTimer
+{
+    UnitTimer (bool on, std::atomic<std::uint64_t>& s, std::atomic<std::uint64_t>* m = nullptr) noexcept
+        : slot (s), longest (m), start (on ? nowNs() : 0) {}
+    ~UnitTimer()
+    {
+        if (start == 0)
+            return;
+        const auto used = nowNs() - start;
+        slot.fetch_add (used, std::memory_order_relaxed);
+        if (longest != nullptr)
+        {
+            auto current = longest->load (std::memory_order_relaxed);
+            while (used > current && ! longest->compare_exchange_weak (current, used, std::memory_order_relaxed))
+            {
+            }
+        }
+    }
+    std::atomic<std::uint64_t>& slot;
+    std::atomic<std::uint64_t>* longest;
+    std::uint64_t start;
+};
+} // namespace
+
+void RackRenderer::resetUnitTimes() noexcept
+{
+    for (auto& t : units->channelNs)
+        t.store (0, std::memory_order_relaxed);
+    for (auto& t : units->effectNs)
+        t.store (0, std::memory_order_relaxed);
+    for (auto& t : units->channelMaxNs)
+        t.store (0, std::memory_order_relaxed);
+    for (auto& t : units->effectMaxNs)
+        t.store (0, std::memory_order_relaxed);
+    units->processNs.store (0, std::memory_order_relaxed);
+    units->processedSamples.store (0, std::memory_order_relaxed);
+}
+
 void RackRenderer::prepare (double sr, int maxBlockSize)
 {
     automationValues.fill (std::numeric_limits<float>::quiet_NaN());
@@ -821,6 +923,7 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         return;
     }
     channelSilent[(std::size_t) i] = 0;
+    const UnitTimer timer (profiling.load (std::memory_order_relaxed), units->channelNs[(std::size_t) i], &units->channelMaxNs[(std::size_t) i]);
     std::memset (l, 0, sizeof (float) * (std::size_t) n);
     std::memset (r, 0, sizeof (float) * (std::size_t) n);
     int position = 0;
@@ -957,6 +1060,17 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
     auto* l = trackBuffer (track, 0);
     auto* r = trackBuffer (track, 1);
     int audible = -1; // -1 = not measured yet; an effect's output is the next one's input
+    const auto timing = times->enabled.load (std::memory_order_relaxed);
+    auto timed = [this, timing] (std::size_t key, auto&& run) {
+        if (! timing || key >= times->effectNs.size())
+        {
+            run();
+            return;
+        }
+        const auto before = ProcessTimes::now();
+        run();
+        times->effectNs[key].fetch_add (ProcessTimes::now() - before, std::memory_order_relaxed);
+    };
 
     for (std::size_t i = 0; i < effects.size() && i < slots.size(); ++i)
     {
@@ -1004,6 +1118,9 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
             std::memcpy (trackScratch (track, 1), r, sizeof (float) * (std::size_t) n);
         }
 
+        const UnitTimer timer (profiling.load (std::memory_order_relaxed), units->effectNs[std::min (key, units->effectNs.size() - 1)],
+                               &units->effectMaxNs[std::min (key, units->effectNs.size() - 1)]);
+
         if (state.hasAutomation && ! isPlugin)
         {
             auto params = slots[i].params; // copy without allocation
@@ -1016,14 +1133,14 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
             effects[i]->setSongPosition (chunkTick);
             effects[i]->setPlaying (chunkPlaying);
             setSidechain (state, slots[i], *effects[i], track);
-            effects[i]->process (l, r, n, params, bpm);
+            timed (key, [&] { effects[i]->process (l, r, n, params, bpm); });
         }
         else
         {
             effects[i]->setSongPosition (chunkTick);
             effects[i]->setPlaying (chunkPlaying);
             setSidechain (state, slots[i], *effects[i], track);
-            effects[i]->process (l, r, n, slots[i].params, bpm);
+            timed (key, [&] { effects[i]->process (l, r, n, slots[i].params, bpm); });
         }
 
 
@@ -1058,12 +1175,18 @@ void RackRenderer::process (const RackState* state,
                             LiveEventQueue* moreLive) noexcept
 {
     const ScopedFlushDenormals noDenormals;
+    const UnitTimer timer (profiling.load (std::memory_order_relaxed), units->processNs);
+    if (profiling.load (std::memory_order_relaxed))
+        units->processedSamples.fetch_add ((std::uint64_t) std::max (0, numSamples), std::memory_order_relaxed);
     std::memset (left, 0, sizeof (float) * (std::size_t) numSamples);
     std::memset (right, 0, sizeof (float) * (std::size_t) numSamples);
     events.clear();
 
     if (state == nullptr || blockCapacity == 0)
         return;
+
+    const auto timing = times->enabled.load (std::memory_order_relaxed);
+    const auto wallStart = timing ? ProcessTimes::now() : 0;
 
     // A snapshot built before the device opened may have another rate. The instruments'
     // prepare() does not allocate, so it can run here.
@@ -1161,6 +1284,12 @@ void RackRenderer::process (const RackState* state,
         resumeAudio = false;
         done += n;
     }
+
+    if (timing)
+    {
+        times->wallNs.fetch_add (ProcessTimes::now() - wallStart, std::memory_order_relaxed);
+        times->audioNs.fetch_add ((std::uint64_t) ((double) numSamples / sampleRate * 1.0e9), std::memory_order_relaxed);
+    }
 }
 
 double RackRenderer::ticksToNextEvent (const RackState& state, double tick) noexcept
@@ -1230,6 +1359,16 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
     chunkStartTick = startTick;
     chunkTps = ticksPerSample (bpm, sampleRate);
 
+    // hosted plugins read the transport from here (PluginHost's play head)
+    {
+        auto& timeline = hostTimeline();
+        timeline.tick.store (startTick, std::memory_order_relaxed);
+        timeline.bpm.store (bpm, std::memory_order_relaxed);
+        timeline.sampleRate.store (sampleRate, std::memory_order_relaxed);
+        timeline.beatsPerBar.store (std::max (1, song.beatsPerBar), std::memory_order_relaxed);
+        timeline.playing.store (playing, std::memory_order_relaxed);
+    }
+
     for (int t = 0; t < tracks; ++t)
     {
         std::memset (trackBuffer (t, 0), 0, sizeof (float) * (std::size_t) numSamples);
@@ -1277,7 +1416,16 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 
     // 1) channels, each with its own notes at the exact sample (in parallel when worth it)
     const auto channels = std::min<int> ({ (int) state.instruments.size(), (int) song.channels.size(), maxChannels });
-    auto channel = [this, &state, numSamples] (int c) { renderChannel (state, c, numSamples); };
+    auto channel = [this, &state, numSamples] (int c) {
+        if (! times->enabled.load (std::memory_order_relaxed) || c >= ProcessTimes::channels)
+        {
+            renderChannel (state, c, numSamples);
+            return;
+        }
+        const auto before = ProcessTimes::now();
+        renderChannel (state, c, numSamples);
+        times->channelNs[(std::size_t) c].fetch_add (ProcessTimes::now() - before, std::memory_order_relaxed);
+    };
 
     if (workers != nullptr && state.parallel)
         workers->parallelFor (channels, channel);

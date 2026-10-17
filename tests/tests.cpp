@@ -1,7 +1,9 @@
 // Core tests (no JUCE). Usage: lynx_tests [folder-with-flp-files]
 
+#include <optional>
 #include <atomic>
 #include <chrono>
+#include <thread>
 #include <random>
 #include <cctype>
 #include <cmath>
@@ -102,6 +104,8 @@
 #include "core/Vocodex.h"
 #include "core/TimeStretch.h"
 #include "core/WorkerPool.h"
+#include "core/RtStats.h"
+#include "core/ParametricEqLinear.h"
 #include "core/Song.h"
 #include "core/NoteEdit.h"
 #include "core/Recorder.h"
@@ -110,6 +114,13 @@
 #include "core/ValueMath.h"
 #include "core/Workspace.h"
 #include "core/StartupSound.h"
+#include "core/ExportOptions.h"
+#include "core/Mp3Encoder.h"
+#include "core/PluginMonitor.h"
+#include "core/PlaylistOps.h"
+#include "core/TouchKeyboard.h"
+#include "core/HeldNotes.h"
+#include "core/Templates.h"
 #include "flp/Flp.h"
 #include "ui/I18nData.h"
 
@@ -277,6 +288,80 @@ TEST (flp_playlist_record_size_by_version)
     CHECK (flp::playlistRecordSize (25002005, 160) == 80);
     CHECK (flp::playlistRecordSize (25002005, 60) == 60);  // size doesn't match the version -> tries the others
     CHECK (flp::playlistRecordSize (25002005, 7) == 0);
+}
+
+TEST (flp_playlist_record_size_by_file_flags)
+{
+    // REA_rodada2 §4.2: 0xA9 bit 1 -> 80 B, bits 1 and 3 -> the native 88 B record (FL 25.2.99 / 26.x)
+    CHECK (flp::playlistRecordSize (26001003, 88 * 4, 15) == 88); // 352 is also a multiple of 32
+    CHECK (flp::playlistRecordSize (26001003, 88 * 10, 15) == 88); // ... and of 80
+    CHECK (flp::playlistRecordSize (25002005, 160, 7) == 80);
+    CHECK (flp::playlistRecordSize (21000000, 120, 1) == 60);
+    CHECK (flp::playlistRecordSize (26001003, 63712) == 88); // no flags: the only size that fits besides 32
+}
+
+TEST (flp_native_88_byte_playlist_items_with_clip_gain_and_fades)
+{
+    // an FL 26.1 file: 0xA9 = 15, four 88 B items (352 B: the old 32 B guess read garbage from it)
+    FlpBuilder b (96);
+    b.ascii (0xC7, "26.1.3.5570");
+    b.u8 (0xA9); b.u32 (15);
+    b.u8 (0x9C); b.u32 (130000);
+    b.u8 (0x40); b.u16 (0);
+    b.u8 (0x15); b.u8 (4); // audio clip channel
+    b.utf16 (0xC4, u"C:\\nowhere\\clip.wav");
+
+    std::vector<std::uint8_t> items;
+    auto add = [&] (std::uint32_t pos, std::uint32_t len, std::uint16_t track, float fadeIn, float fadeOut, float gain) {
+        std::vector<std::uint8_t> r (88, 0);
+        const std::uint16_t base = 20480, idx = 0, rv = (std::uint16_t) (499 - track);
+        const float offs[] = { -1.0f, -1.0f };
+        std::memcpy (&r[0], &pos, 4);
+        std::memcpy (&r[4], &base, 2);
+        std::memcpy (&r[6], &idx, 2);
+        std::memcpy (&r[8], &len, 4);
+        std::memcpy (&r[12], &rv, 2);
+        std::memcpy (&r[0x18], offs, 8);
+        std::memcpy (&r[0x24], &fadeIn, 4);
+        std::memcpy (&r[0x2C], &fadeOut, 4);
+        std::memcpy (&r[0x34], &gain, 4);
+        const double stretch = 1.0;
+        const std::int32_t minusOne = -1;
+        std::memcpy (&r[0x40], &stretch, 8);
+        std::memcpy (&r[0x4C], &minusOne, 4);
+        items.insert (items.end(), r.begin(), r.end());
+    };
+    add (0, 384, 0, 0.0f, 0.0f, 1.0f);
+    add (384, 384, 1, 923.0769f, 461.5385f, 1.65f); // 2 beats in, 1 beat out at 130 BPM
+    add (768, 96, 2, 0.0f, 0.0f, 0.0f);
+    add (1536, 192, 3, 0.0f, 5000.0f, 0.5f);        // fade longer than the clip
+    b.data (0xE9, items);
+
+    const auto p = flp::parseProject (b.bytes);
+    CHECK (p.flagsA9 == 15);
+    CHECK (p.arrangements.size() == 1 && p.arrangements[0].items.size() == 4);
+    CHECK (p.warnings.empty());
+
+    if (p.arrangements.size() == 1 && p.arrangements[0].items.size() == 4)
+    {
+        const auto& it = p.arrangements[0].items;
+        CHECK (it[1].position == 384 && it[1].length == 384 && it[1].track == 1 && it[1].kind == flp::PlaylistItem::Kind::channelClip);
+        CHECK (it[3].position == 1536 && it[3].track == 3);
+        CHECK (std::abs (it[1].gain - 1.65f) < 1e-6f && std::abs (it[1].fadeInMs - 923.0769f) < 1e-3f);
+
+        const auto song = lynx::importFlp (p);
+        CHECK (song.playlist.size() == 4);
+
+        if (song.playlist.size() == 4)
+        {
+            const auto beat = (std::int64_t) lynx::ppq;
+            CHECK (song.playlist[0].gain == 1.0f && song.playlist[0].fadeIn == 0 && song.playlist[0].fadeOut == 0);
+            CHECK (std::abs (song.playlist[1].gain - 1.65f) < 1e-6f);
+            CHECK (std::llabs (song.playlist[1].fadeIn - 2 * beat) <= 1 && std::llabs (song.playlist[1].fadeOut - beat) <= 1);
+            CHECK (song.playlist[2].gain == 0.0f);
+            CHECK (song.playlist[3].fadeOut == song.playlist[3].length); // clamped
+        }
+    }
 }
 
 TEST (flp_parses_project_model)
@@ -936,7 +1021,7 @@ TEST (flp_real_files)
     }
 
     int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
-    int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, markers = 0, signatures = 0, trackEqs = 0;
+    int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, wrappedVst2 = 0, wrappedVst2State = 0, markers = 0, signatures = 0, trackEqs = 0;
     int harmless = 0, harmlessDecoded = 0, harmlessParsed = 0, harmlessKind = 0, sytrus = 0, sytrusDecoded = 0, sytrusEngine = 0, sytrusRendered = 0,
         sytrusSounding = 0;
     int harmor = 0, harmorUsable = 0, harmorKind = 0, harmorSounding = 0;
@@ -1320,6 +1405,14 @@ TEST (flp_real_files)
                 ++wrapped;
                 lynx::ForeignPlugin f;
                 wrappedParsed += lynx::parseFlWrapper (state, f) && f.format != lynx::ForeignPlugin::Format::none && ! f.name.empty();
+                if (f.format == lynx::ForeignPlugin::Format::vst2)
+                {
+                    // VST2 state (REA_rodada89 §2): every one decodes and writes back to the same bytes
+                    ++wrappedVst2;
+                    lynx::FlVst2State st;
+                    if (lynx::parseFlVst2State (f.state, st) && st.version == -9 && lynx::writeFlVst2State (st) == f.state)
+                        ++wrappedVst2State;
+                }
             };
             for (const auto& c : p.channels)
                 countWrapper (c.pluginName, c.pluginState);
@@ -2039,7 +2132,8 @@ TEST (flp_real_files)
     std::printf ("  %d FL effect presets, %d read\n", fxPresets, fxDecoded);
     CHECK (fxDecoded == fxPresets);
     CHECK (wrappedParsed == wrapped);
-    std::printf ("  %d plugins in Fruity Wrapper, %d read\n", wrapped, wrappedParsed);
+    CHECK (wrappedVst2State == wrappedVst2);
+    std::printf ("  %d plugins in Fruity Wrapper, %d read; %d VST2 states, %d decoded\n", wrapped, wrappedParsed, wrappedVst2, wrappedVst2State);
     std::printf ("  %d markers, %d time signature changes, %d tracks with EQ\n", markers, signatures, trackEqs);
     std::printf ("  %d parametric EQs (%d with FL settings), %d reverbs (%d without dry)\n", peqSlots, peqShaped, reverbs, reverbsDryless);
     std::printf ("  DirectWave: %d channels, %d zones; FPC: %d projects, %d pad channels, %d pad notes\n", dwChannels, dwZones, fpcKits,
@@ -3587,6 +3681,53 @@ TEST (fl_wrapper_state_parses_records_and_vst3_state)
     CHECK (positions == (std::vector<int> { 1, -1, -1, 0, 2 }));
     CHECK (lynx::flVst3SlotPositions ({}, { 5u, 6u }) == (std::vector<int> { 0, 1 })); // new instance: slot = position
 
+    // VST2 state (REA_rodada89 §2): chunk and raw-parameter layouts, current (−9) and older versions
+    {
+        lynx::FlVst2State st;
+        st.flags = 8;
+        st.currentProgram = 3;
+        st.chunk = bytes ("BANKCHUNK");
+        const auto withChunk = lynx::writeFlVst2State (st);
+        lynx::FlVst2State back;
+        CHECK (lynx::parseFlVst2State (withChunk, back));
+        CHECK (back.version == -9 && back.flags == 8 && back.currentProgram == 3 && back.chunk == bytes ("BANKCHUNK") && back.params.empty());
+        CHECK (! back.chunkIsProgram());
+
+        lynx::FlVst2State raw;
+        raw.flags = 1;
+        raw.params = { 0.25f, 0.5f, 1.0f };
+        raw.programNames = { "Init" };
+        const auto withParams = lynx::writeFlVst2State (raw);
+        CHECK (withParams.size() == 4 + 1 + 4 + 8 + 4 + 4 + 12 + 4 + 25);
+        CHECK (lynx::parseFlVst2State (withParams, back));
+        CHECK (back.chunk.empty() && back.params == raw.params && back.allPrograms() && back.programNames == std::vector<std::string> { "Init" });
+
+        // version −5: no flags, i32 size, then i32 program; −6 without "all programs": the chunk is one program
+        std::vector<std::uint8_t> v5;
+        for (auto v : { 0xFFFFFFFBu, 4u, 7u })
+            u32 (v5, v);
+        for (auto c : bytes ("ABCD"))
+            v5.push_back (c);
+        CHECK (lynx::parseFlVst2State (v5, back) && back.version == -5 && back.currentProgram == 7 && back.chunk == bytes ("ABCD"));
+        std::vector<std::uint8_t> v6;
+        u32 (v6, 0xFFFFFFFAu);
+        v6.push_back (0);
+        for (auto v : { 2u, 0u })
+            u32 (v6, v);
+        v6.push_back ('x');
+        v6.push_back ('y');
+        CHECK (lynx::parseFlVst2State (v6, back) && back.chunkIsProgram() && back.chunk == bytes ("xy"));
+
+        // nothing to restore (123456), unknown old layouts, truncated chunks
+        std::vector<std::uint8_t> marker;
+        u32 (marker, 123456u);
+        CHECK (! lynx::parseFlVst2State (marker, back));
+        auto cut = withChunk;
+        cut.pop_back();
+        CHECK (! lynx::parseFlVst2State (cut, back));
+        CHECK (! lynx::parseFlVst2State ({}, back));
+    }
+
     // version out of range or no type: not a usable wrapper
     blob[0] = 13;
     CHECK (! lynx::parseFlWrapper (blob, p));
@@ -4232,7 +4373,8 @@ TEST (audio_clips_trigger_cut_and_resume)
 
     // first block already playing mid-clip
     r.process (state.get(), true, 1.5 * lynx::ppq, 256, l.data(), rr.data());
-    CHECK (std::abs (l[0] - 0.75f) < 0.001f);
+    const auto unity = 1.0f / lynx::channelGain (10000.0f / 12800.0f); // clip level at 100% channel volume (REA_rodada89 §4.2)
+    CHECK (std::abs (l[0] - 0.75f * unity) < 0.002f);
 
     // the clip ends at beat 3: after the short fade, silence (the sample would still have audio)
     double tick = 3.0 * lynx::ppq - 10 * tps;
@@ -5800,10 +5942,41 @@ TEST (audio_clip_fades_and_gain)
         all.insert (all.end(), l.begin(), l.end());
     }
 
-    CHECK (all[100] < 0.01f);                            // fade-in start
-    CHECK (std::abs (all[12000] - 0.25f) < 0.02f);       // fade-in midpoint: half of 0.5
-    CHECK (std::abs (all[48000] - 0.5f) < 0.01f);        // body: the clip gain
-    CHECK (std::abs (all[96000 - 12000] - 0.25f) < 0.02f); // fade-out midpoint
+    // FL plays a clip at unity at the default channel volume (78%): at 100% it is that much louder (REA_rodada89 §4.2)
+    const auto unity = 1.0f / lynx::channelGain (10000.0f / 12800.0f);
+    CHECK (all[100] < 0.01f);                                       // fade-in start
+    CHECK (std::abs (all[12000] - 0.25f * unity) < 0.02f);          // fade-in midpoint: half of 0.5
+    CHECK (std::abs (all[48000] - 0.5f * unity) < 0.01f);           // body: the clip gain
+    CHECK (std::abs (all[96000 - 12000] - 0.25f * unity) < 0.02f);  // fade-out midpoint
+}
+
+TEST (audio_clip_unity_at_fl_default_volume)
+{
+    // a Playlist audio clip at FL's default channel volume (10000/12800) and centre pan plays its sample unchanged
+    auto dc = std::make_shared<lynx::SampleData>();
+    dc->left.assign (48000, 0.5f);
+    auto clip = lynx::makeInstrument (lynx::InstrumentKind::audioClip, dc);
+    clip->prepare (48000.0);
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::audioClip;
+    c.volume = 10000.0f / 12800.0f;
+    clip->configure (c, 120.0);
+    clip->noteOn (60, 1.0f);
+    std::vector<float> l (4800, 0.0f), r (4800, 0.0f);
+    const auto g = lynx::channelGain (c.volume);
+    clip->render (l.data(), r.data(), 4800, g, g);
+    CHECK (std::abs (l[2400] - 0.5f) < 1.0e-3f && std::abs (r[2400] - 0.5f) < 1.0e-3f);
+
+    // a sampler channel (pattern notes) keeps the channel volume curve as it was
+    auto sampler = lynx::makeInstrument (lynx::InstrumentKind::sampler, dc);
+    sampler->prepare (48000.0);
+    c.instrument = lynx::InstrumentKind::sampler;
+    sampler->configure (c, 120.0);
+    sampler->noteOn (60, 1.0f);
+    std::fill (l.begin(), l.end(), 0.0f);
+    std::fill (r.begin(), r.end(), 0.0f);
+    sampler->render (l.data(), r.data(), 4800, g, g);
+    CHECK (std::abs (l[2400] - 0.5f * g) < 0.02f);
 }
 
 TEST (slicer_detects_hits_and_plays_slices_by_key)
@@ -7288,6 +7461,142 @@ TEST (worker_pool_runs_each_index_once_per_round)
     CHECK (failures == 0);
     CHECK (outside.load() == 0);
     CHECK (wrongRound.load() == 0);
+}
+
+TEST (worker_pool_wakes_sleeping_workers)
+{
+    // rounds far apart (the workers have gone to sleep on the semaphore in between): every index still runs once,
+    // and the sleeping workers are woken (REA round 87: the Windows build used to poll with growing Sleep()s)
+    lynx::WorkerPool pool (3);
+    std::vector<std::atomic<int>> hits (16);
+    int failures = 0;
+    for (int r = 0; r < 12; ++r)
+    {
+        std::this_thread::sleep_for (std::chrono::microseconds (lynx::WorkerPool::spinMicros * 4));
+        for (auto& h : hits)
+            h.store (0);
+        auto fn = [&] (int i) {
+            std::this_thread::sleep_for (std::chrono::microseconds (200)); // long enough for woken workers to join
+            hits[(std::size_t) i].fetch_add (1);
+        };
+        pool.parallelFor (16, fn);
+        for (auto& h : hits)
+            failures += h.load() != 1;
+    }
+    CHECK (failures == 0);
+    CHECK (pool.wakeUps() > 0);
+    CHECK (pool.indicesRunByWorkers() > 0);
+}
+
+TEST (realtime_stats_count_deadline_misses_and_late_calls)
+{
+    lynx::RtStats stats;
+    // 10 ms deadline: 3 ms, 9 ms (80-100 %), 12 ms (over), then a call 40 ms after the previous one (late)
+    stats.record (100.0, 3.0, 10.0);
+    stats.record (110.0, 9.0, 10.0);
+    stats.record (120.0, 12.0, 10.0);
+    stats.record (160.0, 2.0, 10.0);
+    const auto s = stats.snapshot();
+    CHECK (s.callbacks == 4);
+    CHECK (s.overBudget == 1);
+    CHECK (s.nearBudget == 1);
+    CHECK (s.lateCalls == 1);
+    CHECK (std::abs (s.maxLoad - 1.2) < 1e-9);
+    CHECK (std::abs (s.averageLoad - 26.0 / 40.0) < 1e-3);
+    CHECK (s.histogram[3] == 1 && s.histogram[9] == 1 && s.histogram[12] == 1 && s.histogram[2] == 1);
+    CHECK (std::abs (stats.takeWindowMaxLoad() - 1.2) < 1e-9 && stats.takeWindowMaxLoad() == 0.0);
+    // a device restart is not a late call
+    stats.deviceRestarted();
+    stats.record (5000.0, 1.0, 10.0);
+    CHECK (stats.snapshot().lateCalls == 1);
+    stats.reset();
+    CHECK (stats.snapshot().callbacks == 0 && stats.snapshot().maxLoad == 0.0);
+}
+
+TEST (safe_default_buffer_size)
+{
+    const std::vector<int> wasapi { 144, 160, 192, 224, 256, 288, 320, 384, 448, 480, 512, 576, 640, 1024, 2048 };
+    CHECK (lynx::prefs::safeBufferSize (wasapi, 480, 48000.0) == 512);   // the 10 ms default becomes 512
+    CHECK (lynx::prefs::safeBufferSize (wasapi, 1024, 48000.0) == 1024); // already larger: kept
+    CHECK (lynx::prefs::safeBufferSize (wasapi, 480, 96000.0) == 1024);  // ~10.7 ms at 96 kHz
+    CHECK (lynx::prefs::safeBufferSize ({ 64, 128, 256 }, 128, 44100.0) == 256); // nothing reaches 512: the largest
+    CHECK (lynx::prefs::safeBufferSize ({}, 0, 44100.0) == 0);
+}
+
+TEST (linear_phase_convolver_matches_direct_convolution)
+{
+    // the block FFT convolver (cached twiddles, REA round 87) equals the direct convolution with its kernel
+    lynx::peqfl::FftConvolver c;
+    c.init (256);
+    std::vector<float> table (129, 1.0f);
+    for (int k = 40; k < 129; ++k)
+        table[(std::size_t) k] = 0.25f; // a high shelf cut
+    c.setKernel (table);
+    // impulse response through step()
+    std::vector<float> ir (600, 0.0f);
+    for (int i = 0; i < 600; ++i)
+    {
+        float l = i == 0 ? 1.0f : 0.0f, r = 0.0f;
+        c.step (l, r);
+        ir[(std::size_t) i] = l;
+    }
+    // then a noise signal, compared with direct convolution by that impulse response
+    lynx::peqfl::FftConvolver d;
+    d.init (256);
+    d.setKernel (table);
+    std::vector<float> x (2000), y (2000);
+    std::uint32_t seed = 1;
+    for (auto& v : x)
+        v = (float) ((seed = seed * 1664525u + 1013904223u) >> 8) / 16777216.0f - 0.5f;
+    for (std::size_t i = 0; i < x.size(); ++i)
+    {
+        float l = x[i], r = 0.0f;
+        d.step (l, r);
+        y[i] = l;
+    }
+    double worst = 0.0;
+    for (std::size_t i = 0; i < x.size(); ++i)
+    {
+        double direct = 0.0;
+        for (std::size_t k = 0; k < ir.size() && k <= i; ++k)
+            direct += (double) ir[k] * (double) x[i - k];
+        worst = std::max (worst, std::abs (direct - (double) y[i]));
+    }
+    CHECK (worst < 1e-4);
+    // and it delays by 3n/4 with the kernel's centre there
+    const auto peak = (std::size_t) (std::max_element (ir.begin(), ir.end(), [] (float a, float b) { return std::abs (a) < std::abs (b); }) - ir.begin());
+    CHECK (peak == 192);
+}
+
+TEST (patcher_container_is_reused_across_snapshots)
+{
+    // an unchanged Patcher keeps its built effect (its children's tails, delay lines and PDC stay put), and a
+    // linear-phase Frequency Splitter reports its latency before its first block (REA round 87: it used to be
+    // rebuilt on every snapshot and its latency appeared one block late, re-planning PDC in a loop)
+    auto song = lynx::Song::makeDefault();
+    if (song.mixer.size() < 2)
+        song.mixer.resize (2);
+    lynx::EffectSlot splitter;
+    splitter.kind = lynx::EffectKind::frequencySplitter;
+    splitter.params = lynx::makeEffectSlot (lynx::EffectKind::frequencySplitter).params;
+    splitter.params[4] = 0.6f; // linear-phase mode
+    splitter.params[6] = 0.0f; // quality 0
+    lynx::EffectSlot patcher;
+    patcher.kind = lynx::EffectKind::parallel;
+    patcher.branches.push_back ({ { splitter }, 1.0f });
+    patcher.branches.push_back ({ {}, 0.5f });
+    song.mixer[1].effects = { patcher };
+    const auto a = lynx::RackState::build (song, nullptr, 44100.0);
+    const auto b = lynx::RackState::build (song, a.get(), 44100.0);
+    CHECK (a->effects[1][0] == b->effects[1][0]);
+    CHECK (a->effects[1][0]->latencySamples() == 384); // 3/4 of the 512-point FFT, before any block
+    CHECK (a->latencies == a->currentLatencies());
+    song.mixer[1].effects[0].branches[0].chain[0].params[0] = 0.25f; // a child's parameter changed: rebuilt
+    const auto c = lynx::RackState::build (song, b.get(), 44100.0);
+    CHECK (c->effects[1][0] != b->effects[1][0]);
+    song.mixer[1].effects[0].branches[1].gain = 0.75f;
+    const auto d = lynx::RackState::build (song, c.get(), 44100.0);
+    CHECK (d->effects[1][0] != c->effects[1][0]);
 }
 
 TEST (ladder_filter_follows_toxic_law)
@@ -14759,3 +15068,50 @@ TEST (flp_pattern_events_import)
 }
 
 #include "PrefsTests.inc"
+
+TEST (level_audit_demo_imports_round89)
+{
+    // REA_rodada89 §4: two demo projects whose FL renders were much louder than LYNX's
+    if (realFlpDir.empty())
+        return;
+    auto load = [] (const std::filesystem::path& path) -> std::optional<lynx::Song> {
+        if (! std::filesystem::exists (path))
+            return std::nullopt;
+        std::ifstream in (path, std::ios::binary);
+        const std::vector<std::uint8_t> file ((std::istreambuf_iterator<char> (in)), {});
+        return lynx::importFlp (flp::parseProject (file));
+    };
+    const auto demos = std::filesystem::path (realFlpDir) / "Demo projects";
+
+    // FL 12+: a route to insert 100+ without a level record plays at 100% (the percussion bus of "Lightning")
+    if (const auto song = load (demos / "Product demos" / "Square a Saw - Lightning (VEELA Vocals Resynthesized).flp"))
+    {
+        int highRoutes = 0, highAtZero = 0;
+        for (const auto& t : song->mixer)
+            for (const auto& send : t.sends)
+                if (send.target >= 100)
+                {
+                    ++highRoutes;
+                    highAtZero += send.level <= 0.0f;
+                }
+        std::printf ("  Lightning: %d routes to inserts 100+, %d at level 0\n", highRoutes, highAtZero);
+        CHECK (highRoutes > 0 && highAtZero == 0);
+    }
+
+    // Fruity Compressors FL saved as VST2 inside Fruity Wrapper (RawFL): the exact engine with the saved controls
+    if (const auto song = load (demos / "Visual" / "ZGameEditor Visualizer" / "Treben - Gimbal and Sinan - RawFL.flp"))
+    {
+        int compressors = 0, withSettings = 0;
+        for (const auto& t : song->mixer)
+            for (const auto& fx : t.effects)
+                if (fx.kind == lynx::EffectKind::fruityCompressor)
+                {
+                    ++compressors;
+                    const auto defaults = lynx::makeEffectSlot (lynx::EffectKind::fruityCompressor);
+                    withSettings += fx.params != defaults.params;
+                }
+        std::printf ("  RawFL: %d wrapped Fruity Compressors on the exact engine, %d with their own settings\n", compressors, withSettings);
+        CHECK (compressors >= 10 && withSettings >= 8);
+    }
+}
+#include "DialogsTests84.inc"

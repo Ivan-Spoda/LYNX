@@ -2889,6 +2889,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return flshape::makeWaveShaper (slot.state);
     if (slot.kind == EffectKind::parametricEq && peq::flLaw (slot.params))
         return std::make_unique<ParametricEq> (slot.params);
+    if (slot.kind == EffectKind::frequencySplitter)
+        return fsplit::make (slot.params);
     if (slot.kind == EffectKind::hyperChorus)
         return hyperchorusfx::make (hyperchorusfx::instanceOf (slot.state));
     if (slot.kind == EffectKind::vintageChorus)

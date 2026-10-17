@@ -181,3 +181,42 @@ TEST (convolver_engine)
     std::vector<std::uint8_t> a, b;
     CHECK (lynx::convolver::unpackBlob (lynx::convolver::packBlob ({ 1, 2, 3 }, { 4, 5 }), a, b) && a.size() == 3 && b.size() == 2);
 }
+
+TEST (convolver_long_kernel_matches_direct_convolution)
+{
+    // a sparse 100k-tap kernel reaches every partition level (128, 1024, 8192, 16384); the larger levels compute a
+    // block's output during the previous block (REA round 87), which must not change the convolution
+    lynx::convolver::Kernel k;
+    k.l.assign (100001, 0.0f);
+    k.r.assign (100001, 0.0f);
+    const std::vector<std::pair<int, float>> taps { { 0, 0.5f }, { 77, -0.25f }, { 300, 0.2f }, { 1500, -0.15f }, { 2100, 0.1f }, { 9000, 0.3f },
+                                                    { 16500, -0.2f }, { 20000, 0.12f }, { 70000, -0.3f }, { 100000, 0.25f } };
+    for (const auto& [i, v] : taps)
+        k.l[(std::size_t) i] = v, k.r[(std::size_t) i] = -v;
+    k.tail = 200000;
+    lynx::convolver::Engine e;
+    e.setRate (44100);
+    e.setKernel (k);
+    e.setParams ({ 0, 1000, 0, 0 }); // no dry, full wet, no separation
+    e.reset (false);
+    const int total = 130000;
+    std::vector<float> x (total), l (total), r (total);
+    std::uint32_t seed = 5;
+    for (auto& v : x)
+        v = (float) ((seed = seed * 1664525u + 1013904223u) >> 8) / 16777216.0f - 0.5f;
+    l = x, r = x;
+    for (int done = 0; done < total; done += 512)
+        e.process (l.data() + done, r.data() + done, std::min (512, total - done));
+    const double wet = (double) l[0] / ((double) x[0] * 0.5); // the wet gain's float rounding
+    double worst = 0.0;
+    for (int i = 0; i < total; i += 7)
+    {
+        double y = 0.0;
+        for (const auto& [t, v] : taps)
+            if (i >= t)
+                y += (double) v * (double) x[(std::size_t) (i - t)];
+        worst = std::max ({ worst, std::abs (y * wet - (double) l[(std::size_t) i]), std::abs (-y * wet - (double) r[(std::size_t) i]) });
+    }
+    CHECK (std::abs (wet - 1.0) < 1e-3);
+    CHECK (worst < 2e-5);
+}
