@@ -37,6 +37,8 @@
 #include "asio.h"
 #include "iasiodrv.h"
 
+#include "InputDrift.h"
+
 // {E987C593-898E-4557-BFE3-4288B0228718} — LYNX ASIO's own class id (hosts also use it as the interface id)
 DEFINE_GUID (CLSID_LynxAsio, 0xe987c593, 0x898e, 0x4557, 0xbf, 0xe3, 0x42, 0x88, 0xb0, 0x22, 0x87, 0x18);
 
@@ -91,16 +93,19 @@ std::string narrow (const std::wstring& w)
 // Runs `f` on a fresh thread inside the multithreaded COM apartment and waits for it: every WASAPI object of this
 // driver lives in the MTA, whatever apartment the host calls from.
 template <class F>
+DWORD WINAPI mtaThreadMain (LPVOID p) // WINAPI: thread entry points are __stdcall on 32-bit Windows
+{
+    const auto hr = CoInitializeEx (nullptr, COINIT_MULTITHREADED);
+    (*(F*) p)();
+    if (SUCCEEDED (hr))
+        CoUninitialize();
+    return 0;
+}
+
+template <class F>
 void onMtaThread (F& f)
 {
-    HANDLE t = CreateThread (nullptr, 0, [] (LPVOID p) -> DWORD
-    {
-        const auto hr = CoInitializeEx (nullptr, COINIT_MULTITHREADED);
-        (*(F*) p)();
-        if (SUCCEEDED (hr))
-            CoUninitialize();
-        return 0;
-    }, &f, 0, nullptr);
+    HANDLE t = CreateThread (nullptr, 0, &mtaThreadMain<F>, &f, 0, nullptr);
     if (t != nullptr)
     {
         WaitForSingleObject (t, INFINITE);
@@ -472,7 +477,7 @@ DeviceInfo probeDevice (EDataFlow flow, const std::wstring& id)
         }
         c->Release();
     }
-    if (info.ok && flow == eRender)
+    if (info.ok) // exclusive mode: the rates (and the minimum period) of the playback and of the recording device
     {
         StreamFormat f;
         for (auto r : standardRates)
@@ -634,12 +639,9 @@ public:
     {
         if (! initialised)
             return ASE_NotPresent;
-        const int block = blockSize > 0 ? blockSize : preferredBlock();
-        // output: what is queued ahead of the device (the shared target or the exclusive period) plus the host block
-        // waiting in the FIFO; input: one capture period plus the block
-        const int queued = deviceQueue > 0 ? deviceQueue : (settings.mode == Mode::exclusive ? block : sharedTarget (render.sharedPeriod));
-        *out = queued + block;
-        *in = (capture.ok ? capture.classicPeriod + block : 0) + block;
+        const auto l = latencies (blockSize > 0 ? blockSize : preferredBlock());
+        *in = l.input;
+        *out = l.output;
         return ASE_OK;
     }
 
@@ -762,11 +764,12 @@ public:
         callbacks = cbs;
         useTimeInfo = callbacks->asioMessage (kAsioSelectorSupported, kAsioSupportsTimeInfo, nullptr, nullptr) == 1
                       && callbacks->asioMessage (kAsioSupportsTimeInfo, 0, nullptr, nullptr) == 1;
+        hostKnowsLatencyChanges = callbacks->asioMessage (kAsioSelectorSupported, kAsioLatenciesChanged, nullptr, nullptr) == 1;
 
         // the audio thread opens the devices now (so getLatencies is exact) and waits for start()
         wakeEvent = CreateEventW (nullptr, FALSE, FALSE, nullptr);
         doneEvent = CreateEventW (nullptr, FALSE, FALSE, nullptr);
-        thread = CreateThread (nullptr, 0, [] (LPVOID self) -> DWORD { ((LynxAsio*) self)->audioThread(); return 0; }, this, 0, nullptr);
+        thread = CreateThread (nullptr, 0, &audioThreadMain, this, 0, nullptr);
         WaitForSingleObject (doneEvent, 10000);
         if (! openOk)
         {
@@ -851,6 +854,73 @@ public:
     }
 
     int sharedTarget (int period) const { return period + (settings.safety == 0 ? 0 : settings.safety == 1 ? period / 2 : period); }
+
+    // The input FIFO's level after a host block (frames). The recorded packets (`capture` frames) and the playback
+    // bursts (whole blocks covering one device period) come at unrelated moments; just before a burst the FIFO must
+    // still hold the whole burst plus the interpolator's look-ahead, whatever the phase between the two. Worst case:
+    // target + (burst + block) / 2 - capture >= burst + look-ahead, plus a margin for late packets that follows the
+    // safety setting. Measured (round 106, USB codec): packets of a 6 ms exclusive stream came up to 11.8 ms apart,
+    // of the 10 ms shared stream up to 16.6 ms apart, so "normal" allows one period (at least 6 ms) of lateness.
+    // A device that is later still raises the target once (InputDrift, at most 2x).
+    int inputTargetFor (int capturePacket, int period, int block) const
+    {
+        const int b = std::max (1, block);
+        const int burst = (std::max (period, b) + b - 1) / b * b;
+        const int p = std::max (capturePacket, burst);
+        const double ms = sampleRate / 1000.0;
+        const int late = settings.safety == 0 ? std::max (p / 4, (int) (2 * ms))
+                       : settings.safety == 1 ? std::max (p / 2, (int) (4 * ms))
+                                              : std::max (p, (int) (6 * ms));
+        return capturePacket + burst / 2 - b / 2 + lynxasio::InputDrift::half + 32 + late;
+    }
+
+    // Exclusive recording period: the playback period, but not below twice the device's minimum. Measured on a USB
+    // class-driver codec (REA round 106): at its 3 ms minimum the capture events arrive up to 8 ms apart now and
+    // then and the device drops a packet each time (about one per second); from 6 ms on there were none.
+    int exclusiveCapturePeriod (int playbackPeriod) const { return std::max (playbackPeriod, 2 * capture.exclusiveMinPeriod); }
+
+    struct Latencies
+    {
+        int block = 0, input = 0, output = 0, period = 0, capturePeriod = 0;
+        bool open = false, exclusive = false, captureExclusive = false, hasInput = false;
+    };
+
+    // ASIO latencies for `block`: of the open stream when there is one, else what the settings would give.
+    // Output: what is queued ahead of the device (the shared target or the exclusive period) plus the block waiting
+    // in the FIFO. Input: the FIFO level when the host reads a block (target + block), plus half a capture packet
+    // (the average age of the newest frame) and the interpolator's look-ahead.
+    Latencies latencies (int block, bool ofOpenStream = true) const
+    {
+        Latencies l;
+        l.block = block;
+        if (ofOpenStream && thread != nullptr && openOk)
+        {
+            l.open = true;
+            l.exclusive = streamExclusive;
+            l.period = devicePeriod;
+            l.output = deviceQueue + blockSize;
+            l.block = blockSize;
+            l.hasInput = captureService != nullptr;
+            if (l.hasInput)
+            {
+                l.captureExclusive = captureExclusive;
+                l.capturePeriod = capturePeriod;
+                l.input = std::max (inputTarget, inFifo.target()) + blockSize + capturePeriod / 2 + lynxasio::InputDrift::half;
+            }
+            return l;
+        }
+        l.exclusive = exclusiveActive();
+        l.period = l.exclusive ? std::max (block, render.exclusiveMinPeriod) : render.sharedPeriod;
+        l.output = (l.exclusive ? l.period : sharedTarget (l.period)) + block;
+        l.hasInput = capture.ok;
+        if (capture.ok)
+        {
+            l.captureExclusive = l.exclusive && capture.exclusiveMinPeriod > 0;
+            l.capturePeriod = l.captureExclusive ? exclusiveCapturePeriod (l.period) : capture.sharedPeriod;
+            l.input = inputTargetFor (l.capturePeriod, l.period, block) + block + l.capturePeriod / 2 + lynxasio::InputDrift::half;
+        }
+        return l;
+    }
     bool exclusiveActive() const { return settings.mode == Mode::exclusive && render.exclusiveMinPeriod > 0; }
 
 private:
@@ -892,19 +962,84 @@ private:
     IAudioRenderClient* renderService = nullptr;
     IAudioClient* captureClient = nullptr;
     IAudioCaptureClient* captureService = nullptr;
-    HANDLE renderEvent = nullptr;
+    HANDLE renderEvent = nullptr, captureEvent = nullptr;
     StreamFormat renderFormat, captureFormat;
     UINT32 renderFrames = 0;   // the render buffer
     int devicePeriod = 0;      // frames between two device events
-    int capturePeriod = 480;   // frames between two capture packets
-    Fifo outFifo, inFifo;
+    Fifo outFifo;
+    lynxasio::InputDrift inFifo; // captured frames -> host blocks, following the capture clock
     std::vector<float> scratch, blockIn, blockOut;
     int bufferIndex = 0;
     long long position = 0;
 
     // statistics (LYNX_ASIO_LOG)
-    long long events = 0, hostBlocks = 0, lateEvents = 0, inputShort = 0, inputShortBefore = 0, slowBursts = 0;
+    long long events = 0, hostBlocks = 0, lateEvents = 0, slowBursts = 0, captureEvents = 0, captureGaps = 0;
+    long long inputShortBefore = 0;
     double startMs = 0.0, lastEventMs = 0.0, maxGapMs = 0.0, maxBurstMs = 0.0;
+    struct TracePoint
+    {
+        float level, ppm;
+        int underflows, gaps;
+    };
+    TracePoint trace[240] {}; // input state once per second (first 4 minutes), written to the log at stop
+    int traced = 0;
+    struct GapNote
+    {
+        float atMs, sinceDrainMs;
+        int frames, packetIndex;
+    };
+    GapNote gapNotes[8] {};
+    double lastDrainMs = 0.0, maxCaptureGapMs = 0.0;
+    bool inputSettled = false;
+    int packetsThisDrain = 0;
+
+    // Opens an exclusive event-driven stream of `period` frames (re-initialised with the aligned size when the
+    // device asks for it). Returns the HRESULT.
+    static HRESULT initExclusive (IMMDevice* d, IAudioClient*& client, const StreamFormat& format, int period, double rate)
+    {
+        auto t = framesToRefTime (period, rate);
+        HRESULT hr = client->Initialize (AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, t, t, &format.wf.Format, nullptr);
+        if (hr == AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED)
+        {
+            UINT32 aligned = 0;
+            client->GetBufferSize (&aligned);
+            releaseCom (client);
+            if (FAILED (d->Activate (__uuidof (IAudioClient), CLSCTX_ALL, nullptr, (void**) &client)))
+                return E_FAIL;
+            t = framesToRefTime ((int) aligned, rate);
+            hr = client->Initialize (AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, t, t, &format.wf.Format, nullptr);
+        }
+        return hr;
+    }
+
+    // Shared event-driven stream; the IAudioClient3 low-latency period when the device has one shorter than its
+    // default and no rate conversion is needed. Returns the period in frames (0 = failed).
+    static int initShared (IAudioClient* client, const StreamFormat& format, double rate, double mixRate, REFERENCE_TIME buffer)
+    {
+        const bool atMixRate = rate == mixRate;
+        IAudioClient3* c3 = nullptr;
+        int period = 0;
+        if (atMixRate && SUCCEEDED (client->QueryInterface (__uuidof (IAudioClient3), (void**) &c3)))
+        {
+            UINT32 dp = 0, fp = 0, lo = 0, hi = 0;
+            if (SUCCEEDED (c3->GetSharedModeEnginePeriod (&format.wf.Format, &dp, &fp, &lo, &hi)) && lo > 0 && lo < dp
+                && SUCCEEDED (c3->InitializeSharedAudioStream (AUDCLNT_STREAMFLAGS_EVENTCALLBACK, lo, &format.wf.Format, nullptr)))
+                period = (int) lo;
+            c3->Release();
+        }
+        if (period == 0) // the classic shared stream (also converts other rates to the mix rate)
+        {
+            DWORD flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
+            if (! atMixRate)
+                flags |= AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
+            if (FAILED (client->Initialize (AUDCLNT_SHAREMODE_SHARED, flags, buffer, 0, &format.wf.Format, nullptr)))
+                return 0;
+            REFERENCE_TIME def = 0, mn = 0;
+            client->GetDevicePeriod (&def, &mn);
+            period = std::max (16, refTimeToFrames (def, rate));
+        }
+        return period;
+    }
 
     bool openRender (IMMDevice* d)
     {
@@ -914,23 +1049,11 @@ private:
         if (FAILED (d->Activate (__uuidof (IAudioClient), CLSCTX_ALL, nullptr, (void**) &renderClient)))
             return setError ("Could not open the playback device."), false;
 
-        HRESULT hr = E_FAIL;
         if (exclusive)
         {
             if (! exclusiveFormat (d, render.channels, (int) sampleRate, render.channelMask, renderFormat))
                 return setError ("The playback device takes no exclusive format at this sample rate."), false;
-            const int period = std::max (blockSize, render.exclusiveMinPeriod);
-            auto t = framesToRefTime (period, sampleRate);
-            hr = renderClient->Initialize (AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, t, t, &renderFormat.wf.Format, nullptr);
-            if (hr == AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED)
-            {
-                UINT32 aligned = 0;
-                renderClient->GetBufferSize (&aligned);
-                releaseCom (renderClient);
-                d->Activate (__uuidof (IAudioClient), CLSCTX_ALL, nullptr, (void**) &renderClient);
-                t = framesToRefTime ((int) aligned, sampleRate);
-                hr = renderClient->Initialize (AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, t, t, &renderFormat.wf.Format, nullptr);
-            }
+            const HRESULT hr = initExclusive (d, renderClient, renderFormat, std::max (blockSize, render.exclusiveMinPeriod), sampleRate);
             if (hr == AUDCLNT_E_DEVICE_IN_USE)
                 return setError ("Another program is using the playback device in exclusive mode."), false;
             if (FAILED (hr))
@@ -941,31 +1064,9 @@ private:
         else
         {
             renderFormat = makeFormat (render.channels, (int) sampleRate, SampleKind::float32, render.channelMask);
-            const bool atMixRate = sampleRate == render.mixRate;
-            IAudioClient3* c3 = nullptr;
-            if (atMixRate && SUCCEEDED (renderClient->QueryInterface (__uuidof (IAudioClient3), (void**) &c3)))
-            {
-                UINT32 dp = 0, fp = 0, lo = 0, hi = 0;
-                if (SUCCEEDED (c3->GetSharedModeEnginePeriod (&renderFormat.wf.Format, &dp, &fp, &lo, &hi)) && lo > 0 && lo < dp)
-                {
-                    hr = c3->InitializeSharedAudioStream (AUDCLNT_STREAMFLAGS_EVENTCALLBACK, lo, &renderFormat.wf.Format, nullptr);
-                    if (SUCCEEDED (hr))
-                        devicePeriod = (int) lo;
-                }
-                c3->Release();
-            }
-            if (devicePeriod == 0) // the classic shared stream (also converts other rates to the mix rate)
-            {
-                DWORD flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
-                if (! atMixRate)
-                    flags |= AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
-                hr = renderClient->Initialize (AUDCLNT_SHAREMODE_SHARED, flags, 0, 0, &renderFormat.wf.Format, nullptr);
-                if (FAILED (hr))
-                    return setError ("The playback device refused the shared stream."), false;
-                REFERENCE_TIME def = 0, mn = 0;
-                renderClient->GetDevicePeriod (&def, &mn);
-                devicePeriod = refTimeToFrames (def, sampleRate);
-            }
+            devicePeriod = initShared (renderClient, renderFormat, sampleRate, render.mixRate, 0);
+            if (devicePeriod == 0)
+                return setError ("The playback device refused the shared stream."), false;
             renderClient->GetBufferSize (&renderFrames);
         }
         renderEvent = CreateEventW (nullptr, FALSE, FALSE, nullptr);
@@ -973,41 +1074,74 @@ private:
         if (FAILED (renderClient->GetService (__uuidof (IAudioRenderClient), (void**) &renderService)))
             return setError ("The playback device has no render service."), false;
         deviceQueue = exclusive ? (int) renderFrames : std::min ((int) renderFrames, sharedTarget (devicePeriod));
-        logLine ("render: %s mode, %s %d ch @ %.0f Hz, period %d, buffer %u, queue %d, ASIO block %d",
+        REFERENCE_TIME lat = 0;
+        renderClient->GetStreamLatency (&lat);
+        renderLatency = refTimeToFrames (lat, sampleRate);
+        logLine ("render: %s mode, %s %d ch @ %.0f Hz, period %d, buffer %u, queue %d, stream latency %d, ASIO block %d",
                  exclusive ? "exclusive" : "shared", kindName (renderFormat.kind), renderFormat.channels, sampleRate, devicePeriod,
-                 renderFrames, deviceQueue, blockSize);
+                 renderFrames, deviceQueue, renderLatency, blockSize);
         return true;
     }
 
+    // The recording stream: exclusive (event-driven, same period as the playback when the device allows it) when
+    // LYNX ASIO runs exclusive, else shared. Either way it has its own event and clock; InputDrift follows it.
     void openCapture()
     {
+        captureExclusive = false;
+        capturePeriod = 0;
         if (! capture.ok)
             return;
         IMMDevice* d = openEndpoint (eCapture, settings.input);
         if (d == nullptr)
             return;
-        if (SUCCEEDED (d->Activate (__uuidof (IAudioClient), CLSCTX_ALL, nullptr, (void**) &captureClient)))
+        if (streamExclusive && capture.exclusiveMinPeriod > 0
+            && exclusiveFormat (d, capture.channels, (int) sampleRate, capture.channelMask, captureFormat)
+            && SUCCEEDED (d->Activate (__uuidof (IAudioClient), CLSCTX_ALL, nullptr, (void**) &captureClient)))
+        {
+            const HRESULT hr = initExclusive (d, captureClient, captureFormat, exclusiveCapturePeriod (devicePeriod), sampleRate);
+            UINT32 frames = 0;
+            if (SUCCEEDED (hr) && SUCCEEDED (captureClient->GetBufferSize (&frames)))
+            {
+                captureExclusive = true;
+                capturePeriod = (int) frames;
+            }
+            else
+            {
+                logLine ("capture: exclusive refused (0x%08lx), using the shared stream", (unsigned long) hr);
+                releaseCom (captureClient);
+            }
+        }
+        if (! captureExclusive && SUCCEEDED (d->Activate (__uuidof (IAudioClient), CLSCTX_ALL, nullptr, (void**) &captureClient)))
         {
             captureFormat = makeFormat (capture.channels, (int) sampleRate, SampleKind::float32, capture.channelMask);
-            DWORD flags = 0;
-            if (sampleRate != capture.mixRate)
-                flags |= AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
-            // polled from the render events: a 200 ms buffer is only a safety net
-            if (FAILED (captureClient->Initialize (AUDCLNT_SHAREMODE_SHARED, flags, 2000000, 0, &captureFormat.wf.Format, nullptr))
+            capturePeriod = initShared (captureClient, captureFormat, sampleRate, capture.mixRate, 1000000); // 100 ms of slack
+            if (capturePeriod == 0)
+                releaseCom (captureClient);
+        }
+        if (captureClient != nullptr)
+        {
+            captureEvent = CreateEventW (nullptr, FALSE, FALSE, nullptr);
+            if (FAILED (captureClient->SetEventHandle (captureEvent))
                 || FAILED (captureClient->GetService (__uuidof (IAudioCaptureClient), (void**) &captureService)))
             {
                 releaseCom (captureService);
                 releaseCom (captureClient);
-                logLine ("capture: could not open");
-            }
-            else
-            {
-                REFERENCE_TIME def = 0, mn = 0;
-                captureClient->GetDevicePeriod (&def, &mn);
-                capturePeriod = std::max (32, refTimeToFrames (def, sampleRate));
-                logLine ("capture: shared float32 %d ch @ %.0f Hz, period %d", capture.channels, sampleRate, capturePeriod);
+                CloseHandle (captureEvent);
+                captureEvent = nullptr;
             }
         }
+        if (captureClient != nullptr)
+        {
+            REFERENCE_TIME lat = 0;
+            captureClient->GetStreamLatency (&lat);
+            captureLatency = refTimeToFrames (lat, sampleRate);
+            inputTarget = inputTargetFor (capturePeriod, devicePeriod, blockSize);
+            logLine ("capture: %s mode, %s %d ch @ %.0f Hz, period %d, stream latency %d, FIFO target %d",
+                     captureExclusive ? "exclusive" : "shared", kindName (captureFormat.kind), captureFormat.channels, sampleRate,
+                     capturePeriod, captureLatency, inputTarget);
+        }
+        else
+            logLine ("capture: could not open \"%s\"", narrow (capture.name).c_str());
         d->Release();
     }
 
@@ -1021,54 +1155,93 @@ private:
         releaseCom (renderClient);
         releaseCom (captureService);
         releaseCom (captureClient);
-        if (renderEvent != nullptr)
-            CloseHandle (renderEvent);
-        renderEvent = nullptr;
+        for (auto* h : { &renderEvent, &captureEvent })
+            if (*h != nullptr)
+            {
+                CloseHandle (*h);
+                *h = nullptr;
+            }
     }
 
-    // Moves every captured packet into the input FIFO.
+    // Moves every captured packet into the input FIFO (stamped with the time it was taken).
     void drainCapture()
     {
         if (captureService == nullptr)
             return;
+        packetsThisDrain = 0;
         for (;;)
         {
             UINT32 packet = 0;
-            if (FAILED (captureService->GetNextPacketSize (&packet)) || packet == 0)
+            const HRESULT hr = captureService->GetNextPacketSize (&packet);
+            if (FAILED (hr))
+            {
+                if (hr == AUDCLNT_E_DEVICE_INVALIDATED)
+                    deviceLost = true;
+                break;
+            }
+            if (packet == 0)
                 break;
             BYTE* data = nullptr;
             UINT32 frames = 0;
             DWORD flags = 0;
             if (FAILED (captureService->GetBuffer (&data, &frames, &flags, nullptr, nullptr)))
                 break;
-            scratch.resize ((size_t) (frames * (UINT32) captureFormat.channels));
+            scratch.resize ((size_t) frames * (size_t) captureFormat.channels);
             if ((flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0)
                 std::fill (scratch.begin(), scratch.end(), 0.0f);
             else
                 readSamples (data, scratch.data(), (int) frames * captureFormat.channels, captureFormat.kind);
-            inFifo.push (scratch.data(), (int) frames);
+            if ((flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) != 0 && now() - startMs > 200.0)
+            {
+                ++captureGaps; // we were too late and the device dropped frames
+                if (captureGaps <= 8)
+                    gapNotes[captureGaps - 1] = { (float) (now() - startMs), (float) (now() - lastDrainMs), (int) frames, (int) packetsThisDrain };
+            }
+            ++packetsThisDrain;
+            if (traced < 240 && now() - startMs >= 1000.0 * (traced + 1))
+                trace[traced++] = { (float) inFifo.averageFill(), (float) ((inFifo.ratio() - 1.0) * 1.0e6), (int) inFifo.underflows, (int) captureGaps };
+            inFifo.push (scratch.data(), (int) frames, now() / 1000.0);
             captureService->ReleaseBuffer (frames);
         }
-        // keep the input close: captured packets come once per capture period, so up to two periods and two blocks
-        const int keep = 2 * capturePeriod + 2 * blockSize;
-        if (inFifo.count > keep)
-            inFifo.drop (inFifo.count - keep);
+        if (packetsThisDrain > 0)
+        {
+            const double t = now();
+            if (lastDrainMs > 0.0 && t - startMs > 500.0)
+                maxCaptureGapMs = std::max (maxCaptureGapMs, t - lastDrainMs);
+            lastDrainMs = t;
+        }
     }
+
+    static double now() { return nowMs(); }
 
     // One host block: input FIFO -> ASIO input buffers, bufferSwitch, ASIO output buffers -> output FIFO.
     void runHostBlock()
     {
         const int b = blockSize;
-        if (inFifo.channels > 0 && inFifo.pop (blockIn.data(), b) < b && captureService != nullptr)
-            ++inputShort;
-        for (auto& c : channels)
-            if (c.isInput)
+        if (captureService != nullptr)
+        {
+            if (! inputSettled && now() - startMs > 300.0)
             {
-                float* dst = c.buffers[bufferIndex];
-                const int stride = inFifo.channels;
-                for (int i = 0; i < b; ++i)
-                    dst[i] = blockIn[(size_t) (i * stride + c.index)];
+                inputSettled = true;
+                inFifo.recenter (now() / 1000.0);
             }
+            const int raises = inFifo.raises();
+            inFifo.pull (blockIn.data(), b, now() / 1000.0);
+            if (inFifo.raises() != raises && hostKnowsLatencyChanges) // the input latency grew: hosts that can re-read it
+                callbacks->asioMessage (kAsioLatenciesChanged, 0, nullptr, nullptr);
+            const int stride = inFifo.numChannels();
+            for (auto& c : channels)
+                if (c.isInput)
+                {
+                    float* dst = c.buffers[bufferIndex];
+                    for (int i = 0; i < b; ++i)
+                        dst[i] = blockIn[(size_t) (i * stride + c.index)];
+                }
+        }
+        else
+            for (auto& c : channels)
+                if (c.isInput)
+                    std::fill (c.buffers[bufferIndex], c.buffers[bufferIndex] + b, 0.0f);
 
         lastPosition = position;
         lastSystemNs = (long long) (nowMs() * 1.0e6);
@@ -1109,7 +1282,10 @@ private:
             return;
         const double t0 = nowMs();
         while (outFifo.count < frames)
+        {
             runHostBlock();
+            drainCapture(); // a long burst must not let the recording buffer overflow
+        }
         const double used = nowMs() - t0;
         maxBurstMs = std::max (maxBurstMs, used);
         if (used > 1000.0 * devicePeriod / sampleRate)
@@ -1127,10 +1303,9 @@ private:
     {
         const int ch = renderFormat.channels;
         outFifo.reset (ch, (int) renderFrames + 2 * blockSize + 64);
-        inFifo.reset (captureClient != nullptr ? captureFormat.channels : 0, 3 * capturePeriod + 4 * blockSize + 64);
-        if (captureClient != nullptr) // one capture period and a block of silence absorb the packets' timing
-            inFifo.pushSilence (capturePeriod + blockSize);
-        blockIn.assign ((size_t) (blockSize * std::max (1, inFifo.channels)), 0.0f);
+        if (captureClient != nullptr) // starts at its target level (silence), then follows the capture clock
+            inFifo.reset (captureFormat.channels, inputTarget, sampleRate);
+        blockIn.assign ((size_t) (blockSize * std::max (1, captureFormat.channels)), 0.0f);
         blockOut.assign ((size_t) (blockSize * ch), 0.0f);
         // the first buffer: silence, so the stream starts without a gap
         BYTE* data = nullptr;
@@ -1138,25 +1313,28 @@ private:
         if (SUCCEEDED (renderService->GetBuffer ((UINT32) first, &data)))
             renderService->ReleaseBuffer ((UINT32) first, AUDCLNT_BUFFERFLAGS_SILENT);
         bufferIndex = 0;
-        events = hostBlocks = lateEvents = inputShort = inputShortBefore = slowBursts = 0;
+        events = hostBlocks = lateEvents = inputShortBefore = slowBursts = captureEvents = captureGaps = 0;
+        traced = 0;
+        inputSettled = false;
+        lastDrainMs = maxCaptureGapMs = 0.0;
         lastEventMs = maxGapMs = maxBurstMs = 0.0;
         startMs = nowMs();
     }
 
     void onDeviceEvent()
     {
-        const double now = nowMs();
-        if (lastEventMs > 0.0 && now - startMs > 200.0) // the device's first periods are irregular: not counted
+        const double t = nowMs();
+        if (lastEventMs > 0.0 && t - startMs > 200.0) // the device's first periods are irregular: not counted
         {
-            const double gap = now - lastEventMs;
+            const double gap = t - lastEventMs;
             maxGapMs = std::max (maxGapMs, gap);
             if (gap > 1.5 * 1000.0 * devicePeriod / sampleRate + 1.0)
                 ++lateEvents;
         }
-        lastEventMs = now;
+        lastEventMs = t;
         ++events;
-        if (now - startMs < 200.0)
-            inputShortBefore = inputShort;
+        if (t - startMs < 200.0)
+            inputShortBefore = inFifo.underflows;
         drainCapture();
         if (streamExclusive)
             feedDevice ((int) renderFrames);
@@ -1170,6 +1348,38 @@ private:
             }
             feedDevice (deviceQueue - (int) padding);
         }
+    }
+
+    void logStats()
+    {
+        logLine ("stats: %lld device events, %lld host blocks, late events %lld (max gap %.2f ms), slow bursts %lld (max %.2f ms)",
+                 events, hostBlocks, lateEvents, maxGapMs, slowBursts, maxBurstMs);
+        if (captureClient != nullptr)
+            logLine ("input: %lld capture events, FIFO level %.0f (target %d, now %d), clock ratio %+.1f ppm (range %+.1f..%+.1f), "
+                     "underflows %lld (+%lld while starting), overflows %lld, device gaps %lld, longest wait for a packet %.2f ms",
+                     captureEvents, inFifo.averageFill(), inputTarget, inFifo.target(), (inFifo.ratio() - 1.0) * 1.0e6, (inFifo.minRatio - 1.0) * 1.0e6,
+                     (inFifo.maxRatio - 1.0) * 1.0e6, (long long) inFifo.underflows - inputShortBefore, inputShortBefore,
+                     (long long) inFifo.overflows, captureGaps, maxCaptureGapMs);
+        if (captureClient != nullptr && traced > 0)
+        {
+            std::string line = "input per second (level/ppm/underflows/gaps):";
+            for (int i = 0; i < traced; ++i)
+            {
+                char t[64];
+                std::snprintf (t, sizeof (t), " %.0f/%+.0f/%d/%d", trace[i].level, trace[i].ppm, trace[i].underflows, trace[i].gaps);
+                line += t;
+            }
+            logLine ("%s", line.substr (0, 1000).c_str());
+        }
+        for (int i = 0; i < (int) std::min<long long> (8, captureGaps); ++i)
+            logLine ("gap %d at %.1f ms: %.2f ms since the last packet, %d frames, packet %d of its drain", i, gapNotes[i].atMs,
+                     gapNotes[i].sinceDrainMs, gapNotes[i].frames, gapNotes[i].packetIndex);
+    }
+
+    static DWORD WINAPI audioThreadMain (LPVOID self)
+    {
+        ((LynxAsio*) self)->audioThread();
+        return 0;
     }
 
     void audioThread()
@@ -1193,8 +1403,9 @@ private:
         bool streaming = false;
         for (;;)
         {
-            HANDLE waits[2] = { wakeEvent, renderEvent };
-            const DWORD n = streaming ? 2 : 1;
+            // the capture event comes first: when both are signalled, the recorded packet is taken before the block
+            HANDLE waits[3] = { wakeEvent, captureEvent != nullptr ? captureEvent : renderEvent, renderEvent };
+            const DWORD n = ! streaming ? 1 : captureEvent != nullptr ? 3 : 2;
             const DWORD r = WaitForMultipleObjects (n, waits, FALSE, streaming ? 2000 : INFINITE);
             if (r == WAIT_OBJECT_0)
             {
@@ -1221,9 +1432,7 @@ private:
                             captureClient->Stop();
                             captureClient->Reset();
                         }
-                        logLine ("stats: %lld device events, %lld host blocks, late events %lld (max gap %.2f ms), slow bursts %lld (max %.2f ms), "
-                                 "input short %lld (+%lld while starting)", events, hostBlocks, lateEvents, maxGapMs, slowBursts, maxBurstMs,
-                                 inputShort - inputShortBefore, inputShortBefore);
+                        logStats();
                         if (task != nullptr)
                             AvRevertMmThreadCharacteristics (task);
                         task = nullptr;
@@ -1241,19 +1450,22 @@ private:
                     commandOk = c != Command::start || streaming;
                 SetEvent (doneEvent);
             }
-            else if (r == WAIT_OBJECT_0 + 1)
+            else if (r == WAIT_OBJECT_0 + 1 && n == 3)
             {
-                onDeviceEvent();
-                if (deviceLost)
-                {
-                    deviceLost = false;
-                    if (callbacks != nullptr)
-                        callbacks->asioMessage (kAsioResetRequest, 0, nullptr, nullptr);
-                }
+                ++captureEvents;
+                drainCapture();
             }
+            else if (r == WAIT_OBJECT_0 + 1 || r == WAIT_OBJECT_0 + 2)
+                onDeviceEvent();
             else if (r == WAIT_TIMEOUT && streaming)
             {
                 ++lateEvents; // the device stopped calling (unplugged, sleep): ask the host to reopen
+                if (callbacks != nullptr)
+                    callbacks->asioMessage (kAsioResetRequest, 0, nullptr, nullptr);
+            }
+            if (deviceLost)
+            {
+                deviceLost = false;
                 if (callbacks != nullptr)
                     callbacks->asioMessage (kAsioResetRequest, 0, nullptr, nullptr);
             }
@@ -1268,11 +1480,13 @@ private:
     bool initialised = false;
     double sampleRate = 48000.0;
     ASIOCallbacks* callbacks = nullptr;
-    bool useTimeInfo = false;
+    bool useTimeInfo = false, hostKnowsLatencyChanges = false;
     std::vector<Channel> channels;
     std::vector<float> memory;
     int blockSize = 0;
     int deviceQueue = 0;
+    int capturePeriod = 0, inputTarget = 0, renderLatency = 0, captureLatency = 0;
+    bool captureExclusive = false;
     HANDLE thread = nullptr, wakeEvent = nullptr, doneEvent = nullptr;
     std::atomic<Command> pending { Command::none };
     std::atomic<bool> commandOk { false };
@@ -1291,6 +1505,7 @@ enum
     idBuffer,
     idSafety,
     idInfo,
+    idLatency,
     idOk,
     idCancel
 };
@@ -1344,8 +1559,8 @@ struct Panel
         else if (edit.mode == Mode::exclusive)
         {
             if (r.exclusiveMinPeriod > 0)
-                swprintf (text, 600, tr (L"Exclusive: LYNX ASIO uses \"%ls\" alone (other programs go silent). Shortest period on this device: %d samples (%.1f ms).",
-                                         L"Exclusivo: o LYNX ASIO usa \"%ls\" sozinho (os outros programas ficam mudos). Menor período neste dispositivo: %d amostras (%.1f ms)."),
+                swprintf (text, 600, tr (L"Exclusive: LYNX ASIO uses \"%ls\" alone (other programs go silent; the input device too, when it accepts exclusive mode). Shortest period on this device: %d samples (%.1f ms).",
+                                         L"Exclusivo: o LYNX ASIO usa \"%ls\" sozinho (os outros programas ficam mudos; o dispositivo de entrada também, quando aceita o modo exclusivo). Menor período neste dispositivo: %d amostras (%.1f ms)."),
                           r.name.c_str(), r.exclusiveMinPeriod, 1000.0 * r.exclusiveMinPeriod / rate);
             else
                 swprintf (text, 600, L"%ls", tr (L"This device does not accept exclusive mode; the shared mode will be used.",
@@ -1357,7 +1572,48 @@ struct Panel
                       r.name.c_str(), r.sharedPeriod, 1000.0 * r.sharedPeriod / rate,
                       r.sharedPeriod < r.classicPeriod ? tr (L" (low-latency period)", L" (período de baixa latência)") : L"");
         SetWindowTextW (item (idInfo), text);
-        EnableWindow (item (idSafety), edit.mode == Mode::shared);
+        updateLatency();
+    }
+
+    // "Latency" readout: what these settings give, and what the open stream really uses.
+    void updateLatency()
+    {
+        const auto& r = driver.render;
+        const double rate = r.mixRate > 0 ? r.mixRate : 48000.0;
+        auto ms = [rate] (int frames) { return 1000.0 * frames / rate; };
+        std::wstring text;
+        wchar_t line[400];
+        if (r.ok)
+        {
+            const auto l = driver.latencies (driver.preferredBlock(), false);
+            swprintf (line, 400, tr (L"Latency at %d samples (%.1f ms): output %.1f ms", L"Latência com %d amostras (%.1f ms): saída %.1f ms"),
+                      l.block, ms (l.block), ms (l.output));
+            text = line;
+            if (l.hasInput)
+            {
+                swprintf (line, 400, tr (L", input %.1f ms (%ls)", L", entrada %.1f ms (%ls)"), ms (l.input),
+                          l.captureExclusive ? tr (L"exclusive", L"exclusiva") : tr (L"shared", L"compartilhada"));
+                text += line;
+            }
+            else
+                text += tr (L", no input", L", sem entrada");
+            text += L".";
+            const auto now = driver.latencies (0, true);
+            if (now.open)
+            {
+                swprintf (line, 400, tr (L"\nRunning now: %ls, buffer %d, output %.1f ms", L"\nEm uso agora: %ls, buffer %d, saída %.1f ms"),
+                          now.exclusive ? tr (L"exclusive", L"exclusivo") : tr (L"shared", L"compartilhado"), now.block, ms (now.output));
+                text += line;
+                if (now.hasInput)
+                {
+                    swprintf (line, 400, tr (L", input %.1f ms (%ls)", L", entrada %.1f ms (%ls)"), ms (now.input),
+                              now.captureExclusive ? tr (L"exclusive", L"exclusiva") : tr (L"shared", L"compartilhada"));
+                    text += line;
+                }
+                text += tr (L". Changes apply when the program restarts the driver.", L". As mudanças valem quando o programa reiniciar o driver.");
+            }
+        }
+        SetWindowTextW (item (idLatency), text.c_str());
     }
 
     void readControls()
@@ -1383,7 +1639,7 @@ struct Panel
         ReleaseDC (nullptr, screen);
         auto px = [dpi] (int v) { return MulDiv (v, dpi > 0 ? dpi : 96, 96); };
 
-        RECT rc { 0, 0, px (460), px (330) };
+        RECT rc { 0, 0, px (460), px (392) };
         AdjustWindowRectEx (&rc, WS_CAPTION | WS_SYSMENU, FALSE, WS_EX_DLGMODALFRAME);
         window = CreateWindowExW (WS_EX_DLGMODALFRAME, L"LynxAsioPanel", L"LYNX ASIO", WS_CAPTION | WS_SYSMENU | WS_POPUP,
                                   CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, owner, nullptr, moduleHandle, this);
@@ -1406,9 +1662,10 @@ struct Panel
         row (tr (L"Input", L"Entrada"), idInput);
         row (tr (L"Buffer size", L"Tamanho do buffer"), idBuffer);
         row (tr (L"Safety margin", L"Margem de segurança"), idSafety);
-        make (L"STATIC", L"", SS_LEFT, 14, y + 4, 432, 80, idInfo);
-        make (L"BUTTON", L"OK", BS_DEFPUSHBUTTON | WS_TABSTOP, 270, 290, 84, 28, idOk);
-        make (L"BUTTON", tr (L"Cancel", L"Cancelar"), BS_PUSHBUTTON | WS_TABSTOP, 362, 290, 84, 28, idCancel);
+        make (L"STATIC", L"", SS_LEFT, 14, y + 4, 432, 66, idInfo);
+        make (L"STATIC", L"", SS_LEFT, 14, y + 72, 432, 56, idLatency);
+        make (L"BUTTON", L"OK", BS_DEFPUSHBUTTON | WS_TABSTOP, 270, 352, 84, 28, idOk);
+        make (L"BUTTON", tr (L"Cancel", L"Cancelar"), BS_PUSHBUTTON | WS_TABSTOP, 362, 352, 84, 28, idCancel);
 
         addString (item (idMode), tr (L"Shared (other programs keep their sound)", L"Compartilhado (os outros programas continuam com som)"));
         addString (item (idMode), tr (L"Exclusive (lowest latency, device used alone)", L"Exclusivo (menor latência, dispositivo só do LYNX ASIO)"));
@@ -1439,9 +1696,9 @@ struct Panel
                 sel = (int) i + 2;
         }
         SendMessageW (item (idInput), CB_SETCURSEL, (WPARAM) sel, 0);
-        addString (item (idSafety), tr (L"None (1 period queued)", L"Nenhuma (1 período na fila)"));
-        addString (item (idSafety), tr (L"Small (1.5 periods)", L"Pequena (1,5 período)"));
-        addString (item (idSafety), tr (L"Normal (2 periods)", L"Normal (2 períodos)"));
+        addString (item (idSafety), tr (L"None (lowest latency, may click)", L"Nenhuma (menor latência, pode estalar)"));
+        addString (item (idSafety), tr (L"Small", L"Pequena"));
+        addString (item (idSafety), tr (L"Normal", L"Normal"));
         SendMessageW (item (idSafety), CB_SETCURSEL, (WPARAM) edit.safety, 0);
         fillBuffers();
         updateInfo();
@@ -1481,12 +1738,19 @@ struct Panel
                     if (HIWORD (wp) == CBN_SELCHANGE && (id == idMode || id == idOutput || id == idInput))
                     {
                         p->readControls();
-                        // re-probe the chosen device so the sizes and the explanation match it
-                        p->driver.settings.output = p->edit.output;
-                        p->driver.settings.input = p->edit.input;
+                        // re-probe the chosen device so the sizes, the explanation and the latency match it
+                        p->driver.settings = p->edit;
                         p->driver.probe();
                         p->fillBuffers();
+                        p->readControls();
+                        p->driver.settings = p->edit;
                         p->updateInfo();
+                    }
+                    else if (HIWORD (wp) == CBN_SELCHANGE && (id == idBuffer || id == idSafety))
+                    {
+                        p->readControls();
+                        p->driver.settings = p->edit; // restored by showPanel on Cancel
+                        p->updateLatency();
                     }
                     break;
                 }
