@@ -1095,7 +1095,7 @@ private:
             current = *s;
             engine.P = current.P;
             engine.custom = current.custom, engine.hqCustomSet = current.hq;
-        engine.hostHq = hostHq != nullptr && hostHq();
+            engine.hostHq = hostHq != nullptr && hostHq();
             std::memcpy (engine.snap.data(), current.snap.data(), snapshotSize);
             engine.timing (current.ppq, current.tempo); // (FL: parameters and tempo reach the plugin while voices play)
             engine.update();
