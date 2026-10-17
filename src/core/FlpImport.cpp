@@ -734,6 +734,20 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.sampler.pitch = std::clamp (c.pitchCents / 100.0f, -24.0f, 24.0f);
         }
 
+        // level adjustments (0xE5): FL multiplies the channel volume by the adjustment through the same curve
+        // (gain = f(volume)·f(volAdj), REA_rodada3 §2 [DECOMP]; an FL render of one channel with volAdj 7286 vs 12800
+        // differs by −10.4 dB, f() gives −10.7 dB, a linear factor −4.9 dB) and adds the pan adjustment to the pan.
+        if (c.hasLevelAdjust)
+        {
+            if (c.volAdj != 12800)
+            {
+                const auto g = channelGain (def.volume) * channelGain (std::clamp (c.volAdj / 12800.0f, 0.0f, 1.0f));
+                def.volume = std::clamp ((float) (std::log (10.0 * g + 1.0) / std::log (11.0)), 0.0f, 1.0f);
+            }
+            if (c.panAdj != 0)
+                def.pan = std::clamp (def.pan + c.panAdj / 6400.0f, -1.0f, 1.0f);
+        }
+
         // sample root note: our sampler plays at the original pitch at C5 (60)
         if (c.rootNote >= 0 && c.rootNote <= 127)
             def.sampler.pitch = std::clamp (def.sampler.pitch + (float) (60 - c.rootNote), -24.0f, 24.0f);
@@ -2516,6 +2530,14 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                         clip.offset = (std::int64_t) std::llround (item.startOffset * ppq);
                     else if (std::abs (span - beats * 60000.0 / song.bpm) < 0.02 * std::max (1.0, span))
                         clip.offset = (std::int64_t) std::llround (item.startOffset / 1000.0 * song.bpm / 60.0 * ppq);
+                    else if (const auto& ch = song.channels[(std::size_t) channel->second]; ch.sampler.stretchBeats > 0.0f && span > 0.0 && beats > 0.0)
+                    {
+                        // time-stretched clip: start/end are in the SAMPLE's milliseconds, so the span is the clip
+                        // length times the stretch factor (e.g. 31 219 ms over 64 beats = 29 538 ms at 130 BPM)
+                        const auto factor = span / (beats * 60000.0 / song.bpm);
+                        if (factor > 0.25 && factor < 4.0)
+                            clip.offset = (std::int64_t) std::llround (item.startOffset / factor / 1000.0 * song.bpm / 60.0 * ppq);
+                    }
                 }
 
                 // clip gain and fades (FL 20.99+ records); fades are in ms, at most the clip length

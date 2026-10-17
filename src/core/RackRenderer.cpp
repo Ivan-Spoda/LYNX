@@ -481,6 +481,8 @@ void RackState::buildAutomationTables()
                     used = false;
                 else if (song.mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].kind == EffectKind::plugin)
                     pluginParams.push_back ({ a, -1, t.index, t.slot, t.param });
+                else if (song.mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].isSubstitute())
+                    used = false; // the missing plugin's parameters: kept for when it is back, they don't drive the substitute
                 else if (t.param >= 0 && t.param < maxEffectParams)
                     effectParamAuto[(std::size_t) t.index][(std::size_t) t.slot][(std::size_t) t.param] = a;
                 else

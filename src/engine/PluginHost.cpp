@@ -547,9 +547,16 @@ std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlu
             *how = reason;
         return std::optional<juce::PluginDescription> (d);
     };
-    const auto fileName = plainName (juce::File::createFileWithoutCheckingPath (
+    auto fileName = plainName (juce::File::createFileWithoutCheckingPath (
         juce::String::fromUTF8 (plugin.path.c_str()).replaceCharacter ('\\', '/')).getFileNameWithoutExtension());
-    const auto name = plainName (juce::String::fromUTF8 (plugin.name.c_str()));
+    auto name = plainName (juce::String::fromUTF8 (plugin.name.c_str()));
+    // a Waves shell holds many plugins: its file name says nothing; the sub-plugin's name is in its state
+    const auto shell = name.startsWith ("waveshell") || fileName.startsWith ("waveshell");
+    if (shell)
+    {
+        fileName = {};
+        name = plainName (juce::String::fromUTF8 (wavesPluginName (pluginIdentity (plugin).state).c_str()));
+    }
     // 1) the same plugin, by its format identifier
     for (const auto& d : types)
     {
@@ -594,6 +601,15 @@ std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlu
             continue;
         const auto candidate = plainName (d.name);
         const auto candidateFile = plainName (juce::File::createFileWithoutCheckingPath (d.fileOrIdentifier).getFileNameWithoutExtension());
+        if (shell)
+        {
+            // "RComp" -> "RComp Stereo" / "RComp Mono"; the project's channel layout isn't known: stereo first
+            if (name.isNotEmpty() && (candidate == name + "stereo" || candidate == name))
+                return found (d, TR_NOOP ("same Waves plugin"));
+            if (name.isNotEmpty() && candidate == name + "mono" && ! byName)
+                byName = d;
+            continue;
+        }
         if ((name.isNotEmpty() && (candidate == name || candidateFile == name))
             || (fileName.isNotEmpty() && (candidate == fileName || candidateFile == fileName)))
         {
@@ -649,7 +665,8 @@ juce::StringArray PluginHost::filesToScanFor (const std::vector<FlpPluginUse>& u
     return worth;
 }
 
-int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::StringArray* matched, juce::StringArray* withoutState)
+int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::StringArray* matched, juce::StringArray* withoutState,
+                                juce::StringArray* substituted)
 {
     int found = 0;
 
@@ -763,6 +780,14 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::St
             if (fx.kind != EffectKind::plugin || fx.plugin.foreign.format == ForeignPlugin::Format::none)
                 continue;
             const auto foreign = fx.plugin.foreign;
+            // not installed: a LYNX substitute plays in its place and keeps the original record for later
+            if (pluginSubstitutesEnabled() && ! findForeign (foreign, false) && substituteEffectSlot (fx, pluginIdentity (foreign)))
+            {
+                if (substituted != nullptr)
+                    substituted->addIfNotAlreadyThere (juce::String::fromUTF8 (substituteOriginalName (fx).c_str()) + " -> "
+                                                       + juce::String::fromUTF8 (effectInfo (fx.kind).name));
+                continue;
+            }
             if (! adopt (fx.plugin, false))
                 song.removeEffectSlot (track, slot);
             else if (const auto d = findForeign (foreign, false))
@@ -772,6 +797,91 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::St
         }
 
     return found;
+}
+
+PluginIdentity PluginHost::identityOf (const PluginRef& ref)
+{
+    if (ref.foreign.format != ForeignPlugin::Format::none)
+        return pluginIdentity (ref.foreign);
+
+    PluginIdentity id;
+    id.name = ref.name;
+    // JUCE's identifier: "<format>-<name>-<file hash>-<unique id>" (hex)
+    const auto text = juce::String::fromUTF8 (ref.id.c_str());
+    const auto format = text.upToFirstOccurrenceOf ("-", false, false);
+    id.format = format == "VST3"                           ? ForeignPlugin::Format::vst3
+                : format == Vst2PluginFormat::formatName   ? ForeignPlugin::Format::vst2
+                : format == ClapPluginFormat::formatName   ? ForeignPlugin::Format::clap
+                                                           : ForeignPlugin::Format::other;
+    if (id.format == ForeignPlugin::Format::vst2)
+        id.vst2Id = (std::uint32_t) text.fromLastOccurrenceOf ("-", false, false).getHexValue64();
+
+    juce::MemoryBlock state;
+    if (ref.state.empty() || ! state.fromBase64Encoding (juce::String::fromUTF8 (ref.state.c_str())))
+        return id;
+    const auto* bytes = static_cast<const std::uint8_t*> (state.getData());
+    if (id.format == ForeignPlugin::Format::vst3)
+    {
+        // JUCE's VST3 state: XML "VST3PluginState" whose IComponent element holds the component state in base64
+        if (const auto xml = juce::AudioProcessor::getXmlFromBinary (state.getData(), (int) state.getSize()))
+            if (const auto* component = xml->getChildByName ("IComponent"))
+            {
+                juce::MemoryBlock raw;
+                if (raw.fromBase64Encoding (component->getAllSubText().trim()))
+                    id.state.assign (static_cast<const std::uint8_t*> (raw.getData()), static_cast<const std::uint8_t*> (raw.getData()) + raw.getSize());
+            }
+    }
+    else
+        id.state.assign (bytes, bytes + state.getSize()); // VST2: FL's layout (LYNX's VST2 host); CLAP: the plugin's own
+    return id;
+}
+
+int PluginHost::applySubstitutes (Song& song, int* restored, int* substituted)
+{
+    int back = 0, replaced = 0;
+    bool foreignBack = false;
+    const auto substitute = pluginSubstitutesEnabled();
+    for (auto& track : song.mixer)
+        for (auto& fx : track.effects)
+        {
+            if (fx.isSubstitute())
+            {
+                const auto& original = fx.substituteFor;
+                const auto installed = original.foreign.format != ForeignPlugin::Format::none
+                                           ? findForeign (original.foreign, false).has_value()
+                                           : find (juce::String::fromUTF8 (original.id.c_str())) != nullptr;
+                if (installed)
+                {
+                    foreignBack = foreignBack || original.foreign.format != ForeignPlugin::Format::none;
+                    restoreOriginalPlugin (fx);
+                    ++back;
+                }
+            }
+            else if (substitute && fx.kind == EffectKind::plugin && fx.plugin.foreign.format == ForeignPlugin::Format::none
+                     && ! fx.plugin.id.empty() && find (juce::String::fromUTF8 (fx.plugin.id.c_str())) == nullptr)
+            {
+                if (substituteEffectSlot (fx, identityOf (fx.plugin)))
+                    ++replaced;
+            }
+        }
+    // originals that came from an .flp: their FL record still needs converting to the installed plugin's state
+    if (foreignBack)
+        adoptFlPlugins (song);
+    if (restored != nullptr)
+        *restored = back;
+    if (substituted != nullptr)
+        *substituted = replaced;
+    return back + replaced;
+}
+
+bool pluginSubstitutesEnabled()
+{
+    return PluginHost::settingsFolder().getChildFile ("substitutes.txt").loadFileAsString().trim() != "0";
+}
+
+void setPluginSubstitutesEnabled (bool enabled)
+{
+    PluginHost::settingsFolder().getChildFile ("substitutes.txt").replaceWithText (enabled ? "1" : "0");
 }
 
 std::unique_ptr<juce::AudioPluginInstance> PluginHost::instantiate (const PluginRef& ref, double sampleRate, juce::String* error)

@@ -1936,6 +1936,13 @@ countries: br
 "Note names" = "Nomes das notas"
 "Plays: {0}" = "Toca: {0}"
 "Select a channel in the Channel Rack" = "Selecione um canal no Channel Rack"
+"LYNX substitute: {0} (the original plugin is used again once it is installed)" = "Substituto LYNX: {0} (o plugin original volta a ser usado quando for instalado)"
+"Substitute missing plugins with LYNX equivalents" = "Substituir plugins ausentes por equivalentes do LYNX"
+"A project keeps the original plugin and uses it again once it is installed." = "O projeto guarda o plugin original e volta a usá-lo quando ele for instalado."
+"LYNX substitute for {0}" = "Substituto LYNX de {0}"
+"{0} (LYNX equivalent of {1})" = "{0} (equivalente LYNX de {1})"
+"LYNX equivalents" = "Equivalentes LYNX"
+"same Waves plugin" = "mesmo plugin Waves"
 
 # --- Native plugin windows in FL's arrangement (round 93)
 "(no preset)" = "(sem preset)"

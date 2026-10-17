@@ -561,3 +561,32 @@ TEST (lynx_tune_editor_layout_round95)
     CHECK (inside);
     CHECK (std::all_of (placed.begin(), placed.end(), [] (bool b) { return b; }));
 }
+
+TEST (lynx_tune_substitutes_auto_tune_round95)
+{
+    // a missing Auto-Tune Pro (FL wrapper record, VST3 class ID from real projects) becomes LYNX Tune, keeping the original
+    using namespace substtest;
+    lynx::ForeignPlugin at;
+    at.format = lynx::ForeignPlugin::Format::vst3;
+    at.classId = classIdOf ("415453563854413175746f2d54756e65");
+    at.hasClassId = true;
+    at.name = "Auto-Tune Pro";
+    at.state = flVst3State (juceXmlComponent ("<AutoTune/>"));
+    const auto id = lynx::pluginIdentity (at);
+    const auto* entry = lynx::findPluginSubstitute (id, false);
+    CHECK (entry != nullptr && entry->key == "antares-auto-tune" && entry->effect == lynx::EffectKind::lynxTune);
+    lynx::EffectSlot slot;
+    slot.kind = lynx::EffectKind::plugin;
+    slot.plugin.name = at.name;
+    slot.plugin.foreign = at;
+    CHECK (lynx::substituteEffectSlot (slot, id));
+    CHECK (slot.kind == lynx::EffectKind::lynxTune && slot.isSubstitute() && slot.mix == 1.0f);
+    CHECK (slot.params[lynx::lynxtune::scale] == lynx::effectInfo (lynx::EffectKind::lynxTune).params[lynx::lynxtune::scale].defaultValue);
+
+    // by name too (another edition)
+    lynx::ForeignPlugin artist;
+    artist.format = lynx::ForeignPlugin::Format::vst3;
+    artist.name = "Auto-Tune Artist";
+    const auto* byName = lynx::findPluginSubstitute (lynx::pluginIdentity (artist), false);
+    CHECK (byName != nullptr && byName->effect == lynx::EffectKind::lynxTune);
+}

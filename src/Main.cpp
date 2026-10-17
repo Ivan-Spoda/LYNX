@@ -659,6 +659,43 @@ private:
                             && richBack->mixer[3].effects[0].state == vocodexSlot.state && richBack->mixer[3].effects[0].sidechain2 == 2
                             && richBack->markers() == rich.markers();
 
+        // LYNX substitutes (round 98): a missing plugin's slot plays a built-in equivalent and the project keeps the
+        // original reference byte for byte (.flp record and LYNX plugin state)
+        bool substituteOk = false;
+        {
+            auto song = lynx::Song::makeDefault();
+            lynx::ForeignPlugin vv; // an .flp VST3 record (ValhallaVintageVerb's class ID), opaque state
+            vv.format = lynx::ForeignPlugin::Format::vst3;
+            const std::uint8_t cid[] = { 0x76, 0x54, 0x53, 0x56, 0x65, 0x65, 0x76, 0x33, 0x61, 0x6c, 0x68, 0x61, 0x6c, 0x6c, 0x61, 0x76 };
+            std::copy (std::begin (cid), std::end (cid), vv.classId.begin());
+            vv.hasClassId = true;
+            vv.name = "ValhallaVintageVerb";
+            vv.path = "C:\\x\\ValhallaVintageVerb.vst3";
+            for (int i = 0; i < 777; ++i)
+                vv.state.push_back ((std::uint8_t) (i * 13 + 1));
+            lynx::EffectSlot fromFlp;
+            fromFlp.kind = lynx::EffectKind::plugin;
+            fromFlp.plugin.foreign = vv;
+            lynx::EffectSlot fromLynx; // a LYNX reference whose plugin isn't installed here
+            fromLynx.kind = lynx::EffectKind::plugin;
+            fromLynx.plugin.id = "VST3-FabFilter Pro-Q 3-1a2b3c4d-5e6f7a8b";
+            fromLynx.plugin.name = "FabFilter Pro-Q 3";
+            fromLynx.plugin.state = "AAECAwQFBgcICQ==";
+            const auto flpRef = fromFlp.plugin, lynxRef = fromLynx.plugin;
+            song.mixer[1].effects = { fromFlp, fromLynx };
+            const auto substitutesOn = lynx::pluginSubstitutesEnabled();
+            const auto changed = offline.getPluginHost().applySubstitutes (song);
+            auto& fx = song.mixer[1].effects;
+            // only the LYNX reference is substituted here (an .flp record is the import's job); do the .flp one directly
+            const auto flpSubstituted = lynx::substituteEffectSlot (fx[0], lynx::pluginIdentity (vv));
+            const auto back = lynx::ProjectFile::fromJson (lynx::ProjectFile::toJson (song), error);
+            substituteOk = flpSubstituted && fx[0].kind == lynx::EffectKind::reeverb2
+                           && (! substitutesOn || (changed == 1 && fx[1].kind == lynx::EffectKind::parametricEq && fx[1].substituteFor == lynxRef))
+                           && back && back->mixer[1].effects.size() == 2 && back->mixer[1].effects[0].kind == lynx::EffectKind::reeverb2
+                           && back->mixer[1].effects[0].substituteFor == flpRef && back->mixer[1].effects[0].substituteFor.foreign.state == vv.state
+                           && back->mixer[1].effects[1].kind == fx[1].kind && back->mixer[1].effects[1].substituteFor == fx[1].substituteFor;
+        }
+
         // undo/redo
         offline.editSong ([] (lynx::Song& s) { s.bpm = 99.0; });
         offline.editSong ([] (lynx::Song& s) { s.bpm = 101.0; });
@@ -727,13 +764,14 @@ private:
             }
         }
 
-        const auto ok = audioOk && projectOk && richOk && undoOk && recordOk && recordUndoOk && midiOk && wavpack != "ERROR";
+        const auto ok = audioOk && projectOk && richOk && substituteOk && undoOk && recordOk && recordUndoOk && midiOk && wavpack != "ERROR";
 
         juce::String report;
         report << "connections=" << offline.getNumGraphConnections() << "\n"
                << "peak=" << peak << "\n"
                << "project=" << (projectOk ? "OK" : "ERROR " + error) << "\n"
                << "project_features=" << (richOk ? "OK" : "ERROR") << "\n"
+               << "plugin_substitutes=" << (substituteOk ? "OK" : "ERROR") << "\n"
                << "undo=" << (undoOk ? "OK" : "ERROR") << "\n"
                << "recording=" << (recordOk && recordUndoOk ? "OK" : "ERROR") << "\n"
                << "midi=" << (midiOk ? "OK" : "ERROR") << "\n"
@@ -1537,6 +1575,7 @@ private:
             kinds.push_back (lynx::EffectKind::maximus); // Soundgoodizer (below)
             const auto database = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin database/Effects");
 
+            auto maximusPasses = 0; // Maximus has its own page (first pass); the second pass shows Soundgoodizer
             for (const auto kind : kinds)
             {
                 auto fx = lynx::makeEffectSlot (kind);
@@ -1565,7 +1604,7 @@ private:
                     break;
                 }
 
-                if (kind == lynx::EffectKind::maximus) // Soundgoodizer: preset A of the installation, Amount 60 %
+                if (kind == lynx::EffectKind::maximus && ++maximusPasses == 2) // Soundgoodizer: preset A of the installation, Amount 60 %
                 {
                     juce::MemoryBlock data;
                     juce::File (juce::String::fromUTF8 (roots.factoryData.c_str())).getChildFile ("Plugins/Fruity/Effects/Soundgoodizer/Data/Presets/a.dat").loadFileAsData (data);
