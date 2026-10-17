@@ -31,6 +31,13 @@ the sub-tick rest of an imported millisecond offset (also for stretched clips); 
 start; saved in .lynx (12th clip field, only when not 0); typing a new offset in ticks drops it; "fit to tempo"
 scales it with the offset.
 
+[EXEC] With the sub-tick offset kept, the lag is 0 but the 73.3 s clip was still only −23 dB ESR against FL (the
+rest of the song −85.6 dB = exact): the clip's start frame (77 019.27 ms × 44.1 = 3 396 549.807) is fractional and
+LYNX interpolated from it. FL starts an audio clip on a whole source frame: snapping the start to `round` or `ceil`
+makes 77.6–86 s exact too (−85.5 dB ESR; `floor` is 1 sample late, −30 dB). `round` is used (ceil and round cannot
+be told apart here: the fractional part is 0.807); the 73.4–77.6 s window stays at −30 dB (the short overlapping
+copies, items 29–31, their fades/cuts). Sampler notes (channel mode) are unchanged (their region start is floored).
+
 ## 2. Insert fader law
 
 [DECOMP] FL computes an insert's gain in `0x127b050` (round 2's FUN_0127b050): volume field T+0x384 (int); 12800
@@ -76,7 +83,48 @@ round 107) had no control. Now:
 
 ## 4. Demo regression baselines and route levels
 
-(in progress)
+[DATA] 16 of the 30 regression demos (tmp/demos.txt) have route levels other than 12800 (or a non-zero level on a
+route to Master), so round 107's mapping (fader curve of value/16000; before: value/12800 linear, clamped to 0 dB,
+and no level on the route to Master) changes them. A/B with one binary (main 83c6438 renderwav): each demo as is
+and a copy whose route levels were rewritten so that the new mapping gives the old gains (tmp/r110/oldmap.py),
+both compared with FL's own render of the demo (flref cache, scripts/flref_compare.py; whole song):
+
+    demo                                   NEW: rms_db  spec_db env_corr     OLD: rms_db  spec_db env_corr
+    NewStuff / Ookay - Thief                   -0.75     2.73    0.764            -0.73     2.73    0.763
+    Astes - Bien Duro                          +0.83     1.94    0.631            +0.83     1.94    0.631
+    Atthar … Right Night feeling               -0.63     2.44    0.863            -0.71     2.55    0.865
+    Bombs Away … I'm Awake                     -1.22     1.40    0.816            -1.23     1.39    0.816
+    Chan Gibbons x Ceebeaats - Time            -0.53     0.74    0.942            -0.48     0.70    0.940
+    Cuebur & Thandi Draai - Africa's Calling   -0.57     1.55    0.708            -0.52     1.54    0.663
+    DEDZII - NIGHT TERROR                      -1.33     3.25    0.822            -1.33     3.25    0.822
+    Edlan & Ella Noël - Song For You           +0.03     1.39    0.962            +0.45     1.43    0.944
+    Electroconductor … SH-1 Rework             -0.16     3.90    0.918            +0.06     3.91    0.917
+    Eric Kauffmann & NrgMind - Exoplanet       -0.14     0.73    0.618            +0.49     0.45    0.638
+    Jay Cactus x Confz - Mic Check Ready       -0.65     0.83    0.968            -0.47     0.95    0.967
+    LollieVox & Lezina J - Madonna             +0.41     0.89    0.959            +0.41     0.89    0.959
+    Mehdi Ebrahiminejad - Never Out            -1.75     1.76    0.742            -1.69     1.80    0.738
+    Mehran Abbasi - With You                   -1.56     1.68    0.778            -1.61     1.71    0.779
+
+(NewStuff.flp is the same file as Ookay - Thief.flp, byte for byte; the regression list has it twice. SeamlessR -
+Bass Antics Performance has no usable FL reference: FL's command-line render of the performance-mode project is
+1.9 s of nothing, so the pair metrics are meaningless there and it is left out.)
+
+The route-level change moves these demos by at most ±0.6 dB overall, mostly towards FL (Edlan: +0.45 → +0.03 dB,
+envelope correlation 0.944 → 0.962; Cuebur 0.663 → 0.708); the whole-song metrics are dominated by other,
+unrelated differences (≥ 0.5 dB, spec 0.7–3.9 dB). Exoplanet's level gets closer (+0.49 → −0.14 dB) while its
+spectrum distance grows (0.45 → 0.73 dB: its sends feed reverbs on send tracks 100–103 whose own levels are not
+exact in LYNX). The law itself is the measured one (§2, round 107 §3), so the new values are the reference: the
+regression baseline (C:\Users\kauan\lynx-test\reg2, exe of a510cac) is re-taken as reg3 with the landed build; the
+peaks of the 15 demos above (and of anything with an audio clip at a fractional start frame, §1) are expected to
+move, everything else must not.
 
 ## Where I stopped / next steps
-- Items 1–3 implemented on feature/route110; item 4 renders running (tmp/r110/demo).
+- Done: items 1–4. Item 1 was two things: round 107 §5 had already fixed the "stop at 78 s" (overlapping copies),
+  this round keeps the sub-tick part of millisecond clip offsets (`Clip::offsetFraction`) and starts audio clips on a
+  whole source frame (both verified sample-exact against FL's render). Item 2: the fader law needs no change (10 FL
+  renders within 0.01 dB). Item 3: route-to-Master knob in the mixer. Item 4: table above; the regression baseline
+  moves to reg3 (landed build).
+- Open: ceil vs round of the clip start frame (needs a clip whose start frame has a fractional part < 0.5);
+  the −30 dB residual of the short overlapping copies (items 29–31) in 73.4–77.6 s of `kwe`; the route-level
+  demos' remaining differences are unrelated to this round (Exoplanet's send-track reverbs, etc., see the table);
+  SeamlessR / performance-mode projects have no FL reference.
