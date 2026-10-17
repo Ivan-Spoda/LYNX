@@ -414,7 +414,7 @@ void ChannelRackComponent::paintNotePreview (juce::Graphics& g, int row, const P
     const auto span = juce::jmax (high - low, 6); // a single key sits mid-row, not on an edge
     const auto lowKey = low - (span - (high - low)) / 2;
     const auto inner = area.reduced (1.0f, 3.0f);
-    const auto noteHeight = juce::jlimit (2.0f, 4.0f, inner.getHeight() / (float) (span + 1));
+    const auto noteHeight = juce::jlimit (3.0f, 5.0f, inner.getHeight() / (float) (span + 1));
     const auto ticks = (float) (steps * ticksPerStep);
     const auto tint = channelColour != 0 ? theme::tame (juce::Colour (channelColour)).brighter (0.6f) : stepNote;
 

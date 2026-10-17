@@ -58,6 +58,12 @@ Not compared in depth: Browser (FL 2026 docks it left, LYNX too), plugin wrapper
 - Tests: `uilook90_rack_note_preview_rule`, `uilook90_flp_track_colours` (Thief: DRUMS 0xFF770E0B, BASSES
   0xFF16296C, default tracks uncoloured); the selftest's project round trip checks a track colour.
 
+Shots (outside the repo): FL `lynx-test/uilook90/flref/01..07-*.png`; LYNX before `lynx-test/uilook90/before/s-*.png`
+(main 65e30ca), after `lynx-test/uilook90/after2/s-*.png` (`-desktop-1920`, `-rack`, `-rack-preview`, `-mixer`,
+`-playlist`).
+
 ## Where I stopped / next steps
 
-- Next candidates: items 6, 8, 9, 11 above.
+- Done: items 1-5. Next candidates: 6 (track groups: decode the 0xEE group fields), 8 (rack filter groups),
+  9 (mixer side panel: insert EQ section, output selector), 11 (Piano Roll overview strip, open fitted to the
+  pattern), a fixed name column while the rack's steps scroll sideways (today the whole rack scrolls).
