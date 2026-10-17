@@ -13,6 +13,8 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "core/Effects.h"
@@ -42,4 +44,23 @@ std::optional<SoundgoodizerState> parseSoundgoodizer (const std::vector<std::uin
 const char* soundgoodizerPresetFile (int preset); // "a.dat" … "d.dat"
 
 std::unique_ptr<Effect> make (const std::vector<std::uint8_t>& slotState);
+
+// --- editing a Maximus slot (the native editor's page) -------------------------------------------------------
+// The 59 parameters of the Maximus state (REA_rodada8 §1.2: 7 globals, then 13 per band low / mid / high / master),
+// raw integer ranges and defaults as the plugin stores them. Index = the Maximus parameter number.
+struct StateParam
+{
+    const char* name;
+    int minimum, maximum, defaultValue;
+};
+const std::vector<StateParam>& stateParams();
+int stateParamIndex (const char* name);                                     // −1 = no such parameter
+std::optional<int> stateParam (const std::vector<std::uint8_t>& slotState, int index); // raw value
+// the slot state with one parameter replaced (parameter 5 also updates the container's band mix when it is set)
+std::vector<std::uint8_t> withStateParam (const std::vector<std::uint8_t>& slotState, int index, int raw);
+std::string stateParamText (int index, int raw);                            // the value as the editor shows it
+// The drawn compression curve of band 0…3 (cumulative x, y; both 0…1; x = log₃(1 + 2·level)/2, so 0.5 = 0 dBFS)
+std::vector<std::pair<float, float>> curvePoints (const std::vector<std::uint8_t>& slotState, int band);
+// The band selected in FL's editor when the state was saved (UI block +0x1E0), 0…3
+int selectedBand (const std::vector<std::uint8_t>& slotState);
 } // namespace lynx::maximusfx

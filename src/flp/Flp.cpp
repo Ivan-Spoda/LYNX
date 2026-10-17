@@ -23,6 +23,8 @@ enum : std::uint32_t
     evPluginState = 0xD5,       // plugin blob (channel generator or slot effect)
     evChannelPolyphony = 0xDD,
     evChannelType = 0x15,
+    evChannelEnabled = 0x00,    // u8: 0 = the channel is switched off in the Channel Rack
+    evPluginNew = 0xD4,         // plugin record: i32 mixer insert (or channel), i32 slot, i32 kind (2 = effect), ...
     evChannelMixerTrackOld = 0x16, // u8, old files
     evNewChannel = 0x40,
     evNewPattern = 0x41,
@@ -364,6 +366,17 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
     std::string pendingInsertName;
     std::string pendingSlotPlugin;
     std::vector<std::uint8_t> pendingSlotState;
+    int pendingSlotIndex = -1; // from 0xD4: FL <= 11 files have no 0x62, the next slot/route/insert closes the slot
+    auto closeOldSlot = [&] {
+        if (pendingSlotIndex >= 0 && ! pendingSlotPlugin.empty() && ! project.mixer.empty())
+            project.mixer.back().slots.push_back ({ pendingSlotIndex, pendingSlotPlugin, std::move (pendingSlotState) });
+        if (pendingSlotIndex >= 0)
+        {
+            pendingSlotPlugin.clear();
+            pendingSlotState.clear();
+        }
+        pendingSlotIndex = -1;
+    };
     std::uint32_t pendingInsertColour = 0;
 
     auto text = [&] (const Event& e)
@@ -564,6 +577,16 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                 channel();
                 break;
 
+            case evChannelEnabled:
+                if (section == Section::channel)
+                    channel().enabled = e.value != 0;
+                break;
+
+            case evPluginNew:
+                if (section == Section::mixer && e.data.size() >= 8)
+                    pendingSlotIndex = readLE<std::int32_t> (e.data, 4);
+                break;
+
             case evChannelType:
                 if (section == Section::channel)
                     channel().type = e.value <= 5 ? (ChannelType) e.value : ChannelType::unknown;
@@ -594,7 +617,10 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                 if (section == Section::channel && channel().pluginName.empty())
                     channel().pluginName = text (e);
                 else if (section == Section::mixer)
+                {
+                    closeOldSlot();
                     pendingSlotPlugin = text (e);
+                }
                 break;
 
             case evMixerSlotIndex:
@@ -602,6 +628,7 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                     project.mixer.back().slots.push_back ({ (int) e.value, pendingSlotPlugin, std::move (pendingSlotState) });
                 pendingSlotPlugin.clear();
                 pendingSlotState.clear();
+                pendingSlotIndex = -1;
                 break;
 
             case evPluginState:
@@ -751,6 +778,8 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                 {
                     PlaylistTrackInfo t;
                     t.index = (int) readLE<std::uint32_t> (e.data, 0) - 1;
+                    const auto c = readLE<std::uint32_t> (e.data, 4);
+                    t.colour = ((c & 0xFF) << 16) | (c & 0xFF00) | ((c >> 16) & 0xFF);
                     t.enabled = e.data[12] != 0;
                     arrangement().tracks.push_back (t);
                 }
@@ -813,6 +842,8 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
             }
 
             case evMixerRoutes:
+                if (section == Section::mixer)
+                    closeOldSlot();
                 if (section == Section::mixer && ! project.mixer.empty())
                 {
                     auto& insert = project.mixer.back();
@@ -850,6 +881,8 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
 
             case evMixerInsertParams:
             {
+                if (section == Section::mixer)
+                    closeOldSlot();
                 section = Section::mixer;
                 auto& insert = project.mixer.emplace_back();
                 insert.index = (int) project.mixer.size() - 1;
@@ -867,6 +900,9 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                 break;
         }
     }
+
+    if (section == Section::mixer)
+        closeOldSlot();
 
     // the stretch time is int in files without bit 0 of 0xA9, float in newer ones
     for (auto& ch : project.channels)

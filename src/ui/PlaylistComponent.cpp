@@ -456,6 +456,30 @@ void PlaylistComponent::resized()
     hBar.setBounds (headerWidth, getHeight() - scrollBarSize, getWidth() - headerWidth - scrollBarSize, scrollBarSize);
     vBar.setBounds (getWidth() - scrollBarSize, headerHeight, scrollBarSize, getHeight() - headerHeight - scrollBarSize);
     updateScrollBars();
+
+    if (fitSongPending)
+        showSongAfterOpen();
+}
+
+void PlaylistComponent::showSongAfterOpen()
+{
+    const auto width = gridArea().getWidth();
+    fitSongPending = width < 100;
+
+    if (fitSongPending)
+        return;
+
+    scrollY = 0;
+    scrollTicks = 0.0;
+    const auto length = (double) engine.getSong().songLength();
+
+    if (length > width / pixelsPerTick)
+        zoomAll(); // (also updates the scroll bars)
+    else
+    {
+        updateScrollBars();
+        repaint();
+    }
 }
 
 void PlaylistComponent::paint (juce::Graphics& g)
@@ -769,6 +793,9 @@ void PlaylistComponent::paint (juce::Graphics& g)
             const auto custom = t < (int) song.playlistTracks.size() && ! song.playlistTracks[(std::size_t) t].name.empty();
             const auto hovered = hover.header && hover.track == t;
             auto plate = muted ? colour::bg2 : colour::bg3;
+            const auto trackColour = t < (int) song.playlistTracks.size() ? song.playlistTracks[(std::size_t) t].colour : 0u;
+            if (trackColour != 0) // the track's colour (FL projects colour their track headers by group)
+                plate = plate.interpolatedWith (tame (juce::Colour (trackColour)), muted ? 0.22f : 0.5f);
             if (hovered)
                 plate = plate.interpolatedWith (colour::bg5, 0.6f);
             g.setColour (plate);
@@ -2126,7 +2153,7 @@ void PlaylistComponent::showTrackMenu (int track)
     menu.addSectionHeader (track < (int) song.playlistTracks.size() && ! song.playlistTracks[(std::size_t) track].name.empty()
                                ? juce::String::fromUTF8 (song.playlistTracks[(std::size_t) track].name.c_str())
                                : tr ("Track {0}", { juce::String (track + 1) }));
-    menu.addItem (tr ("Rename..."), [this, track] { renameTrack (track); });
+    menu.addItem (tr ("Rename and color..."), [this, track] { renameTrack (track); });
     menu.addItem (muted ? tr ("Unmute") : tr ("Mute"), [this, track] {
         engine.editSong ([track] (Song& s) {
             if ((int) s.playlistTracks.size() <= track)
@@ -2185,22 +2212,17 @@ void PlaylistComponent::renameTrack (int track)
 {
     const auto& tracks = engine.getSong().playlistTracks;
     const auto current = track < (int) tracks.size() ? juce::String::fromUTF8 (tracks[(std::size_t) track].name.c_str()) : juce::String();
-    auto* window = new juce::AlertWindow (tr ("Rename track"), {}, juce::MessageBoxIconType::NoIcon);
-    window->addTextEditor ("name", current.isNotEmpty() ? current : tr ("Track {0}", { juce::String (track + 1) }));
-    window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
-    window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
-    window->enterModalState (true, juce::ModalCallbackFunction::create ([this, track, window] (int result) {
-                                 if (result != 1)
-                                     return;
-
-                                 const auto name = window->getTextEditorContents ("name").trim().toStdString();
-                                 engine.editSong ([track, name] (Song& s) {
+    const auto colour = track < (int) tracks.size() ? tracks[(std::size_t) track].colour : 0u;
+    showNameAndColourDialog (tr ("Rename track"), current.isNotEmpty() ? current : tr ("Track {0}", { juce::String (track + 1) }), colour,
+                             [this, track] (const juce::String& newName, std::uint32_t newColour) {
+                                 const auto name = newName.trim().toStdString();
+                                 engine.editSong ([track, name, newColour] (Song& s) {
                                      if ((int) s.playlistTracks.size() <= track)
                                          s.playlistTracks.resize ((std::size_t) track + 1);
                                      s.playlistTracks[(std::size_t) track].name = name;
+                                     s.playlistTracks[(std::size_t) track].colour = newColour;
                                  });
-                             }),
-                             true);
+                             });
 }
 
 void PlaylistComponent::showRulerMenu (int x)

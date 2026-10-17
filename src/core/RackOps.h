@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/Song.h"
@@ -57,6 +58,15 @@ bool movePattern (Song& song, int index, int delta);
 
 // Steps the pattern shows in the rack (its length in sixteenths, at least 16).
 int patternSteps (const Song& song, const Pattern& pattern) noexcept;
+
+// True when the channel's notes in the pattern cannot be shown as step buttons: a note starts off the step
+// grid, lasts longer than a step, sits on another key than the step key (60) or slides/glides. The Channel
+// Rack then draws a miniature of the notes instead of the steps (as FL does once a channel has piano-roll
+// notes) and a click opens the Piano Roll. LYNX's own rule (FL's exact test is not confirmed).
+bool showsNotePreview (const Pattern& pattern, int channel) noexcept;
+
+// The key range of the channel's notes in the pattern (lowest, highest); {60, 60} without notes.
+std::pair<int, int> channelKeyRange (const Pattern& pattern, int channel) noexcept;
 
 // An Euclidean rhythm: `pulses` onsets spread as evenly as possible over `steps`, starting on the first
 // step, then rotated right by `rotation` steps. pulses is clamped to 0..steps.
