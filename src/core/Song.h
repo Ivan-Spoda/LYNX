@@ -378,7 +378,11 @@ enum class EffectKind : std::uint8_t
     foilPlate,    // LYNX's Foil Plate (REA_rodada100, core/LynxVerbs.h): plate reverb, 12 controls
     nebula,       // LYNX's Nebula (REA_rodada100, core/LynxVerbs.h): delay-reverb network, 13 controls
     halo,         // LYNX's Halo (REA_rodada100, core/LynxVerbs.h): shimmer reverb, 12 controls
-    horizon       // LYNX's Horizon (REA_rodada100, core/LynxVerbs.h): echo + reverb, 24 controls
+    horizon,      // LYNX's Horizon (REA_rodada100, core/LynxVerbs.h): echo + reverb, 24 controls
+    echoform,     // LYNX's multi-mode echo (REA_rodada101, core/EchoSuite.h), 29 controls
+    spiralEcho,   // LYNX's frequency-shifting echo (REA_rodada101, core/EchoSuite.h), 8 controls
+    orbit,        // LYNX's modulation machine: flangers / choruses / doubler (REA_rodada101, core/EchoSuite.h), 6 controls
+    latticeMod    // LYNX's multitap modulated delay (REA_rodada101, core/EchoSuite.h), 34 controls
 };
 
 constexpr int maxEffectParams = 64; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches)

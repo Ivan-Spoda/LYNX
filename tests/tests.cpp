@@ -15611,3 +15611,4 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "LynxVerbTests100.inc"
 #include "FacetTests103.inc"
 #include "VocalLevel107Tests.inc"
+#include "EchoSuiteTests101.inc"
