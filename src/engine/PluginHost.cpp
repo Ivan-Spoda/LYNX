@@ -1,6 +1,7 @@
 #include "engine/PluginHost.h"
 
 #include "core/Preferences.h"
+#include "core/PluginScanPolicy.h"
 
 #include "core/FlWrapper.h"
 
@@ -228,6 +229,18 @@ PluginHost::PluginHost (bool keep)
         if (auto xml = juce::XmlDocument::parse (settingsFolder().getChildFile ("plugins.xml")))
             known.recreateFromXml (*xml);
         favouriteIds = prefs::parseFavourites (settingsFolder().getChildFile ("plugin-favourites.txt").loadFileAsString().toStdString());
+        // once: files marked as failed by scans before the class-count timeout (REA_rodada107 §2) get another try,
+        // since a large bundle (Waves shell) was marked "hung" only for taking longer than 30 s
+        const auto retried = settingsFolder().getChildFile ("scan-retry.txt");
+        if (retried.loadFileAsString().getIntValue() < 1)
+        {
+            if (! known.getBlacklistedFiles().isEmpty())
+            {
+                known.clearBlacklistedFiles();
+                save();
+            }
+            retried.replaceWithText ("1\n");
+        }
     }
 }
 
@@ -325,6 +338,52 @@ void PluginHost::save()
         xml->writeTo (settingsFolder().getChildFile ("plugins.xml"));
 }
 
+namespace
+{
+// Child side of the scan: how many classes a VST3 module's factory declares (0 = unknown). The module stays loaded
+// (and initialised) for the description that follows, which loads the same module again. Windows only for now.
+int countVst3Classes (const juce::String& path)
+{
+   #if JUCE_WINDOWS
+    juce::File binary (path);
+    if (binary.isDirectory()) // bundle: Contents/x86_64-win/<name>.vst3
+        binary = binary.getChildFile ("Contents").getChildFile ("x86_64-win").getChildFile (binary.getFileName());
+    if (! binary.existsAsFile())
+        return 0;
+    // the leading part of IPluginFactory's vtable (FUnknown, then getFactoryInfo, countClasses)
+    struct Factory
+    {
+        virtual int queryInterface (const char*, void**) = 0;
+        virtual unsigned addRef() = 0;
+        virtual unsigned release() = 0;
+        virtual int getFactoryInfo (void*) = 0;
+        virtual int countClasses() = 0;
+    };
+    static juce::DynamicLibrary module; // kept open until the child exits
+    if (! module.open (binary.getFullPathName()))
+        return 0;
+    if (auto* init = (bool (*)()) module.getFunction ("InitDll"))
+        if (! init())
+            return 0;
+    auto* get = (Factory* (*)()) module.getFunction ("GetPluginFactory");
+    auto* factory = get != nullptr ? get() : nullptr;
+    if (factory == nullptr)
+        return 0;
+    const auto classes = factory->countClasses();
+    factory->release();
+    return juce::jmax (0, classes);
+   #else
+    juce::ignoreUnused (path);
+    return 0;
+   #endif
+}
+
+juce::File classCountFile (const juce::File& result)
+{
+    return result.withFileExtension ("classes");
+}
+} // namespace
+
 bool PluginHost::scanOne (juce::AudioPluginFormat& format, const juce::String& file)
 {
     // a result file of our own: several LYNX processes (and scans) may run at once
@@ -335,16 +394,27 @@ bool PluginHost::scanOne (juce::AudioPluginFormat& format, const juce::String& f
     auto ok = child.start (juce::StringArray { exe.getFullPathName(), "--scan-one", format.getName(), file, result.getFullPathName() }, 0);
     if (ok)
     {
-        // wait in short steps so a cancelled scan (or LYNX closing) doesn't wait for a slow plugin
-        const auto deadline = juce::Time::getMillisecondCounter() + (juce::uint32) scanTimeoutMs;
-        while (child.isRunning() && ! stopScan && juce::Time::getMillisecondCounter() < deadline)
+        // wait in short steps so a cancelled scan (or LYNX closing) doesn't wait for a slow plugin; a file holding
+        // many plugins (Waves shell) gets more time once the child has said how many (core/PluginScanPolicy.h)
+        const auto started = juce::Time::getMillisecondCounter();
+        auto timeout = (juce::uint32) scanpolicy::baseTimeoutMs;
+        auto classesKnown = false;
+        while (child.isRunning() && ! stopScan && juce::Time::getMillisecondCounter() - started < timeout)
+        {
             child.waitForProcessToFinish (100);
+            if (! classesKnown && classCountFile (result).existsAsFile())
+            {
+                classesKnown = true;
+                timeout = (juce::uint32) scanpolicy::timeoutMs (classCountFile (result).loadFileAsString().getIntValue());
+            }
+        }
         if (child.isRunning())
         {
             child.kill();
             if (stopScan) // not the plugin's fault: try it again next time
             {
                 result.deleteFile();
+                classCountFile (result).deleteFile();
                 return false;
             }
             ok = false; // hung: blacklist
@@ -363,6 +433,7 @@ bool PluginHost::scanOne (juce::AudioPluginFormat& format, const juce::String& f
     else if (! ok)
         known.addToBlacklist (file);
     result.deleteFile();
+    classCountFile (result).deleteFile();
     return true;
 }
 
@@ -473,8 +544,14 @@ void PluginHost::cancelBackgroundScan()
     }
 }
 
+
 int PluginHost::scanOneFile (const juce::String& formatName, const juce::String& file, const juce::File& output)
 {
+    // first tell the parent how many plugins this file holds, so it waits long enough for a large bundle
+    if (formatName == "VST3")
+        if (const auto classes = countVst3Classes (file); classes > 1)
+            classCountFile (output).replaceWithText (juce::String (classes));
+
     juce::AudioPluginFormatManager manager;
     addPluginFormats (manager);
     juce::OwnedArray<juce::PluginDescription> found;

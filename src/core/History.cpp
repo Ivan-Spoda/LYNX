@@ -44,7 +44,7 @@ bool sameEffects (const MixerTrack& a, const MixerTrack& b) noexcept
 
 bool sameRouting (const MixerTrack& a, const MixerTrack& b) noexcept
 {
-    return a.sends == b.sends && a.toMaster == b.toMaster;
+    return a.sends == b.sends && a.toMaster == b.toMaster && a.masterLevel == b.masterLevel;
 }
 
 bool sameTrack (const MixerTrack& a, const MixerTrack& b) noexcept

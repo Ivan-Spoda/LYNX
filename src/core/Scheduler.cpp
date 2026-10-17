@@ -144,8 +144,10 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
 
     const auto secondsPerTick = 60.0 / (std::max (song.bpm, 1.0) * ppq);
 
-    for (const auto& clip : song.playlist)
+    for (std::size_t clipIndex = 0; clipIndex < song.playlist.size(); ++clipIndex)
     {
+        const auto& clip = song.playlist[clipIndex];
+
         if (clip.muted || song.isTrackMuted (clip.track))
             continue;
 
@@ -156,6 +158,7 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
 
             NoteEvent e;
             e.channel = clip.channel;
+            e.key = audioClipKey (clipIndex);
             e.velocity = clip.gain;
             e.fadeIn = (float) ((double) clip.fadeIn / tps);
             e.fadeOut = (float) ((double) clip.fadeOut / tps);
