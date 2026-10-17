@@ -15000,6 +15000,7 @@ TEST (event_editor_playback)
     CHECK (loop[0] < 1.0e-4f && loop[1] > 0.01f && loop[2] < 1.0e-4f && loop[3] > 0.01f);
 }
 #include "PrefsTests.inc"
+#include "InputTests.inc"
 
 TEST (level_audit_demo_imports_round89)
 {
