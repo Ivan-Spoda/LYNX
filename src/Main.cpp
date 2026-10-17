@@ -4,6 +4,7 @@
 #include "core/FlEffects.h"
 #include "core/FlpImport.h"
 #include "core/MaximusFx.h"
+#include "core/Harmor.h"
 #include "flp/Flp.h"
 #include "core/SynthPresets.h"
 #include "core/FlWrapper.h"
@@ -1371,10 +1372,35 @@ private:
 
             // generators in FL's arrangement: the channel's plugin page with the FL preset's settings
             const auto generators = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin presets/Generators");
-            for (const auto& [folder, preset] : std::vector<std::pair<const char*, const char*>> { { "3x Osc", "Default.fst" }, { "FL Keys", "Grand Piano.fst" }, { "BooBass", "" }, { "Sytrus", "Default.fst" } })
+            for (auto [folder, preset] : std::vector<std::pair<const char*, const char*>> { { "3x Osc", "Default.fst" }, { "FL Keys", "Grand Piano.fst" }, { "BooBass", "" }, { "Sytrus", "Default.fst" }, { "Harmor", "Default.fst" } })
             {
                 juce::MemoryBlock data;
-                auto file = juce::String (preset).isEmpty() ? database.getSiblingFile ("Generators").getChildFile ("Misc").getChildFile (juce::String (folder) + ".fst")
+                if (juce::String (folder) == "Harmor") // the first preset whose state the engine reads
+                {
+                    auto files = generators.getChildFile (folder).findChildFiles (juce::File::findFiles, true, "*.fst");
+                    files.sort();
+                    for (const auto& f : files)
+                    {
+                        juce::MemoryBlock block;
+                        if (! f.loadFileAsData (block))
+                            continue;
+                        const auto* b = static_cast<const std::uint8_t*> (block.getData());
+                        try
+                        {
+                            const auto p = flp::parseProject (std::vector<std::uint8_t> (b, b + block.getSize()), true);
+                            if (! p.channels.empty() && lynx::harmorStateUsable (p.channels.front().pluginState))
+                            {
+                                preset = nullptr;
+                                data = block;
+                                break;
+                            }
+                        }
+                        catch (const std::exception&)
+                        {
+                        }
+                    }
+                }
+                auto file = preset == nullptr ? juce::File() : juce::String (preset).isEmpty() ? database.getSiblingFile ("Generators").getChildFile ("Misc").getChildFile (juce::String (folder) + ".fst")
                                                             : generators.getChildFile (folder).getChildFile (preset);
                 if (! file.existsAsFile())
                 {
@@ -1382,7 +1408,7 @@ private:
                     files.sort();
                     file = files.isEmpty() ? juce::File() : files[0];
                 }
-                if (! file.loadFileAsData (data))
+                if (data.isEmpty() && ! file.loadFileAsData (data))
                     continue;
                 try
                 {

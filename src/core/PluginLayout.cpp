@@ -1149,6 +1149,53 @@ Layout sytrusMain()
     return l;
 }
 
+Layout harmorMain()
+{
+    // Harmor's part page and global section, with the controls LYNX edits at FL's places (timbre mix, blur, tremolo,
+    // harmonizer, unison order and detune, vibrato, filter cutoff and resonance, pluck, phaser, part volume, A/B
+    // crossfade and the global volume); the rest of the panel keeps the saved patch
+    Layout l;
+    l.fl = "Harmor";
+    l.width = 1000;
+    l.height = 600;
+    auto& v = l.items;
+    v.push_back (section (12, 0, 976, 330, nullptr, boxed));
+    const auto title = [&v] (float x, float y, const char* text) { v.push_back (label (x, y, 110, 18, text, alignLeft)); };
+    title (100, 70, TR_NOOP ("Timbre"));
+    title (18, 104, TR_NOOP ("Blur"));
+    title (228, 104, TR_NOOP ("Trem"));
+    title (60, 180, TR_NOOP ("Prism"));
+    title (210, 180, TR_NOOP ("Harmonizer"));
+    title (380, 160, TR_NOOP ("Unison"));
+    title (40, 278, TR_NOOP ("Pitch"));
+    title (270, 270, TR_NOOP ("Vibrato"));
+    title (400, 270, TR_NOOP ("Legato"));
+    title (555, 238, TR_NOOP ("Pluck"));
+    title (655, 238, TR_NOOP ("Phaser"));
+    title (900, 238, TR_NOOP ("EQ"));
+    title (555, 20, TR_NOOP ("Filter 1"));
+    v.push_back (knob (177, 40, 30, "Timbre mix", TR_NOOP ("Mix"), 63));
+    v.push_back (knob (61, 135, 30, "Harm. blur", TR_NOOP ("Mix"), 160));
+    v.push_back (knob (277, 135, 30, "Tremolo", TR_NOOP ("Depth"), 160));
+    v.push_back (knob (181, 219, 34, "Harmonizer", TR_NOOP ("Amt"), 247));
+    v.push_back (stepper (414, 196, 30, 22, "Unison", TR_NOOP ("Order"), 8));
+    v.push_back (slider (Item::vslider, 476, 182, 18, 80, "Uni detune", TR_NOOP ("Pitch")));
+    v.push_back (knob (335, 291, 28, "Vibrato", TR_NOOP ("Depth"), 312));
+    v.push_back (slider (Item::vslider, 455, 40, 18, 100, "A volume", TR_NOOP ("Vol"), bipolar));
+    v.push_back (knob (725, 71, 44, "Cutoff", TR_NOOP ("Freq"), 106));
+    v.push_back (knob (828, 71, 34, "Resonance", TR_NOOP ("Res"), 106));
+    v.push_back (knob (587, 283, 40, "Pluck", TR_NOOP ("Time"), 313));
+    v.push_back (knob (686, 283, 34, "Phaser mix", TR_NOOP ("Mix"), 313));
+    v.push_back (section (12, 334, 380, 266, nullptr, boxed));
+    title (22, 342, TR_NOOP ("Global"));
+    v.push_back (slider (Item::vslider, 172, 410, 20, 110, "Master vol", TR_NOOP ("Vol")));
+    v.push_back (slider (Item::hslider, 280, 368, 90, 26, "A/B mix", TR_NOOP ("Part A / B")));
+    v.push_back (section (396, 334, 592, 266, nullptr, boxed));
+    v.push_back (label (420, 450, 540, 16, TR_NOOP ("The other Harmor controls keep the saved patch"), dim));
+    v.push_back (label (820, 556, 160, 40, "Harmor", dim));
+    return l;
+}
+
 Layout soundgoodizer()
 {
     // one big Amount knob and the four presets A–D (the slot's state, core/MaximusFx.h)
@@ -1250,20 +1297,21 @@ const Layout& layoutFor (EffectKind kind)
 
 const Layout* instrumentLayout (InstrumentKind kind)
 {
-    static const Layout osc = threeOsc(), keys = flKeys(), boo = booBass(), sytrus = sytrusMain();
+    static const Layout osc = threeOsc(), keys = flKeys(), boo = booBass(), sytrus = sytrusMain(), harmor = harmorMain();
     switch (kind)
     {
         case InstrumentKind::threeosc: return &osc;
         case InstrumentKind::flkeys: return &keys;
         case InstrumentKind::boobass: return &boo;
         case InstrumentKind::sytrus: return &sytrus;
+        case InstrumentKind::harmor: return &harmor;
         default: return nullptr;
     }
 }
 
 const std::vector<InstrumentKind>& instrumentLayoutKinds()
 {
-    static const std::vector<InstrumentKind> kinds { InstrumentKind::threeosc, InstrumentKind::flkeys, InstrumentKind::boobass, InstrumentKind::sytrus };
+    static const std::vector<InstrumentKind> kinds { InstrumentKind::threeosc, InstrumentKind::flkeys, InstrumentKind::boobass, InstrumentKind::sytrus, InstrumentKind::harmor };
     return kinds;
 }
 

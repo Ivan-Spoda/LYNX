@@ -65,6 +65,11 @@ title row of the selected effect's knobs.
 | Fruity WaveShaper | 277 × 358 | the saved shaping curve (read-only here), bipolar / unipolar, PRE, MIX, POST, smooth, oversample, HQ, center |
 | Vintage Chorus | 754 × 214 | MODE (I / II / edit) · DELAYS (time 1 / 2, feedback, high-pass faders) · MODULATION (start phase, wave, L/R phase, tempo sync, speed) · LEVELS (mono input, invert wet, noise gate, noise, gain, mix) |
 | Hyper Chorus | 754 × 214 | three movement pads (delay / feedback, modulation / rate, movement / rate; drag sets both), the voices view, one row of knobs and the delay-lines switch |
+| Fruity Balance | 232 × 150 | Balance and Volume knobs (captions above, values under them) around the meter |
+| Soundgoodizer | 215 × 300 | one big Amount knob, presets A–D under it; LYNX edits the slot's Maximus container (Amount = band mix, the preset = the installation's `Data\Presets\a…d.dat`) |
+| BooBass (channel page) | 343 × 154 | BASS, MID, TREBLE stepping down along the body |
+| Sytrus MAIN page | 850 × 346 | VOL / LFO / PITCH faders, VOL and FILTER ADSR faders, UNISON (order, pan, volume, pitch, sub, phase, envelope variation), MODULATION X/Y pad and knobs, QUALITY (HQ envelopes and oversampling, draft / render), PORTA; the operator / filter / FX pages and the FM / RM matrix are not editable in LYNX and say so |
+| Harmor (channel page) | 1000 × 600 | the controls LYNX edits at their FL places on the part page (timbre mix, blur, tremolo, harmonizer, unison order and pitch, vibrato, part volume, filter 1 freq / res, pluck, phaser mix) and the global section (volume, part A / B); FL's section titles for orientation |
 
 Mapping notes:
 - 3x Osc's shape buttons follow FL's order (sine, square, rounded, custom on the first row; triangle, saw, noise on the
@@ -80,8 +85,8 @@ Mapping notes:
   presets bar's options menu.
 
 ## Where I stopped / next steps
-- Batch 1 (landed): every arrangement in the table above.
-- Next: Maximus / Soundgoodizer (state-based: amount and A–D), Fruity Balance / Send, BooBass, Sytrus and Harmor main
-  pages, then the remaining Fruity effects (Delay 2, Reeverb, Flangus, Soft Clipper, Blood Overdrive, PanOMatic, Stereo
-  Shaper, Transient Processor, Fast LP, Free Filter, WaveShaper, Delay Bank, Hyper / Vintage Chorus, Vintage Phaser…),
-  whose FL captures are in `tmp/r93/flref` (second batch).
+- Landed in batches: every arrangement in the table above.
+- Not done: Maximus (its bands live in the saved state: no editable parameters yet; generated page), Fruity Send and
+  Fruity Phaser (mapped to LYNX's generic utility / chorus, not FL's controls), Newtone (pass-through placeholder), Delay
+  Bank, Vintage Phaser, Squeeze, Vocoder, Pitch Shifter, Convolver, EQUO, Multiband Delay, Frequency Splitter, Hardcore,
+  Effector (captures of most in `tmp/r93/flref`; they keep the generated grid of knobs).

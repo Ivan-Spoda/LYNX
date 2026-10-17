@@ -1079,12 +1079,15 @@ public:
         // FL's arrangement of the plugin's page (core/PluginLayout.cpp): the knobs at FL's places, faders and
         // switches drawn by the panel
         layout = plugui::instrumentLayout (def.instrument);
+        // a state the engine cannot read gives no knobs: keep the plain page then
+        if (layout != nullptr && std::none_of (knobs.begin(), knobs.end(), [this] (const auto& k) { return itemFor (k->getName()) != nullptr; }))
+            layout = nullptr;
         if (layout != nullptr)
         {
             for (auto& k : knobs)
             {
                 const auto* item = itemFor (k->getName());
-                if (item == nullptr || (item->type != plugui::Item::knob && item->type != plugui::Item::vslider))
+                if (item == nullptr || (item->type != plugui::Item::knob && item->type != plugui::Item::vslider && item->type != plugui::Item::hslider))
                 {
                     k->setVisible (false); // edited by a switch of the panel (or not shown by FL)
                     continue;
@@ -1092,6 +1095,8 @@ public:
                 k->setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
                 if (item->type == plugui::Item::vslider)
                     k->setSliderStyle (juce::Slider::LinearVertical);
+                if (item->type == plugui::Item::hslider)
+                    k->setSliderStyle (juce::Slider::LinearHorizontal);
                 k->setPopupDisplayEnabled (true, true, this);
                 k->setTooltip (k->getName());
             }
@@ -1244,6 +1249,9 @@ public:
                         caption (item.label, r.withTop (r.getBottom() - 12.0f * f), dimmed, juce::Justification::centred);
                     break;
                 case plugui::Item::vslider:
+                case plugui::Item::hslider:
+                    if ((item.style & plugui::noCaption) == 0)
+                        caption (item.label, r.withTop (r.getBottom() - 12.0f * f).expanded (16.0f * f, 0.0f), dimmed, juce::Justification::centred);
                     break;
                 case plugui::Item::radio:
                     if (k != nullptr)
@@ -1341,6 +1349,8 @@ public:
             if (item == nullptr || ! k->isVisible())
                 continue;
             auto r = layoutRect (*item);
+            if ((item->type == plugui::Item::vslider || item->type == plugui::Item::hslider) && (item->style & plugui::noCaption) == 0 && item->label != nullptr)
+                r.removeFromBottom (13.0f * layoutFactor());
             if (item->type == plugui::Item::knob)
             {
                 if ((item->style & plugui::noCaption) == 0)
