@@ -69,6 +69,19 @@ struct Host
         for (int b = 1; b < layout.inputBuses.size(); ++b)
             if (sidechain) layout.inputBuses.getReference (b) = juce::AudioChannelSet::stereo();
             else layout.inputBuses.getReference (b) = juce::AudioChannelSet::disabled();
+        // some plugins (JUCE-based ones among them) report their main buses disabled until a host asks for a layout:
+        // ask for stereo in / stereo out, then mono in / stereo out
+        if (layout.getMainInputChannels() == 0 && layout.inputBuses.size() > 0)
+            layout.inputBuses.getReference (0) = juce::AudioChannelSet::stereo();
+        if (layout.getMainOutputChannels() == 0 && layout.outputBuses.size() > 0)
+            layout.outputBuses.getReference (0) = juce::AudioChannelSet::stereo();
+        if (! plugin->checkBusesLayoutSupported (layout) && layout.inputBuses.size() > 0)
+        {
+            auto mono = layout;
+            mono.inputBuses.getReference (0) = juce::AudioChannelSet::mono();
+            if (plugin->checkBusesLayoutSupported (mono))
+                layout = mono;
+        }
         if (! plugin->setBusesLayout (layout))
         {
             // fall back to enabling the buses one by one
