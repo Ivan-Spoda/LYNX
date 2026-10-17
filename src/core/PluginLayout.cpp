@@ -1600,6 +1600,198 @@ Layout emberLayout()
     return l;
 }
 
+// --- LYNX's reverbs (REA round 100): own panels, the same conventions as the mixing suite. The algorithm / type
+// menu sits top-left with the Mix, the time controls (pre-delay, decay, size) in the middle, colour and
+// modulation to the right. -------------------------------------------------------------------------------------
+LayoutItem choiceMenu (float x, float y, float w, float h, const char* param, const char* caption, const char* options)
+{
+    LayoutItem i;
+    i.type = Item::menu;
+    i.x = x, i.y = y, i.w = w, i.h = h;
+    i.param = param;
+    i.label = caption;
+    i.options = options;
+    return i;
+}
+
+Layout epochVerbLayout()
+{
+    Layout l;
+    l.width = 700;
+    l.height = 262;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 170, 254, TR_NOOP ("Algorithm")));
+    v.push_back (choiceMenu (14, 30, 150, 24, "Mode", TR_NOOP ("Mode"),
+                             TR_NOOP ("Concert Hall|Plate|Room|Chamber|Random Space|Chorus Space|Ambience|Bright Hall|Nave|Grit Hall|Grit Plate|Smooth Plate|Smooth Room|Smooth Space|Gated|Drift Chamber|Drift Hall|Drift Space|Cathedral|Grand Hall|Vintage Chamber|Vintage Hall")));
+    v.push_back (label (14, 62, 150, 14, TR_NOOP ("Color"), boxed));
+    v.push_back (tabs (14, 80, 150, 22, "Color", TR_NOOP ("1970s|1980s|Now")));
+    v.push_back (dial (89, 160, 60, "Mix", TR_NOOP ("Mix"), big));
+    v.push_back (section (178, 4, 254, 254, TR_NOOP ("Reverb")));
+    v.push_back (dial (234, 66, 38, "Predelay", TR_NOOP ("Predelay")));
+    v.push_back (dial (305, 72, 60, "Decay", TR_NOOP ("Decay"), big));
+    v.push_back (dial (376, 66, 38, "Size", TR_NOOP ("Size")));
+    v.push_back (dial (234, 178, 34, "Attack", TR_NOOP ("Attack")));
+    v.push_back (dial (305, 178, 34, "Early diffusion", TR_NOOP ("Early diff.")));
+    v.push_back (dial (376, 178, 34, "Late diffusion", TR_NOOP ("Late diff.")));
+    v.push_back (section (436, 4, 260, 254, TR_NOOP ("Color and modulation")));
+    v.push_back (dial (472, 58, 30, "Bass mult", TR_NOOP ("Bass mult")));
+    v.push_back (dial (534, 58, 30, "Bass xover", TR_NOOP ("Bass xover")));
+    v.push_back (dial (596, 58, 30, "High shelf", TR_NOOP ("High shelf"), bipolar));
+    v.push_back (dial (658, 58, 30, "High freq", TR_NOOP ("High freq")));
+    v.push_back (dial (472, 150, 30, "High cut", TR_NOOP ("High cut")));
+    v.push_back (dial (534, 150, 30, "Low cut", TR_NOOP ("Low cut")));
+    v.push_back (dial (596, 150, 30, "Mod rate", TR_NOOP ("Mod rate")));
+    v.push_back (dial (658, 150, 30, "Mod depth", TR_NOOP ("Mod depth")));
+    return l;
+}
+
+Layout atriumLayout()
+{
+    Layout l;
+    l.width = 820;
+    l.height = 262;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 236, 254, TR_NOOP ("Room")));
+    v.push_back (choiceMenu (14, 30, 216, 24, "Type", TR_NOOP ("Type"),
+                             TR_NOOP ("Large Room|Medium Room|Bright Room|Large Chamber|Dark Room|Dark Chamber|Dark Space|Deep Space|Mirror Space|Vast Space|Distant Space|Dense Room")));
+    v.push_back (dial (62, 112, 54, "Mix", TR_NOOP ("Mix"), big));
+    v.push_back (dial (180, 112, 54, "Decay", TR_NOOP ("Decay"), big));
+    v.push_back (dial (46, 208, 30, "Predelay", TR_NOOP ("Predelay")));
+    v.push_back (dial (120, 208, 30, "Early/late", TR_NOOP ("Early / late"), bipolar));
+    v.push_back (dial (194, 208, 30, "Space", TR_NOOP ("Space")));
+    v.push_back (section (244, 4, 200, 254, TR_NOOP ("Early")));
+    v.push_back (dial (290, 62, 32, "Early size", TR_NOOP ("Size")));
+    v.push_back (dial (356, 62, 32, "Early cross", TR_NOOP ("Cross")));
+    v.push_back (dial (412, 62, 26, "Early send", TR_NOOP ("Send")));
+    v.push_back (dial (290, 150, 28, "Early mod rate", TR_NOOP ("Mod rate")));
+    v.push_back (dial (356, 150, 28, "Early mod depth", TR_NOOP ("Mod depth")));
+    v.push_back (dial (412, 150, 26, "Diffusion", TR_NOOP ("Diffusion")));
+    v.push_back (section (448, 4, 170, 254, TR_NOOP ("Late")));
+    v.push_back (dial (494, 62, 32, "Late size", TR_NOOP ("Size")));
+    v.push_back (dial (572, 62, 32, "Late cross", TR_NOOP ("Cross")));
+    v.push_back (dial (494, 150, 28, "Late mod rate", TR_NOOP ("Mod rate")));
+    v.push_back (dial (572, 150, 28, "Late mod depth", TR_NOOP ("Mod depth")));
+    v.push_back (section (622, 4, 194, 254, TR_NOOP ("Decay EQ and output")));
+    v.push_back (dial (668, 58, 28, "Bass mult", TR_NOOP ("Bass mult")));
+    v.push_back (dial (746, 58, 28, "Bass xover", TR_NOOP ("Bass xover")));
+    v.push_back (dial (668, 132, 28, "High mult", TR_NOOP ("High mult")));
+    v.push_back (dial (746, 132, 28, "High xover", TR_NOOP ("High xover")));
+    v.push_back (dial (668, 206, 28, "Low cut", TR_NOOP ("Low cut")));
+    v.push_back (dial (746, 206, 28, "High cut", TR_NOOP ("High cut")));
+    return l;
+}
+
+Layout foilPlateLayout()
+{
+    Layout l;
+    l.width = 600;
+    l.height = 236;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 160, 228, TR_NOOP ("Plate")));
+    v.push_back (choiceMenu (14, 30, 140, 24, "Type", TR_NOOP ("Type"), TR_NOOP ("Silver|Steel|Nickel|Bronze|Copper|Tin|Zinc|Platinum|Tungsten|Iron|Gold|Lead")));
+    v.push_back (dial (84, 120, 56, "Mix", TR_NOOP ("Mix"), big));
+    v.push_back (section (168, 4, 236, 228, TR_NOOP ("Reverb")));
+    v.push_back (dial (222, 64, 34, "Predelay", TR_NOOP ("Predelay")));
+    v.push_back (dial (286, 70, 56, "Decay", TR_NOOP ("Decay"), big));
+    v.push_back (dial (350, 64, 34, "Size", TR_NOOP ("Size")));
+    v.push_back (dial (222, 166, 30, "Width", TR_NOOP ("Width")));
+    v.push_back (dial (286, 166, 30, "Mod rate", TR_NOOP ("Mod rate")));
+    v.push_back (dial (350, 166, 30, "Mod depth", TR_NOOP ("Mod depth")));
+    v.push_back (section (408, 4, 188, 228, TR_NOOP ("EQ")));
+    v.push_back (dial (452, 64, 30, "Low EQ freq", TR_NOOP ("Low freq")));
+    v.push_back (dial (540, 64, 30, "Low EQ gain", TR_NOOP ("Low gain"), bipolar));
+    v.push_back (dial (452, 166, 30, "High EQ freq", TR_NOOP ("High freq")));
+    v.push_back (dial (540, 166, 30, "High EQ gain", TR_NOOP ("High gain"), bipolar));
+    return l;
+}
+
+Layout nebulaLayout()
+{
+    Layout l;
+    l.width = 680;
+    l.height = 250;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 170, 242, TR_NOOP ("Network")));
+    v.push_back (choiceMenu (14, 30, 150, 24, "Mode", TR_NOOP ("Mode"),
+                             TR_NOOP ("Twin|Coil|Crux|Archer|Abyss|Spiral|Lyre|Horn|Delta|Cloud|Veil Major|Veil Minor|Throne|Hunter|Bearer|Fishes|Sting|Scales|Lion|Maiden|Sisters|Dog Star")));
+    v.push_back (dial (89, 130, 60, "Mix", TR_NOOP ("Mix"), big));
+    v.push_back (section (178, 4, 300, 242, TR_NOOP ("Delay")));
+    v.push_back (tabs (188, 28, 180, 22, "Sync", TR_NOOP ("ms|Note|Dotted|Triplet")));
+    v.push_back (choiceMenu (376, 28, 92, 22, "Note", TR_NOOP ("Note"), "1/64|1/32|1/16|1/8|1/4|1/2|1/1"));
+    v.push_back (dial (232, 112, 44, "Delay", TR_NOOP ("Delay"), big));
+    v.push_back (dial (327, 112, 56, "Feedback", TR_NOOP ("Feedback"), big));
+    v.push_back (dial (422, 112, 44, "Density", TR_NOOP ("Density"), big));
+    v.push_back (dial (280, 202, 28, "Warp", TR_NOOP ("Warp")));
+    v.push_back (dial (374, 202, 28, "Width", TR_NOOP ("Width"), bipolar));
+    v.push_back (section (482, 4, 194, 242, TR_NOOP ("Tone and modulation")));
+    v.push_back (dial (528, 70, 30, "Low cut", TR_NOOP ("Low cut")));
+    v.push_back (dial (630, 70, 30, "High cut", TR_NOOP ("High cut")));
+    v.push_back (dial (528, 170, 30, "Mod rate", TR_NOOP ("Mod rate")));
+    v.push_back (dial (630, 170, 30, "Mod depth", TR_NOOP ("Mod depth")));
+    return l;
+}
+
+Layout haloLayout()
+{
+    Layout l;
+    l.width = 620;
+    l.height = 250;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 220, 242, TR_NOOP ("Shimmer")));
+    v.push_back (choiceMenu (14, 30, 200, 24, "Shift mode", TR_NOOP ("Shift mode"), TR_NOOP ("Up|Up + down|Up, bright|Up + down, bright|No shift")));
+    v.push_back (dial (66, 126, 56, "Shift", TR_NOOP ("Shift"), big | bipolar));
+    v.push_back (dial (164, 126, 56, "Feedback", TR_NOOP ("Feedback"), big));
+    v.push_back (section (228, 4, 210, 242, TR_NOOP ("Reverb")));
+    v.push_back (tabs (238, 30, 190, 22, "Reverb mode", TR_NOOP ("Wide|Dense|Bright")));
+    v.push_back (dial (282, 112, 44, "Size", TR_NOOP ("Size"), big));
+    v.push_back (dial (384, 112, 44, "Mix", TR_NOOP ("Mix"), big));
+    v.push_back (dial (282, 204, 28, "Diffusion", TR_NOOP ("Diffusion")));
+    v.push_back (tabs (340, 196, 88, 22, "Color", TR_NOOP ("Bright|Dark")));
+    v.push_back (section (442, 4, 174, 242, TR_NOOP ("Tone and modulation")));
+    v.push_back (dial (486, 70, 30, "Low cut", TR_NOOP ("Low cut")));
+    v.push_back (dial (572, 70, 30, "High cut", TR_NOOP ("High cut")));
+    v.push_back (dial (486, 170, 30, "Mod rate", TR_NOOP ("Mod rate")));
+    v.push_back (dial (572, 170, 30, "Mod depth", TR_NOOP ("Mod depth")));
+    return l;
+}
+
+Layout horizonLayout()
+{
+    Layout l;
+    l.width = 860;
+    l.height = 262;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 330, 254, TR_NOOP ("Echo")));
+    v.push_back (choiceMenu (14, 30, 150, 24, "Echo mode", TR_NOOP ("Echo mode"),
+                             TR_NOOP ("Clean|Tape|Digital|Analog|Detune|Reverse|Reverse Up|Reverse Down|Reverse Up/Down|Sparkle|Swarm|Lo-fi")));
+    v.push_back (tabs (172, 30, 152, 24, "Echo sync", TR_NOOP ("ms|Note|Dotted|Triplet")));
+    v.push_back (dial (56, 112, 44, "Echo time", TR_NOOP ("Time"), big));
+    v.push_back (choiceMenu (20, 168, 72, 20, "Echo note", TR_NOOP ("Note"), "1/64|1/32|1/16|1/8|1/4|1/2"));
+    v.push_back (dial (140, 104, 34, "Echo feedback", TR_NOOP ("Feedback")));
+    v.push_back (dial (210, 104, 34, "Echo level", TR_NOOP ("Level")));
+    v.push_back (dial (280, 104, 34, "Echo spread", TR_NOOP ("Spread")));
+    v.push_back (dial (140, 206, 30, "Echo drive", TR_NOOP ("Drive")));
+    v.push_back (dial (210, 206, 30, "Echo detune", TR_NOOP ("Detune"), bipolar));
+    v.push_back (tabs (252, 196, 76, 40, "Routing", TR_NOOP ("Echo > Rev|Rev > Echo")));
+    v.push_back (section (338, 4, 300, 254, TR_NOOP ("Reverb")));
+    v.push_back (choiceMenu (348, 30, 150, 24, "Reverb mode", TR_NOOP ("Reverb mode"), TR_NOOP ("Room|Chamber|Plate|Hall|Cathedral|Space|Freeze|Gated")));
+    v.push_back (tabs (506, 30, 124, 24, "Color", TR_NOOP ("Bright|Neutral|Dark|Vintage")));
+    v.push_back (dial (396, 112, 54, "Decay", TR_NOOP ("Decay"), big));
+    v.push_back (dial (480, 106, 34, "Size", TR_NOOP ("Size")));
+    v.push_back (dial (550, 106, 34, "Reverb level", TR_NOOP ("Level")));
+    v.push_back (dial (396, 206, 30, "Attack", TR_NOOP ("Attack")));
+    v.push_back (dial (480, 206, 30, "Early/late", TR_NOOP ("Early / late"), bipolar));
+    v.push_back (dial (550, 206, 30, "Density", TR_NOOP ("Density")));
+    v.push_back (section (642, 4, 214, 254, TR_NOOP ("Output")));
+    v.push_back (dial (700, 72, 52, "Mix", TR_NOOP ("Mix"), big));
+    v.push_back (dial (800, 72, 34, "Width", TR_NOOP ("Width"), bipolar));
+    v.push_back (dial (680, 160, 26, "Low EQ freq", TR_NOOP ("Low cut")));
+    v.push_back (dial (736, 160, 26, "High EQ freq", TR_NOOP ("High cut")));
+    v.push_back (dial (792, 160, 26, "Mod rate", TR_NOOP ("Mod rate")));
+    v.push_back (dial (736, 222, 24, "Mod depth", TR_NOOP ("Mod depth")));
+    return l;
+}
+
 Layout generated (EffectKind kind)
 {
     // knobs in rows of up to 6 (FL's wrapper shows unknown plugins as a list of knobs too)
@@ -1645,7 +1837,8 @@ const std::vector<EffectKind>& flLayoutKinds()
 const std::vector<EffectKind>& ownLayoutKinds()
 {
     static const std::vector<EffectKind> kinds { EffectKind::ridgeStrip, EffectKind::glowLeveler, EffectKind::hushDeEsser,
-                                                 EffectKind::aether, EffectKind::ember };
+                                                 EffectKind::aether, EffectKind::ember, EffectKind::epochVerb, EffectKind::atrium,
+                                                 EffectKind::foilPlate, EffectKind::nebula, EffectKind::halo, EffectKind::horizon };
     return kinds;
 }
 
@@ -1695,6 +1888,12 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::hushDeEsser: l = hushDeEsser(); break;
         case EffectKind::aether: l = aetherLayout(); break;
         case EffectKind::ember: l = emberLayout(); break;
+        case EffectKind::epochVerb: l = epochVerbLayout(); break;
+        case EffectKind::atrium: l = atriumLayout(); break;
+        case EffectKind::foilPlate: l = foilPlateLayout(); break;
+        case EffectKind::nebula: l = nebulaLayout(); break;
+        case EffectKind::halo: l = haloLayout(); break;
+        case EffectKind::horizon: l = horizonLayout(); break;
         case EffectKind::lynxTune: l = lynxTune(); break;
         default: l = generated (kind); break;
     }

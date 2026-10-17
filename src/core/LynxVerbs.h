@@ -64,6 +64,7 @@ struct Settings
     // late tank (8-line FDN)
     int shape = 0;                 // line-length set (see LynxVerbs.cpp)
     double lineScale = 1.0;        // multiplier of the shape's lengths
+    double lineSpread = 1.0;       // delay-network shape only: 0 = every line lineScale ms long, 1 = the full spread
     double rt60 = 2.0;             // mid-band decay (s)
     double lowMult = 1.0, lowXover = 300.0;    // RT multiplier below lowXover
     double highMult = 1.0, highXover = 8000.0; // RT multiplier above highXover
@@ -80,10 +81,13 @@ struct Settings
     double shiftSemis = 0.0;
     double shiftFeedback = 0.0;    // 0..1
     double shiftMix = 1.0;         // 0..1: shifted part of what feeds back (0 = plain feedback)
+    double shiftSemis2 = -12.0;    // second voice (dual modes)
+    double shift2Mix = 0.0;        // 0..1: level of the second voice in the shifted feedback
     // output
     double width = 1.0;            // −2..2: side gain of the wet output (M/S); 0 = mono, negative swaps L/R
     double outLowCut = 0.0, outHighCut = 0.0;  // Hz (0 = off)
     int outLowOrder = 2, outHighOrder = 2;     // 1 = 6 dB/oct, 2 = 12 dB/oct
+    double bandLimit = 0.0;        // Hz (0 = off): a steep (24 dB/oct) low-pass, the reduced bandwidth of some algorithms
     double lowShelfHz = 200.0, lowShelfDb = 0.0;
     double highShelfHz = 6000.0, highShelfDb = 0.0;
     double gain = 1.0;

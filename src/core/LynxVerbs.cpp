@@ -21,7 +21,7 @@ constexpr double shapes[][lineCount] = {
     { 37.1, 41.9, 47.3, 53.9, 61.1, 67.7, 74.3, 83.9 }, // 0 hall
     { 21.1, 24.7, 28.3, 32.9, 37.3, 41.9, 46.1, 51.7 }, // 1 room / chamber
     { 29.3, 33.1, 38.9, 44.3, 51.7, 57.1, 63.7, 71.3 }, // 2 plate
-    { 1.000, 1.071, 1.173, 1.249, 1.367, 1.451, 1.553, 1.687 }, // 3 delay network (ratios)
+    { 0.031, 0.117, 0.229, 0.357, 0.493, 0.641, 0.809, 1.000 }, // 3 delay network (fractions of the delay, see lineSpread)
 };
 constexpr int shapeCount = (int) (sizeof (shapes) / sizeof (shapes[0]));
 
@@ -220,9 +220,9 @@ struct Engine::Impl
     } absorb[lineCount];
     double curLen[lineCount] {}; // glided line lengths (samples)
     double lfo[lineCount] {};
-    Shifter shifter;
-    Biquad outLow, outHigh, shelfLow, shelfHigh;
-    bool outLowOn = false, outHighOn = false, shelfLowOn = false, shelfHighOn = false;
+    Shifter shifter, shifter2;
+    Biquad outLow, outHigh, shelfLow, shelfHigh, band1, band2;
+    bool outLowOn = false, outHighOn = false, shelfLowOn = false, shelfHighOn = false, bandOn = false;
 
     // tap patterns (unit times and gains), drawn once
     double eT[2][earlyTaps] {}, eG[2][earlyTaps] {};
@@ -282,6 +282,7 @@ struct Engine::Impl
             loopAp[i].line.allocate ((int) (0.2 * maxLineSec * sr) + 8);
         }
         shifter.prepare (sr, 0.06);
+        shifter2.prepare (sr, 0.06);
         reset();
     }
 
@@ -305,10 +306,13 @@ struct Engine::Impl
             lfo[i] = 2.0 * pi * i / lineCount;
         }
         shifter.clear();
+        shifter2.clear();
         outLow.reset();
         outHigh.reset();
         shelfLow.reset();
         shelfHigh.reset();
+        band1.reset();
+        band2.reset();
         shiftState = 0.0f;
         first = true;
     }
@@ -316,7 +320,9 @@ struct Engine::Impl
     double targetLen (const Settings& s, int i) const noexcept
     {
         const auto shape = std::clamp (s.shape, 0, shapeCount - 1);
-        const auto ms = shapes[shape][i] * std::max (0.0, s.lineScale);
+        const auto spread = std::clamp (s.lineSpread, 0.0, 1.0);
+        const auto ms = shape == 3 ? std::max (0.0, s.lineScale) * (1.0 - spread * (1.0 - shapes[3][i]))
+                                   : shapes[shape][i] * std::max (0.0, s.lineScale);
         return clampPos (ms * sr / 1000.0, 8.0, maxLineSec * sr);
     }
 
@@ -400,6 +406,12 @@ struct Engine::Impl
             else
                 outHigh.filter (sr, 0, s.outHighCut, 0.7071);
         }
+        bandOn = s.bandLimit > 0.0 && s.bandLimit < 0.45 * sr;
+        if (bandOn)
+        {
+            band1.filter (sr, 0, s.bandLimit, 0.5412); // 4th-order Butterworth as two sections
+            band2.filter (sr, 0, s.bandLimit, 1.3066);
+        }
         shelfLowOn = std::abs (s.lowShelfDb) > 0.01;
         if (shelfLowOn)
             shelfLow.shelf (sr, s.lowShelfHz, s.lowShelfDb, false, 0.7);
@@ -449,8 +461,10 @@ struct Engine::Impl
         const auto norm = (float) (1.0 / std::sqrt ((double) lineCount));
         const auto early = (float) s.earlyLevel, late = (float) s.lateLevel, send = (float) s.earlySend;
         const auto gated = s.gateSec > 0.0, build = gated || s.buildSec > 0.0005;
-        const auto cross = (float) std::clamp (s.crossFeed, 0.0, 1.0);
-        const auto ratio = std::pow (2.0, s.shiftSemis / 12.0);
+        const auto crossAngle = 0.25 * pi * std::clamp (s.crossFeed, 0.0, 1.0);
+        const auto crossCos = (float) std::cos (crossAngle), crossSin = (float) std::sin (crossAngle);
+        const auto ratio = std::pow (2.0, s.shiftSemis / 12.0), ratio2 = std::pow (2.0, s.shiftSemis2 / 12.0);
+        const auto voice2 = (float) std::clamp (s.shift2Mix, 0.0, 1.0);
         const auto shimmer = (float) std::clamp (s.shiftFeedback, 0.0, 0.98), shiftMix = (float) std::clamp (s.shiftMix, 0.0, 1.0);
         const auto width = (float) std::clamp (s.width, -2.0, 2.0), gain = (float) s.gain;
         double target[lineCount];
@@ -513,16 +527,20 @@ struct Engine::Impl
                 sOut[i] = y;
             }
             // outputs: two orthogonal sign patterns
-            float lateL = (sOut[0] - sOut[1] + sOut[2] - sOut[3] + sOut[4] - sOut[5] + sOut[6] - sOut[7]) * norm;
-            float lateR = (sOut[0] + sOut[1] - sOut[2] - sOut[3] + sOut[4] + sOut[5] - sOut[6] - sOut[7]) * norm;
+            // (neither pattern sums to zero, so low frequencies, where the lines move together, are kept)
+            float lateL = (sOut[0] + sOut[1] + sOut[2] - sOut[3] + sOut[4] + sOut[5] - sOut[6] + sOut[7]) * norm;
+            float lateR = (sOut[0] - sOut[1] + sOut[2] + sOut[3] + sOut[4] - sOut[5] + sOut[6] + sOut[7]) * norm;
 
             // feedback through the shifter
             float in[2] = { d[0] + send * e[0], d[1] + send * e[1] };
             if (shimmer > 0.0f)
             {
                 const auto mono = 0.5f * (lateL + lateR);
-                const auto shifted = (float) shifter.process (mono, ratio);
-                const auto fb = shimmer * (shiftMix * shifted + (1.0f - shiftMix) * mono);
+                auto shifted = (float) shifter.process (mono, ratio);
+                if (voice2 > 0.0f)
+                    shifted = (1.0f - 0.5f * voice2) * shifted + voice2 * (float) shifter2.process (mono, ratio2);
+                // soft-limited, so the shifted loop stays bounded whatever the settings
+                const auto fb = std::tanh (shimmer * (shiftMix * shifted + (1.0f - shiftMix) * mono));
                 in[0] += fb;
                 in[1] += fb;
             }
@@ -533,23 +551,24 @@ struct Engine::Impl
                 lateR = 0.3f * lateR + d[1];
             }
 
-            // Hadamard (fast Walsh transform, normalised), blended with the identity by crossFeed
+            // mixing: each half of the tank (lines 0–3 fed from the left, 4–7 from the right) through a normalised 4-point
+            // Hadamard, then the halves rotated into each other by crossFeed × 45° (orthogonal for any amount)
             float h[lineCount];
-            for (int i = 0; i < lineCount; ++i)
-                h[i] = sOut[i];
-            for (int len = 1; len < lineCount; len <<= 1)
-                for (int i = 0; i < lineCount; i += len << 1)
-                    for (int j = i; j < i + len; ++j)
-                    {
-                        const auto a = h[j], b = h[j + len];
-                        h[j] = a + b;
-                        h[j + len] = a - b;
-                    }
-            for (int i = 0; i < lineCount; ++i)
+            for (int half = 0; half < lineCount; half += 4)
             {
-                const auto m = cross * h[i] * norm + (1.0f - cross) * sOut[(i + 3) & (lineCount - 1)];
-                const auto inj = (i & 1) == 0 ? in[0] : in[1];
-                lines[i].write (m + ((i & 2) == 0 ? inj : -inj) * 0.5f);
+                const auto a0 = sOut[half] + sOut[half + 1], a1 = sOut[half] - sOut[half + 1];
+                const auto a2 = sOut[half + 2] + sOut[half + 3], a3 = sOut[half + 2] - sOut[half + 3];
+                h[half] = 0.5f * (a0 + a2);
+                h[half + 1] = 0.5f * (a1 + a3);
+                h[half + 2] = 0.5f * (a0 - a2);
+                h[half + 3] = 0.5f * (a1 - a3);
+            }
+            for (int i = 0; i < 4; ++i)
+            {
+                const auto a = h[i], b = h[i + 4];
+                const auto inj = (i & 1) == 0 ? 0.5f : -0.5f;
+                lines[i].write (crossCos * a + crossSin * b + inj * in[0]);
+                lines[i + 4].write (-crossSin * a + crossCos * b + inj * in[1]);
             }
 
             auto ol = late * lateL + early * e[0];
@@ -563,6 +582,11 @@ struct Engine::Impl
             outLow.processBlock (L, R, n);
         if (outHighOn)
             outHigh.processBlock (L, R, n);
+        if (bandOn)
+        {
+            band1.processBlock (L, R, n);
+            band2.processBlock (L, R, n);
+        }
         if (shelfLowOn)
             shelfLow.processBlock (L, R, n);
         if (shelfHighOn)
@@ -672,25 +696,25 @@ struct EpochMode
 const EpochMode epochModes[epoch::modeCount] = {
     { "Concert Hall", 0, 1.00, 1.06, 1.20, 1.0, 1.0, 0.55, 9.0, 0.0, 1.0, 0.91, 5.0, 0.0 },
     { "Plate", 2, 0.80, 0.90, 0.45, 1.0, 1.0, 0.10, 2.0, 60.0, 1.0, 0.70, 2.0, 0.0 },
-    { "Room", 1, 0.85, 1.02, 0.45, 1.0, 1.0, 0.10, 20.0, 150.0, 1.0, 0.65, 1.0, 0.0 },
-    { "Chamber", 1, 1.00, 1.04, 0.45, 1.0, 1.0, 0.15, 30.0, 120.0, 1.0, 0.65, 1.2, 0.0 },
-    { "Random Space", 0, 1.10, 1.00, 0.90, 1.0, 1.0, 0.00, 1.0, 220.0, 2.0, 0.75, 30.0, 0.0 },
+    { "Room", 1, 0.85, 1.02, 0.45, 1.0, 1.0, 0.10, 20.0, 150.0, 1.0, 0.82, 1.0, 0.0 },
+    { "Chamber", 1, 1.00, 1.04, 0.45, 1.0, 1.0, 0.15, 30.0, 140.0, 1.0, 0.70, 1.2, 0.0 },
+    { "Random Space", 0, 1.10, 1.00, 0.90, 1.0, 1.0, 0.00, 1.0, 220.0, 2.0, 1.50, 15.0, 0.0 },
     { "Chorus Space", 0, 1.10, 1.00, 1.10, 1.0, 1.0, 0.05, 40.0, 280.0, 3.0, 0.70, 9.0, 0.0 },
-    { "Ambience", 1, 0.70, 1.00, 0.45, 1.0, 1.0, 0.15, 40.0, 45.0, 1.0, 0.75, 7.5, 0.0 },
+    { "Ambience", 1, 0.70, 1.00, 0.45, 1.0, 1.0, 0.15, 40.0, 25.0, 1.0, 0.80, 7.5, 0.0 },
     { "Bright Hall", 0, 1.05, 1.15, 1.20, 1.0, 1.0, 0.50, 9.0, 0.0, 1.0, 1.00, 5.5, 0.0 },
     { "Nave", 0, 1.20, 1.00, 0.80, 1.0, 1.0, 0.35, 14.0, 20.0, 1.0, 0.62, 0.5, 0.0 },
     { "Grit Hall", 0, 1.00, 1.10, 1.20, 1.0, 1.0, 0.55, 9.0, 0.0, 1.3, 0.83, 5.0, 0.0 },
-    { "Grit Plate", 2, 0.75, 0.92, 0.45, 1.0, 1.0, 0.10, 6.0, 70.0, 1.3, 1.00, 1.0, 0.0 },
+    { "Grit Plate", 2, 0.75, 0.92, 0.45, 1.0, 1.0, 0.10, 6.0, 40.0, 1.3, 1.25, 1.0, 0.0 },
     { "Smooth Plate", 2, 0.85, 1.12, 0.60, 1.0, 1.0, 0.40, 6.0, 0.0, 0.8, 0.46, 4.5, 0.0 },
     { "Smooth Room", 1, 0.95, 0.97, 0.70, 1.0, 1.0, 0.30, 8.0, 6.0, 0.8, 0.53, 9.0, 0.0 },
     { "Smooth Space", 0, 1.00, 1.04, 0.80, 1.0, 1.0, 0.25, 8.0, 6.0, 0.8, 0.81, 7.5, 0.0 },
     { "Gated", 1, 0.60, 0.62, 0.30, 1.0, 1.0, 0.10, 4.0, 0.0, 0.5, 0.90, 1.5, 0.55 },
     { "Drift Chamber", 1, 1.00, 1.08, 0.70, 1.0, 1.0, 0.40, 6.0, 0.0, 2.5, 0.43, 4.5, 0.0 },
     { "Drift Hall", 0, 1.00, 1.13, 1.20, 1.0, 1.0, 0.45, 9.0, 0.0, 2.5, 0.53, 5.0, 0.0 },
-    { "Drift Space", 0, 1.30, 1.70, 1.20, 1.0, 1.0, 0.05, 9.0, 150.0, 2.5, 0.42, 4.0, 0.0 },
-    { "Cathedral", 0, 1.40, 1.35, 1.00, 1.0, 1.0, 0.10, 40.0, 50.0, 1.0, 0.64, 0.5, 0.0 },
+    { "Drift Space", 0, 1.30, 1.70, 1.20, 1.0, 1.0, 0.05, 9.0, 110.0, 2.5, 1.00, 4.0, 0.0 },
+    { "Cathedral", 0, 1.40, 1.30, 1.00, 1.0, 1.0, 0.10, 40.0, 20.0, 1.0, 1.10, 0.5, 0.0 },
     { "Grand Hall", 0, 1.50, 1.30, 2.40, 1.7, 1.0, 0.20, 30.0, 20.0, 1.0, 1.30, 55.0, 0.0 },
-    { "Vintage Chamber", 1, 1.10, 1.20, 0.90, 1.0, 1.0, 0.05, 25.0, 110.0, 0.7, 1.05, 11.0, 0.0 },
+    { "Vintage Chamber", 1, 1.10, 1.20, 0.90, 1.0, 1.0, 0.05, 25.0, 110.0, 0.7, 1.40, 11.0, 0.0 },
     { "Vintage Hall", 0, 1.00, 1.08, 1.20, 1.0, 1.0, 0.50, 9.0, 0.0, 0.7, 0.95, 5.0, 0.0 },
 };
 const char* const epochColours[epoch::colourCount] = { "1970s", "1980s", "Now" };
@@ -716,18 +740,20 @@ protected:
         const auto colour = choice (p[15], epoch::colourCount);
         mix = p[0];
         const auto size = (double) p[3];
-        s.predelaySec = (epochPredelay (p[1]) + m.preMs * (0.4 + 0.6 * size)) / 1000.0;
+        // a very slow attack also delays the onset (the reference: +45 ms at 100 %)
+        s.predelaySec = (epochPredelay (p[1]) + m.preMs * (0.4 + 0.6 * size) + 225.0 * std::max (0.0, p[4] - 0.8)) / 1000.0;
         const auto decay = epochDecay (p[2]);
         s.shape = m.shape;
         s.lineScale = m.scale * (0.3 + 0.7 * size);
-        s.rt60 = withFloor (decay * m.rtScale, m.rtFloor * (0.4 + 0.6 * size));
-        s.lowMult = epochBassMult (p[5]) * m.lowRt;
+        s.rt60 = withFloor (decay * m.rtScale, m.rtFloor * (0.4 + 0.6 * size)) * (0.84 + 0.16 * p[10]);
+        const auto bass = epochBassMult (p[5]);
+        s.lowMult = (bass < 1.0 ? std::pow (bass, 0.35) : bass) * m.lowRt;
         s.lowXover = epochBassXover (p[6]);
         const auto shelf = -24.0 + 24.0 * p[7];
         s.highXover = epochFreq (p[8]);
-        s.highMult = std::pow (10.0, std::max (shelf, -14.0) / 50.0);
+        s.highMult = 1.1 * std::pow (10.0, std::max (shelf, -14.0) / 50.0);
         s.highShelfHz = s.highXover;
-        s.highShelfDb = 0.6 * shelf;
+        s.highShelfDb = std::max (shelf, -16.0);
         s.inDiffusion = m.inDiff * p[9];
         s.loopDiffusion = 0.2 + 0.8 * p[10];
         s.modRateHz = 0.1 + 9.9 * p[11];
@@ -787,8 +813,7 @@ protected:
         s.predelaySec = 0.5 * p[1];
         s.rt60 = atriumDecaySec (p[2]) * t.rtScale;
         s.outHighCut = 100.0 + 14900.0 * p[3];
-        if (t.cut > 0.0)
-            s.outHighCut = std::min (s.outHighCut, t.cut);
+        s.bandLimit = t.cut;
         const auto earlyLate = (double) p[4]; // 0 = early only, 1 = late only
         s.earlyLevel = t.early * std::min (1.0, 2.0 * (1.0 - earlyLate)) * 1.4;
         s.lateLevel = t.lateGain * std::min (1.0, 2.0 * earlyLate);
@@ -799,7 +824,7 @@ protected:
         s.modDepthMs = 0.8 * t.modScale * p[8] / std::sqrt (std::max (0.3, s.modRateHz));
         s.lowMult = 0.5 + 1.5 * p[9];
         s.lowXover = 100.0 + 9900.0 * p[10];
-        s.highMult = 0.1 + 0.9 * p[11];
+        s.highMult = 1.15 * (0.1 + 0.9 * p[11]); // (+15 %: what interpolation and diffusion take away)
         s.highXover = 100.0 + 14900.0 * p[12];
         s.earlySec = (1.0 + 999.0 * p[13]) / 1000.0;
         s.earlyDecay = 2.0 + 3.0 * p[14];
@@ -809,9 +834,9 @@ protected:
         s.loopDiffusion = 0.3 + 0.6 * p[18];
         const auto space = (double) p[20];
         s.buildSec = 0.02 + 0.06 * space;
-        s.gain = 1.0 + 0.6 * space;
+        s.gain = 0.47 * (1.0 + 0.6 * space);
         s.outLowCut = 1000.0 * p[21];
-        s.outLowOrder = 2;
+        s.outLowOrder = 1;
         if (s.outLowCut < 5.0)
             s.outLowCut = 0.0;
     }
@@ -928,8 +953,9 @@ protected:
         const auto mult = lerpLog (m.mult0, m.mult100);
         const auto sw = warp * warp * (3.0 - 2.0 * warp); // smoothstep: lines shorten as warp rises
         s.shape = 3;
-        s.lineScale = delay * mult * (1.0 - 0.6 * sw) / 1.687 * 1.0;
-        const auto meanSec = delay * mult * (1.0 - 0.65 * sw) / 1000.0;
+        s.lineScale = delay * mult;
+        s.lineSpread = sw;
+        const auto meanSec = delay * mult * (1.0 - 0.53 * sw) / 1000.0; // mean line length (the fractions average 0.47)
         s.rt60 = fb >= 0.9999 ? 1000.0 : 6.0 * meanSec * lerpLog (m.dm0, m.dm100) / std::max (1e-4, -std::log10 (std::max (1e-6, fb)));
         s.rt60 = std::min (s.rt60, 1000.0);
         s.inDiffusion = dens;
@@ -946,14 +972,17 @@ protected:
 };
 
 // ---------------------------------------------------------------------------------------------- Halo
+// The reference exposes bare 0..1 values; the laws below are what the measurements showed (§5): shift −12..+12
+// semitones (linear), decay set mainly by Size (≈ 1.5 s + 12.5 s × size), high cut 100..15000 Hz first order (the
+// reference room's law), low cut 0..1000 Hz; mod rate / depth laws not confirmed.
 struct HaloMode
 {
     const char* name;
-    double scale, diff;
+    double scale, rtScale, bright;
 };
-const char* const haloShiftModes[3] = { "Single", "Dual", "Octave Mix" };
-const char* const haloColours[3] = { "Bright", "Dark", "Vintage" };
-const HaloMode haloModes[3] = { { "Wide", 1.2, 1.0 }, { "Focused", 0.8, 0.8 }, { "Thick", 1.5, 1.0 } };
+const HaloMode haloModes[3] = { { "Wide", 1.2, 1.0, 0.0 }, { "Dense", 0.9, 1.05, 0.0 }, { "Bright", 1.0, 0.75, 1.0 } };
+const char* const haloShiftModes[5] = { "Up", "Up + down", "Up, bright", "Up + down, bright", "No shift" };
+const char* const haloColours[2] = { "Bright", "Dark" };
 
 double haloShiftSemis (float v) { return -12.0 + 24.0 * v; }
 
@@ -967,24 +996,32 @@ protected:
     {
         mix = p[0];
         const auto& m = haloModes[choice (p[9], 3)];
-        const auto shiftMode = choice (p[10], 3);
-        const auto colour = choice (p[11], 3);
+        const auto shiftMode = choice (p[10], 5);
+        const auto dark = choice (p[11], 2) == 1;
+        const auto size = (double) p[4];
         s.shiftSemis = haloShiftSemis (p[1]);
-        if (shiftMode == 2)
-            s.shiftSemis = 12.0;
-        s.shiftFeedback = 0.9 * p[2];
-        s.shiftMix = shiftMode == 1 ? 0.5 : 1.0;
-        s.inDiffusion = p[3] * m.diff;
+        s.shiftFeedback = shiftMode == 4 ? 0.0 : 0.85 * p[2];
+        s.shiftMix = 1.0;
+        s.shift2Mix = shiftMode == 1 || shiftMode == 3 ? 0.7 : 0.0;
+        s.shiftSemis2 = s.shiftSemis - 24.0;
+        s.inDiffusion = p[3];
         s.loopDiffusion = 0.2 + 0.7 * p[3];
+        s.buildSec = 0.02 + 0.3 * size * (1.0 - p[3] * 0.5);
         s.shape = 0;
-        s.lineScale = m.scale * (0.3 + 1.2 * p[4]);
-        s.rt60 = 1.0 + 9.0 * p[4];
-        s.outLowCut = skewLaw (p[5], 10.0, 2000.0, 2.0);
-        s.outHighCut = skewLaw (p[6], 200.0, 20000.0, 1.7);
-        s.modRateHz = skewLaw (p[7], 0.05, 10.0, 2.0);
+        s.lineScale = m.scale * (0.3 + 1.2 * size);
+        s.rt60 = (1.5 + 12.5 * size) * m.rtScale * (1.0 - 0.45 * s.shiftFeedback); // the shifted loop adds its own sustain
+        s.outLowCut = 1000.0 * p[5];
+        s.outLowOrder = 1;
+        if (s.outLowCut < 5.0)
+            s.outLowCut = 0.0;
+        s.outHighCut = 100.0 + 14900.0 * p[6];
+        s.outHighOrder = 1;
+        if (shiftMode == 2 || shiftMode == 3 || m.bright > 0.0)
+            s.highShelfDb = 4.0, s.highShelfHz = 3000.0;
+        s.loopBandwidth = dark ? 5000.0 : 0.0;
+        s.modRateHz = 0.05 + 4.95 * p[7];
         s.modDepthMs = 1.2 * p[8] / std::sqrt (std::max (0.3, s.modRateHz));
-        s.loopBandwidth = colour == 0 ? 20000.0 : colour == 1 ? 6000.0 : 9000.0;
-        s.gain = 0.8;
+        s.gain = dark ? 0.75 : 0.95;
     }
 };
 
@@ -1310,12 +1347,12 @@ std::string paramText (EffectKind kind, int param, float v, double bpm)
             switch (param)
             {
                 case 1: return fmt ("%+.1f st", haloShiftSemis (v));
-                case 5: return hz (skewLaw (v, 10.0, 2000.0, 2.0));
-                case 6: return hz (skewLaw (v, 200.0, 20000.0, 1.7));
-                case 7: return fmt ("%.2f Hz", skewLaw (v, 0.05, 10.0, 2.0));
+                case 5: return hz (1000.0 * v);
+                case 6: return hz (100.0 + 14900.0 * v);
+                case 7: return fmt ("%.2f Hz", 0.05 + 4.95 * v);
                 case 9: return haloModes[choice (v, 3)].name;
-                case 10: return haloShiftModes[choice (v, 3)];
-                case 11: return haloColours[choice (v, 3)];
+                case 10: return haloShiftModes[choice (v, 5)];
+                case 11: return haloColours[choice (v, 2)];
                 default: return pct (v);
             }
         case EffectKind::horizon:
