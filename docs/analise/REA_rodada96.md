@@ -132,5 +132,14 @@ arrangements below land); pt-BR strings for every caption.
 ## Where I stopped / next steps
 - Done: the five engines, tests (all measurable responses above), registry / project file / mixer list / build
   lists, docs/PLUGINS.md section, website plugin list (status "LYNX original").
-- Next: the editor arrangements (sections, value read-outs, GR meter) once round 93's layout system is on main;
-  pt-BR strings; landing via tmp/coord/land.sh vocal96.
+- 2026-10-17: merged origin/main (90f0cce) into the branch. The first build-local after the merge aborted in the
+  compiler with no message (zig cache likely corrupted by the power loss); ~/.cache/zig-vocal96 was deleted and a
+  rebuild started, then stopped on the user's request. Not re-verified after the merge yet.
+- Stress project with all five effects (defaults) on mixer tracks 1-8: C:/Users/kauan/lynx-test/vocal96/Mix96.lynx,
+  for `LYNX.exe --rtstress Mix96.lynx rt.txt 30` (not run yet).
+- Next: build-local with the FL Data dir (0 failures), Windows build, --rtstress on Mix96.lynx, then
+  tmp/coord/land.sh vocal96 (batch 1: engines). Batch 2: editor arrangements (sections, read-outs, GR meter, pt-BR
+  captions) need round 93's layout system (src/core/PluginLayout.*, feature/plugui93), still not on main. Batch 1 adds
+  no tr() strings (engines live in src/core; effect parameter names are not translated on main).
+- subst98 (plugin substitution table) and ffmeas99 (FabFilter measurements, tmp/r99) had nothing landed yet: register
+  the suite there / fit to measurements once they land.
