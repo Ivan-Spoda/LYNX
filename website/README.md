@@ -11,3 +11,8 @@ The download buttons read the newest GitHub release at runtime, so a new release
 - Publish with `scripts/deploy-site.sh` (Hostinger API token in `~/.config/hostinger/token`, never committed).
 - The plugin section is data-driven: `FEATURED` (highlight cards, Exact/Near-exact only, `by` = the original's maker,
   so engines inspired by third-party plugins can be added) and `PLUGINS` (full grid), kept in sync with `docs/PLUGINS.md`.
+- The "Inspired by the classics" section (`#classics`) is generated: `scripts/gen-inspired.py` reads the substitute
+  table in `src/core/PluginSubstitutes.cpp` plus `docs/inspired-by.json` (descriptions EN/pt-BR, short names, work in
+  progress) and rewrites the `INSPIRED` data block here and the matching sections of `README.md` and `docs/PLUGINS.md`.
+  Rerun it whenever an engine lands (release step); `--check` fails when a block is stale. A new LYNX engine without an
+  entry in `inspired-by.json` is printed as a warning: add its description there.
