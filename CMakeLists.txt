@@ -114,6 +114,7 @@ target_sources(lynx_core PRIVATE
     src/core/NoteTools.cpp
     src/core/PianoRollTools.cpp
     src/core/EventEdit.cpp
+    src/core/AudioEdit.cpp
     src/core/MixerOps.cpp
     src/core/History.cpp
     src/core/SearchQuery.cpp)
@@ -245,6 +246,7 @@ if(LYNX_BUILD_APP)
     target_sources(LYNX PRIVATE
         src/ui/NoteToolDialogs.cpp
         src/ui/EventEditor.cpp
+        src/ui/AudioEditor.cpp
         src/ui/ToolWindow.cpp
         src/ui/HistoryPanel.cpp
         src/ui/MissingFilesDialog.cpp

@@ -18,6 +18,7 @@
 #include "ui/Icons.h"
 #include "ui/ValueControl.h"
 #include "ui/Theme.h"
+#include "ui/AudioEditor.h"
 
 namespace lynx
 {
@@ -2625,6 +2626,8 @@ void EffectsPanel::showAddMenu (int)
     });
     menu.addSeparator();
     menu.addSubMenu (tr ("Plugin (VST/VST3/CLAP)"), plugins);
+    menu.addSeparator();
+    menu.addItem (tr ("Audio editor (record this insert)..."), [this] { openAudioEditorForInsert (engine, track); });
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
@@ -2641,6 +2644,7 @@ void EffectsPanel::showSlotMenu (int slot)
     const auto count = (int) slots()->size();
     juce::PopupMenu menu;
     menu.addSubMenu (tr ("Replace with"), replace);
+    menu.addItem (tr ("Audio editor (record this insert)..."), [this] { openAudioEditorForInsert (engine, track); });
 
     // FL presets (Plugin presets\Effects\<plugin>) that map to this effect
     {
