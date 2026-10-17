@@ -335,7 +335,12 @@ void MixerStrips::paint (juce::Graphics& g)
         const auto hovered = [this, t] (Part p) { return hoverTrack == t && hoverPart == p; };
         const auto dragging = [this, t] (Part p) { return dragTrack == t && dragPart == p; };
 
-        g.setColour (isSelected || inSelection ? colour::bg4 : (t == 0 ? colour::bg3 : stripHovered ? colour::bg3 : colour::bg2));
+        // the strip is tinted with the insert's colour (FL tints whole strips, so groups read at a glance);
+        // kept dark so meters, knobs and text keep their contrast
+        auto plate = isSelected || inSelection ? colour::bg4 : (t == 0 ? colour::bg3 : stripHovered ? colour::bg3 : colour::bg2);
+        if (track.colour != 0)
+            plate = plate.interpolatedWith (tame (juce::Colour (track.colour)), isSelected ? 0.26f : 0.2f);
+        g.setColour (plate);
         g.fillRoundedRectangle (strip.toFloat(), radius::md);
 
         if (track.colour != 0) // thin colour band at the top
