@@ -185,7 +185,9 @@ private:
     juce::PopupMenu makeToolbarMenu();
     void showToolbarMenu();
     void showCustomizeToolbar();
-    void newProject();
+    void newProject (bool askAlways = false); // File › New: the New project window unless turned off
+    void startNewProject (Song song, const juce::File& file);
+    void saveAsTemplate();
     void chooseFileToOpen();
     void chooseFileToOpenNow();
     void save (bool askForFile);

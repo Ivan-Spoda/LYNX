@@ -44,6 +44,8 @@ public:
 
     // External audio input of the inserts (set before the device starts).
     void setLiveInput (LiveInput* input) noexcept { renderer.setLiveInput (input); }
+    // Per instrument / effect processing time (Plugin performance monitor).
+    ProcessTimes& processTimes() noexcept { return renderer.processTimes(); }
 
 private:
     std::atomic<bool> metering { true };

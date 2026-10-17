@@ -4,6 +4,7 @@
 #include "engine/Exporter.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
+#include "ui/SettingsPages.h"
 #include "ui/Theme.h"
 
 namespace lynx
@@ -59,52 +60,56 @@ private:
     bool ok = false;
 };
 
-// Stems: one file per insert that produces sound (like FL's "split mixer tracks"). Each render creates
-// its own engine; plugins are created and destroyed on the UI thread, so the background thread asks it to do that.
+// Stems: one file per insert that produces sound (FL's "split mixer tracks") or per channel that plays (each heard
+// through its mixer path), plus the full mix when asked. Each render creates its own engine; plugins are created and
+// destroyed on the UI thread, so the background thread asks it to do that.
 class StemsThread final : public juce::ThreadWithProgressWindow
 {
 public:
-    StemsThread (const AudioEngine& e, ExportSettings s, juce::File base)
+    StemsThread (const AudioEngine& e, exportopts::Options o, juce::File base)
         : juce::ThreadWithProgressWindow (tr ("Exporting stems..."), true, true),
-          settings (s),
+          options (o),
           baseFile (std::move (base)),
           song (e.getSong())
     {
-        // inserts that receive a channel or a send
-        for (int t = 1; t < (int) song.mixer.size(); ++t)
-        {
-            auto used = std::any_of (song.channels.begin(), song.channels.end(), [t] (const ChannelDef& c) { return c.mixerTrack == t; });
+        const auto ext = exportopts::extension (options.format);
+        const auto baseName = baseFile.getFileNameWithoutExtension().toStdString();
+        auto file = [&] (int number, const std::string& name) {
+            return baseFile.getSiblingFile (juce::String::fromUTF8 (exportopts::stemFileName (baseName, number, name, ext).c_str()));
+        };
 
-            for (int src = 1; src < (int) song.mixer.size() && ! used; ++src)
-                used = song.routes (src, t) && src != t;
+        if (options.stemsIncludeMaster)
+            items.push_back ({ juce::String ("Master"), baseFile, song });
 
-            if (used)
-                inserts.push_back (t);
-        }
+        if (options.stems == exportopts::Stems::channels)
+            for (auto c : exportopts::stemChannels (song, options.range))
+                items.push_back ({ juce::String::fromUTF8 (song.channels[(std::size_t) c].name.c_str()), file (c + 1, song.channels[(std::size_t) c].name),
+                                   exportopts::makeChannelStemSong (song, c) });
+        else
+            for (auto t : exportopts::stemTracks (song))
+                items.push_back ({ juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()), file (t, song.mixer[(std::size_t) t].name),
+                                   makeBounceSong (song, t) });
     }
 
     void run() override
     {
-        for (std::size_t i = 0; i < inserts.size() && ! threadShouldExit(); ++i)
+        for (std::size_t i = 0; i < items.size() && ! threadShouldExit(); ++i)
         {
-            const auto t = inserts[i];
-            const auto name = juce::File::createLegalFileName (juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()));
-            const auto file = baseFile.getSiblingFile (baseFile.getFileNameWithoutExtension() + " - " + juce::String (t) + " " + name
-                                                       + exportExtension (settings.format));
-            setStatusMessage (name);
+            auto& item = items[i];
+            setStatusMessage (item.name);
 
             std::unique_ptr<ExportJob> job;
             juce::WaitableEvent ready;
             juce::MessageManager::callAsync ([&] {
-                job = std::make_unique<ExportJob> (makeBounceSong (song, t), settings, file);
+                job = std::make_unique<ExportJob> (item.song, options, item.file);
                 ready.signal();
             });
             ready.wait();
 
             juce::String error;
-            const auto base = (double) i / (double) inserts.size();
+            const auto base = (double) i / (double) items.size();
             const auto ok = job->run ([this, base] (double p) {
-                setProgress (base + p / (double) inserts.size());
+                setProgress (base + p / (double) items.size());
                 return ! threadShouldExit();
             }, error);
 
@@ -130,76 +135,255 @@ public:
     }
 
 private:
-    ExportSettings settings;
+    struct Item
+    {
+        juce::String name;
+        juce::File file;
+        Song song;
+    };
+    exportopts::Options options;
     juce::File baseFile;
     Song song;
-    std::vector<int> inserts;
+    std::vector<Item> items;
     int written = 0;
 };
 
-class ExportPanel final : public juce::Component
+juce::File exportSettingsFile()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/export-settings.txt");
+}
+
+// A row of buttons where exactly one is on (the output format).
+class Segmented final : public juce::Component
 {
 public:
-    ExportPanel (AudioEngine& e, juce::File folder, juce::String name)
-        : engine (e),
-          suggestedFolder (std::move (folder)),
-          suggestedName (std::move (name))
+    std::function<void (int)> onChange;
+
+    explicit Segmented (const juce::StringArray& names)
     {
-        formatBox.addItemList ({ tr ("WAV 16 bits"), tr ("WAV 24 bits"), tr ("WAV 32 bits (float)"), tr ("FLAC 24 bits"), "OGG Vorbis" }, 1);
-        formatBox.setSelectedItemIndex (lastFormat, juce::dontSendNotification);
-        rateBox.addItemList ({ "44100 Hz", "48000 Hz", "88200 Hz", "96000 Hz" }, 1);
-        rateBox.setSelectedItemIndex (lastRate, juce::dontSendNotification);
-        whatBox.addItem (tr ("Full song (Playlist)"), 1);
-        whatBox.addItem (tr ("Current pattern"), 2);
-        whatBox.setSelectedItemIndex (engine.getSong().mode == PlayMode::song && ! engine.getSong().playlist.empty() ? 0 : 1,
-                                      juce::dontSendNotification);
-        tailBox.addItemList ({ tr ("No tail"), tr ("Tail up to {0} s", { "3" }), tr ("Tail up to {0} s", { "6" }), tr ("Tail up to {0} s", { "12" }) }, 1);
-        tailBox.setSelectedItemIndex (lastTail, juce::dontSendNotification);
+        for (int i = 0; i < names.size(); ++i)
+        {
+            auto* b = buttons.add (new juce::TextButton (names[i]));
+            b->setClickingTogglesState (true);
+            b->setRadioGroupId (8401);
+            b->setConnectedEdges ((i > 0 ? juce::Button::ConnectedOnLeft : 0) | (i < names.size() - 1 ? juce::Button::ConnectedOnRight : 0));
+            b->setColour (juce::TextButton::buttonColourId, theme::colour::bg4);
+            b->setColour (juce::TextButton::buttonOnColourId, theme::colour::accent);
+            b->setColour (juce::TextButton::textColourOnId, theme::colour::onAccent);
+            b->onClick = [this, i] {
+                if (buttons[i]->getToggleState() && onChange)
+                    onChange (i);
+            };
+            addAndMakeVisible (b);
+        }
+    }
 
-        for (auto* l : { &formatLabel, &rateLabel, &whatLabel, &tailLabel })
-            addAndMakeVisible (l);
-
-        formatLabel.setText (tr ("Format"), juce::dontSendNotification);
-        rateLabel.setText (tr ("Sample rate"), juce::dontSendNotification);
-        whatLabel.setText (tr ("Export"), juce::dontSendNotification);
-        tailLabel.setText (tr ("Tail"), juce::dontSendNotification);
-
-        for (auto* c : { &formatBox, &rateBox, &whatBox, &tailBox })
-            addAndMakeVisible (c);
-
-        stemsToggle.setButtonText (tr ("One file per mixer insert (stems)"));
-        for (auto* l : { &formatLabel, &rateLabel, &whatLabel, &tailLabel })
-            l->setColour (juce::Label::textColourId, theme::colour::textSecondary);
-        exportButton.setColour (juce::TextButton::buttonColourId, theme::colour::accent);
-        exportButton.setColour (juce::TextButton::textColourOffId, theme::colour::onAccent);
-        addAndMakeVisible (stemsToggle);
-        addAndMakeVisible (exportButton);
-        addAndMakeVisible (cancelButton);
-        exportButton.onClick = [this] { chooseFile(); };
-        cancelButton.onClick = [this] { close(); };
-        setSize (380, 252);
+    void setSelected (int index) { if (auto* b = buttons[index]) b->setToggleState (true, juce::dontSendNotification); }
+    int getSelected() const
+    {
+        for (int i = 0; i < buttons.size(); ++i)
+            if (buttons[i]->getToggleState())
+                return i;
+        return 0;
     }
 
     void resized() override
     {
-        auto area = getLocalBounds().reduced (14);
-        auto row = [&area] (juce::Label& l, juce::ComboBox& c) {
-            auto r = area.removeFromTop (28);
-            l.setBounds (r.removeFromLeft (96));
-            c.setBounds (r);
-            area.removeFromTop (8);
+        const auto w = (float) getWidth() / (float) juce::jmax (1, buttons.size());
+        for (int i = 0; i < buttons.size(); ++i)
+            buttons[i]->setBounds (juce::roundToInt (w * (float) i), 0, juce::roundToInt (w * (float) (i + 1)) - juce::roundToInt (w * (float) i), getHeight());
+    }
+
+private:
+    juce::OwnedArray<juce::TextButton> buttons;
+};
+
+// The Export window (FL's "WAV rendering", interpreted; REA_rodada84): what to render on the left, the file format on
+// the right, mix options below; the choices are remembered (%APPDATA%\LYNX\export-settings.txt).
+class ExportPanel final : public juce::Component
+{
+public:
+    ExportPanel (AudioEngine& e, juce::File folder, juce::String name, bool remember)
+        : engine (e),
+          suggestedFolder (std::move (folder)),
+          suggestedName (std::move (name)),
+          persistent (remember)
+    {
+        using namespace exportopts;
+        if (persistent)
+            options = fromText (exportSettingsFile().loadFileAsString().toStdString());
+        const auto& song = engine.getSong();
+        // the range follows what is playing unless a selection was the last choice and still exists
+        if (options.range != Range::selection || ! hasSelection (song))
+            options.range = song.mode == PlayMode::song && ! song.playlist.empty() ? Range::song : Range::pattern;
+
+        for (auto* t : { &whatTitle, &formatTitle, &optionsTitle })
+            addAndMakeVisible (t);
+        whatTitle.setText (tr ("What to render"));
+        formatTitle.setText (tr ("Output format"));
+        optionsTitle.setText (tr ("Mix"));
+
+        auto combo = [this] (juce::Label& label, const juce::String& text, juce::ComboBox& box, const juce::StringArray& items, const juce::String& tip = {}) {
+            settingsui::styleLabel (label, text);
+            addAndMakeVisible (label);
+            box.addItemList (items, 1);
+            box.setTooltip (tip);
+            box.onChange = [this] { readControls(); };
+            addAndMakeVisible (box);
         };
 
-        row (whatLabel, whatBox);
-        row (formatLabel, formatBox);
-        row (rateLabel, rateBox);
-        row (tailLabel, tailBox);
-        stemsToggle.setBounds (area.removeFromTop (24));
+        combo (rangeLabel, tr ("Range"), rangeBox, { tr ("Song (Playlist)"), tr ("Current pattern"), tr ("Playlist selection") },
+               tr ("What is rendered: the arrangement, the current pattern, or the Playlist's time selection"));
+        rangeBox.setItemEnabled (3, hasSelection (song));
+        juce::StringArray loopItems;
+        for (int i = 1; i <= 16; ++i)
+            loopItems.add (i == 1 ? tr ("Once") : tr ("{0} times", { juce::String (i) }));
+        combo (loopsLabel, tr ("Play"), loopsBox, loopItems, tr ("How many times the range plays in the file"));
+        combo (tailLabel, tr ("Tail"), tailBox, { tr ("Cut remainder"), tr ("Leave remainder"), tr ("Wrap remainder") },
+               tr ("Cut: stop exactly at the end (loops). Leave: let reverbs and releases ring out (songs). Wrap: mix the tail into the start (seamless loops)"));
+        combo (tailLengthLabel, tr ("Longest tail"), tailLengthBox, { "3 s", "6 s", "12 s", "30 s" }, tr ("The tail stops earlier when the sound has faded out"));
+        combo (stemsLabel, tr ("Files"), stemsBox, { tr ("One file (the mix)"), tr ("One per mixer insert (stems)"), tr ("One per channel (stems)") },
+               tr ("Stems: a file for each mixer insert that gets sound, or for each channel that plays"));
+        stemsMaster.setButtonText (tr ("Also the full mix"));
+        stemsMaster.onClick = [this] { readControls(); };
+        addAndMakeVisible (stemsMaster);
 
-        auto buttons = area.removeFromBottom (30);
-        cancelButton.setBounds (buttons.removeFromRight (100));
+        formatButtons.onChange = [this] (int) { readControls(); };
+        addAndMakeVisible (formatButtons);
+        combo (depthLabel, tr ("Bit depth"), depthBox, { tr ("16 bits (integer)"), tr ("24 bits (integer)"), tr ("32 bits (float)") });
+        juce::StringArray mp3Items, oggItems;
+        for (auto k : mp3Bitrates())
+            mp3Items.add (juce::String (k) + " kbps");
+        for (auto k : oggBitrates())
+            oggItems.add (juce::String (k) + " kbps");
+        combo (bitrateLabel, tr ("Bitrate"), mp3Box, mp3Items, tr ("Constant bitrate (higher: better sound, bigger file)"));
+        addAndMakeVisible (oggBox);
+        oggBox.addItemList (oggItems, 1);
+        oggBox.onChange = [this] { readControls(); };
+        combo (compressionLabel, tr ("Compression"), flacLevelBox,
+               { tr ("0 (fastest)"), "1", "2", "3", "4", tr ("5 (default)"), "6", "7", tr ("8 (smallest)") },
+               tr ("FLAC is lossless at every level; higher levels make smaller files and take longer"));
+        juce::StringArray rateItems;
+        for (auto r : sampleRates())
+            rateItems.add (juce::String ((int) r) + " Hz");
+        combo (rateLabel, tr ("Sample rate"), rateBox, rateItems);
+        combo (channelsLabel, tr ("Channels"), channelsBox, { tr ("Stereo"), tr ("Mono (both sides mixed)"), tr ("Mono (left only)"), tr ("Mono (right only)") });
+        combo (ditherLabel, tr ("Dither"), ditherBox, { tr ("Off"), tr ("TPDF"), tr ("TPDF + noise shaping") },
+               tr ("Hides the rounding noise of 16 and 24 bit files (noise shaping moves it where the ear is least sensitive)"));
+
+        for (auto* t : { &normalizeToggle, &masterFxToggle, &trimToggle })
+        {
+            t->onClick = [this] { readControls(); };
+            addAndMakeVisible (t);
+        }
+        normalizeToggle.setButtonText (tr ("Normalize (peak to 0 dB)"));
+        masterFxToggle.setButtonText (tr ("Master effects"));
+        trimToggle.setButtonText (tr ("Trim the delay compensation's silence"));
+        normalizeToggle.setTooltip (tr ("Raises or lowers the whole file so its loudest peak reaches full scale"));
+        masterFxToggle.setTooltip (tr ("Off: the Master insert's effects are bypassed for the export"));
+        trimToggle.setTooltip (tr ("Removes the silence plugin latency compensation adds at the start"));
+
+        infoLabel.setFont (theme::font (theme::type::small));
+        infoLabel.setColour (juce::Label::textColourId, theme::colour::textSecondary);
+        addAndMakeVisible (infoLabel);
+        warningLabel.setFont (theme::font (theme::type::small));
+        warningLabel.setColour (juce::Label::textColourId, theme::colour::warning);
+        addAndMakeVisible (warningLabel);
+
+        exportButton.setColour (juce::TextButton::buttonColourId, theme::colour::accent);
+        exportButton.setColour (juce::TextButton::textColourOffId, theme::colour::onAccent);
+        addAndMakeVisible (exportButton);
+        addAndMakeVisible (cancelButton);
+        exportButton.onClick = [this] { chooseFile(); };
+        cancelButton.onClick = [this] { close(); };
+
+        writeControls();
+        setSize (620, 404);
+    }
+
+    // --snapshot: the window with this format chosen (0 WAV, 1 MP3, 2 OGG, 3 FLAC) and a few options set
+    void setFormatForSnapshot (int format)
+    {
+        options.format = (exportopts::Format) juce::jlimit (0, 3, format);
+        if (format == 3)
+        {
+            options.tail = exportopts::TailMode::wrap;
+            options.loops = 2;
+            options.stems = exportopts::Stems::mixerTracks;
+            options.stemsIncludeMaster = true;
+            options.normalize = true;
+        }
+        writeControls();
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (16, 12);
+        auto buttons = area.removeFromBottom (32);
+        cancelButton.setBounds (buttons.removeFromRight (96));
         buttons.removeFromRight (8);
-        exportButton.setBounds (buttons.removeFromRight (120));
+        exportButton.setBounds (buttons.removeFromRight (128));
+        infoLabel.setBounds (buttons.removeFromTop (16));
+        warningLabel.setBounds (buttons);
+        area.removeFromBottom (8);
+
+        auto mix = area.removeFromBottom (58);
+        optionsTitle.setBounds (mix.removeFromTop (26));
+        mix.removeFromTop (4);
+        auto mixRow = mix.removeFromTop (24);
+        normalizeToggle.setBounds (mixRow.removeFromLeft (200));
+        masterFxToggle.setBounds (mixRow.removeFromLeft (150));
+        trimToggle.setBounds (mixRow);
+        area.removeFromBottom (6);
+
+        auto left = area.removeFromLeft ((area.getWidth() - 24) / 2);
+        area.removeFromLeft (24);
+        auto right = area;
+        constexpr int labelWidth = 92, rowHeight = 26, gap = 7;
+
+        auto row = [&] (juce::Rectangle<int>& column, juce::Label& label, juce::Component& control) {
+            auto r = column.removeFromTop (rowHeight);
+            label.setBounds (r.removeFromLeft (labelWidth));
+            control.setBounds (r);
+            column.removeFromTop (gap);
+        };
+
+        whatTitle.setBounds (left.removeFromTop (26));
+        left.removeFromTop (8);
+        row (left, rangeLabel, rangeBox);
+        row (left, loopsLabel, loopsBox);
+        row (left, tailLabel, tailBox);
+        row (left, tailLengthLabel, tailLengthBox);
+        row (left, stemsLabel, stemsBox);
+        stemsMaster.setBounds (left.removeFromTop (22).withTrimmedLeft (labelWidth));
+
+        formatTitle.setBounds (right.removeFromTop (26));
+        right.removeFromTop (8);
+        formatButtons.setBounds (right.removeFromTop (28));
+        right.removeFromTop (gap + 2);
+        // the format's own settings: two rows, the others hidden
+        using exportopts::Format;
+        const auto f = options.format;
+        if (f == Format::wav || f == Format::flac)
+            row (right, depthLabel, depthBox);
+        if (f == Format::mp3)
+            row (right, bitrateLabel, mp3Box);
+        if (f == Format::ogg)
+            row (right, bitrateLabel, oggBox);
+        if (f == Format::flac)
+            row (right, compressionLabel, flacLevelBox);
+        row (right, rateLabel, rateBox);
+        row (right, channelsLabel, channelsBox);
+        row (right, ditherLabel, ditherBox);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (theme::colour::bg2);
+        // a hairline between the two columns
+        const auto x = 16 + (getWidth() - 32 - 24) / 2 + 12;
+        g.setColour (theme::colour::border);
+        g.fillRect (x, 22, 1, getHeight() - 22 - 12 - 32 - 8 - 58 - 6 - 8);
     }
 
 private:
@@ -209,36 +393,144 @@ private:
             w->exitModalState (0);
     }
 
-    ExportSettings settings() const
+    static int indexOf (const std::vector<int>& list, int value)
     {
-        static const double rates[] = { 44100.0, 48000.0, 88200.0, 96000.0 };
-        static const double tails[] = { 0.0, 3.0, 6.0, 12.0 };
-        ExportSettings s;
-        s.format = (ExportSettings::Format) juce::jlimit (0, 4, formatBox.getSelectedItemIndex());
-        s.sampleRate = rates[juce::jlimit (0, 3, rateBox.getSelectedItemIndex())];
-        s.wholeSong = whatBox.getSelectedItemIndex() == 0;
-        s.tailSeconds = tails[juce::jlimit (0, 3, tailBox.getSelectedItemIndex())];
-        return s;
+        for (int i = 0; i < (int) list.size(); ++i)
+            if (list[(std::size_t) i] == value)
+                return i;
+        return 0;
+    }
+
+    void writeControls()
+    {
+        using namespace exportopts;
+        const auto n = juce::dontSendNotification;
+        rangeBox.setSelectedItemIndex ((int) options.range, n);
+        loopsBox.setSelectedItemIndex (options.loops - 1, n);
+        tailBox.setSelectedItemIndex ((int) options.tail, n);
+        const double tails[] = { 3.0, 6.0, 12.0, 30.0 };
+        int tailIndex = 0;
+        for (int i = 0; i < 4; ++i)
+            if (std::abs (tails[i] - options.maxTailSeconds) < std::abs (tails[tailIndex] - options.maxTailSeconds))
+                tailIndex = i;
+        tailLengthBox.setSelectedItemIndex (tailIndex, n);
+        stemsBox.setSelectedItemIndex ((int) options.stems, n);
+        stemsMaster.setToggleState (options.stemsIncludeMaster, n);
+        formatButtons.setSelected ((int) options.format);
+        depthBox.setSelectedItemIndex (options.format == Format::flac ? (options.flacBits == 16 ? 0 : 1) : (options.wavBits == 16 ? 0 : options.wavBits == 24 ? 1 : 2), n);
+        mp3Box.setSelectedItemIndex (indexOf (mp3Bitrates(), options.mp3Kbps), n);
+        oggBox.setSelectedItemIndex (indexOf (oggBitrates(), options.oggKbps), n);
+        flacLevelBox.setSelectedItemIndex (options.flacLevel, n);
+        int rate = 0;
+        for (int i = 0; i < (int) sampleRates().size(); ++i)
+            if (sampleRates()[(std::size_t) i] == options.sampleRate)
+                rate = i;
+        rateBox.setSelectedItemIndex (rate, n);
+        channelsBox.setSelectedItemIndex ((int) options.channels, n);
+        ditherBox.setSelectedItemIndex ((int) options.dither, n);
+        normalizeToggle.setToggleState (options.normalize, n);
+        masterFxToggle.setToggleState (options.masterEffects, n);
+        trimToggle.setToggleState (options.trimPdc, n);
+        refresh();
+    }
+
+    void readControls()
+    {
+        using namespace exportopts;
+        const auto previousFormat = options.format;
+        options.range = (Range) juce::jmax (0, rangeBox.getSelectedItemIndex());
+        options.loops = loopsBox.getSelectedItemIndex() + 1;
+        options.tail = (TailMode) juce::jmax (0, tailBox.getSelectedItemIndex());
+        const double tails[] = { 3.0, 6.0, 12.0, 30.0 };
+        options.maxTailSeconds = tails[juce::jlimit (0, 3, tailLengthBox.getSelectedItemIndex())];
+        options.stems = (Stems) juce::jmax (0, stemsBox.getSelectedItemIndex());
+        options.stemsIncludeMaster = stemsMaster.getToggleState();
+        options.format = (Format) formatButtons.getSelected();
+        if (options.format == previousFormat)
+        {
+            const auto depth = depthBox.getSelectedItemIndex();
+            if (options.format == Format::flac)
+                options.flacBits = depth == 0 ? 16 : 24;
+            else
+                options.wavBits = depth == 0 ? 16 : depth == 1 ? 24 : 32;
+        }
+        options.mp3Kbps = mp3Bitrates()[(std::size_t) juce::jlimit (0, (int) mp3Bitrates().size() - 1, mp3Box.getSelectedItemIndex())];
+        options.oggKbps = oggBitrates()[(std::size_t) juce::jlimit (0, (int) oggBitrates().size() - 1, oggBox.getSelectedItemIndex())];
+        options.flacLevel = juce::jlimit (0, 8, flacLevelBox.getSelectedItemIndex());
+        options.sampleRate = sampleRates()[(std::size_t) juce::jlimit (0, (int) sampleRates().size() - 1, rateBox.getSelectedItemIndex())];
+        options.channels = (Channels) juce::jmax (0, channelsBox.getSelectedItemIndex());
+        options.dither = (DitherMode) juce::jmax (0, ditherBox.getSelectedItemIndex());
+        options.normalize = normalizeToggle.getToggleState();
+        options.masterEffects = masterFxToggle.getToggleState();
+        options.trimPdc = trimToggle.getToggleState();
+        options = clamped (options);
+
+        if (options.format != previousFormat)
+            writeControls(); // the bit depth list changes with the format
+        else
+            refresh();
+    }
+
+    void refresh()
+    {
+        using namespace exportopts;
+        // the depth list: FLAC has no float
+        depthBox.setItemEnabled (3, options.format == Format::wav);
+        tailLengthBox.setEnabled (options.tail != TailMode::cut);
+        stemsMaster.setEnabled (options.stems != Stems::none);
+        loopsBox.setEnabled (true);
+        const auto ditherable = (options.format == Format::wav && options.wavBits != 32) || options.format == Format::flac;
+        ditherBox.setEnabled (ditherable);
+        ditherLabel.setEnabled (ditherable);
+        const auto f = options.format;
+        depthLabel.setVisible (f == Format::wav || f == Format::flac);
+        depthBox.setVisible (f == Format::wav || f == Format::flac);
+        bitrateLabel.setVisible (f == Format::mp3 || f == Format::ogg);
+        mp3Box.setVisible (f == Format::mp3);
+        oggBox.setVisible (f == Format::ogg);
+        compressionLabel.setVisible (f == Format::flac);
+        flacLevelBox.setVisible (f == Format::flac);
+
+        const auto& song = engine.getSong();
+        const auto seconds = exportMusicSeconds (song, options);
+        auto info = tr ("Total time: {0}", { juce::String (formatDuration (seconds)) });
+        if (options.tail == TailMode::leave)
+            info << " " << tr ("(+ tail up to {0} s)", { juce::String ((int) options.maxTailSeconds) });
+        if (options.format == Format::mp3 && mp3SampleRate (options.sampleRate) != options.sampleRate)
+            info << "  ·  " << tr ("MP3 at {0} Hz", { juce::String ((int) mp3SampleRate (options.sampleRate)) });
+        if (options.stems == Stems::mixerTracks)
+            info << "  ·  " << tr ("{0} file(s)", { juce::String ((int) stemTracks (song).size() + (options.stemsIncludeMaster ? 1 : 0)) });
+        else if (options.stems == Stems::channels)
+            info << "  ·  " << tr ("{0} file(s)", { juce::String ((int) stemChannels (song, options.range).size() + (options.stemsIncludeMaster ? 1 : 0)) });
+        infoLabel.setText (info, juce::dontSendNotification);
+
+        juce::String warning;
+        if (! song.mixer.empty() && song.mixer[0].muted)
+            warning = tr ("The Master insert is muted: the file will be silent");
+        else if (options.range == Range::selection && ! hasSelection (song))
+            warning = tr ("There is no Playlist selection: the whole song is rendered");
+        warningLabel.setText (warning, juce::dontSendNotification);
+        resized();
+        repaint();
     }
 
     void chooseFile()
     {
-        lastFormat = formatBox.getSelectedItemIndex();
-        lastRate = rateBox.getSelectedItemIndex();
-        lastTail = tailBox.getSelectedItemIndex();
+        readControls();
+        if (persistent)
+            exportSettingsFile().replaceWithText (juce::String (exportopts::toText (options)));
 
-        const auto s = settings();
-        const auto extension = exportExtension (s.format);
+        const auto o = options;
+        const auto extension = juce::String (exportopts::extension (o.format));
         auto folder = lastFolder.isDirectory() ? lastFolder
                       : suggestedFolder.isDirectory() ? suggestedFolder
                                                       : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
 
-        chooser = std::make_unique<juce::FileChooser> (tr ("Export audio"), folder.getChildFile (suggestedName + extension),
-                                                       "*" + extension);
+        chooser = std::make_unique<juce::FileChooser> (tr ("Export audio"), folder.getChildFile (suggestedName + extension), "*" + extension);
         auto& engineRef = engine;
 
         chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
-                              [this, s, extension, &engineRef] (const juce::FileChooser& fc) {
+                              [this, o, extension, &engineRef] (const juce::FileChooser& fc) {
                                   auto file = fc.getResult();
 
                                   if (file == juce::File())
@@ -250,16 +542,14 @@ private:
                                   lastFolder = file.getParentDirectory();
                                   engineRef.capturePluginStates(); // the copy carries the current plugin state
 
-                                  if (stemsToggle.getToggleState())
+                                  if (o.stems != exportopts::Stems::none)
                                   {
-                                      auto stemSettings = s;
-                                      stemSettings.wholeSong = true;
                                       close();
-                                      (new StemsThread (engineRef, stemSettings, file))->launchThread();
+                                      (new StemsThread (engineRef, o, file))->launchThread();
                                       return;
                                   }
 
-                                  auto job = std::make_unique<ExportJob> (engineRef.getSong(), s, file);
+                                  auto job = std::make_unique<ExportJob> (engineRef.getSong(), o, file);
                                   close(); // deletes this panel: no `this` after this point
                                   (new ExportThread (std::move (job), file))->launchThread();
                               });
@@ -268,14 +558,21 @@ private:
     AudioEngine& engine;
     juce::File suggestedFolder;
     juce::String suggestedName;
-    juce::Label formatLabel, rateLabel, whatLabel, tailLabel;
-    juce::ComboBox formatBox, rateBox, whatBox, tailBox;
+    bool persistent = true;
+    exportopts::Options options;
+
+    settingsui::SectionTitle whatTitle, formatTitle, optionsTitle;
+    juce::Label rangeLabel, loopsLabel, tailLabel, tailLengthLabel, stemsLabel;
+    juce::ComboBox rangeBox, loopsBox, tailBox, tailLengthBox, stemsBox;
+    juce::ToggleButton stemsMaster;
+    Segmented formatButtons { { "WAV", "MP3", "OGG", "FLAC" } };
+    juce::Label depthLabel, bitrateLabel, compressionLabel, rateLabel, channelsLabel, ditherLabel;
+    juce::ComboBox depthBox, mp3Box, oggBox, flacLevelBox, rateBox, channelsBox, ditherBox;
+    juce::ToggleButton normalizeToggle, masterFxToggle, trimToggle;
+    juce::Label infoLabel, warningLabel;
     juce::TextButton exportButton { tr ("Export...") }, cancelButton { tr ("Cancel") };
-    juce::ToggleButton stemsToggle;
     std::unique_ptr<juce::FileChooser> chooser;
 
-    // remembers the last choice while the app is open
-    static inline int lastFormat = 1, lastRate = 0, lastTail = 2;
     static inline juce::File lastFolder;
 };
 } // namespace
@@ -313,15 +610,17 @@ void bounceInsertToAudio (AudioEngine& engine, int track)
     }, tr ("Rendering insert to audio...")))->launchThread();
 }
 
-std::unique_ptr<juce::Component> makeExportPanel (AudioEngine& engine)
+std::unique_ptr<juce::Component> makeExportPanel (AudioEngine& engine, int format)
 {
-    return std::make_unique<ExportPanel> (engine, juce::File(), "LYNX");
+    auto panel = std::make_unique<ExportPanel> (engine, juce::File(), "LYNX", false);
+    panel->setFormatForSnapshot (format);
+    return panel;
 }
 
 void showExportDialog (AudioEngine& engine, const juce::File& suggestedFolder, const juce::String& suggestedName)
 {
     juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (new ExportPanel (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX"));
+    options.content.setOwned (new ExportPanel (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX", true));
     options.dialogTitle = tr ("Export audio");
     options.dialogBackgroundColour = theme::colour::bg2;
     options.useNativeTitleBar = true;

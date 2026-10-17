@@ -179,7 +179,7 @@ float AudioEngine::renderOffline (const RenderOptions& options)
     std::optional<Dither> dither;
 
     if (options.ditherBits > 0)
-        dither.emplace (options.ditherBits);
+        dither.emplace (options.ditherBits, options.ditherShaping);
 
     constexpr int blockSize = 512;
     constexpr float silence = 3.0e-5f; // ~ -90 dB
@@ -224,11 +224,14 @@ float AudioEngine::renderOffline (const RenderOptions& options)
                 dither->process (view.getWritePointer (ch), n, ch);
 
         // PDC: the start is the latency's silence; the song's end arrives `trim` samples later
-        if (output != nullptr && done + n > trim)
+        if ((output != nullptr || options.capture) && done + n > trim)
         {
             const auto skip = (int) juce::jmax<std::int64_t> (0, trim - done);
             const auto beforeWrite = juce::Time::getMillisecondCounterHiRes();
-            output->writeFromAudioSampleBuffer (view, skip, n - skip);
+            if (output != nullptr)
+                output->writeFromAudioSampleBuffer (view, skip, n - skip);
+            if (options.capture)
+                options.capture (view.getReadPointer (0, skip), view.getReadPointer (1, skip), n - skip);
             lastRenderStats.writeMs += juce::Time::getMillisecondCounterHiRes() - beforeWrite;
         }
 
@@ -258,6 +261,11 @@ float AudioEngine::renderOffline (const RenderOptions& options)
     graph.releaseResources();
     setOfflineRendering (false);
     return cancelled ? -1.0f : peak;
+}
+
+ProcessTimes* AudioEngine::getProcessTimes() noexcept
+{
+    return rackProcessor != nullptr ? &rackProcessor->processTimes() : nullptr;
 }
 
 void AudioEngine::play() noexcept { transport.playing.store (true); }

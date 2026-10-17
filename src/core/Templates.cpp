@@ -2,6 +2,8 @@
 
 #include "core/SynthPresets.h"
 
+#include <algorithm>
+
 namespace lynx
 {
 namespace
@@ -111,5 +113,51 @@ Song makeTemplate (int index)
 
     p.sortNotes();
     return s;
+}
+
+std::string legalProjectName (const std::string& name)
+{
+    std::string out;
+    for (auto c : name)
+        out += std::string ("<>:\"/\\|?*").find (c) != std::string::npos || (unsigned char) c < 32 ? '_' : c;
+    const auto first = out.find_first_not_of (" .");
+    if (first == std::string::npos)
+        return "Untitled";
+    out.erase (0, first);
+    while (! out.empty() && (out.back() == ' ' || out.back() == '.'))
+        out.pop_back();
+    return out.empty() ? "Untitled" : out;
+}
+
+std::string newProjectPath (const NewProjectSetup& setup, const char* extension)
+{
+    if (setup.folder.empty())
+        return {};
+    auto folder = setup.folder;
+    while (folder.size() > 1 && (folder.back() == '/' || folder.back() == '\\'))
+        folder.pop_back();
+    const auto name = legalProjectName (setup.name);
+    return folder + "/" + (setup.ownFolder ? name + "/" : std::string()) + name + extension;
+}
+
+void applySetup (Song& song, const NewProjectSetup& setup)
+{
+    song.bpm = std::clamp (setup.bpm, 10.0, 522.0);
+    song.beatsPerBar = std::clamp (setup.beatsPerBar, 1, 16);
+    song.info = setup.info;
+    if (song.info.title.empty() && ! setup.name.empty())
+        song.info.title = setup.name;
+}
+
+std::string templateDisplayName (const std::string& fileName)
+{
+    auto name = fileName;
+    const auto slash = name.find_last_of ("/\\");
+    if (slash != std::string::npos)
+        name.erase (0, slash + 1);
+    const auto dot = name.find_last_of ('.');
+    if (dot != std::string::npos && dot > 0)
+        name.erase (dot);
+    return name;
 }
 } // namespace lynx

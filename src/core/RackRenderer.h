@@ -4,6 +4,9 @@
 // a block of stereo audio with notes triggered at the exact sample.
 
 #include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -130,9 +133,28 @@ struct RackState
 
 class WorkerPool;
 
+// Time spent in each instrument and effect slot (the Plugin performance monitor, round 84). Counted only while
+// `enabled` is on; nanoseconds of processing and of audio rendered, accumulated (the reader takes differences).
+struct ProcessTimes
+{
+    static constexpr int channels = 1024;
+    std::atomic<bool> enabled { false };
+    std::array<std::atomic<std::uint64_t>, channels> channelNs {};
+    std::array<std::atomic<std::uint64_t>, maxMixerTracks * maxEffectSlots> effectNs {}; // [track * maxEffectSlots + slot]
+    std::atomic<std::uint64_t> audioNs { 0 };  // duration of the audio rendered while enabled
+    std::atomic<std::uint64_t> wallNs { 0 };   // time the whole rack took for it
+
+    static std::uint64_t now() noexcept
+    {
+        return (std::uint64_t) std::chrono::duration_cast<std::chrono::nanoseconds> (std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+};
+
 class RackRenderer
 {
 public:
+    ProcessTimes& processTimes() noexcept { return *times; }
+
     // Extra threads for channels and mixer layers (nullptr = everything on the audio thread).
     void setWorkerPool (WorkerPool* pool) noexcept { workers = pool; }
 
@@ -201,6 +223,7 @@ private:
     LiveInput* liveInput = nullptr;
     int liveInputOffset = 0; // of the chunk within the process() block
     void mixLiveInput (const RackState& state, bool playing, int n) noexcept;
+    std::unique_ptr<ProcessTimes> times = std::make_unique<ProcessTimes>();
 
     struct SmartDisableState
     {
