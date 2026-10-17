@@ -202,6 +202,7 @@ struct MaximusPreset
     std::array<Band, 4> band {};
     bool valid = false;
     bool legacyFir = false; // "Linear-phase filters (legacy mode)": windowed-sinc FIR band split (FUN_0083c200)
+    bool linearPhaseSplit = false; // the v14+ linear-phase band split option: not decoded, the normal crossover is used
     MaximusBuild build = MaximusBuild::shared;
 };
 
@@ -427,8 +428,9 @@ std::shared_ptr<const MaximusPreset> makeMaximusPreset (const std::vector<std::u
     {
         if ((d[pos + 8] & 0x40) != 0)
             m->scale = 1.0f;
-        if ((d[pos + 8] & 0x01) != 0)
-            return nullptr; // linear-phase band split through Frequency Splitter's engine_x64.dll: not decoded
+        // linear-phase band split (through Frequency Splitter's engine_x64.dll) is not decoded: the exact engine
+        // with its normal crossover is far closer than the generic limiter (REA_rodada89 §4.3: LollieVox −5.0 → +0.5 dB)
+        m->linearPhaseSplit = (d[pos + 8] & 0x01) != 0;
         pos += 9 + 20;
     }
     if (version >= 15)

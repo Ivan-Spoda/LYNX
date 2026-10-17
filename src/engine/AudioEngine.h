@@ -53,6 +53,8 @@ public:
     const juce::StringArray& getMissingPlugins() const noexcept { return missingPlugins; }
     // "plugin → file (how it was found)" for the plugins of the last imported .flp
     const juce::StringArray& getMatchedPlugins() const noexcept { return matchedPlugins; }
+    // plugins found whose saved settings could not be carried over (VST2 <-> VST3): "name (format)"
+    const juce::StringArray& getPluginsWithoutState() const noexcept { return pluginsWithoutState; }
     // What the last imported .flp converted, approximated or left out.
     const FlpImportReport& getImportReport() const noexcept { return importReport; }
     // The last imported .flp's plugins that were not found, with what uses them and what LYNX put in their place.
@@ -346,7 +348,7 @@ private:
     int takeLatency = 0;                           // input + output, in samples
     MeterBank meters;
     PluginHost plugins;
-    juce::StringArray missingPlugins, matchedPlugins;
+    juce::StringArray missingPlugins, matchedPlugins, pluginsWithoutState;
     FlpImportReport importReport;
     std::vector<MissingPlugin> missingPluginDetails;
     RenderStats lastRenderStats;

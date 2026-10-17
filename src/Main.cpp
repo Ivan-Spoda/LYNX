@@ -306,6 +306,13 @@ public:
             return;
         }
 
+        if (args.contains ("--vst2test"))
+        {
+            const auto i = args.indexOf ("--vst2test");
+            runVst2Test (args[i + 1].unquoted(), args[i + 2].unquoted());
+            return;
+        }
+
         if (args.contains ("--wrappertest"))
         {
             const auto i = args.indexOf ("--wrappertest");
@@ -733,6 +740,74 @@ private:
 
             ok = (hasInstrument || hasEffect) && (! hasInstrument || loadedInstrument != nullptr)
                  && (! hasEffect || loadedEffect != nullptr) && peak > 0.001f && peak < 10.0f;
+        }
+
+        report << "result=" << (ok ? "OK" : "FAILED") << "\n";
+        juce::File (reportPath).replaceWithText (report);
+        setApplicationReturnValue (ok ? 0 : 1);
+        quit();
+    }
+
+    // LYNX.exe --vst2test "LYNX Test Synth.dll" report.txt (tools/testplugin/lynx_test_vst2.c): LYNX's own VST2 host.
+    // Scans the DLL, imports it the way an .flp holds it (Fruity Wrapper VST2 state with a chunk, REA_rodada89 §2),
+    // renders with two saved gains (the level must follow the restored state) and checks the plugin saw the song tempo.
+    void runVst2Test (const juce::String& pluginPath, const juce::String& reportPath)
+    {
+        juce::String report;
+        bool ok = false;
+        {
+            lynx::AudioEngine offline (false);
+            auto& host = offline.getPluginHost();
+            report << "plugins_in_file=" << host.addPluginFile (juce::File (pluginPath)) << "\n";
+            std::optional<juce::PluginDescription> vst2;
+            for (const auto& type : host.getKnownPlugins().getTypes())
+                if (type.pluginFormatName == "VST")
+                    vst2 = type;
+
+            auto render = [&] (float gain, float& tempoSeen, int& adopted) {
+                lynx::FlVst2State state;
+                state.flags = 8;
+                state.chunk = { 'L', 'X', 'V', '2', 0, 0, 0, 0 };
+                std::memcpy (state.chunk.data() + 4, &gain, 4);
+                auto song = lynx::Song::makeDefault();
+                song.bpm = 137.0;
+                auto& f = song.channels[4].plugin.foreign;
+                f.format = lynx::ForeignPlugin::Format::vst2;
+                f.vst2Id = (std::uint32_t) vst2->uniqueId;
+                f.name = "Some other name"; // found by the VST2 ID
+                f.state = lynx::writeFlVst2State (state);
+                song.channels[4].volume = 1.0f;
+                song.patterns[0].notes.clear();
+                song.patterns[0].notes.push_back ({ 0, 4 * lynx::ppq, 4, 69, 1.0f });
+                for (std::size_t c = 0; c < song.channels.size(); ++c)
+                    if (c != 4)
+                        song.channels[c].muted = true;
+                adopted = host.adoptFlPlugins (song);
+                offline.setSong (song);
+                const auto peak = offline.renderOffline (1.0, 48000.0);
+                offline.capturePluginStates();
+                juce::MemoryBlock saved;
+                saved.fromBase64Encoding (juce::String (offline.getSong().channels[4].plugin.state));
+                lynx::FlVst2State back;
+                tempoSeen = 0.0f;
+                if (lynx::parseFlVst2State (std::vector<std::uint8_t> ((const std::uint8_t*) saved.getData(), (const std::uint8_t*) saved.getData() + saved.getSize()), back)
+                    && back.chunk.size() >= 12)
+                    std::memcpy (&tempoSeen, back.chunk.data() + 8, 4);
+                return peak;
+            };
+
+            if (vst2)
+            {
+                report << "plugin=" << vst2->name << " id=" << vst2->uniqueId << " instrument=" << (int) vst2->isInstrument << "\n";
+                float tempoA = 0, tempoB = 0;
+                int adoptedA = 0, adoptedB = 0;
+                const auto quiet = render (0.1f, tempoA, adoptedA);
+                const auto loud = render (0.4f, tempoB, adoptedB);
+                report << "adopted=" << adoptedA << "," << adoptedB << " peak_gain_0.1=" << quiet << " peak_gain_0.4=" << loud
+                       << " tempo_seen=" << tempoB * 1000.0f << "\n";
+                ok = adoptedA == 1 && adoptedB == 1 && quiet > 0.01f && std::abs (loud / quiet - 4.0f) < 0.2f
+                     && std::abs (tempoB * 1000.0f - 137.0f) < 0.01f;
+            }
         }
 
         report << "result=" << (ok ? "OK" : "FAILED") << "\n";

@@ -1276,6 +1276,16 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
     chunkStartTick = startTick;
     chunkTps = ticksPerSample (bpm, sampleRate);
 
+    // hosted plugins read the transport from here (PluginHost's play head)
+    {
+        auto& timeline = hostTimeline();
+        timeline.tick.store (startTick, std::memory_order_relaxed);
+        timeline.bpm.store (bpm, std::memory_order_relaxed);
+        timeline.sampleRate.store (sampleRate, std::memory_order_relaxed);
+        timeline.beatsPerBar.store (std::max (1, song.beatsPerBar), std::memory_order_relaxed);
+        timeline.playing.store (playing, std::memory_order_relaxed);
+    }
+
     for (int t = 0; t < tracks; ++t)
     {
         std::memset (trackBuffer (t, 0), 0, sizeof (float) * (std::size_t) numSamples);
