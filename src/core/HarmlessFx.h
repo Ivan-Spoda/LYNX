@@ -138,5 +138,9 @@ private:
 
 // a Maximus state with some parameters replaced (index, value): Harmor sends its globals 49–52 as the hosted
 // plugin's parameters 5, 8, 21 and 34 after loading the preset
+// the 8 envelopes of a Maximus state (per band: the compression curve, then the second envelope) as (Δx, y)
+// points; empty when the state cannot be read
+std::vector<std::vector<std::pair<double, float>>> maximusEnvelopes (const std::vector<std::uint8_t>& state);
+
 std::vector<std::uint8_t> withMaximusParams (std::vector<std::uint8_t> state, const std::vector<std::pair<int, int>>& params);
 } // namespace lynx::hlfx
