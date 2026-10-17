@@ -122,28 +122,28 @@ TEST (lynxverbs100_parameter_laws_follow_the_measured_ones)
 TEST (lynxverbs100_decay_times_match_the_references)
 {
     using namespace verbs100;
-    // reference RT60s measured on the plugins (T20, 500 Hz–2 kHz, 48 kHz; REA_rodada100 §1–§4) with the same settings
+    // reference RT60s measured on the plugins with the same settings and the same broadband T20 (48 kHz; REA_rodada100 §1–§6)
     {
-        auto p = defaults (EffectKind::epochVerb); // Concert Hall, Decay 2 s, Size 100 %, high cut open
-        p[1] = 0.0f, p[2] = (float) lynx::verbs::skewInverse (2.0, 0.2, 70.0, 3.3596), p[13] = 1.0f, p[15] = 1.0f;
+        auto p = defaults (EffectKind::epochVerb); // Concert Hall, Decay 2 s, Size 100 %, high cut open, no shelf, bass 1 X
+        p[1] = 0.0f, p[2] = (float) lynx::verbs::skewInverse (2.0, 0.2, 70.0, 3.3596), p[5] = 0.5f, p[7] = 1.0f, p[13] = 1.0f, p[15] = 1.0f;
         const auto r = rt60 (impulse (EffectKind::epochVerb, p, 6.0));
-        CHECK (near (r, 2.46, 0.15));
-        p[16] = 1.0f / 21.0f; // Plate: 1.90 s
-        CHECK (near (rt60 (impulse (EffectKind::epochVerb, p, 6.0)), 1.90, 0.15));
-        p[2] = (float) lynx::verbs::skewInverse (8.0, 0.2, 70.0, 3.3596); // Plate, 8 s: 6.97 s
-        CHECK (near (rt60 (impulse (EffectKind::epochVerb, p, 14.0)), 6.97, 0.15));
+        CHECK (near (r, 2.49, 0.15));
+        p[16] = 1.0f / 21.0f; // Plate: 1.92 s
+        CHECK (near (rt60 (impulse (EffectKind::epochVerb, p, 6.0)), 1.92, 0.15));
+        p[2] = (float) lynx::verbs::skewInverse (8.0, 0.2, 70.0, 3.3596); // Plate, 8 s: 6.89 s
+        CHECK (near (rt60 (impulse (EffectKind::epochVerb, p, 14.0)), 6.89, 0.15));
     }
     {
-        auto p = defaults (EffectKind::atrium); // Large Room, decay 2 s → 2.0 s
+        auto p = defaults (EffectKind::atrium); // Large Room, decay 2 s → 1.76 s broadband (2.0 s in the mid bands)
         p[3] = 1.0f;
-        CHECK (near (rt60 (impulse (EffectKind::atrium, p, 6.0)), 2.0, 0.15));
-        p[2] = lynx::verbs::atrium::decayValue (4.0); // 4 s → 3.98 s
-        CHECK (near (rt60 (impulse (EffectKind::atrium, p, 10.0)), 3.98, 0.15));
+        CHECK (near (rt60 (impulse (EffectKind::atrium, p, 6.0)), 1.76, 0.15));
+        p[2] = lynx::verbs::atrium::decayValue (4.0); // 4 s → 3.50 s
+        CHECK (near (rt60 (impulse (EffectKind::atrium, p, 10.0)), 3.50, 0.15));
     }
     {
-        auto p = defaults (EffectKind::foilPlate); // decay 2 s → 1.95 s mid band
+        auto p = defaults (EffectKind::foilPlate); // decay 2 s → 1.67 s broadband (highs damped)
         p[2] = 0.3f;
-        CHECK (near (rt60 (impulse (EffectKind::foilPlate, p, 6.0)), 1.95, 0.2));
+        CHECK (near (rt60 (impulse (EffectKind::foilPlate, p, 6.0)), 1.67, 0.2));
     }
     {
         auto p = defaults (EffectKind::nebula); // Twin, 100 ms, feedback 50 %, density 0: √0.5 per pass → 2.05 s
@@ -153,9 +153,9 @@ TEST (lynxverbs100_decay_times_match_the_references)
         CHECK (near (rt60 (impulse (EffectKind::nebula, p, 14.0)), 4.8, 0.2));
     }
     {
-        auto p = defaults (EffectKind::horizon); // Room, 2 s, echo off: 1.6 s
+        auto p = defaults (EffectKind::horizon); // Room, 2 s, echo off: 1.54 s
         p[0] = 1.0f, p[11] = 0.1875f, p[19] = 0.0f, p[20] = 1.0f, p[22] = 0.0f;
-        CHECK (near (rt60 (impulse (EffectKind::horizon, p, 6.0)), 1.6, 0.2));
+        CHECK (near (rt60 (impulse (EffectKind::horizon, p, 6.0)), 1.54, 0.2));
     }
 }
 
@@ -163,7 +163,7 @@ TEST (lynxverbs100_onsets_levels_and_stereo)
 {
     using namespace verbs100;
     auto p = defaults (EffectKind::epochVerb);
-    p[1] = 0.0f, p[2] = (float) lynx::verbs::skewInverse (2.0, 0.2, 70.0, 3.3596), p[13] = 1.0f, p[15] = 1.0f;
+    p[1] = 0.0f, p[2] = (float) lynx::verbs::skewInverse (2.0, 0.2, 70.0, 3.3596), p[5] = 0.5f, p[7] = 1.0f, p[13] = 1.0f, p[15] = 1.0f;
     const auto hall = impulse (EffectKind::epochVerb, p, 4.0);
     // Concert Hall starts 5.5 ms after the impulse with an energy of −3.1 dB in its first 100 ms (unit impulse)
     CHECK (std::abs ((double) onset (hall) / 48.0 - 5.5) < 1.0);

@@ -23,10 +23,12 @@
 //   latency                           print the reported latency in samples
 //   savestate <file> / loadstate <file>
 //   pump <ms>                         deliver the plugin's pending Win32 messages for a while
+//   editor <out.png> [ms]             open the plugin's own editor in a window, wait, save a picture of it (UI study)
 //   echo <text>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_events/juce_events.h>
+#include <juce_gui_basics/juce_gui_basics.h>
 #include <cstdio>
 #include <cstdlib>
 #include <windows.h>
@@ -258,6 +260,56 @@ struct Host
         return lo < 0 ? p->getValueForText (text) : (float) (lo + hi) / (2.0f * n);
     }
 
+    // the plugin's editor in a plain window; the picture is taken from the window itself (PrintWindow)
+    void editorShot (const juce::File& out, int ms)
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> ed (plugin->createEditorIfNeeded());
+        if (ed == nullptr) { log ("error: no editor"); return; }
+        juce::DocumentWindow win ("fxmeasure", juce::Colours::black, 0, true);
+        win.setUsingNativeTitleBar (true);
+        win.setContentNonOwned (ed.get(), true);
+        win.setTopLeftPosition (40, 40);
+        win.setVisible (true);
+        win.toFront (true);
+        pump (ms);
+        auto hwnd = (HWND) win.getWindowHandle();
+        RECT rc {};
+        GetClientRect (hwnd, &rc);
+        const int w = rc.right - rc.left, h = rc.bottom - rc.top;
+        HDC screen = GetDC (nullptr);
+        HDC mem = CreateCompatibleDC (screen);
+        BITMAPINFO bi {};
+        bi.bmiHeader.biSize = sizeof (bi.bmiHeader);
+        bi.bmiHeader.biWidth = w;
+        bi.bmiHeader.biHeight = -h;
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        void* bits = nullptr;
+        HBITMAP bmp = CreateDIBSection (screen, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        auto old = SelectObject (mem, bmp);
+        PrintWindow (hwnd, mem, 3); // PW_CLIENTONLY | PW_RENDERFULLCONTENT
+        juce::Image img (juce::Image::RGB, w, h, true);
+        {
+            juce::Image::BitmapData d (img, juce::Image::BitmapData::writeOnly);
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                {
+                    const auto* px = (const juce::uint8*) bits + (y * w + x) * 4;
+                    d.setPixelColour (x, y, juce::Colour (px[2], px[1], px[0]));
+                }
+        }
+        SelectObject (mem, old);
+        DeleteObject (bmp);
+        DeleteDC (mem);
+        ReleaseDC (nullptr, screen);
+        out.deleteFile();
+        juce::FileOutputStream os (out);
+        juce::PNGImageFormat png;
+        png.writeImageToStream (img, os);
+        log ("editor " + juce::String (w) + "x" + juce::String (h) + " -> " + out.getFileName());
+        win.clearContentComponent();
+    }
+
     void setParam (juce::AudioProcessorParameter* p, float v)
     {
         p->setValue (v);
@@ -334,6 +386,8 @@ struct Host
                 juce::File (a[1]).replaceWithData (m.getData(), m.getSize());
                 log ("savestate " + juce::String ((int) m.getSize()) + " bytes");
             }
+            else if (cmd == "editor")
+                editorShot (juce::File (a[1]), a.size() > 2 ? a[2].getIntValue() : 1500);
             else if (cmd == "loadstate")
             {
                 juce::MemoryBlock m;
