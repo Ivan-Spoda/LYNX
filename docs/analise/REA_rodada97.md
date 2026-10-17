@@ -132,8 +132,50 @@ The uninstaller unregisters it first when `HKLM\SOFTWARE\ASIO\LYNX ASIO` exists 
 
 ## 5. Measurements
 
-(in progress)
+[MEASURED] User's PC, USB Audio CODEC, `--rtstress` of the girlfriend's project (`gf92\full.flp`), 15 s each
+(`tmp/r97/rt/rt.sh`, reports in `tmp/r97/rt/`). "Latency" = the output latency the device reports to LYNX.
+
+| Driver (LYNX device type) | Asked | Got | Output latency | Over deadline | Late calls | Result |
+|---|---|---|---|---|---|---|
+| Windows Audio (shared) | 480 | 480 @ 48 kHz | 480 (10.0 ms) | 0 | 0 | OK |
+| Windows Audio (Low Latency Mode) | 480 | 480 @ 48 kHz (engine period is fixed) | 480 (10.0 ms) | 0 | 0 | OK |
+| Windows Audio (Exclusive Mode) | 64 | open failed | — | — | — | below the 3 ms minimum (the UI never offers it) |
+| Windows Audio (Exclusive Mode) | 128 | JUCE fell back to 480 @ 44.1 kHz | 960 | 0 | 0 | OK |
+| **Windows Audio (Exclusive Mode)** | **144** | **144 @ 44.1 kHz (3.3 ms)** | **288 (6.5 ms)** | 0 | 0 | **OK** |
+| Windows Audio (Exclusive Mode) | 256 | 256 @ 44.1 kHz | 512 (11.6 ms) | 0 | 0 | OK |
+| LYNX ASIO exclusive (`--asiodll`) | 64 / 128 | 144 @ 48 kHz (device minimum) | 288 (6.0 ms) | 0 | 0 | OK |
+| **LYNX ASIO exclusive** | **144** | **144 @ 48 kHz (3.0 ms)** | **288 (6.0 ms)** | 0 | 0 | **OK** |
+| LYNX ASIO exclusive | 256 | 256 @ 48 kHz | 512 (10.7 ms) | 0 | 0 | OK |
+| LYNX ASIO shared, margin "none" | 128 | 128 | 608 (12.7 ms) | 0 | 1498 * | OK by the driver's own count |
+| LYNX ASIO shared, margin "normal" | 128 | 128 | 1088 (22.7 ms) | 0 | 1499 * | OK by the driver's own count |
+| FL Studio ASIO (test host, reference) | 128 / 256 | 44.1 kHz | 2520–2646 (57–60 ms) reported | — | — | — |
+
+\* In shared mode the device wakes the driver once per 10 ms engine period and the driver runs four 128-sample
+host blocks back to back; LYNX's "late device calls" heuristic (gap > 1.9 × block + 2 ms) counts every such burst.
+The driver's own statistics (`LYNX_ASIO_LOG`) for those runs: 3295 device events, **0 late events** (max gap
+11–14 ms), **0 slow bursts** (max 5.9 ms of host work per 10 ms period), 0 input underflows.
+
+LYNX ASIO exclusive, driver statistics over the whole run (including project loading): 2–4 late device events
+(max gap 7.3 ms) and one slow burst (4.9–7 ms) — all outside the 15 s measurement window, i.e. at the start of
+playback; none during the measured playback. [model] probably the first heavy block when the transport starts.
+
+Test host (`asiohost.exe`, sine): LYNX ASIO exclusive 144 → 1333 events in 4 s, 0 late (max gap 3.29 ms);
+shared 128 with margin "none" → 0 late (max gap 10.6 ms); stop/start cycles work (streams are reset on stop).
+
+[model] Conclusions for this PC: the shared modes cannot go below the 10 ms engine period (the class driver pins
+the IAudioClient3 period too); **exclusive mode — JUCE's or LYNX ASIO's — runs the real project at 3 ms buffers
+(≈ 6 ms output latency) without glitches**. LYNX ASIO's shared mode has a lower real latency than FL Studio ASIO
+here (12.7 ms with margin "none", 22.7 ms with "normal", vs. ~57 ms reported by FL Studio ASIO at 44.1 kHz).
 
 ## Where I stopped / next steps
 
-* Part 1 code is in the WIP commit; Windows build + `--rtstress` measurements next.
+* Done: Settings > Audio names/explains the WASAPI modes (pt-BR), hides useless shared sizes; `--rtstress --type
+  --device` restores the user's device; LYNX ASIO driver (shared + exclusive, panel, ini, log); `--asiodll` test
+  mode; installer / zip / release workflow carry the driver and the register/unregister helpers.
+* Not done / ideas:
+  - exclusive *capture* (input is always a shared stream, so input latency stays ≈ one capture period + block);
+  - LYNX could list `lynx-asio.dll` next to `LYNX.exe` without registration (the `--asiodll` device type already
+    works); kept hidden until the user has tried the driver in other hosts;
+  - the "late device calls" heuristic should know when a driver delivers blocks in bursts (shared-mode ASIO);
+  - a resampler inside LYNX ASIO (shared mode at other rates uses Windows' converter; exclusive offers only the
+    device's own rates); 32-bit build of the driver for 32-bit hosts.
