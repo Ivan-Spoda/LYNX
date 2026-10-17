@@ -1,4 +1,5 @@
 #include "core/Effects.h"
+#include "core/MixSuite.h"
 
 #include "core/Effector.h"
 #include "core/PitcherDsp.h"
@@ -2453,6 +2454,11 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::distructor: return distructorInfo;
         case EffectKind::newtone: return newtoneInfo;
         case EffectKind::newtime: return newtimeInfo;
+        case EffectKind::ridgeStrip: return mixsuite::ridgeInfo();
+        case EffectKind::glowLeveler: return mixsuite::glowInfo();
+        case EffectKind::hushDeEsser: return mixsuite::hushInfo();
+        case EffectKind::aether: return mixsuite::aetherInfo();
+        case EffectKind::ember: return mixsuite::emberInfo();
     }
     return eq;
 }
@@ -2815,6 +2821,13 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::newtime:
             return newtonefx::paramText (param, v);
 
+        case EffectKind::ridgeStrip:
+        case EffectKind::glowLeveler:
+        case EffectKind::hushDeEsser:
+        case EffectKind::aether:
+        case EffectKind::ember:
+            return mixsuite::paramText (kind, param, v);
+
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
 
@@ -2976,6 +2989,11 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::fruityFlanger: return flangerfx::make();
         case EffectKind::newtone:
         case EffectKind::newtime: return newtonefx::make (nullptr); // without its sample: a pass-through
+        case EffectKind::ridgeStrip:
+        case EffectKind::glowLeveler:
+        case EffectKind::hushDeEsser:
+        case EffectKind::aether:
+        case EffectKind::ember: return mixsuite::make (kind); // LYNX's own mixing suite (REA_rodada96)
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();

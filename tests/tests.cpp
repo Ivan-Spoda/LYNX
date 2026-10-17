@@ -23,6 +23,7 @@
 #include "core/Dither.h"
 #include "core/DrumSynthLive.h"
 #include "core/Effects.h"
+#include "core/MixSuite.h"
 #include "core/Effector.h"
 #include "core/FruityDelayBank.h"
 #include "core/FruityMultiband.h"
@@ -15046,3 +15047,4 @@ TEST (level_audit_demo_imports_round89)
     }
 }
 #include "DialogsTests84.inc"
+#include "MixSuiteTests96.inc"

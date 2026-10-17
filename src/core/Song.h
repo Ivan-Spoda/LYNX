@@ -357,7 +357,12 @@ enum class EffectKind : std::uint8_t
     multibandDelay, // FL's Multiband Delay, exact (REA_rodada71, core/MultibandDelayFx.h): FL's state in EffectSlot::state, 12 globals (raw − min) / range
     lovePhilter,   // FL's Fruity Love Philter, exact (REA_rodada66, core/LovePhilter.h): FL's state in EffectSlot::state, 48 controls
     newtone,      // FL's Newtone (REA_rodada73, core/NewtoneFx.h): pass-through; in slave mode adds its source sample at the song time
-    newtime       // FL's Newtime (REA_rodada73, core/NewtoneFx.h): the same contract (its time warping is not reproduced)
+    newtime,      // FL's Newtime (REA_rodada73, core/NewtoneFx.h): the same contract (its time warping is not reproduced)
+    ridgeStrip,   // LYNX's channel strip (REA_rodada96, core/MixSuite.h): filters, 4-band EQ, compressor, gate / expander
+    glowLeveler,  // LYNX's optical leveler (REA_rodada96, core/MixSuite.h)
+    hushDeEsser,  // LYNX's de-esser (REA_rodada96, core/MixSuite.h)
+    aether,       // LYNX's air band + exciter (REA_rodada96, core/MixSuite.h)
+    ember         // LYNX's saturator (REA_rodada96, core/MixSuite.h)
 };
 
 constexpr int maxEffectParams = 64; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches)
