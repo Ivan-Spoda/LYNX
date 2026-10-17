@@ -1362,6 +1362,14 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
     if (e.x < headerWidth && e.y >= headerHeight && e.y < gridArea().getBottom())
     {
         const auto track = yToTrack (e.y);
+
+        if (noteedit::isFoldedAway (engine.getSong(), track)) // a thin row of a folded group: only its menu
+        {
+            if (e.mods.isPopupMenu())
+                showTrackMenu (track);
+            return;
+        }
+
         const auto onLed = trackLed (track).expanded (3).contains (e.getPosition());
         const auto onArrow = trackArrow (track).contains (e.getPosition());
 
@@ -3301,8 +3309,9 @@ PlaylistComponent::Hover PlaylistComponent::hoverAt (juce::Point<int> p) const
         h.header = true;
         h.track = yToTrack (p.y);
         h.divider = dividerAt (p);
-        h.led = h.divider < 0 && trackLed (h.track).expanded (3).contains (p);
-        h.arrow = h.divider < 0 && trackArrow (h.track).contains (p);
+        const auto folded = noteedit::isFoldedAway (engine.getSong(), h.track);
+        h.led = ! folded && h.divider < 0 && trackLed (h.track).expanded (3).contains (p);
+        h.arrow = ! folded && h.divider < 0 && trackArrow (h.track).contains (p);
         return h;
     }
 

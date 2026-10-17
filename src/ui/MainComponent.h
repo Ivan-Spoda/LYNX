@@ -90,6 +90,7 @@ public:
     MixerComponent& getMixerForSnapshot() { return mixer; }
     std::unique_ptr<juce::Component> makeQuickAddForSnapshot();
     PlaylistComponent& getPlaylistForSnapshot() { return playlist; }
+    PatternPicker& getPickerForSnapshot() { return picker; }
     void selectMixerTrackForSnapshot (int track, int slot = -1)
     {
         mixer.selectTrack (track);
