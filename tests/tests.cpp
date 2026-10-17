@@ -1021,7 +1021,7 @@ TEST (flp_real_files)
     }
 
     int files = 0, withNotes = 0, withPlaylist = 0, automations = 0, automationsWithTarget = 0, sends = 0;
-    int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, wrappedVst2 = 0, wrappedVst2State = 0, markers = 0, signatures = 0, trackEqs = 0;
+    int threeOsc = 0, threeOscDecoded = 0, wrapped = 0, wrappedParsed = 0, wrappedVst2 = 0, wrappedVst2State = 0, wrappedVst2Old = 0, markers = 0, signatures = 0, trackEqs = 0;
     int harmless = 0, harmlessDecoded = 0, harmlessParsed = 0, harmlessKind = 0, sytrus = 0, sytrusDecoded = 0, sytrusEngine = 0, sytrusRendered = 0,
         sytrusSounding = 0;
     int harmor = 0, harmorUsable = 0, harmorKind = 0, harmorSounding = 0;
@@ -1407,11 +1407,16 @@ TEST (flp_real_files)
                 wrappedParsed += lynx::parseFlWrapper (state, f) && f.format != lynx::ForeignPlugin::Format::none && ! f.name.empty();
                 if (f.format == lynx::ForeignPlugin::Format::vst2)
                 {
-                    // VST2 state (REA_rodada89 §2): every one decodes and writes back to the same bytes
-                    ++wrappedVst2;
+                    // VST2 state (REA_rodada89 §2): every current-layout (−9) one decodes and writes back to the same
+                    // bytes; FL 11 files (their mixer slots are read since round 80) carry older layouts
                     lynx::FlVst2State st;
-                    if (lynx::parseFlVst2State (f.state, st) && st.version == -9 && lynx::writeFlVst2State (st) == f.state)
-                        ++wrappedVst2State;
+                    const auto parsed = lynx::parseFlVst2State (f.state, st);
+                    wrappedVst2Old += ! parsed || st.version != -9;
+                    if (parsed && st.version == -9)
+                    {
+                        ++wrappedVst2;
+                        wrappedVst2State += lynx::writeFlVst2State (st) == f.state;
+                    }
                 }
             };
             for (const auto& c : p.channels)
@@ -2133,8 +2138,9 @@ TEST (flp_real_files)
     std::printf ("  %d FL effect presets, %d read\n", fxPresets, fxDecoded);
     CHECK (fxDecoded == fxPresets);
     CHECK (wrappedParsed == wrapped);
-    CHECK (wrappedVst2State == wrappedVst2);
-    std::printf ("  %d plugins in Fruity Wrapper, %d read; %d VST2 states, %d decoded\n", wrapped, wrappedParsed, wrappedVst2, wrappedVst2State);
+    CHECK (wrappedVst2State == wrappedVst2 && wrappedVst2 >= 23);
+    std::printf ("  %d plugins in Fruity Wrapper, %d read; %d VST2 states (-9), %d decoded; %d VST2 states of older layouts\n", wrapped,
+                 wrappedParsed, wrappedVst2, wrappedVst2State, wrappedVst2Old);
     std::printf ("  %d markers, %d time signature changes, %d tracks with EQ\n", markers, signatures, trackEqs);
     std::printf ("  %d parametric EQs (%d with FL settings), %d reverbs (%d without dry)\n", peqSlots, peqShaped, reverbs, reverbsDryless);
     std::printf ("  DirectWave: %d channels, %d zones; FPC: %d projects, %d pad channels, %d pad notes\n", dwChannels, dwZones, fpcKits,
