@@ -111,8 +111,10 @@ public:
 
     static constexpr int headerWidth = 96;
     static constexpr int toolbarHeight = 28;
+    static constexpr int overviewHeight = 16; // the overview strip under the toolbar (round 90)
     static constexpr int timelineHeight = 24;
-    static constexpr int headerHeight = toolbarHeight + timelineHeight;
+    static constexpr int rulerTop = toolbarHeight + overviewHeight;
+    static constexpr int headerHeight = rulerTop + timelineHeight;
     static constexpr int trackHeight = 38; // the default row height (each track can be resized: P18)
     static constexpr int scrollBarSize = 12;
 
@@ -191,7 +193,10 @@ private:
     void showTrackMenu (int track);
 
     AudioEngine& engine;
-    juce::ScrollBar hBar { false }, vBar { true };
+    juce::ScrollBar hBar { false }, vBar { true }; // hBar is hidden: the overview strip scrolls sideways
+    OverviewBar overview;
+    void paintOverview (juce::Graphics& g, juce::Rectangle<float> area, double total);
+    std::size_t overviewSignature = 0; // the clips drawn in the overview (repaints it when they change)
     juce::ComboBox arrangementBox;
     SnapBox snapBox { true }; // "Main" (the toolbar snap) or this editor's own grid
     ToolStrip tools { true };

@@ -279,7 +279,7 @@ class AudioPage final : public ScrollingPage,
 public:
     AudioPage (AudioEngine& e) : engine (e), devices (e.getDeviceManager())
     {
-        for (auto* c : std::initializer_list<juce::Component*> { &deviceTitle, &statusTitle, &recordTitle, &driverLabel, &driverBox, &outputLabel,
+        for (auto* c : std::initializer_list<juce::Component*> { &deviceTitle, &statusTitle, &recordTitle, &driverLabel, &driverBox, &driverNote, &outputLabel,
                                                                  &outputBox, &inputLabel, &inputBox, &rateLabel, &rateBox, &bufferLabel, &bufferBox,
                                                                  &bufferNote, &panelButton, &testButton, &status, &load, &recordInput, &recordNote, &inputChannels })
             add (*c);
@@ -289,6 +289,7 @@ public:
         styleLabel (inputLabel, tr ("Input device"));
         styleLabel (rateLabel, tr ("Sample rate"));
         styleLabel (bufferLabel, tr ("Buffer size"));
+        styleNote (driverNote, {});
         styleNote (bufferNote, tr ("Smaller buffers answer faster when you play; larger ones give the CPU more room (fewer clicks)."));
         for (auto* l : { &status, &load })
         {
@@ -366,7 +367,8 @@ private:
     {
         Rows r (width);
         r.section (deviceTitle, true);
-        driverBox.setBounds (r.row (driverLabel, 260));
+        driverBox.setBounds (r.row (driverLabel, 320));
+        driverNote.setBounds (r.indented (46).translated (0, -6));
         outputBox.setBounds (r.row (outputLabel, 0));
         inputBox.setBounds (r.row (inputLabel, 0));
         rateBox.setBounds (r.row (rateLabel, 160));
@@ -409,7 +411,7 @@ private:
         auto& types = devices.getAvailableDeviceTypes();
         for (int i = 0; i < types.size(); ++i)
         {
-            driverBox.addItem (types[i]->getTypeName(), i + 1);
+            driverBox.addItem (driverDisplayName (types[i]->getTypeName()), i + 1);
             if (types[i] == type)
                 driverBox.setSelectedId (i + 1, juce::dontSendNotification);
         }
@@ -457,12 +459,17 @@ private:
                 rateBox.addItem (juce::String ((int) r) + " Hz", (int) r);
             rateBox.setSelectedId ((int) rate, juce::dontSendNotification);
 
+            const auto kind = prefs::driverKind (device->getTypeName().toStdString());
+            std::vector<int> offered;
             for (auto b : device->getAvailableBufferSizes())
+                offered.push_back (b);
+            for (auto b : prefs::usableBufferSizes (kind, offered, device->getDefaultBufferSize()))
                 bufferBox.addItem (tr ("{0} samples ({1} ms)", { juce::String (b), juce::String (prefs::bufferLatencyMs (b, rate), 1) }), b);
             bufferBox.setSelectedId (device->getCurrentBufferSizeSamples(), juce::dontSendNotification);
         }
         for (auto* b : { &outputBox, &inputBox, &rateBox, &bufferBox })
             b->setEnabled (b->getNumItems() > 0);
+        driverNote.setText (driverExplanation (type != nullptr ? type->getTypeName() : juce::String(), device), juce::dontSendNotification);
         panelButton.setEnabled (device != nullptr && device->hasControlPanel());
         testButton.setEnabled (device != nullptr);
         recordInput.setToggleState (engine.isAudioRecordingArmed(), juce::dontSendNotification);
@@ -508,12 +515,55 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
     void timerCallback() override { updateStatus(); }
 
+    // The driver types with what they mean (JUCE's type names stay the identity in the saved setup).
+    static juce::String driverDisplayName (const juce::String& typeName)
+    {
+        switch (prefs::driverKind (typeName.toStdString()))
+        {
+            case prefs::DriverKind::wasapiShared:     return tr ("Windows Audio (shared)");
+            case prefs::DriverKind::wasapiLowLatency: return tr ("Windows Audio (shared, low-latency period)");
+            case prefs::DriverKind::wasapiExclusive:  return tr ("Windows Audio (exclusive, lowest latency)");
+            case prefs::DriverKind::directSound:      return tr ("DirectSound (legacy)");
+            case prefs::DriverKind::asio:             return "ASIO";
+            case prefs::DriverKind::other:            break;
+        }
+        return typeName;
+    }
+
+    // What the selected driver type does, and for shared mode the period this device mixes at (REA round 97).
+    static juce::String driverExplanation (const juce::String& typeName, juce::AudioIODevice* device)
+    {
+        const auto rate = device != nullptr && device->getCurrentSampleRate() > 0 ? device->getCurrentSampleRate() : 48000.0;
+        const auto period = device != nullptr ? device->getDefaultBufferSize() : 0;
+        switch (prefs::driverKind (typeName.toStdString()))
+        {
+            case prefs::DriverKind::wasapiShared:
+                return tr ("Other programs keep their sound. Windows mixes every program in steps of {0} ms on this device, so the buffer cannot go below that. "
+                           "For lower latency choose the exclusive mode or an ASIO driver.",
+                           { juce::String (prefs::bufferLatencyMs (period > 0 ? period : 480, rate), 1) });
+            case prefs::DriverKind::wasapiLowLatency:
+                return period > 0 && device != nullptr && device->getAvailableBufferSizes().size() <= 1
+                           ? tr ("This device does not support a shorter period in shared mode (it stays at {0} ms). Use the exclusive mode or an ASIO driver for lower latency.",
+                                 { juce::String (prefs::bufferLatencyMs (period, rate), 1) })
+                           : tr ("Shared like the normal mode, but asks Windows for a shorter mixing period. Only some drivers support it.");
+            case prefs::DriverKind::wasapiExclusive:
+                return tr ("LYNX uses the device alone: the lowest latency without ASIO, but other programs go silent while LYNX plays.");
+            case prefs::DriverKind::directSound:
+                return tr ("Old Windows audio path with high latency. Use it only when the others fail.");
+            case prefs::DriverKind::asio:
+                return tr ("Low-latency drivers. LYNX ASIO, FL Studio ASIO and ASIO4ALL work with any device; a manufacturer's ASIO driver works with its own device.");
+            case prefs::DriverKind::other:
+                break;
+        }
+        return {};
+    }
+
     AudioEngine& engine;
     juce::AudioDeviceManager& devices;
     bool updating = false;
     juce::String error;
     SectionTitle deviceTitle { tr ("Audio device") }, statusTitle { tr ("Status") }, recordTitle { tr ("Recording") };
-    juce::Label driverLabel, outputLabel, inputLabel, rateLabel, bufferLabel, bufferNote, status, load, recordNote, inputChannels;
+    juce::Label driverLabel, driverNote, outputLabel, inputLabel, rateLabel, bufferLabel, bufferNote, status, load, recordNote, inputChannels;
     juce::ComboBox driverBox, outputBox, inputBox, rateBox, bufferBox;
     juce::TextButton panelButton { tr ("Driver settings...") }, testButton { tr ("Play a test sound") };
     juce::ToggleButton recordInput;

@@ -307,5 +307,74 @@ inline bool noteLabelFits (double widthPixels, int rowHeight)
 {
     return rowHeight >= 9 && widthPixels >= 3.0 * labelHeight (rowHeight);
 }
+
+// --- overview strip (round 90) ------------------------------------------------------------------
+// The strip above the Piano Roll's and the Playlist's ruler shows the whole content in miniature with
+// the visible window outlined (FL Studio's preview scroll bar, interpreted). Positions are in content
+// units (ticks); `width` is the strip's width in pixels.
+enum class OverviewGrab { none, move, left, right };
+
+struct OverviewWindow
+{
+    double start = 0.0, length = 1.0;
+};
+
+// What a press at `x` grabs: an edge of the window (zooms), the window (scrolls) or nothing (jumps).
+inline OverviewGrab overviewGrabAt (double x, double width, double total, OverviewWindow w, double edgePixels = 5.0)
+{
+    if (total <= 0.0 || width <= 0.0)
+        return OverviewGrab::none;
+
+    const auto x0 = w.start / total * width, x1 = (w.start + w.length) / total * width;
+    // a narrow window keeps a middle zone to move it
+    const auto edge = std::min (edgePixels, std::max (1.0, (x1 - x0) / 3.0));
+
+    if (std::abs (x - x0) <= edge)
+        return OverviewGrab::left;
+    if (std::abs (x - x1) <= edge)
+        return OverviewGrab::right;
+    if (x > x0 && x < x1)
+        return OverviewGrab::move;
+    return OverviewGrab::none;
+}
+
+// The window after dragging `grab` by `dx` pixels from `from`; `minLength` keeps the zoom in range.
+// A press outside the window (none) centres it on the press first, then drags like `move`.
+inline OverviewWindow overviewDrag (OverviewGrab grab, OverviewWindow from, double dx, double width, double total,
+                                    double minLength)
+{
+    if (width <= 0.0 || total <= 0.0)
+        return from;
+
+    const auto d = dx / width * total;
+    auto w = from;
+
+    switch (grab)
+    {
+        case OverviewGrab::none:
+        case OverviewGrab::move:
+            w.start = std::clamp (from.start + d, 0.0, std::max (0.0, total - from.length));
+            break;
+        case OverviewGrab::left:
+        {
+            const auto end = from.start + from.length;
+            w.start = std::clamp (from.start + d, 0.0, std::max (0.0, end - minLength));
+            w.length = end - w.start;
+            break;
+        }
+        case OverviewGrab::right:
+            w.length = std::clamp (from.length + d, minLength, std::max (minLength, total - from.start));
+            break;
+    }
+
+    return w;
+}
+
+// The window centred on content position `at` (a click outside the window jumps there).
+inline OverviewWindow overviewCentredOn (double at, OverviewWindow w, double total)
+{
+    w.start = std::clamp (at - w.length / 2.0, 0.0, std::max (0.0, total - w.length));
+    return w;
+}
 } // namespace gesture
 } // namespace lynx

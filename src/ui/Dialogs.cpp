@@ -146,7 +146,7 @@ public:
         : juce::AlertWindow (tr ("Recording"), tr ("What would you like to record?"), juce::MessageBoxIconType::NoIcon)
     {
         int result = recordChoiceAudio;
-        for (auto* b : { &audio, &notes, &everything })
+        for (auto* b : { &audio, &notes, &everything, &editor })
         {
             b->onClick = [this, result] { exitModalState (result); };
             addCustomComponent (b);
@@ -164,7 +164,8 @@ private:
     RecordChoiceButton audio { tr ("Audio, into the Playlist as an audio clip"),
                                tr ("Arms the selected mixer insert; choose its audio input (microphone) if it has none") },
         notes { tr ("Notes, into the current pattern"), tr ("Notes played on a MIDI keyboard or the PC keyboard") },
-        everything { tr ("Everything"), tr ("Notes, and audio from the armed inserts") };
+        everything { tr ("Everything"), tr ("Notes, and audio from the armed inserts") },
+        editor { tr ("Audio, into the audio editor"), tr ("Records the audio input into a new audio editor while the song plays") };
     juce::ToggleButton dontAsk;
 };
 } // namespace
