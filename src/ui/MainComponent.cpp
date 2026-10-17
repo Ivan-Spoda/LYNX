@@ -2647,6 +2647,9 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             else
                 showImportReport();
         });
+        menu.addItem (tr ("Built-in plugins (online list)..."), [] {
+            juce::URL ("https://github.com/Ka1-S/LYNX/blob/main/docs/PLUGINS.md").launchInDefaultBrowser();
+        });
         menu.addItem (tr ("About LYNX"), [] {
             auto* window = makeAboutWindow().release();
             window->enterModalState (true, nullptr, true);
