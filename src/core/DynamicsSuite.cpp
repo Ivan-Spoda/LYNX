@@ -752,7 +752,7 @@ float thresholdValue (double db) noexcept
 double ratioOf (float v) noexcept { return ratioLaw (v); }
 double rangeDb (float v) noexcept { return lin (v, -30.0, 30.0); }
 double kneeDb (float v) noexcept { return lin (v, 0.0, 48.0); }
-double attackMs (float v) noexcept { return 0.3 + 240.0 * std::pow ((double) std::clamp (v, 0.0f, 1.0f), 3.9); }
+double attackMs (float v) noexcept { return 0.11 + 89.0 * std::pow ((double) std::clamp (v, 0.0f, 1.0f), 3.9); }
 double releaseMs (float v) noexcept { return 130.0 + 3500.0 * std::pow ((double) std::clamp (v, 0.0f, 1.0f), 3.0); }
 double levelDb (float v) noexcept { return lin (v, -30.0, 30.0); }
 double crossoverHz (float v) noexcept { return logMap (v, 30.0, 18000.0); }

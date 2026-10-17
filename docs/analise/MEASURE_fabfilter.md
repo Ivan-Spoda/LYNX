@@ -584,8 +584,90 @@ settings; their states are not translated).
   slopes / modes / rates, Pro-C 3 static + timing, Pro-L 2 latency / ceiling / true peak / timing, Saturn 2
   harmonics, Pro-DS, Pro-MB crossovers, Pro-G, Pro-R 2 decay, Timeless 3 echoes (§9), notes for vocal96
   (tmp/r96/NOTES_from_r99.md), Facet EQ and Apex Limiter with tests.
-- Not measured: Pro-Q 4 dynamic EQ and spectral dynamics, Pro-C 3 side-chain EQ / character / oversampling,
-  Pro-L 2 dither and loudness metering, Saturn 2 modulation and multiband interplay, Pro-MB dynamics per band,
-  Pro-R 2 decay-rate EQ, Volcano 3 / Twin 3 / Micro / One / Simplon beyond their parameter tables.
+- Not measured: Pro-Q 4 dynamic EQ and spectral dynamics, Pro-L 2 dither and loudness metering, Saturn 2
+  modulation, Pro-R 2 decay-rate EQ, Volcano 3 / Twin 3 / Micro / One / Simplon beyond their parameter tables.
+  (Round 108 measured Pro-C 3's side-chain EQ / character / oversampling, Pro-MB's per-band dynamics and Saturn 2's
+  crossover sum: §12.)
 - Next: a dedicated Facet EQ editor (curve display, draggable nodes) following UI_STUDY_plugins93; natural-phase mode
   (exact analog phase via a short FIR correction) to close the 10 kHz gap; a compressor module against §2.
+
+## 12. Round 108 additions (script `tools/fxmeasure/py/dyn108_meas.py`; LYNX's dynamics suite: REA_rodada108)
+
+### 12.1 Pro-C 3 side-chain EQ [EXEC]
+Clean style, threshold −30, ratio 4, knee 0, attack 1 ms, release 50 ms; sine stairs at 100 Hz / 1 kHz / 5 kHz, one
+side-chain band at a time. The band filters the **detector only** with the Pro-Q prototypes (§1.2): the onset moves
+by exactly the band's gain at the tone's frequency — bell +12 dB Q 1 at 1 kHz: 1 kHz onset 12 dB lower, 5 kHz
+1.2 dB lower (the bell's +1.18 dB there), 100 Hz unchanged; low cut 1 kHz 12 dB/oct: 1 kHz 3.0 dB higher, 100 Hz
+not compressed up to 0 dBFS (20 dB over), 5 kHz unchanged; high shelf 3 kHz +12: 5 kHz 9 dB lower; band pass
+1 kHz Q 1: 100 Hz and 5 kHz 11–17 dB higher. "Side Chain Level" +6 dB = onset 6 dB lower at every frequency.
+No latency from the side-chain EQ.
+
+### 12.2 Pro-C 3 character [EXEC]
+Ratio 1 (no compression), 1 kHz sine. The drive gain goes in before the curve and comes out after it. Harmonics in
+dB re the fundamental, "level" = sine level + drive (into the curve):
+
+| character | into the curve | fundamental | H2 | H3 | H4 | H5 |
+|---|---|---|---|---|---|---|
+| Tube | ≤ +6 dBFS | 0.00 | < −140 | < −140 | | |
+| Tube | +18 | −1.34 | −17.6 | −22.0 | −30.3 | −53.1 |
+| Diode | −30 | 0.00 | −102 | −89.6 | | |
+| Diode | −18 | 0.01 | −118 | −65.7 | | |
+| Diode | −6 | +0.21 | −87 | −42.3 | −101 | −79.0 |
+| Diode | +6 | +0.57 | −27.7 | −28.5 | −41.9 | −29.3 |
+| Diode | +18 | −9.81 | −35.6 | −10.2 | −36.4 | −16.0 |
+| Bright | −30 | 0.00 | −66.1 | −78.6 | −99.9 | −95.0 |
+| Bright | −18 | −0.02 | −56.3 | −65.2 | −83.9 | −84.3 |
+| Bright | −6 | −0.12 | −50.1 | −48.6 | −66.2 | −71.1 |
+| Bright | +6 | −0.98 | −34.7 | −29.5 | −45.0 | −53.3 |
+| Bright | +18 | −4.34 | −26.2 | −25.3 | −26.8 | −28.4 |
+
+Small-signal response (impulse at −60 dBFS): Tube +0.12 / +0.24 / +0.32 dB at 10 / 15 / 20 kHz, −0.05 dB at 50 Hz;
+Diode and Bright flat within 0.004 dB. Pre- and post-compression routing give the same harmonics on a steady tone,
+also with 12 dB of compression.
+
+### 12.3 Pro-C 3 oversampling [EXEC]
+Latency 0 / 34 / 40 / 44 / 46 / 48 samples for Off / 2x / 4x / 8x / 16x / 32x at 48 kHz (no look-ahead). Pass band
+the same for every factor: 0.00 dB to 20 kHz, −1.12 at 22 kHz, −3.80 at 23 kHz. A 15 kHz sine at −6 dBFS through a
+fast compressor (attack 0.005 ms, release 10 ms, ratio 8, threshold −30): strongest spurious component −64.6 dB (off),
+−68.9 (2x), −101.6 (4x), −105.4 (8x), −106.2 (16x), −126.8 (32x).
+
+### 12.4 Pro-MB per-band dynamics [EXEC]
+Dynamic Phase, one band 300 Hz – 3 kHz at 24 dB/oct, threshold −30, ratio 4, knee 0, attack / release 20 %, gain of a
+1 kHz stair (dB) at −34 / −28 / −22 / −16 / −10 / −4 dBFS:
+
+| setting | −34 | −28 | −22 | −16 | −10 | −4 |
+|---|---|---|---|---|---|---|
+| compression, range −30 | 0.00 | −1.34 | −5.70 | −9.98 | −14.11 | −18.03 |
+| knee 24 | −0.94 | −2.92 | −5.96 | −9.98 | −14.11 | −17.93 |
+| knee 48 | −1.43 | −3.45 | −6.32 | −10.00 | −14.11 | −17.76 |
+| ratio 2 | 0.00 | −0.89 | −3.81 | −6.71 | −9.55 | −12.34 |
+| ratio 100 | 0.00 | −1.78 | −7.58 | −13.17 | −18.41 | −23.04 |
+| range −12 | 0.00 | −1.34 | −5.70 | −9.23 | −11.12 | −11.50 |
+| expansion, range −30 | −10.05 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| expansion, range +12 | 0.00 | +1.34 | +5.78 | +9.46 | +11.46 | +11.87 |
+
+Expansion range −30 bottoms out at −25.9 dB (−46 dBFS and below); ratio 2 expansion: −3.4 / −8.2 / −12.9 / −17.3 /
+−21.4 dB at −34 / −40 / −46 / −52 / −58 dBFS. A 100 Hz stair is untouched. Compression with a **positive** range is
+upward compression below the threshold, with a slope that grows with the range: gain ≈ range·(R − 1)·(threshold −
+level)/36 dB capped at the range (ratios 1.5 / 2 / 4 / 8 / 100, ranges +12 / +24; one threshold, so whether 36 is a
+constant is not confirmed). Attack % (50 % of the reduction after a −50 → −10 dBFS step): 0.58 ms (0 %), 0.60 (10 %),
+0.83 (20 %), 11.3 (50 %), 168 ms (100 %). Release % (after a −10 → −28 dBFS step, from −14.1 to −1.3 dB): half the
+recovery after ≈ 90 ms (0 %), ≈ 120 (20 %), ≈ 330 (50 %), far beyond 900 ms (100 %). Larger level drops make the
+band filters ring through the gain-envelope measurement (the first ~5 ms are not meaningful). Look-ahead 5 / 20 ms
+moves the attack 0.4 ms earlier; latency stays 960.
+
+### 12.5 Saturn 2 crossovers [EXEC]
+1 to 3 bands, crossovers 200 Hz / 2 kHz, every band Subtle Transformer at drive 0 (−0.98 dB, clean): the magnitude is
+the same as one band within 0.05 dB at every slope; the phase at 30 Hz … 10 kHz is that of Linkwitz-Riley
+crossovers: 12 dB/oct −180° per crossover above it, 24 dB/oct −360°, 48 dB/oct −720°; 6 dB/oct shows no phase shift
+(a complementary split).
+
+### 12.6 State layouts [EXEC]
+Each parameter set through the API to 11 values, the state saved after each (JUCE wraps the VST3 component state as
+base64 in `<IComponent>`): the component state is "FFBS", version 1, count (Pro-C 3: 100, Saturn 2: 951) or "FabF",
+version 2, name length, preset name, one zero word, count (Pro-MB: 151, Pro-G: 34), then one float per VST3
+parameter in the order of the parameter list. Units: dB for thresholds, knees, ranges, drives and most gains;
+milliseconds for look-ahead; log2(Hz) for frequencies; indices for enumerations; percent for Pro-MB attack / release
+and Saturn's mixes; the normalized value for ratios, attack, release, hold, Q and Pro-G's times; output / wet / dry /
+band levels in a −1 … 1 encoding (0 = 0 dB, +1 = +36 dB, 36 dB per unit above −0.6, a square law below to −∞ at −1).
+The layouts and the tables used to translate them are in REA_rodada108 §5 and src/core/FabFilterStates.cpp.

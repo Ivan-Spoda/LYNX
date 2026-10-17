@@ -97,8 +97,8 @@ float thresholdValue (double db) noexcept;
 double ratioOf (float v) noexcept;       // 1 .. 100 : 1 (same law as Crest)
 double rangeDb (float v) noexcept;       // −30 .. +30 dB (negative = downward, positive = upward)
 double kneeDb (float v) noexcept;        // 0 .. 48 dB
-double attackMs (float v) noexcept;      // 0.3 .. 240 ms (shown as 0 .. 100 %)
-double releaseMs (float v) noexcept;     // 130 .. 3600 ms (shown as 0 .. 100 %)
+double attackMs (float v) noexcept;      // detector τ 0.11 .. 89 ms (shown as 0 .. 100 %)
+double releaseMs (float v) noexcept;     // detector τ 130 .. 3630 ms (shown as 0 .. 100 %)
 double levelDb (float v) noexcept;       // −30 .. +30 dB
 double crossoverHz (float v) noexcept;   // 30 Hz .. 18 kHz (log)
 float crossoverValue (double hz) noexcept;

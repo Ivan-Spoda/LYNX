@@ -69,12 +69,16 @@ preset = Dry=0; Wet=0.8                 # LYNX parameter (by name) = normalised 
 mix = 0.25                              # the substitute's slot dry/wet
 vst2params = 12                         # VST2 parameters per program (to read "all programs" states)
 map = xml:Mix -> mix                    # translation: source -> target [| inLo inHi outLo outHi]
+translate = pro-c3                      # a built-in state translator (round 108): pro-c3, pro-mb, pro-g, saturn2
 ```
 
 Map sources: `vst2:<n>` (float parameter n of the current program in FL's VST2 state), `xml:<attribute>` (an
 attribute of the first element of a JUCE XML state, found after `VC2!` or `<?xml`), `waves:<n>` (value n of the
 active setup's "RealWorld" list in a Waves preset chunk). Targets: `mix` (the slot's dry/wet) or a parameter name of
 the LYNX effect; the optional range maps the source linearly (clamped) onto the normalised parameter.
+`translate` names a built-in translator (src/core/FabFilterStates.cpp) for states whose layout was learned from our own
+black-box observation (round 108: the FabFilter component states, "FFBS" / "FabF" + one float per VST3 parameter);
+it runs after the maps and only when the state's header and parameter count match the observed layout.
 
 Matching order: VST2 ID, VST3 class ID, CLAP id, Waves sub-plugin name, then names (a WaveShell's own name never
 matches by name).
@@ -99,14 +103,17 @@ matches by name).
 | Waves SuperTap, Soundtoys EchoBoy / PrimalTap, ValhallaDelay / FreqEcho, FabFilter Timeless | Fruity Delay 3 | VST2 ID [DATA] (EchoBoy), names | — |
 | Waves L1/L2/L3/L4 | Limiter | Waves name | — |
 | FabFilter Pro-L | Apex Limiter (round 99) | names | — |
-| Waves RComp, CLA-76, CLA-3A, C1, SSLComp, API-2500, FabFilter Pro-C | Compressor | VST3 class ID [DATA], Waves names, names | — |
+| Waves RComp, CLA-76, CLA-3A, C1, SSLComp, API-2500 | Compressor | VST3 class ID [DATA], Waves names | — |
+| FabFilter Pro-C (2 / 3) | Crest Compressor (round 108) | names | Pro-C 3: style, threshold, ratio, knee, range, attack, release, hold, look-ahead, character, side-chain EQ (3 bands), levels, mix, oversampling [EXEC layout] |
+| FabFilter Pro-MB | Prism Multiband (round 108) | names | enabled bands laid out on Prism's four, threshold, ratio, range, mode, knee, attack / release, level, solo, look-ahead, mix [EXEC layout] |
+| FabFilter Pro-G | Sentry Gate (round 108) | names | every control [EXEC layout] |
 | Waves CLA-2A | Glow Leveler (peak reduction 45 %, gain +3 dB; round 96) | VST3 class ID [DATA], Waves name | — |
 | Waves SSL E-Channel, SSL Native Channel Strip / 4K E / 4K B / Vocalstrip | Ridge Strip (neutral; round 96) | VST3 class ID [DATA], Waves name, names | — |
 | Waves Q10, REQ, SSLEQ | Parametric EQ (flat) | Waves names | — |
 | FabFilter Pro-Q | Facet EQ (flat, round 99) | names | — |
 | Waves DeEsser, FabFilter Pro-DS, Harrison De-Esser | Hush De-esser (default; round 96) | Waves name, names | — |
 | Slate Digital Fresh Air | Aether (neutral; round 96) | name | — |
-| Soundtoys Decapitator, FabFilter Saturn | Ember Saturator (drive +5.4 dB, auto gain; round 96) | names | — |
+| Soundtoys Decapitator, FabFilter Saturn | Ember Saturator (drive +5.4 dB, auto gain; round 96) | names | Saturn 2: multiband mode — bands, crossovers, style family, drive, mix, level (round 108) [EXEC layout] |
 | Soundtoys PanMan | Auto-pan | VST2 ID [DATA], name | — |
 
 | Antares Auto-Tune (Pro / Artist / Access / EFX+ / Hybrid), Waves Tune Real-Time | LYNX Tune (defaults: C major, 20 ms retune) | VST3 class ID [DATA] (Auto-Tune Pro), names, Waves name | — |

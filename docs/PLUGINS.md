@@ -183,11 +183,34 @@ oversample where they are nonlinear and never allocate on the audio thread.
 | Glow Leveler | optical levelers such as the Teletronix LA-2A (Waves CLA-2A, UA LA-2A) | feedback leveler with an electro-optical cell model: ~10 ms attack, two-stage release that lengthens after long or heavy leveling; peak reduction, gain, compress / limit, sidechain emphasis, mix |
 | Hush De-esser | de-essers (Waves DeEsser, FabFilter Pro-DS) | split-band (complementary crossover) or wideband reduction, high-pass or band detector, frequency, threshold, range, release, listen, 2 ms lookahead |
 | Aether | "air" EQs and high-frequency exciters (Slate Digital Fresh Air, Maag EQ4 air band) | broad high shelf up to +15 dB (5–20 kHz) plus a 4x-oversampled harmonic exciter on the band above its frequency, even ↔ odd character, mix |
-| Ember Saturator | analog saturators (Soundtoys Decapitator, FabFilter Saturn) | tube (asymmetric, even harmonics), tape (pre/de-emphasis, odd), transistor and fuzz curves; drive, tone tilt, low / high cut, auto gain, mix, 2x / 4x / 8x oversampling with a constant latency |
+| Ember Saturator | analog saturators (Soundtoys Decapitator, FabFilter Saturn) | tube (asymmetric, even harmonics), tape (pre/de-emphasis, odd), transistor and fuzz curves; drive, tone tilt, low / high cut, auto gain, mix, 2x / 4x / 8x oversampling with a constant latency; since round 108 a multiband mode: up to four Linkwitz-Riley bands (12 / 24 / 48 dB/oct, summing flat) with their own style, drive, mix and level |
 
 Product names in the table are trademarks of their owners (Solid State Logic, Waves Audio, Universal Audio,
 FabFilter, Slate Digital, Maag Audio, Soundtoys and the owners of the Teletronix name); they are used only to say
 which role each LYNX effect plays. LYNX is not affiliated with, endorsed or sponsored by any of them.
+
+## LYNX originals: dynamics
+
+Three dynamics processors of LYNX's own design (REA round 108, [`docs/analise/REA_rodada108.md`](analise/REA_rodada108.md)),
+in the roles of the style compressor, multiband dynamics and gate most mix engineers know. Unlike the mixing suite
+above they were **fitted to measurements**: the official trial versions of the reference plugins were run only as a
+DAW runs them (parameters set through the VST3 API, test tones in, audio out — [`MEASURE_fabfilter.md`](analise/MEASURE_fabfilter.md)),
+never opened, disassembled or decompiled; the curves and timings below are our own models of what we measured, with
+their residuals documented. Own names, own code, own panels (dark / red, live gain-reduction and level graphs). All
+are on every mixer insert (*Insert*), report their latency before the first block and never allocate on the audio thread.
+
+| LYNX engine | In the role of | What it is | Fit to the measurements |
+|---|---|---|---|
+| Crest Compressor | style compressors (FabFilter Pro-C 3) | 11 styles (Clean, Allround, Punch, Upward, Two-way, Vari-mu, Classic, Opto, Vocal, Bus, Pumping), threshold, ratio 1–100:1, knee 0–72 dB, range, attack, release (+ auto), hold, look-ahead with a maximum-look-ahead latency switch, 3-band side-chain EQ (Facet EQ shapes), side-chain level / external input / listen, stereo link, character (warm / crisp / bright, pre or post, drive), 2x–8x oversampling of the whole gain path, auto gain, mix, input / output | static curves within 1 dB of 84 measured points; 50 % attack / release within ~15 %; character harmonics within ~3 dB |
+| Prism Multiband | multiband dynamics (FabFilter Pro-MB) | four bands (three crossovers, 12 / 24 / 48 dB/oct), each compress / expand, downward or upward by the sign of its range, threshold, ratio, knee, attack / release %, level, solo, on; look-ahead, mix, input / output; **transparent at rest** (a band without gain change leaves the signal untouched) | band compression within ~2 dB of the measured curve; expansion, upward expansion and timings in the measured ranges |
+| Sentry Gate | gates / expanders (FabFilter Pro-G) | Classic, Clean, Vocal, Guitar and Upward styles, threshold, ratio 1–100:1 (expander to gate), range 0–100 dB, attack, release, hold, knee, look-ahead (10 ms latency when on), side-chain high / low pass, external side chain, listen, dry mix, output | expansion start points per style as measured; closing / opening times within ~35 % |
+
+When a project uses one of these FabFilter plugins and it is not installed, the LYNX engine stands in for it **with
+the plugin's saved settings translated** (Pro-C 3 → Crest, Pro-MB → Prism, Pro-G → Sentry, Saturn 2 → Ember's
+multiband mode): the state layout was learned by saving the trial's state after each parameter change, nothing else.
+The original plugin and its state are kept byte for byte, so the project opens with the real plugin wherever it is
+installed. FabFilter, Pro-C, Pro-MB, Pro-G and Saturn are trademarks of FabFilter Software Instruments; they are named
+only to say which role each LYNX effect plays. LYNX is not affiliated with, endorsed or sponsored by FabFilter.
 
 ## LYNX originals: vocal pitch
 
