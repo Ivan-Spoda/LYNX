@@ -16,6 +16,7 @@ Channel Rack, Piano Roll, Playlist and Mixer in C++20 + JUCE 8, built to run wel
   <a href="https://github.com/Ka1-S/LYNX/releases/latest"><strong>Download</strong></a> ·
   <a href="#features"><strong>Features</strong></a> ·
   <a href="#opens-fl-studio-projects">FL projects</a> ·
+  <a href="docs/PLUGINS.md">Built-in plugins</a> ·
   <a href="#building">Building</a> ·
   <a href="docs/STATUS.md">Status</a> ·
   <a href="docs/ROADMAP.md">Roadmap</a>
@@ -164,6 +165,21 @@ Any knob or fader (channel, mixer, effect, plugin parameter) becomes a clip with
 </tr>
 </table>
 
+## Built-in plugins
+
+LYNX's native engines are clean-room re-implementations of FL Studio's native plugins, each checked against the
+original running unmodified. The full list — every engine, what it is compatible with, its status and what is still
+missing — is in [`docs/PLUGINS.md`](docs/PLUGINS.md).
+
+| | Exact | Near-exact | Close | Approximate | Placeholder |
+|---|---:|---:|---:|---:|---:|
+| **Generators** (3x Osc, DX10, Sytrus, Harmor, FL Keys, DirectWave, …) | 12 | 10 | 7 | 1 | 2 |
+| **Effects** (Parametric EQ 2, Limiter, Reeverb 2, Delay 3, Gross Beat, Love Philter, …) | 34 | 10 | 1 | 8 | 1 |
+
+*Exact* = bit-identical to the original on every installation state tested; *near-exact* = the rest below about
+−100 dB; *close* = same algorithm, within −60 dB. Plugin names are Image-Line's trademarks, used only to describe
+compatibility; LYNX is not affiliated with Image-Line.
+
 ## Opens FL Studio projects
 
 LYNX reads the `.flp` format directly and converts everything that has an equivalent:
@@ -281,6 +297,7 @@ docs/         architecture, status, roadmap and the behavioural analysis of FL S
 | Document | Contents |
 |---|---|
 | [`docs/STATUS.md`](docs/STATUS.md) | what works, what is approximated and what is missing |
+| [`docs/PLUGINS.md`](docs/PLUGINS.md) | the built-in plugins, what each one is compatible with, and its status |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | project phases |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | how the engine and the UI are organised |
 | [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md) | how releases are built and code-signed (SignPath) |

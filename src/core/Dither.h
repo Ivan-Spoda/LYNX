@@ -12,7 +12,7 @@ namespace lynx
 class Dither
 {
 public:
-    explicit Dither (int bits) : scale ((float) (1 << (bits - 1))) {}
+    explicit Dither (int bits, bool noiseShaping = true) : scale ((float) (1 << (bits - 1))), shaping (noiseShaping) {}
 
     void process (float* samples, int n, int channel) noexcept
     {
@@ -21,7 +21,7 @@ public:
 
         for (int i = 0; i < n; ++i)
         {
-            const auto shaped = samples[i] - (2.0f * e1 - e2);
+            const auto shaped = shaping ? samples[i] - (2.0f * e1 - e2) : samples[i];
             const auto tpdf = (random() - random()) / scale; // triangular, ±1 LSB
             auto q = std::round ((shaped + tpdf) * scale) / scale;
             q = q > 1.0f - 1.0f / scale ? 1.0f - 1.0f / scale : (q < -1.0f ? -1.0f : q);
@@ -41,6 +41,7 @@ private:
     }
 
     float scale;
+    bool shaping = true;
     float error1[2] {}, error2[2] {};
     std::uint32_t state = 0x9E3779B9u;
 };

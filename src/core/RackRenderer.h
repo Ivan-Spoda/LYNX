@@ -5,6 +5,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -133,10 +134,28 @@ class WorkerPool;
 
 // Whether a parallel container slot (FL's Patcher) can keep its built effect: same branches, children and links.
 bool sameContainer (const EffectSlot& a, const EffectSlot& b);
+// Time spent in each instrument and effect slot (the Plugin performance monitor, round 84). Counted only while
+// `enabled` is on; nanoseconds of processing and of audio rendered, accumulated (the reader takes differences).
+struct ProcessTimes
+{
+    static constexpr int channels = 1024;
+    std::atomic<bool> enabled { false };
+    std::array<std::atomic<std::uint64_t>, channels> channelNs {};
+    std::array<std::atomic<std::uint64_t>, maxMixerTracks * maxEffectSlots> effectNs {}; // [track * maxEffectSlots + slot]
+    std::atomic<std::uint64_t> audioNs { 0 };  // duration of the audio rendered while enabled
+    std::atomic<std::uint64_t> wallNs { 0 };   // time the whole rack took for it
+
+    static std::uint64_t now() noexcept
+    {
+        return (std::uint64_t) std::chrono::duration_cast<std::chrono::nanoseconds> (std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+};
 
 class RackRenderer
 {
 public:
+    ProcessTimes& processTimes() noexcept { return *times; }
+
     // Extra threads for channels and mixer layers (nullptr = everything on the audio thread).
     void setWorkerPool (WorkerPool* pool) noexcept { workers = pool; }
 
@@ -216,6 +235,7 @@ private:
     WorkerPool* workers = nullptr;
     std::atomic<bool> profiling { false };
     std::unique_ptr<UnitTimes> units = std::make_unique<UnitTimes>();
+    std::unique_ptr<ProcessTimes> times = std::make_unique<ProcessTimes>();
 
     struct SmartDisableState
     {

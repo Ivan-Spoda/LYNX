@@ -5,12 +5,15 @@
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
+#include "core/ExportOptions.h"
 #include "core/Song.h"
 
 namespace lynx
 {
 class AudioEngine;
 
+// The short form used by the command line, the self-test and "Render to audio" (the Export window uses
+// exportopts::Options, core/ExportOptions.h).
 struct ExportSettings
 {
     enum class Format
@@ -26,6 +29,8 @@ struct ExportSettings
     double sampleRate = 44100.0;
     bool wholeSong = true;     // false = current pattern only
     double tailSeconds = 6.0;  // maximum tail; stops earlier when the sound ends
+
+    exportopts::Options toOptions() const;
 };
 
 // File extension (with dot) for the format.
@@ -38,6 +43,7 @@ class ExportJob
 {
 public:
     ExportJob (const Song& song, const ExportSettings& settings, const juce::File& output);
+    ExportJob (const Song& song, const exportopts::Options& options, const juce::File& output);
     ~ExportJob();
 
     // progress(0..1) returns false to cancel. On error or cancellation the file is deleted.
@@ -48,10 +54,16 @@ public:
     AudioEngine& getEngine() noexcept { return *engine; }
 
 private:
+    bool writeBuffered (std::vector<float>& left, std::vector<float>& right, juce::String& error);
+
     std::unique_ptr<AudioEngine> engine;
-    ExportSettings settings;
+    exportopts::Options options;
     juce::File output;
-    double musicSeconds = 0.0;
+    std::string title, artist;
+    double musicSeconds = 0.0, loopSeconds = 0.0;
     float peak = 0.0f;
 };
+
+// Seconds the export of `song` with these options lasts (the music, all loops; no tail).
+double exportMusicSeconds (const Song& song, const exportopts::Options& options);
 } // namespace lynx

@@ -44,6 +44,8 @@ public:
 
     // The renderer (its per-unit CPU profile, REA round 87).
     RackRenderer& getRenderer() noexcept { return renderer; }
+    // Per instrument / effect processing time (Plugin performance monitor).
+    ProcessTimes& processTimes() noexcept { return renderer.processTimes(); }
 
 private:
     std::atomic<bool> metering { true };
