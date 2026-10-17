@@ -211,3 +211,14 @@ TEST (fruity_send_pdc_counts_the_slots_before_it)
     CHECK (plan.sendDelay[1].size() == 2 && plan.sendDelay[1][1] == 0); // [Master, the Fruity Send]
     CHECK (plan.total == 150 && plan.sendDelay[2][0] == 50);
 }
+
+TEST (fruity_send_window_menu_values)
+{
+    using namespace lynx;
+    for (const auto& item : plugui::layoutFor (EffectKind::fruitySend).items)
+        if (item.type == plugui::Item::menu)
+        {
+            CHECK (formatEffectParam (EffectKind::fruitySend, 3, plugui::optionValue (item, 0), 120.0) == "None");
+            CHECK (formatEffectParam (EffectKind::fruitySend, 3, plugui::optionValue (item, 1), 120.0) == "Insert 1");
+        }
+}

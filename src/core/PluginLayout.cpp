@@ -984,7 +984,8 @@ Layout fruitySend()
     to.x = 78, to.y = 17, to.w = 48, to.h = 28;
     to.param = "Send to";
     to.label = TR_NOOP ("Send to");
-    to.options = TR_NOOP ("None"); // the editor lists the song's inserts
+    to.options = "None|Insert 1"; // (not shown: the editor lists the song's inserts by name)
+    to.values = { 0.0f, 1.0f / (float) (maxMixerTracks - 1) };
     v.push_back (to);
     v.push_back (label (70, 52, 64, 14, TR_NOOP ("Send to")));
     v.push_back (knob (158, 30, 46, "Pan", TR_NOOP ("Pan"), 72, bipolar));
