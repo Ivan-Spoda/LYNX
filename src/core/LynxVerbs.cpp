@@ -220,7 +220,7 @@ struct Engine::Impl
     } absorb[lineCount];
     double curLen[lineCount] {}; // glided line lengths (samples)
     double lfo[lineCount] {};
-    Shifter shifter, shifter2;
+    Shifter shifters[4]; // inside lines 0, 2, 4, 6 (shimmer)
     Biquad outLow, outHigh, shelfLow, shelfHigh, band1, band2;
     bool outLowOn = false, outHighOn = false, shelfLowOn = false, shelfHighOn = false, bandOn = false;
 
@@ -281,8 +281,8 @@ struct Engine::Impl
             lines[i].allocate (maxLine + (int) (0.05 * sr));
             loopAp[i].line.allocate ((int) (0.2 * maxLineSec * sr) + 8);
         }
-        shifter.prepare (sr, 0.06);
-        shifter2.prepare (sr, 0.06);
+        for (auto& sh : shifters)
+            sh.prepare (sr, 0.06);
         reset();
     }
 
@@ -305,8 +305,8 @@ struct Engine::Impl
             absorb[i].lo.z = absorb[i].hi.z = absorb[i].bw.z = absorb[i].lc.z = 0.0f;
             lfo[i] = 2.0 * pi * i / lineCount;
         }
-        shifter.clear();
-        shifter2.clear();
+        for (auto& sh : shifters)
+            sh.clear();
         outLow.reset();
         outHigh.reset();
         shelfLow.reset();
@@ -465,7 +465,9 @@ struct Engine::Impl
         const auto crossCos = (float) std::cos (crossAngle), crossSin = (float) std::sin (crossAngle);
         const auto ratio = std::pow (2.0, s.shiftSemis / 12.0), ratio2 = std::pow (2.0, s.shiftSemis2 / 12.0);
         const auto voice2 = (float) std::clamp (s.shift2Mix, 0.0, 1.0);
-        const auto shimmer = (float) std::clamp (s.shiftFeedback, 0.0, 0.98), shiftMix = (float) std::clamp (s.shiftMix, 0.0, 1.0);
+        // shimmer: a part of what four of the lines write back goes through a pitch shifter. (1 − a)² + a² ≤ 1 and
+        // the shifted part is decorrelated, so the loop keeps the decay the absorption filters set: always stable
+        const auto shimmer = (float) (std::clamp (s.shiftFeedback, 0.0, 1.0) * std::clamp (s.shiftMix, 0.0, 1.0));
         const auto width = (float) std::clamp (s.width, -2.0, 2.0), gain = (float) s.gain;
         double target[lineCount];
         for (int i = 0; i < lineCount; ++i)
@@ -531,19 +533,7 @@ struct Engine::Impl
             float lateL = (sOut[0] + sOut[1] + sOut[2] - sOut[3] + sOut[4] + sOut[5] - sOut[6] + sOut[7]) * norm;
             float lateR = (sOut[0] - sOut[1] + sOut[2] + sOut[3] + sOut[4] - sOut[5] + sOut[6] + sOut[7]) * norm;
 
-            // feedback through the shifter
-            float in[2] = { d[0] + send * e[0], d[1] + send * e[1] };
-            if (shimmer > 0.0f)
-            {
-                const auto mono = 0.5f * (lateL + lateR);
-                auto shifted = (float) shifter.process (mono, ratio);
-                if (voice2 > 0.0f)
-                    shifted = (1.0f - 0.5f * voice2) * shifted + voice2 * (float) shifter2.process (mono, ratio2);
-                // soft-limited, so the shifted loop stays bounded whatever the settings
-                const auto fb = std::tanh (shimmer * (shiftMix * shifted + (1.0f - shiftMix) * mono));
-                in[0] += fb;
-                in[1] += fb;
-            }
+            const float in[2] = { d[0] + send * e[0], d[1] + send * e[1] };
             if (gated)
             {
                 // gated: the dense tap block is the sound; the short tank only smooths it
@@ -567,8 +557,17 @@ struct Engine::Impl
             {
                 const auto a = h[i], b = h[i + 4];
                 const auto inj = (i & 1) == 0 ? 0.5f : -0.5f;
-                lines[i].write (crossCos * a + crossSin * b + inj * in[0]);
-                lines[i + 4].write (-crossSin * a + crossCos * b + inj * in[1]);
+                auto u = crossCos * a + crossSin * b, w = -crossSin * a + crossCos * b;
+                if (shimmer > 0.0f && (i & 1) == 0)
+                {
+                    // the second voice (dual modes) takes line 2 and line 6
+                    const auto r = i == 2 && voice2 > 0.0f ? ratio2 : ratio;
+                    const auto amount = i == 2 && voice2 > 0.0f ? shimmer * voice2 : shimmer;
+                    u = (1.0f - amount) * u + amount * shifters[i / 2].process (u, r);
+                    w = (1.0f - amount) * w + amount * shifters[2 + i / 2].process (w, i == 2 && voice2 > 0.0f ? ratio2 : ratio);
+                }
+                lines[i].write (u + inj * in[0]);
+                lines[i + 4].write (w + inj * in[1]);
             }
 
             auto ol = late * lateL + early * e[0];
@@ -853,21 +852,21 @@ struct FoilType
     const char* name;
     double scale, preMs, lowRt, damp, bw, early, gain;
 };
-// plate types: line scale, own onset (ms), bass RT ×, high-frequency absorption (1/s at 8 kHz), loop bandwidth (Hz),
+// plate types: line scale, own onset (ms), bass RT ×, high-frequency absorption (1/s at 8 kHz), band limit (Hz, 0 = full band),
 // early level, gain
 const FoilType foilTypes[foil::typeCount] = {
-    { "Silver", 1.00, 20.0, 1.0, 0.34, 12500.0, 0.0, 1.0 },
-    { "Steel", 0.85, 0.0, 1.0, 0.30, 12500.0, 0.4, 1.0 },
-    { "Nickel", 1.10, 55.0, 1.0, 0.25, 15000.0, 0.0, 1.0 },
-    { "Bronze", 0.90, 17.0, 1.0, 0.30, 12500.0, 0.6, 1.0 },
-    { "Copper", 1.20, 6.0, 1.0, 0.20, 11000.0, 0.0, 0.8 },
-    { "Tin", 1.00, 18.0, 1.0, 0.32, 12500.0, 0.2, 0.9 },
-    { "Zinc", 1.30, 6.0, 1.1, 0.18, 13000.0, 0.0, 0.9 },
-    { "Platinum", 1.20, 80.0, 1.3, 0.35, 11000.0, 0.0, 0.5 },
-    { "Tungsten", 1.00, 20.0, 1.0, 0.30, 20000.0, 0.0, 1.0 },
-    { "Iron", 1.10, 55.0, 1.1, 0.30, 20000.0, 0.0, 0.9 },
-    { "Gold", 1.00, 20.0, 1.0, 0.30, 20000.0, 0.0, 1.0 },
-    { "Lead", 1.00, 2.0, 1.0, 0.45, 11000.0, 0.3, 1.0 },
+    { "Silver", 1.00, 20.5, 1.0, 0.34, 11000.0, 0.35, 1.30 },
+    { "Pewter", 0.85, 1.0, 1.0, 0.30, 11000.0, 0.45, 1.00 },
+    { "Nickel", 1.10, 56.0, 1.0, 0.25, 13000.0, 0.35, 2.30 },
+    { "Bronze", 0.90, 17.0, 1.0, 0.30, 11000.0, 0.55, 0.77 },
+    { "Bismuth", 1.20, 6.5, 1.0, 0.20, 10000.0, 0.30, 1.45 },
+    { "Tin", 1.00, 18.5, 1.0, 0.32, 11000.0, 0.35, 1.30 },
+    { "Zinc", 1.30, 6.5, 1.1, 0.18, 11500.0, 0.30, 1.50 },
+    { "Platinum", 1.20, 81.0, 1.3, 0.35, 10000.0, 0.25, 1.00 },
+    { "Tungsten", 1.00, 21.0, 1.0, 0.30, 0.0, 0.35, 1.10 },
+    { "Iron", 1.10, 56.0, 1.1, 0.30, 0.0, 0.30, 2.10 },
+    { "Gold", 1.00, 20.5, 1.0, 0.30, 0.0, 0.35, 1.10 },
+    { "Lead", 1.00, 1.5, 1.0, 0.45, 10000.0, 0.40, 1.00 },
 };
 double foilDecaySec (float v) { return knotLaw (v, foilDecayKnots, foilDecayCount); }
 
@@ -882,28 +881,30 @@ protected:
         const auto& t = foilTypes[choice (p[11], foil::typeCount)];
         mix = p[0];
         const auto size = 2.0 * p[3];
-        s.predelaySec = (epochPredelay (p[1]) + t.preMs * (0.5 + 0.5 * size)) / 1000.0;
+        s.predelaySec = (epochPredelay (p[1]) + t.preMs * (0.55 + 0.45 * size)) / 1000.0;
         s.shape = 2;
-        s.lineScale = t.scale * (0.35 + 0.65 * size * 0.5 + 0.0);
+        s.lineScale = t.scale * (0.5 + 0.5 * size);
         const auto rt = foilDecaySec (p[2]);
         s.rt60 = rt;
         // plates lose highs faster the longer they ring: 1/RT(8 kHz) = 1/RT + damp (measured, §3)
         s.highMult = 1.0 / (1.0 + t.damp * rt);
-        s.highXover = 2500.0;
+        s.highXover = 5000.0;
         s.lowMult = t.lowRt;
         s.lowXover = 250.0;
-        s.loopBandwidth = t.bw;
+        s.bandLimit = t.bw;
         s.inDiffusion = 1.0;
         s.loopDiffusion = 0.85;
-        s.width = 2.0 * p[4] * 0.5 * 1.0;
+        s.width = 2.0 * p[4]; // 100 % = decorrelated, 0 % = mono, 200 % = anti-correlated (measured)
         s.modRateHz = skewLaw (p[5], 0.05, 5.0, 2.381);
         s.modDepthMs = 1.0 * p[6] / std::sqrt (std::max (0.3, s.modRateHz));
         s.lowShelfHz = 20.0 + 1980.0 * p[7];
-        s.lowShelfDb = -12.0 + 24.0 * p[8];
+        s.lowShelfDb = 0.75 * (-12.0 + 24.0 * p[8]);
         s.highShelfHz = 200.0 + 19800.0 * p[9];
         s.highShelfDb = -12.0 + 24.0 * p[10];
+        // the plate speaks at once after its own delay: a short, smeared early burst
         s.earlyLevel = t.early;
-        s.earlySec = 0.004;
+        s.earlySec = 0.015;
+        s.earlyDiffusion = 0.8;
         s.gain = t.gain;
     }
 };
@@ -920,17 +921,17 @@ struct NebulaMode
 };
 // decay multiplier at density 0 / 100, line length × delay at density 0 / 100, stereo correlation (measured, §4)
 const NebulaMode nebulaModes[nebula::modeCount] = {
-    { "Twin", 1.03, 1.26, 1, 1, 0.93 },        { "Coil", 3.43, 3.82, 1, 2, -0.31 },
-    { "Crux", 1.33, 1.39, 1, 2, -0.25 },       { "Archer", 2.56, 2.67, 1, 1, 0.25 },
-    { "Abyss", 3.64, 3.97, 1, 2, -0.21 },      { "Spiral", 7.04, 6.77, 2, 2, 0.29 },
-    { "Lyre", 1.03, 1.17, 1, 1, 0.77 },        { "Horn", 1.03, 1.22, 1, 1, 0.87 },
-    { "Delta", 4.29, 12.8, 8, 1, 0.39 },       { "Cloud", 2.14, 12.3, 4, 1, 0.63 },
-    { "Veil Major", 2.02, 5.04, 2, 1, 0.72 },  { "Veil Minor", 1.00, 1.01, 1, 1, 0.47 },
-    { "Throne", 2.16, 16.3, 4, 1, 1.0 },       { "Hunter", 20.0, 20.7, 8, 1, -0.30 },
-    { "Bearer", 1.00, 1.12, 1, 1, 0.54 },      { "Fishes", 1.03, 1.30, 1, 1, 0.37 },
-    { "Sting", 1.00, 1.05, 1, 1, 0.95 },       { "Scales", 2.10, 9.65, 4, 1, 0.0 },
-    { "Lion", 4.15, 12.65, 8, 1, 0.31 },       { "Maiden", 1.00, 1.35, 1, 2, -0.43 },
-    { "Sisters", 1.02, 1.01, 1, 1, -0.10 },    { "Dog Star", 1.16, 1.04, 1, 1, 0.84 },
+    { "Ripple", 1.03, 1.26, 1, 1, 0.93 },        { "Swell", 3.43, 3.82, 1, 2, -0.31 },
+    { "Fold", 1.33, 1.39, 1, 2, -0.25 },       { "Drift", 2.56, 2.67, 1, 1, 0.25 },
+    { "Abyss", 3.64, 3.97, 1, 2, -0.21 },      { "Vortex", 7.04, 6.77, 2, 2, 0.29 },
+    { "Glint", 1.03, 1.17, 1, 1, 0.77 },        { "Pulse", 1.03, 1.22, 1, 1, 0.87 },
+    { "Expanse", 4.29, 12.8, 8, 1, 0.39 },       { "Haze", 2.14, 12.3, 4, 1, 0.63 },
+    { "Veil", 2.02, 5.04, 2, 1, 0.72 },  { "Mist", 1.00, 1.01, 1, 1, 0.47 },
+    { "Monolith", 2.16, 16.3, 4, 1, 1.0 },       { "Eternity", 20.0, 20.7, 8, 1, -0.30 },
+    { "Tide", 1.00, 1.12, 1, 1, 0.54 },      { "Shoal", 1.03, 1.30, 1, 1, 0.37 },
+    { "Spark", 1.00, 1.05, 1, 1, 0.95 },       { "Plateau", 2.10, 9.65, 4, 1, 0.0 },
+    { "Dusk", 4.15, 12.65, 8, 1, 0.31 },       { "Mirage", 1.00, 1.35, 1, 2, -0.43 },
+    { "Cluster", 1.02, 1.01, 1, 1, -0.10 },    { "Beacon", 1.16, 1.04, 1, 1, 0.84 },
 };
 double nebulaDelayMs (float v) { return knotLaw (v, nebulaDelayKnots, nebulaDelayCount); }
 const char* const syncNames[4] = { "ms", "Note", "Dotted", "Triplet" };
@@ -955,13 +956,17 @@ protected:
         s.shape = 3;
         s.lineScale = delay * mult;
         s.lineSpread = sw;
-        const auto meanSec = delay * mult * (1.0 - 0.53 * sw) / 1000.0; // mean line length (the fractions average 0.47)
+        // √F per pass of the delay: RT = 6·D / −log10 F, times the shape's measured decay multiple (which already holds
+        // its line-length multiple); warp shortens the lines and so the decay
+        const auto meanSec = delay * (1.0 - 0.53 * sw) / 1000.0; // (the warp fractions average 0.47)
         s.rt60 = fb >= 0.9999 ? 1000.0 : 6.0 * meanSec * lerpLog (m.dm0, m.dm100) / std::max (1e-4, -std::log10 (std::max (1e-6, fb)));
         s.rt60 = std::min (s.rt60, 1000.0);
         s.inDiffusion = dens;
         s.loopDiffusion = 0.85 * dens;
         s.crossFeed = 0.3 + 0.7 * dens;
-        const auto w = std::sqrt ((1.0 - m.corr) / (1.0 + m.corr + 1e-3));
+        // stereo: plain echoes are mono (density 0); the shape's correlation at full density; warp decorrelates
+        const auto corr = (1.0 + (m.corr - 1.0) * dens) * (1.0 - std::min (1.0, 2.0 * warp));
+        const auto w = std::sqrt ((1.0 - corr) / (1.0 + corr + 1e-3));
         s.width = (-1.0 + 2.0 * p[7]) * std::min (2.0, w);
         s.outLowCut = 10.0 + 1990.0 * p[8];
         s.outHighCut = 200.0 + 19800.0 * p[9];
@@ -1000,7 +1005,7 @@ protected:
         const auto dark = choice (p[11], 2) == 1;
         const auto size = (double) p[4];
         s.shiftSemis = haloShiftSemis (p[1]);
-        s.shiftFeedback = shiftMode == 4 ? 0.0 : 0.85 * p[2];
+        s.shiftFeedback = shiftMode == 4 ? 0.0 : 0.9 * p[2]; // the shifted share of the recirculation
         s.shiftMix = 1.0;
         s.shift2Mix = shiftMode == 1 || shiftMode == 3 ? 0.7 : 0.0;
         s.shiftSemis2 = s.shiftSemis - 24.0;
@@ -1009,11 +1014,11 @@ protected:
         s.buildSec = 0.02 + 0.3 * size * (1.0 - p[3] * 0.5);
         s.shape = 0;
         s.lineScale = m.scale * (0.3 + 1.2 * size);
-        s.rt60 = (1.5 + 12.5 * size) * m.rtScale * (1.0 - 0.45 * s.shiftFeedback); // the shifted loop adds its own sustain
-        s.outLowCut = 1000.0 * p[5];
-        s.outLowOrder = 1;
-        if (s.outLowCut < 5.0)
-            s.outLowCut = 0.0;
+        s.rt60 = (1.5 + 12.5 * size) * m.rtScale * (1.0 + 1.4 * p[2] * p[2]); // feedback lengthens the tail (§5)
+        s.earlyLevel = 0.45; // it speaks at once
+        s.earlySec = 0.03;
+        s.earlyDiffusion = p[3];
+        s.loopLowCut = 1000.0 * p[5] * 0.5; // the reference's low cut acts mostly on the recirculation (§5)
         s.outHighCut = 100.0 + 14900.0 * p[6];
         s.outHighOrder = 1;
         if (shiftMode == 2 || shiftMode == 3 || m.bright > 0.0)

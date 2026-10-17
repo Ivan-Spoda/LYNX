@@ -12,8 +12,10 @@ samples, impulses or tables, LYNX reads them at run time from **your own** FL St
 
 ## Featured
 
-The plugins FL Studio users reach for most, all shipping in LYNX at **Exact** or **Near-exact** quality.
-(Sytrus and Harmor are not featured yet: both are *Close* — see [Generators](#generators).)
+The plugins FL Studio users reach for most, all shipping in LYNX at **Exact** or **Near-exact** quality, plus LYNX's
+own reverbs fitted to black-box measurements of the third-party reverbs producers use most (see
+[LYNX originals: reverbs](#lynx-originals-reverbs)). (Sytrus and Harmor are not featured yet: both are *Close* — see
+[Generators](#generators).)
 
 <!-- Featured list: add a row for any engine that reaches Exact/Near-exact. Engines inspired by third-party plugins
      go here too, with their maker in the "Inspired by" column. Keep the website's FEATURED list in sync. -->
@@ -29,6 +31,10 @@ The plugins FL Studio users reach for most, all shipping in LYNX at **Exact** or
 | Fruity Delay 3 | Fruity Delay 3 (FL Studio) | Effect | Exact | Insert | analog-style delay with modulation, diffusion and feedback filtering |
 | Reeverb 2 | Fruity Reeverb 2 (FL Studio) | Effect | Exact | Insert | algorithmic reverb, small rooms to huge halls |
 | Fruity Compressor | Fruity Compressor (FL Studio) | Effect | Exact | Insert | the classic FL compressor, sidechain included |
+| Epoch Verb | ValhallaVintageVerb (Valhalla DSP) | Effect | Fitted | Insert, substitute | 22 vintage-digital reverb algorithms, three eras of converter colour |
+| Nebula | Valhalla Supermassive (Valhalla DSP) | Effect | Fitted | Insert, substitute | huge delay-reverb networks: delay, feedback, density, warp, 22 shapes |
+| Atrium | ValhallaRoom (Valhalla DSP) | Effect | Fitted | Insert, substitute | rooms and chambers, separate early / late sections, three-band decay |
+| Foil Plate | ValhallaPlate (Valhalla DSP) | Effect | Fitted | Insert, substitute | bright plate reverb, instant onset, 12 plate types |
 
 ## Status legend
 
@@ -39,10 +45,13 @@ The plugins FL Studio users reach for most, all shipping in LYNX at **Exact** or
 | **Close** | the same algorithm; within −60 dB of the original on (almost) all tested states, typically −80 dB or better; the gaps are listed |
 | **Approximate** | the plugin's saved settings are mapped onto a LYNX built-in effect or synth: similar sound, not the same engine |
 | **Placeholder** | the state is kept and the plugin makes no sound / passes audio through, as the original does in FL Studio 2026 |
+| **Fitted** | LYNX's own engine (not the original's algorithm), designed so that black-box measurements of the third-party original — decay times per band, onset, build-up, levels, filters, parameter laws — match within the tolerances listed for it |
 
 **How you get it:** *Insert* = can be added to any mixer insert (Mixer slot menu or the F8 quick-add palette).
 *Import* = created when you open an FL Studio project (`.flp`) or drop an FL effect preset; the engine is kept
-in the `.lynx` project and its controls stay editable and automatable.
+in the `.lynx` project and its controls stay editable and automatable. *Substitute* = also stands in automatically for
+the third-party plugin when a project uses it and it is not installed ([`PLUGIN_FALLBACK.md`](PLUGIN_FALLBACK.md)): its
+saved settings are translated and the original stays in the project byte for byte.
 
 ## Summary
 
@@ -188,6 +197,30 @@ oversample where they are nonlinear and never allocate on the audio thread.
 Product names in the table are trademarks of their owners (Solid State Logic, Waves Audio, Universal Audio,
 FabFilter, Slate Digital, Maag Audio, Soundtoys and the owners of the Teletronix name); they are used only to say
 which role each LYNX effect plays. LYNX is not affiliated with, endorsed or sponsored by any of them.
+
+## LYNX originals: reverbs
+
+Six reverbs of LYNX's own design (REA round 100, [`docs/analise/REA_rodada100.md`](analise/REA_rodada100.md)), each
+**inspired by** a Valhalla DSP reverb and fitted to measurements of it. The originals were only hosted the way a DAW
+hosts them — the official demo versions, VST3 parameter API, test signals in, audio out — never opened, decompiled or
+disassembled; no preset, graphic or manual text was copied. The DSP is LYNX's own, written from the published
+literature (Schroeder / Moorer all-pass diffusion, Jot's feedback delay networks with frequency-dependent absorption,
+Dattorro's input diffusers, a two-head delay-line pitch shifter). The parameter laws follow the measured ones, so a
+project's saved Valhalla settings translate one to one when LYNX stands in for a missing Valhalla plugin; the effects
+also sit on any mixer insert (*Insert*), have their own panels, no latency, and never allocate on the audio thread.
+
+| LYNX engine | Inspired by | What it is | Fit (48 kHz, impulse responses) |
+|---|---|---|---|
+| Epoch Verb | ValhallaVintageVerb | 22 algorithms (halls, plates, rooms, chambers, chorused / random spaces, gated, drifting …), 1970s / 1980s / Now colour, pre-delay, decay 0.2–70 s, size, attack, bass multiply / crossover, high shelf, early / late diffusion, modulation, high / low cut, equal-power mix | mid-band RT60 within ±8 % on 22 modes and 0.5–8 s decays; onsets within 1 ms; energy of the first 100 ms within ±2 dB on most modes |
+| Atrium | ValhallaRoom | 12 room / chamber / space types; early section (size, cross, modulation, send into the late part) and late section (size, cross, modulation); bass and high RT multipliers with crossovers; space; high / low cut | RT60 = Decay within ±10 % (0.5–8 s) per octave band 125 Hz–4 kHz |
+| Foil Plate | ValhallaPlate | 12 plate types, pre-delay, decay 0.5–30 s, size, width, modulation, low / high EQ shelves | RT60 at low / mid frequencies = Decay; the measured high-frequency damping that grows with decay |
+| Nebula | Valhalla Supermassive | delay 0–2000 ms or synced (note / dotted / triplet), feedback (√F per pass, as measured), density, warp, width, low / high cut, modulation, 22 network shapes | echo spacing and decay per shape as measured (Delay × shape multiple, decay multiple at density 0 and 100 %) |
+| Halo | ValhallaShimmer | shimmer: −12…+12 semitone shifter in the feedback path (single / dual voices, or off), size-set decay, diffusion, colour, low / high cut, modulation | shift law and size → decay law as measured; the mode lists are partly not confirmed |
+| Horizon | ValhallaFutureVerb | echo (12 modes: clean, tape, digital, analog, detune, reverse and reverse-octave, sparkle, swarm, lo-fi; time / sync, feedback, spread, drive, detune) into or after a reverb (8 modes, decay 0.2–70 s, size, attack, early / late, density), colour, low / high EQ, width | reverb decay per mode as measured; the echo modes are our own interpretation |
+
+Valhalla, ValhallaVintageVerb, ValhallaRoom, ValhallaPlate, Supermassive, ValhallaShimmer and ValhallaFutureVerb are
+trademarks of Valhalla DSP, LLC; they are named only to say which plugin each LYNX reverb is inspired by and stands in
+for. LYNX is not affiliated with, endorsed or sponsored by Valhalla DSP.
 
 ## LYNX originals: vocal pitch
 

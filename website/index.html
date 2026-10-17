@@ -233,6 +233,7 @@ input[type=range]{accent-color:var(--red);width:130px}
 .ft .top{display:flex;align-items:center;gap:6px}
 .ft .badge{display:inline-flex;align-items:center;gap:6px;font:600 11px Inter;letter-spacing:.03em;border-radius:99px;padding:3px 9px 3px 7px;border:1px solid}
 .ft .badge.x{color:#8ff0b8;border-color:rgba(61,220,132,.4);background:rgba(61,220,132,.08)}
+.ft .badge.o{color:#a9c4ff;border-color:rgba(122,167,255,.4);background:rgba(122,167,255,.08)}
 .ft .badge.n{color:#d8f08f;border-color:rgba(197,232,93,.4);background:rgba(197,232,93,.07)}
 .ft .badge .st{width:7px;height:7px}
 .ft .k{margin-left:auto;font:500 10px "JetBrains Mono",monospace;color:var(--dim);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
@@ -452,7 +453,7 @@ html.shot .ft{opacity:1!important;animation:none!important}html.shot .hero{min-h
     <div class="eyebrow reveal">// built-in plugins</div>
     <h2 class="sec-title reveal d1" data-i18n="pl.title">Native plugins, rebuilt from scratch.</h2>
     <p class="sec-lead reveal d2" data-i18n="pl.lead">Each engine is written natively in LYNX, inspired by an FL Studio plugin and checked against the original running unmodified. Exact means bit-identical output.</p>
-    <div class="ft-head reveal"><h3 data-i18n="ft.title">Featured</h3><p data-i18n="ft.lead">The plugins FL Studio users reach for most, all at Exact or Near-exact quality.</p></div>
+    <div class="ft-head reveal"><h3 data-i18n="ft.title">Featured</h3><p data-i18n="ft.lead">The plugins FL Studio users reach for most, all at Exact or Near-exact quality, plus LYNX's own reverbs fitted to measurements of producers' favourites.</p></div>
     <div class="ft-grid reveal" id="ftGrid"></div>
     <h3 class="pl-sub reveal" data-i18n="pl.sub">Every built-in plugin</h3>
     <div class="pl-bar reveal">
@@ -562,7 +563,7 @@ const PT = {
  'sig.privacy':'Privacidade','sig.pp':'Este programa não transfere nenhuma informação para outros sistemas em rede, a menos que isso seja solicitado especificamente pelo usuário ou pela pessoa que o instala ou opera. <a href="https://github.com/Ka1-S/LYNX/blob/main/PRIVACY.md">Política de privacidade</a>',
  'nav.plugins':'Plugins','pl.title':'Plugins nativos, refeitos do zero.','pl.lead':'Cada motor é escrito nativamente no LYNX, inspirado num plugin do FL Studio e conferido contra o original rodando sem modificação. Exato significa saída idêntica bit a bit.',
  'pl.all':'Todos','pl.gen':'Geradores','pl.fx':'Efeitos','pl.x':'Exato','pl.n':'Quase exato','pl.c':'Próximo','pl.a':'Aproximado','pl.p':'Só estado','pl.o':'Original do LYNX',
- 'ft.title':'Destaques','ft.lead':'Os plugins que quem usa o FL Studio mais usa, todos com status Exato ou Quase exato.','pl.sub':'Todos os plugins embutidos',
+ 'ft.title':'Destaques','ft.lead':'Os plugins que quem usa o FL Studio mais usa, todos com status Exato ou Quase exato, mais os reverbs do próprio LYNX ajustados a medições dos favoritos dos produtores.','pl.sub':'Todos os plugins embutidos',
  'pl.more':'Status, cobertura de testes e o que ainda falta em cada um: <a href="https://github.com/Ka1-S/LYNX/blob/main/docs/PLUGINS.md">docs/PLUGINS.md</a>.',
  'pl.tm':'FL Studio e os nomes dos seus plugins são marcas da Image-Line Software, citadas aqui só para descrever compatibilidade. O LYNX não é afiliado à Image-Line. Nenhum código ou dado de áudio da Image-Line vem com o LYNX; as ondas embutidas são lidas da sua própria instalação do FL Studio.',
  'f.sign':'Assinatura de código e privacidade'
@@ -622,11 +623,13 @@ const PLUGINS = [
  ['EQ','Fruity 7 Band EQ, Fruity Bass Boost','e','a'],['Delay','Fruity Delay (v1)','e','a'],['Chorus','Fruity Phaser','e','a'],['Utility','Fruity Center, Phase Inverter, Send, Transporter','e','a'],
  ['Frequency shifter','Frequency Shifter','e','a'],['Limiter','Emphasis','e','a'],['Parametric EQ','Low Lifter','e','a'],
  ['Ridge Strip','channel strips','e','o'],['Glow Leveler','opto compressors','e','o'],['Hush De-esser','de-essers','e','o'],
- ['Aether','air EQ / exciters','e','o'],['Ember Saturator','analog saturation','e','o']
+ ['Aether','air EQ / exciters','e','o'],['Ember Saturator','analog saturation','e','o'],
+ ['Epoch Verb','vintage-digital reverbs (Valhalla VintageVerb)','e','o'],['Atrium','room reverbs (Valhalla Room)','e','o'],['Foil Plate','plate reverbs (Valhalla Plate)','e','o'],
+ ['Nebula','delay-reverb networks (Valhalla Supermassive)','e','o'],['Halo','shimmer reverbs (Valhalla Shimmer)','e','o'],['Horizon','echo + reverb (Valhalla FutureVerb)','e','o']
 ];
 // Featured strip above the full list. To feature another engine (e.g. a future LYNX engine inspired by a
 // third-party plugin), add an entry: by = the original's maker, fl = the original plugin, t = g/e,
-// s = x/n (only Exact / Near-exact are featured), how = insert (any mixer insert) / flp (created from .flp).
+// s = x/n (Exact / Near-exact) or o (a LYNX original fitted to black-box measurements of a third-party plugin), how = insert (any mixer insert) / flp (created from .flp).
 const FEATURED = [
  {n:'3x Osc engine',fl:'3x Osc',by:'FL Studio',t:'g',s:'x',how:'flp',
   en:'Three-oscillator subtractive synth, FL\'s classic starting point.',pt:'Synth subtrativo de três osciladores, o clássico ponto de partida do FL.'},
@@ -647,7 +650,15 @@ const FEATURED = [
  {n:'Reeverb 2',fl:'Fruity Reeverb 2',by:'FL Studio',t:'e',s:'x',how:'insert',
   en:'Algorithmic reverb, from small rooms to huge halls.',pt:'Reverb algorítmico, de salas pequenas a halls enormes.'},
  {n:'Fruity Compressor',fl:'Fruity Compressor',by:'FL Studio',t:'e',s:'x',how:'insert',
-  en:'The classic FL compressor, sidechain included.',pt:'O compressor clássico do FL, com sidechain.'}
+  en:'The classic FL compressor, sidechain included.',pt:'O compressor clássico do FL, com sidechain.'},
+ {n:'Epoch Verb',fl:'ValhallaVintageVerb',by:'Valhalla DSP',t:'e',s:'o',how:'insert',
+  en:'22 vintage-digital reverb algorithms and three eras of colour; VintageVerb settings carry over.',pt:'22 algoritmos de reverb digital vintage e três épocas de cor; as configurações do VintageVerb são aproveitadas.'},
+ {n:'Nebula',fl:'Valhalla Supermassive',by:'Valhalla DSP',t:'e',s:'o',how:'insert',
+  en:'Huge delay-reverb networks: delay, feedback, density, warp and 22 shapes.',pt:'Redes enormes de delay e reverb: delay, feedback, densidade, warp e 22 formas.'},
+ {n:'Atrium',fl:'ValhallaRoom',by:'Valhalla DSP',t:'e',s:'o',how:'insert',
+  en:'Rooms and chambers with separate early and late sections and three-band decay.',pt:'Salas e câmaras com reflexões iniciais e cauda separadas e decaimento em três bandas.'},
+ {n:'Foil Plate',fl:'ValhallaPlate',by:'Valhalla DSP',t:'e',s:'o',how:'insert',
+  en:'Bright plate reverb with instant onset and twelve plate types.',pt:'Reverb de placa brilhante, ataque imediato e doze tipos de placa.'}
 ];
 function renderFeatured(){
   const pt = lang==='pt', d = pt ? PT : EN, esc = t => t.replace(/&/g,'&amp;').replace(/</g,'&lt;');

@@ -1,6 +1,8 @@
 // REA_rodada100: LYNX's own reverbs (core/LynxVerbs.h) fitted to black-box measurements of the Valhalla DSP reverbs.
 // Tolerances are wide on purpose (decay times ±15–20 %, levels ±1.5 dB): these are measurable behaviours, not
 // sample goldens, and they must hold with any compiler.
+#include "core/LynxVerbs.h"
+
 
 namespace verbs100
 {
@@ -111,10 +113,10 @@ TEST (lynxverbs100_parameter_laws_follow_the_measured_ones)
     CHECK (std::abs (dry - 0.92388f) < 1e-4f && std::abs (wet - 0.38268f) < 1e-4f);
     mixGains (1.0f, dry, wet);
     CHECK (dry == 0.0f && wet == 1.0f);
-    CHECK (std::string (lynx::formatEffectParam (EffectKind::epochVerb, 2, 0.42048f, 120.0)) == "4.00 s");
-    CHECK (std::string (lynx::formatEffectParam (EffectKind::epochVerb, 16, 1.0f, 120.0)) == "Vintage Hall");
-    CHECK (std::string (lynx::formatEffectParam (EffectKind::nebula, 3, 0.5f, 120.0)) == "300.0 ms");
-    CHECK (std::string (lynx::formatEffectParam (EffectKind::halo, 1, 1.0f, 120.0)) == "+12.0 st");
+    CHECK (std::string (lynx::formatEffectParam (lynx::EffectKind::epochVerb, 2, 0.42048f, 120.0)) == "4.00 s");
+    CHECK (std::string (lynx::formatEffectParam (lynx::EffectKind::epochVerb, 16, 1.0f, 120.0)) == "Vintage Hall");
+    CHECK (std::string (lynx::formatEffectParam (lynx::EffectKind::nebula, 3, 0.5f, 120.0)) == "300.0 ms");
+    CHECK (std::string (lynx::formatEffectParam (lynx::EffectKind::halo, 1, 1.0f, 120.0)) == "+12.0 st");
 }
 
 TEST (lynxverbs100_decay_times_match_the_references)

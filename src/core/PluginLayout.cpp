@@ -1688,7 +1688,7 @@ Layout foilPlateLayout()
     l.height = 236;
     auto& v = l.items;
     v.push_back (section (4, 4, 160, 228, TR_NOOP ("Plate")));
-    v.push_back (choiceMenu (14, 30, 140, 24, "Type", TR_NOOP ("Type"), TR_NOOP ("Silver|Steel|Nickel|Bronze|Copper|Tin|Zinc|Platinum|Tungsten|Iron|Gold|Lead")));
+    v.push_back (choiceMenu (14, 30, 140, 24, "Type", TR_NOOP ("Type"), TR_NOOP ("Silver|Pewter|Nickel|Bronze|Bismuth|Tin|Zinc|Platinum|Tungsten|Iron|Gold|Lead")));
     v.push_back (dial (84, 120, 56, "Mix", TR_NOOP ("Mix"), big));
     v.push_back (section (168, 4, 236, 228, TR_NOOP ("Reverb")));
     v.push_back (dial (222, 64, 34, "Predelay", TR_NOOP ("Predelay")));
@@ -1713,7 +1713,7 @@ Layout nebulaLayout()
     auto& v = l.items;
     v.push_back (section (4, 4, 170, 242, TR_NOOP ("Network")));
     v.push_back (choiceMenu (14, 30, 150, 24, "Mode", TR_NOOP ("Mode"),
-                             TR_NOOP ("Twin|Coil|Crux|Archer|Abyss|Spiral|Lyre|Horn|Delta|Cloud|Veil Major|Veil Minor|Throne|Hunter|Bearer|Fishes|Sting|Scales|Lion|Maiden|Sisters|Dog Star")));
+                             TR_NOOP ("Ripple|Swell|Fold|Drift|Abyss|Vortex|Glint|Pulse|Expanse|Haze|Veil|Mist|Monolith|Eternity|Tide|Shoal|Spark|Plateau|Dusk|Mirage|Cluster|Beacon")));
     v.push_back (dial (89, 130, 60, "Mix", TR_NOOP ("Mix"), big));
     v.push_back (section (178, 4, 300, 242, TR_NOOP ("Delay")));
     v.push_back (tabs (188, 28, 180, 22, "Sync", TR_NOOP ("ms|Note|Dotted|Triplet")));
