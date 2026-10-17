@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 // Built-in instruments: synthesized drums and synth, and a sampler. They let the
 // DAW make sound before plugin hosting exists and play imported projects.
 // Everything has fixed capacity: noteOn/render never allocate.
@@ -81,6 +83,18 @@ struct SampleData
 // prepare()/configure(), so set it before preparing the graph for the render and clear it afterwards.
 void setOfflineRendering (bool on) noexcept;
 bool offlineRendering() noexcept;
+
+// Where the song is, for hosted plugins (tempo-synced effects, LFO/volume shapers, arpeggiators read the host's
+// transport): the renderer publishes it at the start of each chunk it renders.
+struct HostTimeline
+{
+    std::atomic<double> tick { 0.0 };          // song position in LYNX ticks (ppq per quarter note)
+    std::atomic<double> bpm { 120.0 };
+    std::atomic<double> sampleRate { 44100.0 };
+    std::atomic<bool> playing { false };
+    std::atomic<int> beatsPerBar { 4 };
+};
+HostTimeline& hostTimeline() noexcept;
 
 // `sample` is only used by the sampler; without a sample the sampler is silent.
 std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr<const SampleData> sample = nullptr);

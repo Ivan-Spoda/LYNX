@@ -472,7 +472,7 @@ in event `0xA9`**:
 | version < 20.99.1 | 32 B |
 | ≥ 20.99.1 and `(flagsA9 & 2) == 0` (includes files without `0xA9`) | **60 B** |
 | ≥ 20.99.1, bit 2 on and `(flagsA9 & 8) == 0` | **80 B** |
-| ≥ 20.99.1, bits 2 and 8 on | current native size (≥ 0x58 = 88 B **[HYP]**) |
+| ≥ 20.99.1, bits 2 and 8 on | current native size: **88 B** (confirmed on a real FL 26.1.3 project with `0xA9 = 15`: 724 items, round gf92) |
 
 In the demos: without `0xA9` → 60 B; `0xA9 = 7` → 80 B (24.2…25.2); `0xA9 = 15` (25.2.99/26.1) → native,
 but both files are empty **[DATA]**. Bit 1 of `0xA9` also converts a channel field
@@ -506,6 +506,11 @@ Layout (validated on 10,576 records of 80 B):
 | 0x48 | u32 | 0 |
 | 0x4C | i32 | −1 (in native; ignored in the 80 B one) |
 | 0x50 | u32 | 0 (native only) |
+| 0x54 | u32 | 0 (native 88 B only; seen 0 or small values) |
+
+Round gf92 (real FL 26.1.3 project): +0x24 and +0x2C are the fade-in / fade-out lengths in **milliseconds**
+(923.08 = 2 beats at 130 BPM; 461.5 = 1 beat), +0x34 the clip gain (linear: 0.05 … 1.65 seen; 0 on some clips).
+LYNX imports them since then (`PlaylistItem::fadeInMs/fadeOutMs/gain` → `Clip::fadeIn/fadeOut/gain`).
 
 ### 4.3 Playlist track: event `0xEE` (70 B) + name in `0xEF` **[DECOMP+DATA]**
 

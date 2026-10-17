@@ -5,6 +5,7 @@
 #include "core/FlWrapper.h"
 
 #include "engine/ClapFormat.h"
+#include "engine/Vst2Format.h"
 #include "engine/PluginSandbox.h"
 #include "engine/FlStudio.h"
 #include "ui/I18n.h"
@@ -42,6 +43,35 @@ void setPluginParameter (juce::AudioPluginInstance& plugin, int index, float val
             p->setValue (value);
 }
 
+// The song's transport as hosted plugins see it (tempo, position, play state), from the renderer's timeline.
+class TimelinePlayHead final : public juce::AudioPlayHead
+{
+public:
+    juce::Optional<PositionInfo> getPosition() const override
+    {
+        const auto& t = hostTimeline();
+        const auto bpm = t.bpm.load (std::memory_order_relaxed);
+        const auto rate = t.sampleRate.load (std::memory_order_relaxed);
+        const auto quarters = t.tick.load (std::memory_order_relaxed) / (double) ppq;
+        const auto beatsPerBar = juce::jmax (1, t.beatsPerBar.load (std::memory_order_relaxed));
+        PositionInfo info;
+        info.setBpm (bpm);
+        info.setTimeSignature (TimeSignature { beatsPerBar, 4 });
+        info.setPpqPosition (quarters);
+        info.setPpqPositionOfLastBarStart (std::floor (quarters / beatsPerBar) * beatsPerBar);
+        info.setTimeInSeconds (quarters * 60.0 / juce::jmax (1.0, bpm));
+        info.setTimeInSamples ((juce::int64) std::llround (quarters * 60.0 / juce::jmax (1.0, bpm) * rate));
+        info.setIsPlaying (t.playing.load (std::memory_order_relaxed));
+        return info;
+    }
+};
+
+juce::AudioPlayHead& timelinePlayHead()
+{
+    static TimelinePlayHead head;
+    return head;
+}
+
 int bufferChannels (const juce::AudioPluginInstance& plugin)
 {
     return juce::jmax (2, plugin.getTotalNumInputChannels(), plugin.getTotalNumOutputChannels());
@@ -56,6 +86,7 @@ PluginInstrument::PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> i
 {
     buffer.setSize (bufferChannels (*plugin), blockSize);
     midi.ensureSize (8192); // the audio thread only adds events within this capacity
+    plugin->setPlayHead (&timelinePlayHead());
 }
 
 PluginInstrument::~PluginInstrument()
@@ -114,6 +145,7 @@ PluginEffect::PluginEffect (std::unique_ptr<juce::AudioPluginInstance> instance,
       blockSize (maxBlockSize)
 {
     buffer.setSize (bufferChannels (*plugin), blockSize);
+    plugin->setPlayHead (&timelinePlayHead());
 }
 
 PluginEffect::~PluginEffect()
@@ -216,6 +248,9 @@ juce::FileSearchPath PluginHost::defaultSearchPath()
     juce::FileSearchPath paths;
     // Same locations JUCE/Steinberg use by default on Windows.
     paths.add (juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory).getChildFile ("Common Files/VST3"));
+    // VST2 (Vst2Format): the usual folders installers use
+    for (const auto* sub : { "VSTPlugins", "Steinberg/VSTPlugins", "Common Files/VST2", "Common Files/Steinberg/VST2" })
+        paths.add (juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory).getChildFile (sub));
     paths.add (juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory).getChildFile ("Common Files/CLAP"));
     paths.add (juce::File::getSpecialLocation (juce::File::windowsLocalAppData).getChildFile ("Programs/Common/CLAP"));
     paths.add (settingsFolder().getChildFile ("Plugins"));
@@ -521,6 +556,9 @@ std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlu
         if (plugin.format == ForeignPlugin::Format::vst3 && plugin.hasClassId && d.pluginFormatName == "VST3"
             && (d.deprecatedUid == vst3Hash (plugin.classId) || d.uniqueId == vst3NormalisedHash (plugin.classId)))
             return found (d, TR_NOOP ("same VST3 class ID"));
+        if (plugin.format == ForeignPlugin::Format::vst2 && plugin.vst2Id != 0 && d.pluginFormatName == Vst2PluginFormat::formatName
+            && (juce::uint32) d.uniqueId == plugin.vst2Id)
+            return found (d, TR_NOOP ("same VST2 ID"));
         if (plugin.format == ForeignPlugin::Format::clap && ! plugin.clapId.empty() && d.pluginFormatName == ClapPluginFormat::formatName
             && d.uniqueId == juce::String::fromUTF8 (plugin.clapId.c_str()).hashCode())
             return found (d, TR_NOOP ("same CLAP id"));
@@ -547,6 +585,7 @@ std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlu
     // a plugin installed in several formats: prefer the one FL used (VST3 → VST3, CLAP → CLAP), whose state carries over
     const auto sameFormat = plugin.format == ForeignPlugin::Format::vst3   ? juce::String ("VST3")
                             : plugin.format == ForeignPlugin::Format::clap ? juce::String (ClapPluginFormat::formatName)
+                            : plugin.format == ForeignPlugin::Format::vst2 ? juce::String (Vst2PluginFormat::formatName)
                                                                            : juce::String();
     std::optional<juce::PluginDescription> byName;
     for (const auto& d : types)
@@ -579,7 +618,9 @@ juce::StringArray PluginHost::filesToScanFor (const std::vector<FlpPluginUse>& u
     if (needed.empty())
         return files;
 
-    auto hosted = [] (const juce::String& path) { return path.endsWithIgnoreCase (".vst3") || path.endsWithIgnoreCase (".clap"); };
+    auto hosted = [] (const juce::String& path) {
+        return path.endsWithIgnoreCase (".vst3") || path.endsWithIgnoreCase (".clap") || path.endsWithIgnoreCase (".dll");
+    };
     auto addExisting = [&] (const std::string& path) {
         const auto p = juce::String::fromUTF8 (path.c_str()).replaceCharacter ('/', '\\');
         if (p.isNotEmpty() && juce::File::isAbsolutePath (p) && hosted (p) && juce::File (p).exists())
@@ -608,7 +649,7 @@ juce::StringArray PluginHost::filesToScanFor (const std::vector<FlpPluginUse>& u
     return worth;
 }
 
-int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::StringArray* matched)
+int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::StringArray* matched, juce::StringArray* withoutState)
 {
     int found = 0;
 
@@ -618,8 +659,16 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::St
         if (f.format == ForeignPlugin::Format::clap && d.pluginFormatName == "CLAP")
             return f.state.size() > 4 ? juce::MemoryBlock (f.state.data() + 4, f.state.size() - 4).toBase64Encoding().toStdString() : std::string {};
 
+        // VST2: LYNX's VST2 host keeps FL's own state layout (REA_rodada89 §2)
+        if (f.format == ForeignPlugin::Format::vst2 && d.pluginFormatName == Vst2PluginFormat::formatName)
+        {
+            FlVst2State check;
+            return parseFlVst2State (f.state, check) ? juce::MemoryBlock (f.state.data(), f.state.size()).toBase64Encoding().toStdString()
+                                                     : std::string {};
+        }
+
         if (f.format != ForeignPlugin::Format::vst3 || d.pluginFormatName != "VST3")
-            return {}; // VST2 -> VST3: different state format; plugin at defaults
+            return {}; // VST2 <-> VST3: different state formats; plugin at defaults
 
         std::vector<std::uint8_t> component, controller;
 
@@ -655,6 +704,9 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::St
         ref.id = d->createIdentifierString().toStdString();
         ref.name = d->name.toStdString();
         ref.state = convertState (ref.foreign, *d);
+        // found, but the project's settings could not be carried over: it plays its default sound
+        if (ref.state.empty() && ! ref.foreign.state.empty() && withoutState != nullptr)
+            withoutState->addIfNotAlreadyThere (juce::String::fromUTF8 (ref.foreign.name.c_str()) + " (" + d->pluginFormatName + ")");
         ref.foreign = {};
         ++found;
         return true;
@@ -766,19 +818,56 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::instantiate (const Plugin
     return instance;
 }
 
+namespace
+{
+juce::String failureLine (const PluginRef& ref, const juce::String& why)
+{
+    const auto name = juce::String::fromUTF8 (ref.name.c_str());
+    if (why.isEmpty())
+        return name + ": " + tr ("the plugin could not start");
+    return why.startsWith (name) ? why : name + ": " + why;
+}
+} // namespace
+
+juce::StringArray PluginHost::getLoadFailures() const
+{
+    const std::scoped_lock lock (failuresLock);
+    return loadFailures;
+}
+
+void PluginHost::clearLoadFailures()
+{
+    const std::scoped_lock lock (failuresLock);
+    loadFailures.clear();
+}
+
 std::shared_ptr<Instrument> PluginHost::makeInstrument (const PluginRef& ref, double sampleRate, juce::String* error)
 {
-    if (auto instance = instantiate (ref, sampleRate, error))
+    juce::String why;
+    if (auto instance = instantiate (ref, sampleRate, &why))
         return std::make_shared<PluginInstrument> (std::move (instance), maxBlockSize);
 
+    {
+        const std::scoped_lock lock (failuresLock);
+        loadFailures.addIfNotAlreadyThere (failureLine (ref, why));
+    }
+    if (error != nullptr)
+        *error = why;
     return nullptr;
 }
 
 std::shared_ptr<Effect> PluginHost::makeEffect (const PluginRef& ref, double sampleRate, juce::String* error)
 {
-    if (auto instance = instantiate (ref, sampleRate, error))
+    juce::String why;
+    if (auto instance = instantiate (ref, sampleRate, &why))
         return std::make_shared<PluginEffect> (std::move (instance), maxBlockSize);
 
+    {
+        const std::scoped_lock lock (failuresLock);
+        loadFailures.addIfNotAlreadyThere (failureLine (ref, why));
+    }
+    if (error != nullptr)
+        *error = why;
     return nullptr;
 }
 

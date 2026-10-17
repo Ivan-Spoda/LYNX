@@ -76,4 +76,5 @@ private:
 };
 
 std::unique_ptr<Effect> make();
+std::unique_ptr<Effect> make (const EffectParams& params); // latency known from the slot's parameters before the first block
 } // namespace lynx::fsplit

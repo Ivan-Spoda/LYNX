@@ -229,6 +229,11 @@ struct PlaylistItem
     std::int32_t patternEndTick = -1;
     float startOffset = 0.0f;
     float endOffset = 0.0f;
+
+    // Audio clips, records of 60 B and more (FL 20.99+): fades in milliseconds and the clip gain (linear).
+    float fadeInMs = 0.0f;
+    float fadeOutMs = 0.0f;
+    float gain = 1.0f;
 };
 
 struct PlaylistTrackInfo
@@ -309,7 +314,8 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset = f
 
 // Utilities exposed for tests
 std::uint32_t parseVersionNumber (const std::string& version);
-std::size_t playlistRecordSize (std::uint32_t versionNumber, std::size_t payloadSize);
+// `flagsA9`: the file flags event 0xA9 (0 when absent); it decides between the 60, 80 and 88 B layouts.
+std::size_t playlistRecordSize (std::uint32_t versionNumber, std::size_t payloadSize, std::uint32_t flagsA9 = 0);
 // Converts a controlID from old files (class 0x2..., sends at 0x1F40+d) to the current format.
 ControlId normalizeControlId (std::uint32_t raw);
 } // namespace flp

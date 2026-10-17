@@ -40,6 +40,16 @@ namespace lynx
 {
 namespace
 {
+// 1 / channelGain at FL's default channel volume (10000 of 12800)
+float audioClipUnity() noexcept
+{
+    static const float unity = 1.0f / channelGain (10000.0f / 12800.0f);
+    return unity;
+}
+} // namespace
+
+namespace
+{
 constexpr double twoPi = 6.283185307179586;
 
 // Per-sample factor for an exponential decay that drops 60 dB in `seconds`.
@@ -1606,7 +1616,9 @@ public:
         *target = {};
         target->active = true;
         target->key = key;
-        target->velocity = velocity;
+        // FL plays a Playlist audio clip at unity gain at the channel's default volume (78%): the channel volume
+        // curve is relative to that point for clips (REA_rodada89 §4.2 [EXEC]: +5.2 dB at every volume and pan)
+        target->velocity = clipMode ? velocity * audioClipUnity() : velocity;
         target->data = data;
         target->zoneGain = zone != nullptr ? zone->zone.gain : 1.0f;
 
@@ -2473,6 +2485,12 @@ std::atomic<bool> offlineRenderingFlag { false };
 
 void setOfflineRendering (bool on) noexcept { offlineRenderingFlag.store (on); }
 bool offlineRendering() noexcept { return offlineRenderingFlag.load(); }
+
+HostTimeline& hostTimeline() noexcept
+{
+    static HostTimeline timeline;
+    return timeline;
+}
 
 std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr<const SampleData> sample)
 {

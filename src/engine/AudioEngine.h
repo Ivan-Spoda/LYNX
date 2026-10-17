@@ -13,6 +13,7 @@
 #include "core/Recorder.h"
 #include "core/WorkerPool.h"
 #include "core/RackRenderer.h"
+#include "core/RtStats.h"
 #include "core/FlpImport.h"
 #include "core/History.h"
 #include "core/SnapshotExchange.h"
@@ -52,6 +53,8 @@ public:
     const juce::StringArray& getMissingPlugins() const noexcept { return missingPlugins; }
     // "plugin → file (how it was found)" for the plugins of the last imported .flp
     const juce::StringArray& getMatchedPlugins() const noexcept { return matchedPlugins; }
+    // plugins found whose saved settings could not be carried over (VST2 <-> VST3): "name (format)"
+    const juce::StringArray& getPluginsWithoutState() const noexcept { return pluginsWithoutState; }
     // What the last imported .flp converted, approximated or left out.
     const FlpImportReport& getImportReport() const noexcept { return importReport; }
     // The last imported .flp's plugins that were not found, with what uses them and what LYNX put in their place.
@@ -187,7 +190,10 @@ public:
         std::function<bool (double)> progress; // 0..1; false cancels
         double tailSeconds = 0.0;
         int trimSamples = 0;  // PDC: discards this much from the start and renders the same amount extra at the end
-        int ditherBits = 0;   // > 0: TPDF dither with noise shaping for this bit depth
+        int ditherBits = 0;   // > 0: TPDF dither (with noise shaping unless ditherShaping is false) for this bit depth
+        bool ditherShaping = true;
+        // receives every rendered block after the PDC trim (left, right, frames), like `output` does
+        std::function<void (const float*, const float*, int)> capture;
     };
 
     float renderOffline (const RenderOptions& options);
@@ -209,9 +215,40 @@ public:
 
     int getNumGraphConnections() const { return (int) graph.getConnections().size(); }
 
+    // Time spent in each instrument and effect (the Plugin performance monitor); nullptr without the rack node.
+    ProcessTimes* getProcessTimes() noexcept;
+
     // Latest output samples (mono), for the oscilloscope. UI thread.
     void copyScope (float* destination, int count) const noexcept;
     static constexpr int scopeSize = 2048;
+
+    // Real-time health of the audio callback (REA round 87): callbacks over their deadline, late device calls, load.
+    const RtStats& getRtStats() const noexcept { return rtStats; }
+    RtStats& getRtStats() noexcept { return rtStats; }
+
+    // What takes the most audio CPU: channels and insert effects, as a share of real time over the last ~2 s of
+    // playback, heaviest first. UI thread.
+    struct UnitLoad
+    {
+        juce::String name;
+        double load = 0.0;      // CPU time / audio time (summed over the worker threads)
+        double longestMs = 0.0; // the longest single call in the window
+    };
+    const std::vector<UnitLoad>& getHeaviestUnits() const noexcept { return heaviestUnits; }
+
+    // How regularly the message thread runs the engine's 30 Hz timer (a saturated UI delays it). UI thread.
+    struct UiPulse
+    {
+        int calls = 0;
+        double maxGapMs = 0.0;
+    };
+    UiPulse takeUiPulse() noexcept { return std::exchange (uiPulse, {}); }
+
+    // Device, buffer, deadline and the callback statistics in a few lines (CPU meter hint, glitch log, --rtstress).
+    juce::String describeRealtime (bool withUnits = true) const;
+
+    // %APPDATA%\LYNX\audio-glitches.log: a line each time callbacks run over their deadline (at most every 2 s).
+    static juce::File glitchLogFile();
 
     // Total latency compensated by PDC (at the Master output), in samples.
     int getLatencySamples() const noexcept { return lastPublishedShape.pdc.total; }
@@ -236,6 +273,18 @@ private:
     double estimatedPositionNow() const noexcept;
 
     void buildInitialGraph();
+    void chooseSafeBufferSize();
+    void updateRealtimeStats(); // timer: unit loads over a window, glitch log
+    RtStats rtStats;
+    std::vector<UnitLoad> heaviestUnits;
+    std::vector<std::uint64_t> lastChannelNs, lastEffectNs;
+    std::uint64_t lastProcessedSamples = 0;
+    double lastUnitsWindowMs = 0.0, lastUiPulseMs = 0.0;
+    UiPulse uiPulse;
+    int latencyRepublishes = 0;   // PDC re-plans because a unit's latency changed (diagnostics)
+    juce::String lastLatencyChange;
+    std::uint64_t loggedOver = 0, loggedLate = 0;
+    double lastLogMs = 0.0;
     class PreviewPlayer* preview = nullptr; // graph node (owned by the graph)
     void publishSong();
 
@@ -299,7 +348,7 @@ private:
     int takeLatency = 0;                           // input + output, in samples
     MeterBank meters;
     PluginHost plugins;
-    juce::StringArray missingPlugins, matchedPlugins;
+    juce::StringArray missingPlugins, matchedPlugins, pluginsWithoutState;
     FlpImportReport importReport;
     std::vector<MissingPlugin> missingPluginDetails;
     RenderStats lastRenderStats;

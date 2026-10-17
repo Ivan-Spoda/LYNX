@@ -1,4 +1,5 @@
 #include "engine/ClapFormat.h"
+#include "engine/Vst2Format.h"
 
 #include <array>
 #include <atomic>
@@ -922,5 +923,6 @@ void addPluginFormats (juce::AudioPluginFormatManager& manager)
 {
     manager.addDefaultFormats();
     manager.addFormat (new ClapPluginFormat());
+    manager.addFormat (new Vst2PluginFormat());
 }
 } // namespace lynx

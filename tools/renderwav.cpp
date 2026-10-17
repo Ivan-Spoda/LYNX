@@ -1,6 +1,13 @@
 // renderwav: imports an .flp and renders a pattern with the built-in instruments.
 // Usage: renderwav project.flp output.wav [pattern-index] [loops]
 // Without an index, picks the pattern with the most notes.
+//
+// Real-time diagnostics (REA round 87), environment variables:
+//   LYNX_BLOCK=n      block size (default 256)
+//   LYNX_THREADS=n    n worker threads, as the app's audio engine uses
+//   LYNX_REALTIME=1   paces the blocks at real time (the workers sleep between blocks, as with a sound card)
+//   LYNX_PROFILE=1    per-channel / per-insert-effect CPU time, heaviest first
+// The block timing report (budget = block duration) is always printed.
 
 #include <cctype>
 #include <cmath>
@@ -15,6 +22,14 @@
 #include <map>
 #include <string>
 #include <chrono>
+#include <thread>
+#include <time.h>
+#if defined(_WIN32)
+ #define WIN32_LEAN_AND_MEAN
+ #define NOMINMAX
+ #include <windows.h>
+ #include <mmsystem.h>
+#endif
 
 #include "WavReader.h"
 #include "core/FlpImport.h"
@@ -23,6 +38,22 @@
 
 namespace
 {
+// like the app's audio threads: MMCSS "Pro Audio" on Windows (with a 1 ms timer for the real-time pacing)
+void realtimePriority()
+{
+#if defined(_WIN32)
+    using AvSet = void* (__stdcall*) (const wchar_t*, unsigned long*);
+    static const auto avSet = [] () -> AvSet {
+        if (auto* avrt = LoadLibraryW (L"avrt.dll"))
+            return reinterpret_cast<AvSet> (reinterpret_cast<void*> (GetProcAddress (avrt, "AvSetMmThreadCharacteristicsW")));
+        return nullptr;
+    }();
+    unsigned long task = 0;
+    if (avSet == nullptr || avSet (L"Pro Audio", &task) == nullptr)
+        SetThreadPriority (GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+#endif
+}
+
 void writeWav (const char* path, const std::vector<float>& left, const std::vector<float>& right, int sampleRate)
 {
     std::ofstream out (path, std::ios::binary);
@@ -68,12 +99,18 @@ int main (int argc, char** argv)
 
     // On Linux/WSL FL lives under /mnt/c; the .flp paths use backslashes.
     const std::string flRoot = std::getenv ("FL_ROOT") ? std::getenv ("FL_ROOT")
+#if defined(_WIN32)
+                                                       : "C:/Program Files/Image-Line/FL Studio 2026";
+#else
                                                        : "/mnt/c/Program Files/Image-Line/FL Studio 2026";
+#endif
     auto toLocal = [] (std::string p) {
         std::replace (p.begin(), p.end(), '\\', '/');
         // absolute Windows paths ("C:/...") → the WSL mount ("/mnt/c/...")
+#if ! defined(_WIN32) // (the Windows build of this tool reads them as they are)
         if (p.size() > 2 && p[1] == ':' && p[2] == '/' && std::isalpha ((unsigned char) p[0]))
             p = "/mnt/" + std::string (1, (char) std::tolower ((unsigned char) p[0])) + p.substr (2);
+#endif
         return p;
     };
 
@@ -118,7 +155,7 @@ int main (int argc, char** argv)
     const auto lengthTicks = wholeSong ? songTicks : pattern.effectiveLength (song.beatsPerBar) * loops;
 
     constexpr int sampleRate = 44100;
-    constexpr int blockSize = 256;
+    const int blockSize = std::getenv ("LYNX_BLOCK") ? std::clamp (std::atoi (std::getenv ("LYNX_BLOCK")), 16, 8192) : 256;
     const auto tps = lynx::ticksPerSample (song.bpm, sampleRate);
     auto totalSamples = (std::size_t) (lengthTicks / tps) + sampleRate; // +1 s of tail
     if (const char* s = std::getenv ("LYNX_SECONDS"); s != nullptr && std::atof (s) > 0) // benchmark: render only the start
@@ -164,24 +201,132 @@ int main (int argc, char** argv)
     std::unique_ptr<lynx::WorkerPool> pool;
     if (const char* t = std::getenv ("LYNX_THREADS"); t != nullptr && std::atoi (t) > 0)
     {
-        pool = std::make_unique<lynx::WorkerPool> (std::atoi (t));
+        pool = std::make_unique<lynx::WorkerPool> (std::atoi (t), [] { realtimePriority(); });
         renderer.setWorkerPool (pool.get());
     }
-    renderer.prepare (sampleRate);
+    renderer.prepare (sampleRate, std::max (2048, blockSize));
+    const bool profile = std::getenv ("LYNX_PROFILE") != nullptr;
+    const bool realtime = std::getenv ("LYNX_REALTIME") != nullptr;
+#if defined(_WIN32)
+    timeBeginPeriod (1);
+    realtimePriority();
+#endif
+    renderer.setProfiling (profile);
 
     std::vector<float> left (totalSamples), right (totalSamples);
+    // the units whose latency is only known after their first block (the app then re-plans PDC once)
+    const auto latenciesBefore = state->currentLatencies();
     const auto started = std::chrono::steady_clock::now();
     double tick = 0.0;
+    const double budgetMs = 1000.0 * blockSize / sampleRate;
+    std::vector<double> wallMs, cpuMs;
+    auto threadCpuMs = [] {
+#if defined(_WIN32)
+        FILETIME created, exited, kernel, user;
+        GetThreadTimes (GetCurrentThread(), &created, &exited, &kernel, &user);
+        return (((std::uint64_t) user.dwHighDateTime << 32 | user.dwLowDateTime) + ((std::uint64_t) kernel.dwHighDateTime << 32 | kernel.dwLowDateTime)) * 1e-4;
+#else
+        timespec ts {};
+        clock_gettime (CLOCK_THREAD_CPUTIME_ID, &ts);
+        return ts.tv_sec * 1000.0 + ts.tv_nsec * 1e-6;
+#endif
+    };
 
     for (std::size_t pos = 0; pos < totalSamples; pos += blockSize)
     {
         const auto n = (int) std::min<std::size_t> (blockSize, totalSamples - pos);
         const bool playing = tick < (double) lengthTicks;
+        const auto t0 = std::chrono::steady_clock::now();
+        const auto c0 = threadCpuMs();
         renderer.process (state.get(), playing, tick, n, left.data() + pos, right.data() + pos);
+        wallMs.push_back (std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - t0).count());
+        cpuMs.push_back (threadCpuMs() - c0);
         tick += n * tps;
+
+        if (realtime) // the next block starts one block later, like a sound card's callback
+            std::this_thread::sleep_until (started + std::chrono::microseconds ((long long) ((pos + (std::size_t) n) * 1.0e6 / sampleRate)));
     }
 
+    {
+        const auto after = state->currentLatencies();
+        std::size_t index = song.channels.size();
+        for (std::size_t t = 0; t < song.mixer.size(); ++t)
+            for (std::size_t k = 0; k < state->effects[t].size(); ++k, ++index)
+                if (index < after.size() && after[index] != latenciesBefore[index])
+                    std::printf ("latency changed after the first block: insert %zu slot %zu %s: %d -> %d\n", t, k + 1,
+                                 lynx::effectInfo (song.mixer[t].effects[k].kind).name, latenciesBefore[index], after[index]);
+    }
     std::printf ("render: %.0f ms\n", std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - started).count());
+    {
+        auto report = [&] (const char* what, std::vector<double> v) {
+            if (v.empty())
+                return;
+            double sum = 0.0;
+            std::size_t over = 0, nearly = 0;
+            for (auto x : v)
+                sum += x, over += x >= budgetMs, nearly += x >= 0.8 * budgetMs && x < budgetMs;
+            std::sort (v.begin(), v.end());
+            auto pct = [&] (double p) { return v[std::min (v.size() - 1, (std::size_t) (p * (double) v.size()))]; };
+            std::printf ("blocks %s: %zu x %d samples (budget %.2f ms): mean %.0f%%, p50 %.0f%%, p99 %.0f%%, max %.0f%%; "
+                         "over budget %zu (%.2f%%), 80-100%% %zu\n",
+                         what, v.size(), blockSize, budgetMs, 100.0 * sum / (double) v.size() / budgetMs, 100.0 * pct (0.5) / budgetMs,
+                         100.0 * pct (0.99) / budgetMs, 100.0 * v.back() / budgetMs, over, 100.0 * (double) over / (double) v.size(), nearly);
+        };
+        report ("wall", wallMs);
+        {
+            // where the slowest blocks were (seconds into the render)
+            std::vector<std::size_t> order (cpuMs.size());
+            for (std::size_t i = 0; i < order.size(); ++i)
+                order[i] = i;
+            const auto& by = pool == nullptr ? cpuMs : wallMs;
+            std::sort (order.begin(), order.end(), [&] (std::size_t a, std::size_t b) { return by[a] > by[b]; });
+            std::printf ("slowest blocks:");
+            for (std::size_t i = 0; i < order.size() && i < 8; ++i)
+                std::printf (" %.2fs=%.0f%%", (double) (order[i] * (std::size_t) blockSize) / sampleRate, 100.0 * by[order[i]] / budgetMs);
+            std::printf ("\n");
+        }
+        if (pool == nullptr)
+            report ("thread-cpu", cpuMs);
+#if ! defined(LYNX_OLDPOOL)
+        if (pool != nullptr)
+            std::printf ("workers: %d threads ran %llu indices, %llu wake-ups\n", pool->workers(),
+                         (unsigned long long) pool->indicesRunByWorkers(), (unsigned long long) pool->wakeUps());
+#endif
+    }
+
+    if (profile)
+    {
+        const auto& u = renderer.unitTimes();
+        const auto total = (double) u.processNs.load();
+        struct Row
+        {
+            double ns;
+            std::string name;
+            double maxNs = 0.0;
+        };
+        std::vector<Row> rows;
+        for (std::size_t c = 0; c < song.channels.size() && c < (std::size_t) lynx::RackRenderer::maxChannels; ++c)
+            if (const auto ns = (double) u.channelNs[c].load(); ns > 0.0)
+                rows.push_back ({ ns, "channel " + std::to_string (c) + " \"" + song.channels[c].name + "\"", (double) u.channelMaxNs[c].load() });
+        for (std::size_t t = 0; t < song.mixer.size(); ++t)
+            for (std::size_t k = 0; k < song.mixer[t].effects.size() && k < (std::size_t) lynx::maxEffectSlots; ++k)
+                if (const auto ns = (double) u.effectNs[t * lynx::maxEffectSlots + k].load(); ns > 0.0)
+                    rows.push_back ({ ns, "insert " + std::to_string (t) + " slot " + std::to_string (k + 1) + " "
+                                              + lynx::effectInfo (song.mixer[t].effects[k].kind).name
+                                              + (song.mixer[t].effects[k].plugin.name.empty() ? "" : " (" + song.mixer[t].effects[k].plugin.name + ")"),
+                                          (double) u.effectMaxNs[t * lynx::maxEffectSlots + k].load() });
+        std::sort (rows.begin(), rows.end(), [] (const Row& a, const Row& b) { return a.ns > b.ns; });
+        const auto audioMs = 1000.0 * (double) u.processedSamples.load() / sampleRate;
+        std::printf ("profile: process %.0f ms for %.0f ms of audio (units below are CPU time, summed over threads)\n", total * 1e-6, audioMs);
+        for (std::size_t i = 0; i < rows.size() && i < 25; ++i)
+            std::printf ("  %6.1f%% of real time, longest call %7.2f ms  %s\n", 100.0 * rows[i].ns * 1e-6 / std::max (1.0, audioMs),
+                         rows[i].maxNs * 1e-6, rows[i].name.c_str());
+        // the spikes: units whose single call took longest
+        std::sort (rows.begin(), rows.end(), [] (const Row& a, const Row& b) { return a.maxNs > b.maxNs; });
+        std::printf ("longest single calls:\n");
+        for (std::size_t i = 0; i < rows.size() && i < 10; ++i)
+            std::printf ("  %7.2f ms  %s\n", rows[i].maxNs * 1e-6, rows[i].name.c_str());
+    }
 
     // LYNX_RAW=path: also write the un-normalized float samples (L block then R block), for bit-exact comparisons
     if (const char* raw = std::getenv ("LYNX_RAW"); raw != nullptr)
