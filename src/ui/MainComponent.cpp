@@ -1405,6 +1405,13 @@ void MainComponent::toggleRecording()
     showRecordChoiceDialog ([safe] (int choice, bool dontAsk) {
         if (safe == nullptr)
             return;
+        if (choice == recordChoiceAudioEditor)
+        {
+            openAudioEditorRecording (safe->engine);
+            if (! safe->engine.getTransport().playing.load())
+                safe->engine.play();
+            return;
+        }
         auto o = safe->engine.getRecordOptions();
         o.recordNotes = choice != recordChoiceAudio;
         o.recordAudio = choice != recordChoiceNotes;

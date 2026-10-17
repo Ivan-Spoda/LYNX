@@ -23,6 +23,9 @@ void openAudioEditor (AudioEngine& engine);
 void openAudioEditor (AudioEngine& engine, const juce::File& file);
 // The sample of a channel (a Sampler channel or the channel of a Playlist audio clip); the edit can go back to it.
 void openAudioEditorForChannel (AudioEngine& engine, int channel);
+// The record button's "Audio, into the audio editor" choice: an empty editor recording the audio input while the
+// song plays (it starts with the playback and stops with it, like FL's Edison record target).
+void openAudioEditorRecording (AudioEngine& engine);
 // A mixer insert (0 = Master): opens with the recording source set to it, like an editor sitting in a mixer slot.
 void openAudioEditorForInsert (AudioEngine& engine, int insert);
 

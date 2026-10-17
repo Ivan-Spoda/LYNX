@@ -1795,6 +1795,13 @@ private:
     }
 
 public:
+    void recordInputWithSong()
+    {
+        recordSource = AudioCapture::input;
+        recordMode = RecordMode::onPlay;
+        startRecording();
+    }
+
     void setRecordSource (int s)
     {
         recordSource = s;
@@ -2435,6 +2442,11 @@ void openAudioEditorForChannel (AudioEngine& engine, int channel)
     auto* editor = openWindow (engine, { Source::Kind::channel, channel, path });
     if (path.isNotEmpty())
         editor->loadFile (juce::File (path));
+}
+
+void openAudioEditorRecording (AudioEngine& engine)
+{
+    openWindow (engine, {})->recordInputWithSong();
 }
 
 void openAudioEditorForInsert (AudioEngine& engine, int insert)

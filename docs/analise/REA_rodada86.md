@@ -115,6 +115,9 @@ Window (`src/ui/AudioEditor.{h,cpp}`, a resizable tool window, one per source):
   → accent red → amber → white); overview strip; info bar (rate, channels, length, selection, peak, status).
 - Mouse/keys: drag selects (Shift extends), double-click selects the region or the stretch between markers, Ctrl+wheel
   zooms, wheel scrolls; Ctrl+Z/Y/X/C/V/A/S, Del, Esc, Home/End, R, L, S, M, F, +/−. Audio files can be dropped in.
+- The record button's question ("What would you like to record?", round 88) has a fourth choice, "Audio, into the
+  audio editor" (FL's "Audio, into the Edison audio editor/recorder"): an empty editor records the audio input from
+  the moment the song plays and stops with it; LYNX starts the song.
 - Opens from: Playlist audio clip menu ("Edit in the audio editor"), Channel Rack sampler menu ("Edit the sample in
   the audio editor"), Browser file menu, mixer slot / add-slot menu ("Audio editor (record this insert)"), Edit menu
   ("Audio editor…") and the record menu ("Record into the audio editor…").
@@ -129,4 +132,5 @@ beat/pitch detection, trigger-note assignment, scripting, dual view, drag-out of
 
 ## Where I stopped / next steps
 
-- (in progress) Windows build, snapshots and LOOK.
+- Windows build, snapshots and LOOK checked by the coordinator on landing; record-dialog target added.
+- Left: the Edison features listed under "Not done" above.

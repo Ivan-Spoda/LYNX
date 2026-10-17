@@ -1575,6 +1575,8 @@ countries: br
 "What would you like to record?" = "O que você quer gravar?"
 "Don't ask again (right-click the record button for the recording filter)" = "Não perguntar de novo (clique direito no botão de gravar para o filtro de gravação)"
 "Audio, into the Playlist as an audio clip" = "Áudio, na Playlist como clipe de áudio"
+"Audio, into the audio editor" = "Áudio, no editor de áudio"
+"Records the audio input into a new audio editor while the song plays" = "Grava a entrada de áudio em um novo editor de áudio enquanto a música toca"
 "Arms the selected mixer insert; choose its audio input (microphone) if it has none" = "Arma o insert selecionado do mixer; escolha a entrada de áudio (microfone) se ele não tiver"
 "Notes, into the current pattern" = "Notas, no pattern atual"
 "Notes played on a MIDI keyboard or the PC keyboard" = "Notas tocadas num teclado MIDI ou no teclado do PC"
