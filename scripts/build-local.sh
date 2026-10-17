@@ -44,6 +44,8 @@ CORE="$CORE src/core/DirectWave.cpp"
 CORE="$CORE src/core/OggVorbis.cpp"
 # export options, MP3 encoding, plugin performance monitor, clip properties / arrangements (round 84)
 CORE="$CORE src/core/ExportOptions.cpp src/core/Mp3Encoder.cpp src/core/PluginMonitor.cpp src/core/PlaylistOps.cpp"
+# LYNX's Facet EQ and Apex Limiter (round 99)
+CORE="$CORE src/core/FacetEq.cpp src/core/ApexLimiter.cpp"
 # WavPack decoder (C)
 if [[ -z "${CC:-}" ]]; then
     case "$CXX" in
