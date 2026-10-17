@@ -233,6 +233,7 @@ private:
     std::array<float, maxMixerTracks * 2> lastTrackGain {}; // L/R gain of the previous block, for the ramp
     std::array<char, maxMixerTracks> trackActive {};        // the track output has sound in this block
     std::array<char, maxChannels> channelSilent {};          // channel skipped in this chunk (idle, no notes)
+    std::array<NoteMask, maxChannels> heldNotes {};          // keys held on each channel (effects that follow notes: LYNX Tune)
     static constexpr int chunkCapacity = 512;               // chunks processed at once
     std::vector<float> channelBuffers;                      // maxChannels * 2 * chunkCapacity
     std::vector<float> trackScratchBuffers;                 // maxMixerTracks * 2 * chunkCapacity

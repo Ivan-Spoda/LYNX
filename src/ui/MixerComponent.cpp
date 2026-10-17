@@ -1442,6 +1442,7 @@ const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, 
                                       EffectKind::delay,  EffectKind::reverb,       EffectKind::chorus,     EffectKind::filter,
                                       EffectKind::distortion, EffectKind::utility, EffectKind::volumeGate,
                                       EffectKind::pitchShift, EffectKind::freqShift, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::frequencySplitter, EffectKind::autoPan, EffectKind::vocoder, EffectKind::pitchCorrect,
+                                      EffectKind::lynxTune, // LYNX's own pitch corrector
                                       EffectKind::fruityLimiter, EffectKind::fruityCompressor,
                                       EffectKind::fruityWaveShaper, EffectKind::fruitySoftClipper,
                                       EffectKind::reeverb2, EffectKind::reeverb1,

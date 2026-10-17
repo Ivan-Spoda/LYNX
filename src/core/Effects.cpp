@@ -1,4 +1,5 @@
 #include "core/Effects.h"
+#include "core/LynxTune.h"
 
 #include "core/Effector.h"
 #include "core/PitcherDsp.h"
@@ -1856,6 +1857,13 @@ public:
                 c.effect->setPlaying (playing);
     }
 
+    void setHeldNotes (const NoteMask* channels, int count) noexcept override
+    {
+        for (auto& b : branches)
+            for (auto& c : b.chain)
+                c.effect->setHeldNotes (channels, count);
+    }
+
     void process (float* l, float* r, int n, const EffectParams&, double bpm) noexcept override
     {
         for (int done = 0; done < n; done += capacity)
@@ -2453,6 +2461,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::distructor: return distructorInfo;
         case EffectKind::newtone: return newtoneInfo;
         case EffectKind::newtime: return newtimeInfo;
+        case EffectKind::lynxTune: return lynxtune::info();
     }
     return eq;
 }
@@ -2815,6 +2824,9 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::newtime:
             return newtonefx::paramText (param, v);
 
+        case EffectKind::lynxTune:
+            return lynxtune::paramText (param, v);
+
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
 
@@ -2976,6 +2988,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::fruityFlanger: return flangerfx::make();
         case EffectKind::newtone:
         case EffectKind::newtime: return newtonefx::make (nullptr); // without its sample: a pass-through
+        case EffectKind::lynxTune: return lynxtune::make(); // LYNX's own pitch corrector (REA_rodada95)
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();
