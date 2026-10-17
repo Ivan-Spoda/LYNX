@@ -86,6 +86,7 @@ countries: br
 "FL Studio import" = "Importação do FL Studio"
 "Nothing to report (no .flp imported in this session, or everything was converted)." = "Nada a relatar (nenhum .flp importado nesta sessão, ou tudo foi convertido)."
 "About LYNX" = "Sobre o LYNX"
+"Built-in plugins (online list)..." = "Plugins nativos (lista online)..."
 "Lightweight C++/JUCE DAW with the FL Studio workflow.\nIndependent implementation: no Image-Line code was copied." = "DAW leve em C++/JUCE com o fluxo de trabalho do FL Studio.\nImplementação independente: nenhum código da Image-Line foi copiado."
 "The new language is applied when LYNX restarts." = "O novo idioma é aplicado quando o LYNX reinicia."
 "Restart now" = "Reiniciar agora"
