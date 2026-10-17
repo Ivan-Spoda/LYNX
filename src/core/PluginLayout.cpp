@@ -1457,14 +1457,14 @@ Layout ridgeStrip()
     v.push_back (dial (488, 158, 30, "Ratio", TR_NOOP ("Ratio")));
     v.push_back (dial (536, 158, 30, "Comp. threshold", TR_NOOP ("Thres")));
     v.push_back (dial (584, 158, 30, "Comp. release", TR_NOOP ("Release")));
-    v.push_back (dial (488, 216, 26, "Comp. mix", TR_NOOP ("Mix")));
-    v.push_back (toggle (512, 206, 100, 20, "Fast attack", TR_NOOP ("Fast attack")));
-    v.push_back (label (462, 246, 148, 14, TR_NOOP ("Gate / expander"), boxed));
-    v.push_back (dial (488, 280, 30, "Gate range", TR_NOOP ("Range")));
-    v.push_back (dial (536, 280, 30, "Gate threshold", TR_NOOP ("Thres")));
-    v.push_back (dial (584, 280, 30, "Gate release", TR_NOOP ("Release")));
-    v.push_back (toggle (462, 332, 70, 20, "Gate fast", TR_NOOP ("Fast")));
-    v.push_back (toggle (536, 332, 76, 20, "Expander", TR_NOOP ("Expand")));
+    v.push_back (dial (488, 214, 24, "Comp. mix", TR_NOOP ("Mix")));
+    v.push_back (toggle (512, 208, 100, 20, "Fast attack", TR_NOOP ("Fast attack")));
+    v.push_back (label (462, 252, 148, 14, TR_NOOP ("Gate / expander"), boxed));
+    v.push_back (dial (488, 286, 30, "Gate range", TR_NOOP ("Range")));
+    v.push_back (dial (536, 286, 30, "Gate threshold", TR_NOOP ("Thres")));
+    v.push_back (dial (584, 286, 30, "Gate release", TR_NOOP ("Release")));
+    v.push_back (toggle (462, 334, 70, 20, "Gate fast", TR_NOOP ("Fast")));
+    v.push_back (toggle (536, 334, 76, 20, "Expander", TR_NOOP ("Expand")));
 
     // master: trims, order, phase, dynamics in
     v.push_back (section (620, 4, 76, 352, TR_NOOP ("Master")));

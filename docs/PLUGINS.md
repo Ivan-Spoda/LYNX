@@ -173,7 +173,7 @@ Five effects of LYNX's own design for vocal and mix chains (REA round 96, [`docs
 They are **not** models or copies of any product: each fills the *role* of a familiar kind of studio processor and
 is written only from published DSP knowledge (textbooks, AES / DAFx papers and public circuit analyses of classic
 hardware). No third-party plugin was opened, run or analysed to make them, and no preset, name, graphic or manual
-text of one is used. All are on every mixer insert (*Insert*), report their latency before the first block,
+text of one is used. All are on every mixer insert (*Insert*), report their latency before the first block, have their own panels with live gain-reduction meters,
 oversample where they are nonlinear and never allocate on the audio thread.
 
 | LYNX engine | In the role of | What it is |

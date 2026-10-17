@@ -1101,11 +1101,11 @@ public:
                 return 0.9f + (float) (20.0 * std::log10 (std::max (1e-6, mag))) / 40.0f;
             }, inner, true);
         }
-        else if (id == "embercurve") // the style's transfer curve at the drive (input −1 .. 1)
+        else if (id == "embercurve") // the style's transfer curve at the drive (x = ±1: the peaks of a −12 dBFS sine)
         {
             grid (4, 4);
             const auto style = mixsuite::ember::styleOf (param01 ("Style"));
-            const auto drive = (float) std::pow (10.0, mixsuite::ember::driveDb (param01 ("Drive")) / 20.0);
+            const auto drive = 0.25f * (float) std::pow (10.0, mixsuite::ember::driveDb (param01 ("Drive")) / 20.0);
             const auto norm = 1.0f / juce::jmax (0.05f, std::abs (mixsuite::ember::shape (style, drive)));
             strokeCurve ([style, drive, norm] (float x) {
                 return 0.5f + 0.5f * juce::jlimit (-1.0f, 1.0f, mixsuite::ember::shape (style, (x * 2.0f - 1.0f) * drive) * norm);

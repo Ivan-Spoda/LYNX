@@ -126,8 +126,24 @@ transistor x/(1 + x⁴)^¼, fuzz (near-hard positive clip at 0.6, tanh(1.5x)/1.5
   −14.9 dB at 2x, −102.4 dB at 8x.
 
 ## 4. UI
-The editor windows use the plugin layout system of round 93 (`src/core/PluginLayout.*`, generated grids until the
-arrangements below land); pt-BR strings for every caption.
+Each effect has its own panel in round 93's layout system (`src/core/PluginLayout.cpp`, `plugui::ownLayoutKinds()`;
+`fl` = "" because they are not FL arrangements), drawn by the native editor (`src/ui/PluginEditors.cpp`) with
+LYNX's look and the same conventions as the FL-style pages: titled sections, knobs with caption and value read-out,
+the graph on top, binary switches as tabs or toggles. [design]
+- Ridge Strip (700 × 360): Filters | Equalizer (EQ + filter response graph from `ridge::responseDb`, LF / LMF / HMF /
+  HF columns: gain, freq, Q or bell; brown / black; EQ in) | Dynamics (static curve from `ridge::compressorCurveDb`,
+  compressor and gate GR meters, compressor and gate / expander rows) | Master (input, output, order, dyn in, phase).
+- Glow Leveler (420 × 220): GR meter across the top, big Gain and Peak reduction knobs, compress / limit, emphasis, mix.
+- Hush De-esser (460 × 200): detector graph (high-pass or band at the frequency), reduction meter, split / wide,
+  high / band, listen, lookahead; frequency, threshold, range, release, output.
+- Aether (380 × 262): Air and Exciter sections, mix and output strip.
+- Ember Saturator (520 × 230): transfer curve of the style at the drive, style buttons (2 × 2), Drive section, auto
+  gain, 2x / 4x / 8x.
+- Live meters: the rack publishes `Effect::controlOutput (0 / 1)` of the suite's slots into
+  `ProcessTimes::effectMeters` (relaxed atomics, cleared when the slot is bypassed or smart-disabled); the editor
+  repaints only the meter wells at 30 Hz.
+- pt-BR for every caption; `--plugui <dir>` also snapshots the five panels. Test `mixsuite_panels_place_every_parameter`:
+  every parameter has exactly one control, nothing overlaps or leaves the body, meters where expected. [TEST]
 
 ## 5. Verification
 - build-local with the FL Data dir after merging main 90f0cce: 1169845 checks, 0 failures.
@@ -136,9 +152,6 @@ arrangements below land); pt-BR strings for every caption.
   average load 13.0 %, max 34.8 %; heaviest unit an Ember Saturator at 2.2 % (peak 0.1 ms). [TEST]
 
 ## Where I stopped / next steps
-- Batch 1 (engines, tests, docs, website list) landed via tmp/coord/land.sh vocal96.
-- Batch 2 (not done): editor arrangements (sections, value read-outs, GR meter, pt-BR captions) on round 93's layout
-  system (src/core/PluginLayout.*, feature/plugui93), which is not on main yet; until then the five effects use
-  LYNX's generic knob editor. Batch 1 adds no tr() strings (engines live in src/core).
-- subst98 (plugin substitution table) and ffmeas99 (FabFilter measurements, tmp/r99) had nothing landed: register the
-  suite there / fit de-esser and saturator to the measurements once they land.
+- Landed via tmp/coord/land.sh vocal96: engines, tests, panels with live meters, pt-BR, docs, website list.
+- subst98 (plugin substitution table) and ffmeas99 (FabFilter measurements, tmp/r99) had nothing landed when this round
+  closed: register the suite in the substitution table / fit the de-esser and saturator to the measurements later.
