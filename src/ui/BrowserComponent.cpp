@@ -9,6 +9,7 @@
 #include "ui/Theme.h"
 #include "ui/ValueControl.h"
 #include "ui/WaveformView.h"
+#include "ui/AudioEditor.h"
 
 namespace lynx
 {
@@ -353,7 +354,10 @@ public:
         if (e.mods.isPopupMenu())
         {
             select (row, false);
-            browser.showFolderMenu (n.folder ? n.file : n.file.getParentDirectory());
+            if (n.folder)
+                browser.showFolderMenu (n.file);
+            else
+                browser.showFileMenu (n.file);
             return;
         }
 
@@ -947,6 +951,23 @@ void BrowserComponent::fileSelected (const juce::File& file, bool preview)
     strip->show (file, preview);
     tree->repaint();
     results->repaint();
+}
+
+void BrowserComponent::showFileMenu (const juce::File& file)
+{
+    if (! isAudio (file))
+    {
+        showFolderMenu (file.getParentDirectory());
+        return;
+    }
+    juce::PopupMenu menu;
+    menu.addSectionHeader (file.getFileName());
+    menu.addItem (tr ("Edit in the audio editor..."), [this, file] { openAudioEditor (engine, file); });
+    menu.addItem (tr ("Show in the file manager"), [file] { file.revealToUser(); });
+    menu.addSeparator();
+    menu.addItem (tr ("Collapse all folders"), [this] { tree->collapseAll(); });
+    menu.addItem (tr ("Add folder..."), [this] { addUserFolder(); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
 }
 
 void BrowserComponent::showFolderMenu (const juce::File& folder)

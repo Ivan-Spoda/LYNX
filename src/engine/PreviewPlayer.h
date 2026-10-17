@@ -12,8 +12,10 @@ class PreviewPlayer final : public juce::AudioProcessor
 public:
     PreviewPlayer();
 
-    // UI thread. nullptr to stop.
-    void play (std::shared_ptr<const SampleData> sample);
+    // UI thread. nullptr to stop. `loop`: plays it over and over (the audio editor's loop playback).
+    void play (std::shared_ptr<const SampleData> sample, bool loop = false, float gain = 0.8f);
+    // Any thread: the frame being played in the current sample, or -1 when nothing plays.
+    double getPlayPosition() const noexcept { return playPosition.load (std::memory_order_relaxed); }
 
     const juce::String getName() const override { return "Preview"; }
     void prepareToPlay (double sampleRate, int) override { deviceRate = sampleRate; }
@@ -37,6 +39,9 @@ private:
     juce::SpinLock lock;                       // the audio thread only tries (never waits)
     std::shared_ptr<const SampleData> pending; // swapped by the UI
     bool hasPending = false;
+    bool pendingLoop = false, looping = false;
+    float pendingGain = 0.8f, gain = 0.8f;
+    std::atomic<double> playPosition { -1.0 };
     std::shared_ptr<const SampleData> current;  // touched only by the audio thread
     std::shared_ptr<const SampleData> retired;  // released by the UI (audio never deallocates)
     double position = 0.0;

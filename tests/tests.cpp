@@ -5031,7 +5031,11 @@ TEST (mixer_mute_fades_instead_of_clicking)
     r.process (on.get(), false, 0.0, 256, l.data(), rr.data(), &live);
     CHECK (std::abs (l[255] - 0.5f) < 1e-3f);
     r.process (off.get(), false, 0.0, 256, l.data(), rr.data());
-    CHECK (l[0] > 0.45f && l[128] > 0.2f && l[128] < 0.3f && std::abs (l[255]) < 1e-6f); // ramp down to zero
+    // the fader glides down by 0.001 per sample, as FL's (REA_rodada85 §3): 1000 samples from 1 to 0
+    CHECK (l[0] > 0.49f && std::abs (l[128] - 0.5f * (1.0f - 0.129f)) < 1e-3f && std::abs (l[255] - 0.5f * (1.0f - 0.256f)) < 1e-3f);
+    for (int b = 0; b < 3; ++b)
+        r.process (off.get(), false, 0.0, 256, l.data(), rr.data());
+    CHECK (std::abs (l[255]) < 1e-6f); // down to zero after 1000 samples
     r.process (off.get(), false, 0.0, 256, l.data(), rr.data());
     CHECK (std::abs (l[0]) < 1e-9f);
 }
@@ -15120,7 +15124,73 @@ TEST (event_editor_playback)
     CHECK (lanesPattern == 1);
     CHECK (loop[0] < 1.0e-4f && loop[1] > 0.01f && loop[2] < 1.0e-4f && loop[3] > 0.01f);
 }
+TEST (flp_pattern_events_import)
+{
+    // REA_rodada85 §1: event 0xDF holds a pattern's events {u32 tick, u32 controlID, i32 raw value}, 0xD8 the values
+    // reset when the song starts; they become pattern event lanes in FL's normalised scale
+    FlpBuilder b;
+    b.u8 (0x40); b.u16 (0); // channel 0
+    b.u8 (0x15); b.u8 (0);  // sampler
+    b.u8 (0x41); b.u16 (1); // pattern 1: events only, no notes
+    auto rec = [] (std::vector<std::uint8_t>& v, std::uint32_t tick, std::uint32_t id, std::int32_t value) {
+        for (auto w : { tick, id, (std::uint32_t) value })
+            for (int i = 0; i < 4; ++i)
+                v.push_back ((std::uint8_t) (w >> (8 * i)));
+    };
+    std::vector<std::uint8_t> events;
+    rec (events, 0, 0x70001FC0u, 16000);  // Master volume: top
+    rec (events, 96, 0x70001FC0u, 8000);
+    rec (events, 96, 0x70001FC0u, 4000);  // same tick: the last one wins
+    rec (events, 0, 0x00000001u, 0);      // channel 0 pan: hard left
+    rec (events, 48, 0x00000001u, 12800); // hard right
+    rec (events, 0, 0x00008000u, 5);      // a plugin parameter of a sampler: scale unknown, skipped
+    b.data (0xDF, events);
+    std::vector<std::uint8_t> init;
+    rec (init, 0, 0x70001FC1u, -6400);    // Master pan reset to hard left at song start
+    b.data (0xD8, init);
+
+    const auto project = flp::parseProject (b.bytes);
+    CHECK (project.initControls.size() == 1);
+    const flp::Pattern* src = nullptr;
+    for (const auto& p : project.patterns)
+        if (p.index == 1)
+            src = &p;
+    CHECK (src != nullptr && src->controlEvents.size() == 6);
+
+    lynx::FlpImportReport report;
+    lynx::FlpImportOptions options;
+    options.report = &report;
+    const auto song = lynx::importFlp (project, options);
+    const lynx::PatternEvents* volume = nullptr;
+    const lynx::PatternEvents* pan = nullptr;
+    int lanes = 0;
+    for (const auto& p : song.patterns)
+        for (const auto& lane : p.events)
+        {
+            ++lanes;
+            if (lane.target.kind == lynx::AutomationTargetKind::mixerVolume && lane.target.index == 0)
+                volume = &lane;
+            if (lane.target.kind == lynx::AutomationTargetKind::channelPan)
+                pan = &lane;
+        }
+    CHECK (lanes == 2 && volume != nullptr && pan != nullptr);
+    if (volume != nullptr && volume->events.size() == 2)
+    {
+        CHECK (volume->events[0].tick == 0 && volume->events[1].tick == lynx::ppq);
+        CHECK (volume->events[0].value > volume->events[1].value); // 4000 (not 8000) is the one kept
+    }
+    else
+        CHECK (false);
+    if (pan != nullptr && pan->events.size() == 2)
+        CHECK (pan->events[0].value < 0.01f && pan->events[1].value > 0.99f && pan->events[1].tick == lynx::ppq / 2);
+    else
+        CHECK (false);
+    CHECK (report.converted["Pattern events"] == 2);
+    CHECK (song.targetValue ({ lynx::AutomationTargetKind::mixerPan, 0 }) < 0.01f);
+}
+
 #include "PrefsTests.inc"
+#include "AudioEditTests.inc"
 #include "InputTests.inc"
 
 TEST (level_audit_demo_imports_round89)
