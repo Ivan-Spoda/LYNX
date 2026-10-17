@@ -49,6 +49,7 @@ enum : std::uint32_t
     evAutomationPoints = 0xEA,  // header 21 B + 24 B per point + 112 B
     evMixerRoutes = 0xEB,       // one byte per destination track
     evChannelLevels = 0xDB,
+    evChannelLevelAdjust = 0xE5, // i32 panAdj, i32 volAdj, i32 ?, i32 modXAdj, i32 modYAdj
     evChannelColour = 0x80,
     evMixerInsertColour = 0x95, // u32 0x00BBGGRR; comes before the 0xEC that opens the insert
     evMixerSlotIndex = 0x62,    // u16: closes the effect slot described by the preceding events     // u32 0x00BBGGRR (also appears in mixer slots)     // i32 pan, i32 volume, i32 pitch (cents), ...
@@ -730,6 +731,18 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                         c.modY = readLE<std::int32_t> (e.data, 16);
                         c.filterType = readLE<std::int32_t> (e.data, 20);
                     }
+                }
+                break;
+
+            case evChannelLevelAdjust:
+                if (section == Section::channel && e.data.size() >= 8)
+                {
+                    auto& c = channel();
+                    // files older than 5.3.7 store these at 1/100 scale (REA_rodada3 §2)
+                    const auto scale = project.versionNumber != 0 && project.versionNumber < version (5, 3, 7) ? 100 : 1;
+                    c.hasLevelAdjust = true;
+                    c.panAdj = readLE<std::int32_t> (e.data, 0) * scale;
+                    c.volAdj = readLE<std::int32_t> (e.data, 4) * scale;
                 }
                 break;
 
