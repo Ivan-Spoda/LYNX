@@ -83,4 +83,6 @@ private:
 std::unique_ptr<Effect> make (const std::vector<std::uint8_t>& slotState);
 const char* globalName (int index) noexcept;
 std::string globalText (int index, float value);
+// A control (0…130) as the editor shows it; `s` gives the bank's context (tempo sync for the time, filter types)
+std::string controlText (const State& s, int index, int raw);
 } // namespace lynx::fldbank

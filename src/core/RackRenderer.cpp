@@ -215,10 +215,11 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                 && i < previous->song.mixer[t].effects.size() && i < previous->effects[t].size()
                 && previous->song.mixer[t].effects[i].kind == kind
                 && (kind != EffectKind::parallel || sameContainer (previous->song.mixer[t].effects[i], slots[i])) // children are built in
-                && previous->song.mixer[t].effects[i].state == slots[i].state
                 && previous->song.mixer[t].effects[i].samplePath == slots[i].samplePath
                 && (kind != EffectKind::plugin
-                    || (previous->song.mixer[t].effects[i].plugin.id == slots[i].plugin.id && previous->sampleRate == sampleRate)))
+                    || (previous->song.mixer[t].effects[i].plugin.id == slots[i].plugin.id && previous->sampleRate == sampleRate))
+                && (previous->song.mixer[t].effects[i].state == slots[i].state
+                    || (previous->sampleRate == sampleRate && previous->effects[t][i] != nullptr && previous->effects[t][i]->acceptState (slots[i].state))))
             {
                 state->effects[t].push_back (previous->effects[t][i]);
                 continue;
