@@ -365,6 +365,70 @@ TEST (flp_native_88_byte_playlist_items_with_clip_gain_and_fades)
     }
 }
 
+TEST (flp_channel_level_adjustments_and_stretched_clip_start)
+{
+    // FL 26.1 audio clip channel (gf92 follow-up): 0xE5 level adjustments and a time-stretched clip whose item
+    // start/end are in the sample's milliseconds ("Liwn Passar voz" ch5: 788 ms into a clip stretched by 1.0569)
+    FlpBuilder b (96);
+    b.ascii (0xC7, "26.1.3.5570");
+    b.u8 (0xA9); b.u32 (15);
+    b.u8 (0x9C); b.u32 (130000);
+    b.u8 (0x40); b.u16 (0);
+    b.u8 (0x15); b.u8 (4); // audio clip channel
+    b.utf16 (0xC4, u"C:\\nowhere\\clip.wav");
+    {
+        std::vector<std::uint8_t> levels (24, 0);
+        const std::int32_t pan = 6400, vol = 10000;
+        std::memcpy (&levels[0], &pan, 4);
+        std::memcpy (&levels[4], &vol, 4);
+        b.data (0xDB, levels);
+        std::vector<std::uint8_t> adjust (20, 0);
+        const std::int32_t panAdj = 3200, volAdj = 7286;
+        std::memcpy (&adjust[0], &panAdj, 4);
+        std::memcpy (&adjust[4], &volAdj, 4);
+        b.data (0xE5, adjust);
+        std::vector<std::uint8_t> params (0x98, 0);
+        const float time = 64.0f * 192.0f; // stretched to 64 beats (float: 0xA9 bit 0)
+        const double end = 1.0;
+        std::memcpy (&params[0x60], &time, 4);
+        std::memcpy (&params[0x88], &end, 8);
+        b.data (0xD7, params);
+    }
+    {
+        std::vector<std::uint8_t> r (88, 0);
+        const std::uint32_t pos = 0, len = 6144; // 64 beats
+        const std::uint16_t base = 20480, idx = 0, rv = 499;
+        const float offs[] = { 788.4615f, 788.4615f + 31218.92f }; // sample ms: 64 beats at 130 BPM x 1.056892
+        const float gain = 1.0f;
+        std::memcpy (&r[0], &pos, 4);
+        std::memcpy (&r[4], &base, 2);
+        std::memcpy (&r[6], &idx, 2);
+        std::memcpy (&r[8], &len, 4);
+        std::memcpy (&r[12], &rv, 2);
+        std::memcpy (&r[0x18], offs, 8);
+        std::memcpy (&r[0x34], &gain, 4);
+        b.data (0xE9, r);
+    }
+
+    const auto p = flp::parseProject (b.bytes);
+    CHECK (p.channels.size() == 1);
+    if (p.channels.size() != 1)
+        return;
+    CHECK (p.channels[0].hasLevelAdjust && p.channels[0].panAdj == 3200 && p.channels[0].volAdj == 7286);
+
+    const auto song = lynx::importFlp (p);
+    CHECK (song.channels.size() == 1 && song.playlist.size() == 1);
+    if (song.channels.size() != 1 || song.playlist.size() != 1)
+        return;
+    // gain = f(volume)·f(volAdj), pan = pan + panAdj
+    const auto expected = lynx::channelGain (10000.0f / 12800.0f) * lynx::channelGain (7286.0f / 12800.0f);
+    CHECK (std::abs (lynx::channelGain (song.channels[0].volume) - expected) < 1e-5f);
+    CHECK (std::abs (song.channels[0].pan - 0.5f) < 1e-6f);
+    // 788.46 sample ms / 1.056892 = 746.0 ms = 1.6164 beats into the clip
+    CHECK (song.channels[0].sampler.stretchBeats > 0.0f);
+    CHECK (std::llabs (song.playlist[0].offset - (std::int64_t) std::llround (1.61638 * lynx::ppq)) <= 1);
+}
+
 TEST (flp_parses_project_model)
 {
     FlpBuilder b (96);
