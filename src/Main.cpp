@@ -98,13 +98,16 @@ public:
 
         if (args.contains ("--rtstress"))
         {
-            // LYNX.exe --rtstress project.(flp|lynx) report.txt [seconds] [--buffer N] [--no-window]: the real app (window, audio device)
-            // plays the project and reports the callbacks that missed their deadline (REA round 87)
+            // LYNX.exe --rtstress project.(flp|lynx) report.txt [seconds] [--buffer N] [--type "driver type"] [--device "output"]
+            // [--no-window]: the real app (window, audio device) plays the project and reports the callbacks that missed their
+            // deadline (REA round 87); --type/--device pick another driver for this run only (round 97)
             const auto i = args.indexOf ("--rtstress");
             const auto seconds = args[i + 3].getDoubleValue();
             const auto buffer = args.contains ("--buffer") ? args[args.indexOf ("--buffer") + 1].getIntValue() : 0;
             juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
-            runRealtimeStress (juce::File (args[i + 1].unquoted()), juce::File (args[i + 2].unquoted()), seconds > 0.0 ? seconds : 30.0, buffer);
+            const auto option = [&args] (const char* name) { return args.contains (name) ? args[args.indexOf (name) + 1].unquoted() : juce::String(); };
+            runRealtimeStress (juce::File (args[i + 1].unquoted()), juce::File (args[i + 2].unquoted()), seconds > 0.0 ? seconds : 30.0, buffer,
+                               option ("--type"), option ("--device"));
             return;
         }
 
@@ -301,7 +304,9 @@ public:
                         step ("  in" + juce::String (c + 1) + "=" + names[c]);
                     inputs.setRange (0, juce::jmin (64, names.size()), true);
                 }
-                const auto error = device->open (inputs, outputs, rate, device->getDefaultBufferSize());
+                // --buffer N: ask for that block size (REA round 97 latency survey); default: the driver's default
+                const auto wantedBlock = args.contains ("--buffer") ? args[args.indexOf ("--buffer") + 1].getIntValue() : 0;
+                const auto error = device->open (inputs, outputs, rate, wantedBlock > 0 ? wantedBlock : device->getDefaultBufferSize());
                 if (error.isNotEmpty())
                     step ("error=" + error);
                 else
@@ -1266,16 +1271,27 @@ private:
 
     // --rtstress: opens the project in the normal window with the saved audio device, plays it from the start for
     // `seconds` and writes the real-time statistics (deadline misses, late device calls, load histogram, heaviest units)
-    void runRealtimeStress (const juce::File& project, const juce::File& report, double seconds, int bufferSize)
+    void runRealtimeStress (const juce::File& project, const juce::File& report, double seconds, int bufferSize,
+                            const juce::String& deviceType, const juce::String& deviceName)
     {
         startupOptions = lynx::StartupOptions::load();
         engine = std::make_unique<lynx::AudioEngine>();
         crashEngine = engine.get();
-        if (bufferSize > 0)
+        // the user's saved device stays as it was: this run's choices are undone before quitting
+        savedDeviceState = engine->getDeviceManager().createStateXml();
+        auto& devices = engine->getDeviceManager();
+        if (deviceType.isNotEmpty() && devices.getCurrentAudioDeviceType() != deviceType)
+            devices.setCurrentAudioDeviceType (deviceType, true);
+        if (bufferSize > 0 || deviceName.isNotEmpty())
         {
-            auto setup = engine->getDeviceManager().getAudioDeviceSetup();
-            setup.bufferSize = bufferSize;
-            engine->getDeviceManager().setAudioDeviceSetup (setup, true);
+            auto setup = devices.getAudioDeviceSetup();
+            if (bufferSize > 0)
+                setup.bufferSize = bufferSize;
+            if (deviceName.isNotEmpty())
+                setup.outputDeviceName = deviceName;
+            const auto error = devices.setAudioDeviceSetup (setup, true);
+            if (error.isNotEmpty())
+                report.replaceWithText ("device error: " + error + "\n");
         }
         createMainWindow();
         if (! juce::JUCEApplication::getCommandLineParameters().contains ("--no-window")) // --no-window: is it the UI?
@@ -1296,6 +1312,7 @@ private:
         if (! ok)
         {
             report.replaceWithText ("project: " + project.getFullPathName() + "\nresult=ERROR " + error + "\n");
+            restoreSavedDeviceState();
             setApplicationReturnValue (1);
             quit();
             return;
@@ -1332,6 +1349,7 @@ private:
                 text << "\n";
                 text << "result=" << (s.callbacks == 0 ? "ERROR no audio callbacks" : s.overBudget == 0 && s.lateCalls == 0 ? "OK" : "GLITCHES") << "\n";
                 report.replaceWithText (text);
+                restoreSavedDeviceState();
                 setApplicationReturnValue (s.callbacks == 0 ? 1 : 0);
                 quit();
             });
@@ -2452,6 +2470,12 @@ private:
 
     lynx::theme::LookAndFeel lookAndFeel;
     std::unique_ptr<lynx::AudioEngine> engine;
+    std::unique_ptr<juce::XmlElement> savedDeviceState; // --rtstress: the user's device before this run's --type/--buffer
+    void restoreSavedDeviceState()
+    {
+        if (engine != nullptr)
+            engine->restoreAudioDeviceState (savedDeviceState.get());
+    }
     std::unique_ptr<MainWindow> mainWindow;
     std::unique_ptr<lynx::SplashScreen> splash;
     lynx::StartupOptions startupOptions;

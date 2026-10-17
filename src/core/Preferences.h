@@ -45,6 +45,28 @@ double bufferLatencyMs (int bufferSamples, double sampleRate);
 // is already larger; the largest offered one if none reaches it. 0 when nothing is offered.
 int safeBufferSize (const std::vector<int>& available, int current, double sampleRate);
 
+// What kind of driver a JUCE device type name is (REA round 97). Windows offers three WASAPI modes:
+//  shared        - other programs keep their sound; Windows mixes every stream at its engine period (10 ms on most
+//                  devices), so a smaller buffer cannot lower the latency, it only adds bursts;
+//  lowLatency    - shared, but asks Windows for a shorter engine period (IAudioClient3); only drivers that support it
+//                  go below 10 ms (many USB class-driver devices stay at 480 samples);
+//  exclusive     - LYNX alone on the device (other programs go silent); the device's own minimum period (often 3 ms).
+enum class DriverKind
+{
+    wasapiShared,
+    wasapiLowLatency,
+    wasapiExclusive,
+    directSound,
+    asio,
+    other
+};
+DriverKind driverKind (const std::string& typeName);
+
+// The buffer sizes worth offering for a device of that kind. In classic shared mode the sizes below the engine period
+// `devicePeriod` (the device's default buffer) are dropped: Windows still mixes in whole periods, so they would not
+// lower the latency and only risk clicks. Other kinds (low-latency mode lists real engine periods): `offered` unchanged.
+std::vector<int> usableBufferSizes (DriverKind kind, const std::vector<int>& offered, int devicePeriod);
+
 // --- MIDI (MIDI page) -------------------------------------------------------------------------------------------
 // How a played note's velocity reaches the instrument.
 enum class VelocityCurve
