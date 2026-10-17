@@ -10,6 +10,7 @@
 
 #include "core/Effects.h"
 #include "engine/Text.h"
+#include "ui/FacetEqEditor.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/PluginEditors.h"
 #include "ui/PluginWindow.h"
@@ -1760,7 +1761,7 @@ int EffectsPanel::knobAt (juce::Point<int> p) const
     if (s == nullptr || selectedSlot < 0 || selectedSlot >= (int) s->size())
         return -1;
 
-    if ((*s)[(std::size_t) selectedSlot].kind == EffectKind::parametricEq)
+    if ((*s)[(std::size_t) selectedSlot].kind == EffectKind::parametricEq || (*s)[(std::size_t) selectedSlot].kind == EffectKind::facetEq)
         return -1; // edited in its own window
 
     const auto count = shownParams ((*s)[(std::size_t) selectedSlot]);
@@ -1959,6 +1960,15 @@ void EffectsPanel::paint (juce::Graphics& g)
         drawButton (button, tr ("Open parametric EQ"), Icon::settings);
         const auto curve = juce::Rectangle<int> (button.getX(), button.getBottom() + 10, button.getWidth(), 120).toFloat();
         drawParametricEqCurve (g, curve, slot.params, juce::jmax (8000.0, engine.getTransport().sampleRate.load()), slot.enabled);
+        return;
+    }
+
+    if (slot.kind == EffectKind::facetEq)
+    {
+        const auto button = pluginButtonBounds();
+        drawButton (button, tr ("Open Facet EQ"), Icon::settings);
+        const auto curve = juce::Rectangle<int> (button.getX(), button.getBottom() + 10, button.getWidth(), 120).toFloat();
+        drawFacetEqCurve (g, curve, slot.params, juce::jmax (8000.0, engine.getTransport().sampleRate.load()), slot.enabled);
         return;
     }
 
@@ -2210,6 +2220,13 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
         && pluginButtonBounds().withHeight (170).contains (e.getPosition()))
     {
         ParametricEqWindows::open (engine, track, selectedSlot);
+        return;
+    }
+
+    if (selectedSlot >= 0 && selectedSlot < (int) s->size() && (*s)[(std::size_t) selectedSlot].kind == EffectKind::facetEq
+        && pluginButtonBounds().withHeight (170).contains (e.getPosition()))
+    {
+        FacetEqWindows::open (engine, track, selectedSlot);
         return;
     }
 
@@ -2850,7 +2867,7 @@ void EffectsPanel::showSlotMenu (int slot)
                               [assign, t] { assign (t); });
         menu.addSubMenu (title, side);
     };
-    if (kind == EffectKind::compressor || kind == EffectKind::fruityLimiter || kind == EffectKind::fruityCompressor)
+    if (kind == EffectKind::compressor || kind == EffectKind::fruityLimiter || kind == EffectKind::fruityCompressor || kind == EffectKind::facetEq)
         sideMenu (tr ("Sidechain from"), false);
     if (kind == EffectKind::vocoder || kind == EffectKind::vocodex)
     {
