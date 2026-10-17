@@ -2302,7 +2302,6 @@ countries: br
 "Mod depth" = "Prof. mod."
 "Spatial EQ" = "EQ espacial"
 "In gain" = "Ganho ent."
-"Out gain" = "Ganho saída"
 "Noise gain" = "Ruído"
 "Feedback mix" = "Mix do feedback"
 "1x|1/2x" = "1x|1/2x"
