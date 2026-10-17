@@ -81,7 +81,49 @@ demo projects decodes and writes back byte-identical (test `real FLPs`), plus sy
 
 ## 4. Scoreboard clusters (round 80 FL renders vs LYNX)
 
-(filled in from the demo-song analysis below)
+Whole songs were a median −1.8 dB RMS quieter in LYNX (peaks equal: both hit the master ceiling). Per-channel stems
+(renderwav solo), synthetic FL projects rendered by `FL64.exe /R /Ewav` (in `C:\Users\kauan\lynx-test\r89\{syn,vol,mix}`,
+outside the repo) and env-gated experiments in a private source copy gave these causes (dB = LYNX − FL):
+
+1. **Routes to inserts ≥ 100 without a level record were dropped** (`FlpImport.cpp`, mixer routes) **[EXEC]**.
+   LYNX gave them level 0 (an FL 11 template rule). In FL 12.5's own render test with insert 1 routed only to
+   insert 100 and its level record removed, FL plays it at full level (−19.33 dB, as the original) and LYNX played
+   silence. Fixed for files saved by FL 12 and newer; FL 11 and older keep the old rule (Synth_dfr, FL 11.1,
+   unchanged). Square a Saw – Lightning −14.7 → +3.5 dB, Oxygen −4.8 → +0.1 dB. FL's "Advanced" templates (20.5+)
+   route inserts to bus tracks 117…125 this way, so a user project started from them came out nearly silent.
+   The exact version boundary between the two rules is **not confirmed**.
+2. **Playlist audio clips 5.2 dB too quiet** (`Instruments.cpp`, clip voices) **[EXEC]**: with the clip on an empty
+   insert and no stretch, FL is a constant +5.2 dB louder at channel volumes 2500/5000/7500 and hard-left pan, i.e. FL
+   plays a clip at unity at the default channel volume (10000/12800): clip voices are now scaled by
+   1/channelGain(10000/12800) = 1.8149. Generators and samplers already matched. Ookay – Thief −3.5 → −0.4 dB,
+   Chan Gibbons −2.5 → −0.7, Mic Check −1.2 → −0.3, Vocodex demo −0.9 → +0.5, Exploding Chips −4.8 → −2.7.
+3. **Master Maximus with the v14+ "linear-phase" band split fell back to the generic limiter** (`HarmlessFx.cpp`)
+   **[EXEC on the song]**: the exact engine with its normal crossover is far closer (LollieVox −4.96 → +0.47 dB,
+   flat across bands). The linear-phase split itself is still **not decoded** (`MaximusPreset::linearPhaseSplit`).
+4. **Fruity effects saved inside Fruity Wrapper as VST2 lost their settings** (`FlpImport.cpp`, `wrappedFruityState`)
+   **[DATA]**: old FL saved its own effects as VST2 plugins; the wrapper keeps their parameters as 0…1 floats (§2).
+   Fruity Compressor's 6 controls map linearly onto the native ranges — the untouched instances in RawFL
+   (`1.0, 0.02, 0.5, 0.038, 0.05, 0`) land exactly on the native defaults (0, 10, 0, 150, 200, 0) — so the exact
+   engine now gets the saved threshold/ratio/gain (up to +15 dB makeup on RawFL's buses) /attack/release/type.
+   The lookahead flag has no VST2 parameter (off; not confirmed). Wrapped Flanger/Chorus/Fast LP stay at defaults.
+5. Unsupported generators (FLEX) and missing third-party instruments play the internal synth: unrelated level
+   (Purps −5.1 dB, 808 bass on FLEX). Not changed; now reported loudly for third-party plugins (§1).
+6. FL's time-stretch of drum loops keeps every transient when compressing time (≈ +3.3 dB vs LYNX's stretch, which
+   keeps the RMS and drops hits): algorithm difference, not fixed.
+7. Layer channels (event 0x5E children) don't trigger their children: forwarding notes gave mixed results (Asher +1.2,
+   RawFL −0.2 dB); the layer's own level/options are not confirmed; not landed.
+
+Already exact **[EXEC]**: channel volume and pan laws for generators and samplers, mixer fader law, insert pan, master
+volume/pan, stereo separation.
+
+Measurement-tool gaps (renderwav, not the app; the round 80 scoreboard understates LYNX on some songs): no
+stretched-sample provider ("keep pitch" clips play unstretched), main's `tools/WavReader.h` can't read FL's
+Ogg-in-WAV pack samples, no mp3/flac reading (RawFL, Bien Duro, DEDZII use them).
+
+With 1–3 (+ the stretch provider in the tool) the demo-song median moves from about −1.8 to about −0.6 dB. Still
+clearly quieter: Purps (FLEX), RawFL (cause 4, now fixed for the compressors; not re-measured), Exploding Chips /
+Pumping objects (cause 6 and ≈ −3 dB on their Harmor/Harmless channels, not investigated), Create a chord
+progression (−3.6) and Sytrus Essentials (−2.2), not investigated.
 
 ## Where I stopped / next steps
 

@@ -1,5 +1,6 @@
 // Core tests (no JUCE). Usage: lynx_tests [folder-with-flp-files]
 
+#include <optional>
 #include <atomic>
 #include <chrono>
 #include <random>
@@ -4288,7 +4289,8 @@ TEST (audio_clips_trigger_cut_and_resume)
 
     // first block already playing mid-clip
     r.process (state.get(), true, 1.5 * lynx::ppq, 256, l.data(), rr.data());
-    CHECK (std::abs (l[0] - 0.75f) < 0.001f);
+    const auto unity = 1.0f / lynx::channelGain (10000.0f / 12800.0f); // clip level at 100% channel volume (REA_rodada89 §4.2)
+    CHECK (std::abs (l[0] - 0.75f * unity) < 0.002f);
 
     // the clip ends at beat 3: after the short fade, silence (the sample would still have audio)
     double tick = 3.0 * lynx::ppq - 10 * tps;
@@ -5852,10 +5854,41 @@ TEST (audio_clip_fades_and_gain)
         all.insert (all.end(), l.begin(), l.end());
     }
 
-    CHECK (all[100] < 0.01f);                            // fade-in start
-    CHECK (std::abs (all[12000] - 0.25f) < 0.02f);       // fade-in midpoint: half of 0.5
-    CHECK (std::abs (all[48000] - 0.5f) < 0.01f);        // body: the clip gain
-    CHECK (std::abs (all[96000 - 12000] - 0.25f) < 0.02f); // fade-out midpoint
+    // FL plays a clip at unity at the default channel volume (78%): at 100% it is that much louder (REA_rodada89 §4.2)
+    const auto unity = 1.0f / lynx::channelGain (10000.0f / 12800.0f);
+    CHECK (all[100] < 0.01f);                                       // fade-in start
+    CHECK (std::abs (all[12000] - 0.25f * unity) < 0.02f);          // fade-in midpoint: half of 0.5
+    CHECK (std::abs (all[48000] - 0.5f * unity) < 0.01f);           // body: the clip gain
+    CHECK (std::abs (all[96000 - 12000] - 0.25f * unity) < 0.02f);  // fade-out midpoint
+}
+
+TEST (audio_clip_unity_at_fl_default_volume)
+{
+    // a Playlist audio clip at FL's default channel volume (10000/12800) and centre pan plays its sample unchanged
+    auto dc = std::make_shared<lynx::SampleData>();
+    dc->left.assign (48000, 0.5f);
+    auto clip = lynx::makeInstrument (lynx::InstrumentKind::audioClip, dc);
+    clip->prepare (48000.0);
+    lynx::ChannelDef c;
+    c.instrument = lynx::InstrumentKind::audioClip;
+    c.volume = 10000.0f / 12800.0f;
+    clip->configure (c, 120.0);
+    clip->noteOn (60, 1.0f);
+    std::vector<float> l (4800, 0.0f), r (4800, 0.0f);
+    const auto g = lynx::channelGain (c.volume);
+    clip->render (l.data(), r.data(), 4800, g, g);
+    CHECK (std::abs (l[2400] - 0.5f) < 1.0e-3f && std::abs (r[2400] - 0.5f) < 1.0e-3f);
+
+    // a sampler channel (pattern notes) keeps the channel volume curve as it was
+    auto sampler = lynx::makeInstrument (lynx::InstrumentKind::sampler, dc);
+    sampler->prepare (48000.0);
+    c.instrument = lynx::InstrumentKind::sampler;
+    sampler->configure (c, 120.0);
+    sampler->noteOn (60, 1.0f);
+    std::fill (l.begin(), l.end(), 0.0f);
+    std::fill (r.begin(), r.end(), 0.0f);
+    sampler->render (l.data(), r.data(), 4800, g, g);
+    CHECK (std::abs (l[2400] - 0.5f * g) < 0.02f);
 }
 
 TEST (slicer_detects_hits_and_plays_slices_by_key)
@@ -14746,3 +14779,49 @@ TEST (event_editor_playback)
     CHECK (loop[0] < 1.0e-4f && loop[1] > 0.01f && loop[2] < 1.0e-4f && loop[3] > 0.01f);
 }
 #include "PrefsTests.inc"
+
+TEST (level_audit_demo_imports_round89)
+{
+    // REA_rodada89 §4: two demo projects whose FL renders were much louder than LYNX's
+    if (realFlpDir.empty())
+        return;
+    auto load = [] (const std::filesystem::path& path) -> std::optional<lynx::Song> {
+        if (! std::filesystem::exists (path))
+            return std::nullopt;
+        std::ifstream in (path, std::ios::binary);
+        const std::vector<std::uint8_t> file ((std::istreambuf_iterator<char> (in)), {});
+        return lynx::importFlp (flp::parseProject (file));
+    };
+    const auto demos = std::filesystem::path (realFlpDir) / "Demo projects";
+
+    // FL 12+: a route to insert 100+ without a level record plays at 100% (the percussion bus of "Lightning")
+    if (const auto song = load (demos / "Product demos" / "Square a Saw - Lightning (VEELA Vocals Resynthesized).flp"))
+    {
+        int highRoutes = 0, highAtZero = 0;
+        for (const auto& t : song->mixer)
+            for (const auto& send : t.sends)
+                if (send.target >= 100)
+                {
+                    ++highRoutes;
+                    highAtZero += send.level <= 0.0f;
+                }
+        std::printf ("  Lightning: %d routes to inserts 100+, %d at level 0\n", highRoutes, highAtZero);
+        CHECK (highRoutes > 0 && highAtZero == 0);
+    }
+
+    // Fruity Compressors FL saved as VST2 inside Fruity Wrapper (RawFL): the exact engine with the saved controls
+    if (const auto song = load (demos / "Visual" / "ZGameEditor Visualizer" / "Treben - Gimbal and Sinan - RawFL.flp"))
+    {
+        int compressors = 0, withSettings = 0;
+        for (const auto& t : song->mixer)
+            for (const auto& fx : t.effects)
+                if (fx.kind == lynx::EffectKind::fruityCompressor)
+                {
+                    ++compressors;
+                    const auto defaults = lynx::makeEffectSlot (lynx::EffectKind::fruityCompressor);
+                    withSettings += fx.params != defaults.params;
+                }
+        std::printf ("  RawFL: %d wrapped Fruity Compressors on the exact engine, %d with their own settings\n", compressors, withSettings);
+        CHECK (compressors >= 10 && withSettings >= 8);
+    }
+}
