@@ -146,6 +146,44 @@ std::optional<EffectKind> effectForFlPlugin (const std::string& name)
     return std::nullopt;
 }
 
+// Range of an FL parameter's raw value (what FL's parameter setter stores and what pattern events 0xDF / 0xD8 hold),
+// so that (raw − lo) / (hi − lo) is FL's normalised value, the one automation clips carry (REA_rodada85 §2).
+// `plugin` = the FL plugin of the target slot or channel. Unknown ranges: no value.
+std::optional<std::pair<int, int>> flRawRange (flp::ControlId id, const std::string& plugin)
+{
+    const auto p = id.param();
+
+    if (id.isChannel())
+    {
+        if (p == 0 || p == 1) // volume 0..12800 (10000 = default), pan 0..12800 (6400 = centre)
+            return std::pair { 0, 12800 };
+    }
+    else if (id.isMixer())
+    {
+        if (p == flp::ControlId::mixerVolume)
+            return std::pair { 0, 16000 };
+        if (p == flp::ControlId::mixerPan)
+            return std::pair { -6400, 6400 };
+        if (p == 0x1F01) // slot dry/wet
+            return std::pair { 0, 12800 };
+    }
+
+    if (p < flp::ControlId::pluginParamBase)
+        return std::nullopt;
+
+    // plugin parameters: the plugin's own control integer (FL hands it to ProcessParam unscaled)
+    const auto k = p - flp::ControlId::pluginParamBase;
+    if (plugin == "Fruity Reeverb 2" && k < reeverb2ParamCount)
+        return std::pair { reeverb2::ranges[(std::size_t) k].lo, reeverb2::ranges[(std::size_t) k].hi };
+    if (plugin == "Fruity Reeverb" && k < reeverb1ParamCount)
+        return std::pair { 0, reeverb1::maxima[(std::size_t) k] };
+    if (plugin == "Fruity Convolver" && k < convolverParamCount)
+        return std::pair { convolver::ranges[(std::size_t) k].lo, convolver::ranges[(std::size_t) k].hi };
+    if (plugin == "LuxeVerb" && k < luxeVerbControlCount)
+        return std::pair { luxeverb::ranges[(std::size_t) k].lo, luxeverb::ranges[(std::size_t) k].hi };
+    return std::nullopt;
+}
+
 AutomationTarget automationTargetFor (flp::ControlId id, const std::map<int, int>& channelMap, int mixerTracks)
 {
     AutomationTarget t;
@@ -2090,7 +2128,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
         p.sortNotes();
 
-        if (! p.notes.empty())
+        if (! p.notes.empty() || ! src.controlEvents.empty()) // a pattern of events only still plays them
         {
             patternMap[src.index] = (int) song.patterns.size();
             song.patterns.push_back (std::move (p));
@@ -2166,6 +2204,104 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         }
         return target;
     };
+
+    // Pattern events (.flp 0xDF, REA_rodada85): per pattern and target, FL's raw values held from their tick on.
+    // They become the pattern's event lanes (round 83) in FL's normalised scale, then our target's (valueMap).
+    {
+        auto pluginOf = [&] (flp::ControlId id) -> std::string {
+            if (id.isChannel())
+            {
+                for (const auto& c : project.channels)
+                    if (c.index == id.channel())
+                        return c.pluginName;
+            }
+            else if (id.isMixer())
+            {
+                const auto found = effectSlotMap.find ({ id.track(), id.slot() });
+                if (found != effectSlotMap.end())
+                    return found->second.second;
+            }
+            return {};
+        };
+        auto note = [&] (const std::string& what) {
+            if (options.report != nullptr)
+                ++options.report->unsupported["Pattern events: " + what];
+        };
+        // FL value → our 0..1 for a target (nothing when the target or its scale is not reproduced)
+        auto convertor = [&] (flp::ControlId id, AutomationTarget& target) -> std::function<float (std::int32_t)> {
+            std::function<float (float)> valueMap;
+            target = resolveTarget (id, valueMap);
+            const auto plugin = pluginOf (id);
+            if (target.kind == AutomationTargetKind::none || target.kind == AutomationTargetKind::tempo)
+            {
+                note ("target not reproduced" + (plugin.empty() ? std::string() : " (" + plugin + ")"));
+                return {};
+            }
+            const auto range = flRawRange (id, plugin);
+            if (! range || range->second <= range->first)
+            {
+                note ("value scale not known (" + (plugin.empty() ? std::string ("FL parameter") : plugin) + ")");
+                return {};
+            }
+            const auto lo = (double) range->first, span = (double) (range->second - range->first);
+            return [lo, span, valueMap] (std::int32_t raw) {
+                auto v = (float) std::clamp (((double) raw - lo) / span, 0.0, 1.0);
+                return valueMap ? std::clamp (valueMap (v), 0.0f, 1.0f) : v;
+            };
+        };
+
+        for (const auto& src : project.patterns)
+        {
+            const auto pm = patternMap.find (src.index);
+            if (src.controlEvents.empty() || pm == patternMap.end())
+                continue;
+
+            auto& pattern = song.patterns[(std::size_t) pm->second];
+            std::vector<std::uint32_t> ids; // targets in order of first appearance
+            for (const auto& e : src.controlEvents)
+                if (std::find (ids.begin(), ids.end(), e.id.raw) == ids.end())
+                    ids.push_back (e.id.raw);
+
+            for (const auto raw : ids)
+            {
+                PatternEvents lane;
+                const auto convert = convertor (flp::ControlId { raw }, lane.target);
+                if (! convert)
+                    continue;
+
+                for (const auto& e : src.controlEvents)
+                    if (e.id.raw == raw)
+                        lane.events.push_back ({ rescale ((std::int64_t) e.tick), convert (e.value) });
+
+                // one event per tick: the last one of a tick wins (FL applies them in order)
+                std::stable_sort (lane.events.begin(), lane.events.end(),
+                                  [] (const PatternEvent& a, const PatternEvent& b) { return a.tick < b.tick; });
+                std::vector<PatternEvent> kept;
+                for (const auto& e : lane.events)
+                    if (! kept.empty() && kept.back().tick == e.tick)
+                        kept.back() = e;
+                    else
+                        kept.push_back (e);
+                lane.events = std::move (kept);
+
+                // a target already driven by a lane of this pattern: the later lane wins, like FL's single target
+                pattern.events.erase (std::remove_if (pattern.events.begin(), pattern.events.end(),
+                                                      [&] (const PatternEvents& l) { return l.target == lane.target; }),
+                                      pattern.events.end());
+                pattern.events.push_back (std::move (lane));
+                if (options.report != nullptr)
+                    ++options.report->converted["Pattern events"];
+            }
+        }
+
+        // 0xD8: values FL resets when the song starts — the targets' own values before any pattern event
+        for (const auto& c : project.initControls)
+        {
+            AutomationTarget target;
+            if (const auto convert = convertor (c.id, target))
+                song.setTargetValue (target, convert (c.value));
+        }
+    }
 
     // Automation clips: one Automation per FL automation channel, with the target from the 0xE3 link.
     std::map<int, int> automationMap; // FL channel -> index into song.automations

@@ -165,6 +165,16 @@ struct ControlValue
     std::int32_t value = 0;
 };
 
+// A pattern event (event 0xDF, 12 B records {u32 tick, u32 controlID, i32 value}): the target's raw value
+// (what FL's parameter setter stores, e.g. 0..12800 for a channel volume), held from `tick` (file PPQ) on.
+// Same record for the "initialized controls" of event 0xD8 (reset when the song starts). REA_rodada85 §1.
+struct ControlEvent
+{
+    std::uint32_t tick = 0;
+    ControlId id;
+    std::int32_t value = 0;
+};
+
 // Links an automation clip (channel) to a parameter (event 0xE3).
 struct AutomationLink
 {
@@ -208,6 +218,7 @@ struct Pattern
     std::string name;
     std::optional<std::uint32_t> colour; // 0xRRGGBB (stored in the file as 0x00BBGGRR)
     std::vector<Note> notes;
+    std::vector<ControlEvent> controlEvents; // event 0xDF: pattern events (event editor), file order
 };
 
 struct PlaylistItem
@@ -293,6 +304,7 @@ struct Project
     std::vector<Arrangement> arrangements;
     std::vector<MixerInsert> mixer;
     std::vector<ControlValue> controls;       // volumes, pans, send levels...
+    std::vector<ControlEvent> initControls;   // event 0xD8: values reset when the song starts
     std::vector<AutomationLink> automationLinks;
     std::vector<ControllerLink> controllerLinks;
 
