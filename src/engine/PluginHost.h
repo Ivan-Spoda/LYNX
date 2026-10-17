@@ -11,6 +11,7 @@
 
 #include "core/Effects.h"
 #include "core/FlPluginDb.h"
+#include "core/PluginSubstitutes.h"
 #include "core/Instruments.h"
 
 namespace lynx
@@ -139,8 +140,19 @@ public:
     // Matched channels become plugin channels; unmatched effect slots are dropped. Returns how many were matched.
     // `matched` gets one "name → file (how)" line per plugin found.
     // `withoutState` gets the plugins found whose saved settings couldn't be carried over (VST2 <-> VST3 swap).
+    // Effect slots whose plugin is missing become their LYNX substitute (core/PluginSubstitutes.h) when
+    // pluginSubstitutesEnabled(); `substituted` gets one "name -> LYNX effect" line each (they are not in `missing`).
     int adoptFlPlugins (Song& song, juce::StringArray* missing = nullptr, juce::StringArray* matched = nullptr,
-                        juce::StringArray* withoutState = nullptr);
+                        juce::StringArray* withoutState = nullptr, juce::StringArray* substituted = nullptr);
+
+    // A .lynx song just loaded: substitute slots whose original plugin is now installed go back to it (always: the
+    // original is preferred); plugin effect slots whose plugin isn't installed get their LYNX substitute (when
+    // pluginSubstitutesEnabled()). Returns how many slots changed; `restored` / `substituted` count each kind.
+    int applySubstitutes (Song& song, int* restored = nullptr, int* substituted = nullptr);
+
+    // What a substitute is matched on for a saved reference: its .flp record when it has one, else the format, name
+    // and (decoded) state of the LYNX reference.
+    static PluginIdentity identityOf (const PluginRef& ref);
     std::optional<juce::PluginDescription> findForeign (const ForeignPlugin& plugin, bool instrument, juce::String* how = nullptr);
 
     // Plugin files worth a targeted scan so a project's plugins can be found: for each plugin not known yet, the
@@ -181,6 +193,10 @@ private:
     mutable std::mutex stateLock;
     ScanState state;
 };
+
+// Settings → "Substitute missing plugins with LYNX equivalents" (default on; %APPDATA%\LYNX\substitutes.txt).
+bool pluginSubstitutesEnabled();
+void setPluginSubstitutesEnabled (bool enabled);
 
 // Stereo layout (if the plugin accepts it), rate and block size; calls prepareToPlay.
 void preparePlugin (juce::AudioPluginInstance& plugin, double sampleRate, int blockSize);

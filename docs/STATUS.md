@@ -62,6 +62,10 @@ exports the 30 demo projects shipped with FL Studio 2026.
   parallel container.
 - **Plugins:** VST3 and CLAP (own CLAP host on top of JUCE); scanning always runs in separate processes with a
   blacklist; optionally every plugin runs in a separate process (*Options → Run plugins in a separate process*).
+- **Missing plugins:** a project effect whose third-party plugin isn't installed plays a LYNX substitute (reverb →
+  Reeverb 2/LuxeVerb, delay → Delay 3, limiter, compressor, EQ…) from a data-driven table, translating settings when
+  the saved state is readable; the original reference is kept byte for byte and comes back once the plugin is
+  installed (docs/PLUGIN_FALLBACK.md).
 - **Export:** WAV 16/24/32f, FLAC, OGG; whole song or pattern; tail until silence; TPDF dither + noise shaping
   for 16-bit.
 - **Performance:** lock-free engine, channels and mixer layers on worker threads, idle channels skipped, FTZ/DAZ.

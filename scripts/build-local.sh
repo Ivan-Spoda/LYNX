@@ -28,6 +28,8 @@ CORE="$CORE src/core/ThreeOsc.cpp"
 CORE="$CORE src/core/FlPluginDb.cpp"
 # missing files of an opened project: search and relocation (round 81)
 CORE="$CORE src/core/MissingFiles.cpp"
+# LYNX substitutes for missing third-party plugins (round 98)
+CORE="$CORE src/core/PluginSubstitutes.cpp"
 # settings pages, plugin manager and shortcut manager logic (round 82)
 CORE="$CORE src/core/Preferences.cpp"
 # layouts of the native plugin editors (round 93)
@@ -46,6 +48,8 @@ CORE="$CORE src/core/DirectWave.cpp"
 CORE="$CORE src/core/OggVorbis.cpp"
 # export options, MP3 encoding, plugin performance monitor, clip properties / arrangements (round 84)
 CORE="$CORE src/core/ExportOptions.cpp src/core/Mp3Encoder.cpp src/core/PluginMonitor.cpp src/core/PlaylistOps.cpp"
+# LYNX's Facet EQ and Apex Limiter (round 99)
+CORE="$CORE src/core/FacetEq.cpp src/core/ApexLimiter.cpp"
 # WavPack decoder (C)
 if [[ -z "${CC:-}" ]]; then
     case "$CXX" in

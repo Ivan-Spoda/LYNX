@@ -31,6 +31,8 @@
 #include "core/FlangusFastDist.h"
 
 #include "core/Biquad.h"
+#include "core/FacetEq.h"
+#include "core/ApexLimiter.h"
 
 #include <algorithm>
 #include <atomic>
@@ -2453,6 +2455,8 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::distructor: return distructorInfo;
         case EffectKind::newtone: return newtoneInfo;
         case EffectKind::newtime: return newtimeInfo;
+        case EffectKind::facetEq: return facet::info();
+        case EffectKind::apexLimiter: return apex::info();
     }
     return eq;
 }
@@ -2815,6 +2819,12 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::newtime:
             return newtonefx::paramText (param, v);
 
+        case EffectKind::facetEq:
+            return facet::paramText (param, v);
+
+        case EffectKind::apexLimiter:
+            return apex::paramText (param, v);
+
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
 
@@ -2976,6 +2986,8 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::fruityFlanger: return flangerfx::make();
         case EffectKind::newtone:
         case EffectKind::newtime: return newtonefx::make (nullptr); // without its sample: a pass-through
+        case EffectKind::facetEq: return facet::make();
+        case EffectKind::apexLimiter: return apex::make();
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();
