@@ -1445,7 +1445,7 @@ constexpr int panelHeader = 30;
 constexpr int inputRowHeight = 30; // the input row (arm, audio input source) above the slots
 constexpr int slotsTop = panelHeader + inputRowHeight;
 constexpr int slotHeight = 24;
-const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, EffectKind::compressor, EffectKind::limiter,
+const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, EffectKind::facetEq, EffectKind::compressor, EffectKind::limiter, EffectKind::apexLimiter,
                                       EffectKind::delay,  EffectKind::reverb,       EffectKind::chorus,     EffectKind::filter,
                                       EffectKind::distortion, EffectKind::utility, EffectKind::volumeGate,
                                       EffectKind::pitchShift, EffectKind::freqShift, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::frequencySplitter, EffectKind::autoPan, EffectKind::vocoder, EffectKind::pitchCorrect,

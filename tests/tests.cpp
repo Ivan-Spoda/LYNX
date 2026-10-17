@@ -15403,3 +15403,4 @@ TEST (plugin_layout_options_match_the_engine_values)
     CHECK (! plugui::hasFlLayout (EffectKind::distortion));
     CHECK (! plugui::layoutFor (EffectKind::distortion).items.empty());
 }
+#include "FabMeasureTests99.inc"

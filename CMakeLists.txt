@@ -92,6 +92,8 @@ add_library(lynx_core STATIC
     src/core/ThreeOsc.cpp
     src/core/Plucked.cpp
     src/core/HardcoreFx.cpp
+    src/core/FacetEq.cpp
+    src/core/ApexLimiter.cpp
     src/core/FlResampler.cpp
     src/core/FlKeys.cpp
     src/core/DirectWave.cpp
