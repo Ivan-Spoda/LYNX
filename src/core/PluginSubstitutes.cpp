@@ -20,44 +20,152 @@ namespace
 // public manual gives the meaning (each one says so). Modules added later (pitch corrector, vocal tools...) append
 // their own entries here or through registerPluginSubstitutes.
 constexpr std::string_view builtInTable = R"TABLE(
-# ---------------------------------------------------------------- reverbs -> Reeverb 2 / LuxeVerb
+# ---------------------------------------------------------------- reverbs -> LYNX's reverbs (round 100)
+# Valhalla DSP: the saved state is a JUCE XML block whose attributes are the plugin's normalised (0..1) VST3 values
+# [DATA, round 98]. Round 100 measured each parameter's value -> unit law and enumeration breakpoints on the official
+# demos (black-box, REA_rodada100 §0-§6) [EXEC]; LYNX's own reverbs use the same laws, so most maps are identities;
+# enumerations use "steps", and Atrium's decay (LYNX's own law) a "curve". The Mix controls are equal-power
+# dry / wet inside the effect (measured), so the slot mix stays at 100 %.
 [valhalla-vintageverb]
 product = ValhallaVintageVerb
 vendor = Valhalla DSP
-lynx = Reeverb 2
+lynx = Epoch Verb
 # [DATA] class ID from FL wrapper records of real projects
 vst3 = 7654535665657633616c68616c6c6176
 names = ValhallaVintageVerb
-# the reverb runs 100 % wet at unity (Reeverb 2: dry 0, wet 128 of 160); the balance is the slot's dry/wet
-preset = Dry=0; Wet=0.8
-mix = 0.25
-# [DATA] the saved state is a JUCE XML block with a "Mix" attribute 0..1; [DOC] the vendor manual describes Mix as
-# the wet/dry balance 0-100 %. Read as a linear wet/dry crossfade [model].
-map = xml:Mix -> mix
+map = xml:Mix -> Mix
+map = xml:PreDelay -> Predelay
+map = xml:Decay -> Decay
+map = xml:Size -> Size
+map = xml:Attack -> Attack
+map = xml:BassMult -> Bass mult
+map = xml:BassXover -> Bass xover
+map = xml:HighShelf -> High shelf
+map = xml:HighFreq -> High freq
+map = xml:EarlyDiffusion -> Early diffusion
+map = xml:LateDiffusion -> Late diffusion
+map = xml:ModRate -> Mod rate
+map = xml:ModDepth -> Mod depth
+map = xml:HighCut -> High cut
+map = xml:LowCut -> Low cut
+map = xml:ColorMode -> Color | steps 0:0 0.6662:0.5 0.9995:1
+map = xml:ReverbMode -> Mode | steps 0:0 0.0828:0.0476 0.1245:0.0952 0.1662:0.1429 0.2078:0.1905 0.2495:0.2381 0.2912:0.2857 0.3328:0.3333 0.3745:0.381 0.4162:0.4286 0.4578:0.4762 0.4995:0.5238 0.5412:0.5714 0.5828:0.619 0.6245:0.6667 0.6662:0.7143 0.7078:0.7619 0.7495:0.8095 0.7912:0.8571 0.8328:0.9048 0.8745:0.9524 0.9162:1 0.9578:0
 
 [valhalla-room]
 product = ValhallaRoom
 vendor = Valhalla DSP
-lynx = Reeverb 2
+lynx = Atrium
 names = ValhallaRoom
-preset = Dry=0; Wet=0.8
-mix = 0.25
+map = xml:mix -> Mix
+map = xml:predelay -> Predelay
+map = xml:HiCut -> High cut
+map = xml:earlyLateMix -> Early/late
+map = xml:lateSize -> Late size
+map = xml:lateCross -> Late cross
+map = xml:lateModRate -> Late mod rate
+map = xml:lateModDepth -> Late mod depth
+map = xml:RTBassMultiply -> Bass mult
+map = xml:RTXover -> Bass xover
+map = xml:RTHighMultiply -> High mult
+map = xml:RTHighXover -> High xover
+map = xml:earlySize -> Early size
+map = xml:earlyCross -> Early cross
+map = xml:earlyModRate -> Early mod rate
+map = xml:earlyModDepth -> Early mod depth
+map = xml:earlySend -> Early send
+map = xml:diffusion -> Diffusion
+map = xml:space -> Space
+map = xml:LoCut -> Low cut
+map = xml:decay -> Decay | curve 0:0 0.0002:0.2254 0.0005:0.2646 0.001:0.2987 0.002:0.3372 0.004:0.3807 0.008:0.4297 0.012:0.4613 0.019:0.4999 0.03:0.5415 0.05:0.5921 0.08:0.6429 0.13:0.6999 0.2:0.7546 0.3:0.8101 0.45:0.8696 0.65:0.9274 1:1
+map = xml:type -> Type | steps 0:0 0.1662:0.0909 0.2495:0.1818 0.3328:0.2727 0.4162:0.3636 0.4995:0.4545 0.5828:0.5455 0.6662:0.6364 0.7495:0.7273 0.8328:0.8182 0.9162:0.9091 0.9995:1
 
 [valhalla-plate]
 product = ValhallaPlate
 vendor = Valhalla DSP
-lynx = Reeverb 2
+lynx = Foil Plate
 names = ValhallaPlate
-preset = Dry=0; Wet=0.8
-mix = 0.25
+map = xml:Mix -> Mix
+map = xml:PreDelay -> Predelay
+map = xml:Decay -> Decay
+map = xml:Size -> Size
+map = xml:Width -> Width
+map = xml:ModRate -> Mod rate
+map = xml:ModDepth -> Mod depth
+map = xml:LowEQFreq -> Low EQ freq
+map = xml:LowEQGain -> Low EQ gain
+map = xml:HighEQFreq -> High EQ freq
+map = xml:HighEQGain -> High EQ gain
+map = xml:Type -> Type | steps 0:0 0.0828:0.0909 0.1245:0.1818 0.1662:0.2727 0.2078:0.3636 0.2495:0.4545 0.2912:0.5455 0.3328:0.6364 0.3745:0.7273 0.4162:0.8182 0.4578:0.9091 0.4995:1 0.5412:0
 
 [valhalla-supermassive]
 product = Valhalla Supermassive
 vendor = Valhalla DSP
-lynx = LuxeVerb
-names = ValhallaSupermassive; ValhallaShimmer
-mix = 1
+lynx = Nebula
+names = ValhallaSupermassive
+map = xml:Mix -> Mix
+map = xml:Delay_Ms -> Delay
+map = xml:DelayWarp -> Warp
+map = xml:Feedback -> Feedback
+map = xml:Density -> Density
+map = xml:Width -> Width
+map = xml:LowCut -> Low cut
+map = xml:HighCut -> High cut
+map = xml:ModRate -> Mod rate
+map = xml:ModDepth -> Mod depth
+map = xml:DelaySync -> Sync | steps 0:0 0.4995:0.3333 0.7495:0.6667 0.9995:1
+map = xml:DelayNote -> Note | steps 0:0 0.1453:0.1667 0.287:0.3333 0.4287:0.5 0.5745:0.6667 0.7162:0.8333 0.8578:1
+map = xml:Mode -> Mode | steps 0:0 0.0828:0.0476 0.1245:0.0952 0.1662:0.1429 0.2078:0.1905 0.2495:0.2381 0.2912:0.2857 0.3328:0.3333 0.3745:0.381 0.4162:0.4286 0.4578:0.4762 0.4995:0.5238 0.5412:0.5714 0.5828:0.619 0.6245:0.6667 0.6662:0.7143 0.7078:0.7619 0.7495:0.8095 0.7912:0.8571 0.8328:0.9048 0.8745:0.9524 0.9162:1 0.9578:0
 
+[valhalla-shimmer]
+product = ValhallaShimmer
+vendor = Valhalla DSP
+lynx = Halo
+names = ValhallaShimmer
+# the reference saves bare parameterN attributes (0..1); the order is its VST3 parameter list [EXEC]
+map = xml:parameter0 -> Mix
+map = xml:parameter1 -> Shift
+map = xml:parameter2 -> Feedback
+map = xml:parameter3 -> Diffusion
+map = xml:parameter4 -> Size
+map = xml:parameter5 -> Low cut
+map = xml:parameter6 -> High cut
+map = xml:parameter7 -> Mod rate
+map = xml:parameter8 -> Mod depth
+map = xml:parameter9 -> Reverb mode | steps 0:0 0.525:0.5 0.775:1
+map = xml:parameter10 -> Shift mode | steps 0:0 0.25:0.25 0.45:0.5 0.65:0.75 0.85:1
+map = xml:parameter11 -> Color | steps 0:0 0.525:1
+
+[valhalla-futureverb]
+product = ValhallaFutureVerb
+vendor = Valhalla DSP
+lynx = Horizon
+names = ValhallaFutureVerb
+map = xml:Mix -> Mix
+map = xml:Width -> Width
+map = xml:Echo_Ms -> Echo time
+map = xml:EchoFeedback -> Echo feedback
+map = xml:EchoSpread -> Echo spread
+map = xml:EchoDrive -> Echo drive
+map = xml:EchoDetune -> Echo detune
+map = xml:EchoLevel -> Echo level
+map = xml:ReverbDecay -> Decay
+map = xml:ReverbSize -> Size
+map = xml:ReverbAttack -> Attack
+map = xml:ReverbEarlyLate -> Early/late
+map = xml:ReverbDensity -> Density
+map = xml:ReverbLevel -> Reverb level
+map = xml:ModRate -> Mod rate
+map = xml:ModDepth -> Mod depth
+map = xml:LowEQFreq -> Low EQ freq
+map = xml:HighEQFreq -> High EQ freq
+map = xml:EchoSync -> Echo sync | steps 0:0 0.4995:0.3333 0.7495:0.6667 0.9995:1
+map = xml:EchoNote -> Echo note | steps 0:0 0.1662:0.2 0.3328:0.4 0.4995:0.6 0.6662:0.8 0.8328:1
+map = xml:Routing -> Routing | steps 0:0 0.4995:1
+map = xml:EchoMode -> Echo mode | steps 0:0 0.0828:0.0909 0.1245:0.1818 0.1662:0.2727 0.2078:0.3636 0.2495:0.4545 0.2912:0.5455 0.3328:0.6364 0.3745:0.7273 0.4162:0.8182 0.4578:0.9091 0.4995:1 0.5412:0
+map = xml:ReverbMode -> Reverb mode | steps 0:0 0.0828:0.1429 0.1245:0.2857 0.1662:0.4286 0.2078:0.5714 0.2495:0.7143 0.2912:0.8571 0.3328:1 0.3745:0
+map = xml:Color -> Color | steps 0:0 0.1662:0.3333 0.2495:0.6667 0.3328:1
+
+# ---------------------------------------------------------------- other reverbs -> Reeverb 2 / LuxeVerb
 [fabfilter-pro-r]
 product = FabFilter Pro-R
 vendor = FabFilter
@@ -318,7 +426,7 @@ std::string matchKey (const std::string& name)
 std::optional<EffectKind> effectKindNamed (const std::string& name)
 {
     const auto wanted = lowerAscii (trim (name));
-    for (int k = 0; k <= (int) EffectKind::fruityPhaser; ++k) // the last EffectKind: extend when one is appended
+    for (int k = 0; k <= (int) EffectKind::horizon; ++k) // the last EffectKind: extend when one is appended
     {
         const auto kind = (EffectKind) k;
         if (kind == EffectKind::plugin || kind == EffectKind::parallel)
@@ -432,11 +540,26 @@ bool parseMap (const std::string& text, EffectKind kind, SubstituteParamMap& out
     else
         return false;
 
-    if (lowerAscii (target) == "mix")
+    if (target == "mix") // lower case: the slot's dry/wet ("Mix" is an effect parameter, e.g. of LYNX's reverbs)
         out.toSlotMix = true;
     else if ((out.target = paramNamed (kind, target)) < 0)
         return false;
 
+    if (const auto words = splitList (range, ' '); ! words.empty() && (lowerAscii (words[0]) == "curve" || lowerAscii (words[0]) == "steps"))
+    {
+        out.shape = lowerAscii (words[0]) == "curve" ? SubstituteParamMap::Shape::curve : SubstituteParamMap::Shape::steps;
+        for (std::size_t i = 1; i < words.size(); ++i)
+        {
+            const auto colon = words[i].find (':');
+            float x = 0, y = 0;
+            if (colon == std::string::npos || ! parseFloat (words[i].substr (0, colon), x) || ! parseFloat (words[i].substr (colon + 1), y))
+                return false;
+            if (! out.points.empty() && x <= out.points.back().first)
+                return false; // x must ascend
+            out.points.push_back ({ x, y });
+        }
+        return out.points.size() >= (out.shape == SubstituteParamMap::Shape::curve ? 2u : 1u);
+    }
     if (! range.empty())
     {
         std::vector<float> v;
@@ -530,6 +653,27 @@ std::string wavesParametersText (const std::vector<std::uint8_t>& state)
 
 float mapValue (const SubstituteParamMap& m, double value)
 {
+    if (m.shape == SubstituteParamMap::Shape::steps)
+    {
+        auto y = m.points.front().second;
+        for (const auto& [px, py] : m.points)
+            if (value >= (double) px - 1e-6)
+                y = py;
+        return std::clamp (y, 0.0f, 1.0f);
+    }
+    if (m.shape == SubstituteParamMap::Shape::curve)
+    {
+        const auto& p = m.points;
+        if (value <= (double) p.front().first)
+            return std::clamp (p.front().second, 0.0f, 1.0f);
+        for (std::size_t i = 1; i < p.size(); ++i)
+            if (value <= (double) p[i].first)
+            {
+                const auto t = (value - (double) p[i - 1].first) / ((double) p[i].first - (double) p[i - 1].first);
+                return std::clamp ((float) ((double) p[i - 1].second + t * ((double) p[i].second - (double) p[i - 1].second)), 0.0f, 1.0f);
+            }
+        return std::clamp (p.back().second, 0.0f, 1.0f);
+    }
     auto u = (value - (double) m.inLo) / ((double) m.inHi - (double) m.inLo);
     u = std::clamp (u, 0.0, 1.0);
     return (float) ((double) m.outLo + u * ((double) m.outHi - (double) m.outLo));

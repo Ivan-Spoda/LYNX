@@ -122,10 +122,10 @@ TEST (substitute_valhalla_vst3_translates_mix_and_keeps_original)
     slot.sidechain = 4;
     const auto before = slot.plugin;
     CHECK (lynx::substituteEffectSlot (slot, id));
-    CHECK (slot.kind == lynx::EffectKind::reeverb2 && slot.isSubstitute());
-    CHECK (std::abs (slot.mix - 0.5f * 0.42f) < 1e-6f); // the plugin's Mix inside FL's slot dry/wet
+    CHECK (slot.kind == lynx::EffectKind::epochVerb && slot.isSubstitute()); // LYNX's own vintage-digital reverb (round 100)
+    CHECK (std::abs (slot.mix - 0.5f) < 1e-6f);                       // FL's slot dry/wet; the plugin's Mix is the effect's own
     CHECK (! slot.enabled && slot.sidechain == 4);
-    CHECK (slot.params[10] == 0.0f && std::abs (slot.params[12] - 0.8f) < 1e-6f); // Reeverb 2 dry 0, wet at unity
+    CHECK (std::abs (slot.params[0] - 0.42f) < 1e-6f && std::abs (slot.params[2] - 0.3f) < 1e-6f); // Mix, Decay: same laws
     CHECK (slot.substituteFor == before);
     CHECK (slot.substituteFor.foreign.state == vv.state); // byte for byte
     CHECK (lynx::substituteOriginalName (slot) == "ValhallaVintageVerb");
@@ -142,7 +142,7 @@ TEST (substitute_valhalla_vst3_translates_mix_and_keeps_original)
     const auto plain = lynx::makeSubstituteSlot (*entry, nullptr, &translated);
     const auto id2 = lynx::pluginIdentity (vv);
     const auto fromJunk = lynx::makeSubstituteSlot (*entry, &id2, &translated);
-    CHECK (translated == 0 && fromJunk.mix == plain.mix && std::abs (plain.mix - 0.25f) < 1e-6f);
+    CHECK (translated == 0 && fromJunk.mix == plain.mix && plain.mix == 1.0f && fromJunk.params == plain.params);
 }
 
 TEST (substitute_waves_shell_by_plugin_name)
