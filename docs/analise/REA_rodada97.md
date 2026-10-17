@@ -76,7 +76,59 @@ JUCE 8 already offers three WASAPI device types [CODE `juce_WASAPI_windows.cpp`]
 
 ## 4. Part 2 — LYNX ASIO (own universal ASIO driver)
 
-(in progress)
+`asio/LynxAsio.cpp` (one file, ~1500 lines, built by `scripts/build-lynx-asio.sh` with Zig/MinGW into
+`lynx-asio.dll`; CMake target `lynx-asio` for MSVC). Written from Microsoft's WASAPI documentation and the ASIO SDK
+interface headers (GPLv3 option, like LYNX's ASIO host); only the general architecture of section 2 was taken
+from FL Studio ASIO, and two things are done differently on purpose: an event-driven stream instead of 1 ms
+polling, and an exclusive mode.
+
+* **COM server**: `DllGetClassObject` / `DllCanUnloadNow` / `DllRegisterServer` / `DllUnregisterServer`; own
+  CLSID `{E987C593-898E-4557-BFE3-4288B0228718}`; `QueryInterface` answers the CLSID itself, which is how ASIO
+  hosts ask for `IASIO`. Registration (administrator, `regsvr32`) writes `HKLM\SOFTWARE\Classes\CLSID\{…}`
+  (InprocServer32, ThreadingModel Apartment) and `HKLM\SOFTWARE\ASIO\LYNX ASIO` (CLSID, Description).
+* **Apartments**: every WASAPI object lives on the driver's own MTA threads (the audio thread, and short-lived
+  probe threads for `init` and the panel), whatever apartment the host calls from.
+* **Shared mode**: the render stream is event-driven; with the host's rate equal to the mix rate it first tries
+  `IAudioClient3::InitializeSharedAudioStream` at the minimum engine period (only when that is shorter than the
+  default), else the classic `Initialize(SHARED, EVENTCALLBACK)` (with Windows' sample-rate conversion when the
+  host asks for another rate). On each device event it tops the device queue up to a **target fill** of 1, 1.5 or 2
+  engine periods ("safety margin" in the panel; default 2 = FL Studio ASIO's choice) from a FIFO that the host's
+  `bufferSwitch` calls fill block by block — so any ASIO block size works (32…4096).
+* **Exclusive mode**: event-driven at the ASIO block (never below the device's minimum period; re-initialised with
+  the aligned size on `AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED`), format chosen in the order float32, int32, 24-in-32,
+  int24, int16. The device gets one whole buffer per event.
+* **Input**: a shared capture stream drained at every render event into an input FIFO primed with one capture
+  period plus one block of silence, trimmed when it grows past two periods plus two blocks (clock drift).
+* The host always sees `ASIOSTFloat32LSB`; `bufferSwitchTimeInfo` when the host supports time info; sample
+  position and system time for `getSamplePosition`; `kAsioResetRequest` when the device stops calling for 2 s, is
+  invalidated, or when the panel / sample rate changes.
+* **Thread**: MMCSS "Pro Audio" at `AVRT_PRIORITY_CRITICAL` while streaming.
+* **Panel** (`controlPanel`, a small Win32 window built in code, English or pt-BR from the Windows UI language):
+  mode (shared / exclusive), output and input device (Windows default, any endpoint, or no input), preferred
+  buffer size, safety margin, and an explanation with the device's real shared period and exclusive minimum.
+* **Settings**: `%APPDATA%\LYNX\lynx-asio.ini` (no registry); `LYNX_ASIO_INI` overrides the path and
+  `LYNX_ASIO_LOG` writes what was opened plus stream statistics (late device events, slow host bursts, input
+  underflows) — used for the measurements below.
+
+### Testing without registration
+
+* `tmp/r97/host/asiohost.cpp`: a 150-line ASIO host that `LoadLibrary`s a driver DLL, creates it through its
+  class factory and plays a quiet sine.
+* LYNX: hidden `--asiodll "<file.dll>[|{CLSID}]"` adds a device type "ASIO driver file"
+  (`src/engine/DllAsioDevice.cpp`, an `AudioIODevice` on top of any `IASIO*`); with `--rtstress` it is selected
+  automatically, so the real engine plays a real project through the driver:
+  `LYNX.exe --asiodll lynx-asio.dll --rtstress project.flp report.txt 15 --buffer 144`.
+
+### Shipping and registration (for other programs)
+
+`build-windows-zig.sh` builds `lynx-asio.dll` next to `LYNX.exe`; the installer, the portable zip and the release
+workflow carry it with `Register LYNX ASIO.bat` / `Unregister LYNX ASIO.bat` (they ask for administrator rights
+and run `regsvr32`). By hand, from an administrator prompt:
+
+    regsvr32 "%LOCALAPPDATA%\Programs\LYNX\lynx-asio.dll"        (install)
+    regsvr32 /u "%LOCALAPPDATA%\Programs\LYNX\lynx-asio.dll"     (remove)
+
+The uninstaller unregisters it first when `HKLM\SOFTWARE\ASIO\LYNX ASIO` exists (one UAC prompt).
 
 ## 5. Measurements
 
