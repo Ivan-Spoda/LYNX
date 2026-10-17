@@ -81,3 +81,18 @@ note (red); the correction in cents with a ±100 c centre meter; the last 8 s (3
 (grey) and the corrected pitch (input + applied correction, red with a glow) over note lanes — the key's scale notes
 switched on are brighter and labelled — centred on the recent pitch (follows the voice, ±7.5 semitones). Data:
 LYNX Tune's controlOutput 0 – 2 (round 95) published through the live meters at 30 Hz.
+
+## 6. Tests (tests/FacetTests103.inc)
+Backward compatibility of the 22 new controls; the dynamic law vs the measured steps (≤ 0.12 dB); a dynamic band in
+the three modes (−50 / −24 / −6 dBFS → 0 / −6 / −12 dB, ≤ 0.45 dB, live meter); sidechain ducking, unrouted
+sidechain, out-of-band sidechain; FIR modes vs the analog magnitude (≤ 0.2 dB, 100 Hz – 15 kHz), linear-phase
+symmetry and peak at the latency, natural-phase causality, run-time latency change; solo; meters / tap / Tune layout.
+CPU (one instance, 48 kHz, 8 dynamic bands, noise): zero latency ≈ 3 %, natural ≈ 10 %, linear ≈ 7–9 % of a core.
+
+## 7. Where I stopped / next steps
+- Done: everything in §3–§6; snapshots from `LYNX.exe --plugui` (Facet EQ.png, LYNX Tune.png).
+- Not done / ideas: per-band sidechain choice (one detector switch for the whole EQ: 64 parameters is the slot
+  maximum), mid/side and left/right band placement, flat tilt / all pass / brickwall shapes, the reference's
+  auto-threshold mode, spectral dynamics, analyser freeze / peak hold, a resolution setting for the FIR modes
+  (8192 taps smear very low narrow bands slightly: −23.8 vs −24.1 dB at 50 Hz in linear mode), Facet EQ
+  substitutes reading Pro-Q's dynamic parameters.
