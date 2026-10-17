@@ -96,6 +96,18 @@ public:
             return;
         }
 
+        if (args.contains ("--rtstress"))
+        {
+            // LYNX.exe --rtstress project.(flp|lynx) report.txt [seconds] [--buffer N] [--no-window]: the real app (window, audio device)
+            // plays the project and reports the callbacks that missed their deadline (REA round 87)
+            const auto i = args.indexOf ("--rtstress");
+            const auto seconds = args[i + 3].getDoubleValue();
+            const auto buffer = args.contains ("--buffer") ? args[args.indexOf ("--buffer") + 1].getIntValue() : 0;
+            juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+            runRealtimeStress (juce::File (args[i + 1].unquoted()), juce::File (args[i + 2].unquoted()), seconds > 0.0 ? seconds : 30.0, buffer);
+            return;
+        }
+
         if (args.contains ("--selftest"))
         {
             const auto i = args.indexOf ("--selftest");
@@ -338,6 +350,13 @@ public:
             juce::File (args[i + 2].unquoted()).replaceWithText (report);
             setApplicationReturnValue (found > 0 ? 0 : 1);
             quit();
+            return;
+        }
+
+        if (args.contains ("--vst2test"))
+        {
+            const auto i = args.indexOf ("--vst2test");
+            runVst2Test (args[i + 1].unquoted(), args[i + 2].unquoted());
             return;
         }
 
@@ -776,6 +795,74 @@ private:
         quit();
     }
 
+    // LYNX.exe --vst2test "LYNX Test Synth.dll" report.txt (tools/testplugin/lynx_test_vst2.c): LYNX's own VST2 host.
+    // Scans the DLL, imports it the way an .flp holds it (Fruity Wrapper VST2 state with a chunk, REA_rodada89 §2),
+    // renders with two saved gains (the level must follow the restored state) and checks the plugin saw the song tempo.
+    void runVst2Test (const juce::String& pluginPath, const juce::String& reportPath)
+    {
+        juce::String report;
+        bool ok = false;
+        {
+            lynx::AudioEngine offline (false);
+            auto& host = offline.getPluginHost();
+            report << "plugins_in_file=" << host.addPluginFile (juce::File (pluginPath)) << "\n";
+            std::optional<juce::PluginDescription> vst2;
+            for (const auto& type : host.getKnownPlugins().getTypes())
+                if (type.pluginFormatName == "VST")
+                    vst2 = type;
+
+            auto render = [&] (float gain, float& tempoSeen, int& adopted) {
+                lynx::FlVst2State state;
+                state.flags = 8;
+                state.chunk = { 'L', 'X', 'V', '2', 0, 0, 0, 0 };
+                std::memcpy (state.chunk.data() + 4, &gain, 4);
+                auto song = lynx::Song::makeDefault();
+                song.bpm = 137.0;
+                auto& f = song.channels[4].plugin.foreign;
+                f.format = lynx::ForeignPlugin::Format::vst2;
+                f.vst2Id = (std::uint32_t) vst2->uniqueId;
+                f.name = "Some other name"; // found by the VST2 ID
+                f.state = lynx::writeFlVst2State (state);
+                song.channels[4].volume = 1.0f;
+                song.patterns[0].notes.clear();
+                song.patterns[0].notes.push_back ({ 0, 4 * lynx::ppq, 4, 69, 1.0f });
+                for (std::size_t c = 0; c < song.channels.size(); ++c)
+                    if (c != 4)
+                        song.channels[c].muted = true;
+                adopted = host.adoptFlPlugins (song);
+                offline.setSong (song);
+                const auto peak = offline.renderOffline (1.0, 48000.0);
+                offline.capturePluginStates();
+                juce::MemoryBlock saved;
+                saved.fromBase64Encoding (juce::String (offline.getSong().channels[4].plugin.state));
+                lynx::FlVst2State back;
+                tempoSeen = 0.0f;
+                if (lynx::parseFlVst2State (std::vector<std::uint8_t> ((const std::uint8_t*) saved.getData(), (const std::uint8_t*) saved.getData() + saved.getSize()), back)
+                    && back.chunk.size() >= 12)
+                    std::memcpy (&tempoSeen, back.chunk.data() + 8, 4);
+                return peak;
+            };
+
+            if (vst2)
+            {
+                report << "plugin=" << vst2->name << " id=" << vst2->uniqueId << " instrument=" << (int) vst2->isInstrument << "\n";
+                float tempoA = 0, tempoB = 0;
+                int adoptedA = 0, adoptedB = 0;
+                const auto quiet = render (0.1f, tempoA, adoptedA);
+                const auto loud = render (0.4f, tempoB, adoptedB);
+                report << "adopted=" << adoptedA << "," << adoptedB << " peak_gain_0.1=" << quiet << " peak_gain_0.4=" << loud
+                       << " tempo_seen=" << tempoB * 1000.0f << "\n";
+                ok = adoptedA == 1 && adoptedB == 1 && quiet > 0.01f && std::abs (loud / quiet - 4.0f) < 0.2f
+                     && std::abs (tempoB * 1000.0f - 137.0f) < 0.01f;
+            }
+        }
+
+        report << "result=" << (ok ? "OK" : "FAILED") << "\n";
+        juce::File (reportPath).replaceWithText (report);
+        setApplicationReturnValue (ok ? 0 : 1);
+        quit();
+    }
+
     // LYNX.exe --wrappertest plugin.vst3 report.txt: builds a VST3 state the way FL's Fruity
     // Wrapper stores it (REA_rodada5 §3.2), runs it through the import (adoptFlPlugins) and checks
     // that the plugin comes back with the changed parameter.
@@ -1175,6 +1262,80 @@ private:
         juce::File (reportPath).replaceWithText (report);
         setApplicationReturnValue (ok ? 0 : 1);
         quit();
+    }
+
+    // --rtstress: opens the project in the normal window with the saved audio device, plays it from the start for
+    // `seconds` and writes the real-time statistics (deadline misses, late device calls, load histogram, heaviest units)
+    void runRealtimeStress (const juce::File& project, const juce::File& report, double seconds, int bufferSize)
+    {
+        startupOptions = lynx::StartupOptions::load();
+        engine = std::make_unique<lynx::AudioEngine>();
+        crashEngine = engine.get();
+        if (bufferSize > 0)
+        {
+            auto setup = engine->getDeviceManager().getAudioDeviceSetup();
+            setup.bufferSize = bufferSize;
+            engine->getDeviceManager().setAudioDeviceSetup (setup, true);
+        }
+        createMainWindow();
+        if (! juce::JUCEApplication::getCommandLineParameters().contains ("--no-window")) // --no-window: is it the UI?
+            mainWindow->reveal();
+
+        juce::String error;
+        auto ok = false;
+        const auto loadStart = juce::Time::getMillisecondCounterHiRes();
+        if (project.hasFileExtension ("flp"))
+            ok = engine->importFlpFile (project, error);
+        else if (auto song = lynx::ProjectFile::load (project, error))
+        {
+            engine->setSong (std::move (*song));
+            ok = true;
+        }
+        const auto loadMs = juce::Time::getMillisecondCounterHiRes() - loadStart;
+
+        if (! ok)
+        {
+            report.replaceWithText ("project: " + project.getFullPathName() + "\nresult=ERROR " + error + "\n");
+            setApplicationReturnValue (1);
+            quit();
+            return;
+        }
+
+        // let the window draw the project, then play from the start with fresh statistics
+        juce::Timer::callAfterDelay (1500, [this, project, report, seconds, loadMs] {
+            if (engine == nullptr)
+                return;
+            engine->stop();
+            engine->rewind();
+            engine->getRtStats().reset();
+            engine->takeUiPulse();
+            engine->play();
+            juce::Timer::callAfterDelay ((int) (seconds * 1000.0), [this, project, report, seconds, loadMs] {
+                if (engine == nullptr)
+                    return;
+                engine->stop();
+                const auto s = engine->getRtStats().snapshot();
+                juce::String text;
+                text << "project: " << project.getFullPathName() << "\n"
+                     << "LYNX " << getApplicationVersion() << ", " << juce::SystemStats::getOperatingSystemName() << ", "
+                     << juce::SystemStats::getNumCpus() << " logical CPUs (" << juce::SystemStats::getNumPhysicalCpus() << " cores), "
+                     << juce::SystemStats::getCpuModel() << "\n"
+                     << "load " << juce::String (loadMs / 1000.0, 1) << " s, played " << juce::String (seconds, 0) << " s\n"
+                     << engine->describeRealtime();
+                const auto pulse = engine->takeUiPulse();
+                text << "  UI: the 30 Hz engine timer ran " << pulse.calls << " times (" << juce::String (pulse.calls / seconds, 1)
+                     << "/s), longest gap " << juce::String (pulse.maxGapMs, 0) << " ms" << (mainWindow == nullptr || ! mainWindow->isVisible() ? " (window hidden)" : "") << "\n";
+                text << "  load histogram (share of the deadline: callbacks):";
+                for (std::size_t b = 0; b < s.histogram.size(); ++b)
+                    if (s.histogram[b] > 0)
+                        text << " " << (int) (b * 10) << (b + 1 == s.histogram.size() ? juce::String ("+") : "-" + juce::String ((int) (b * 10 + 10))) << "%:" << (juce::int64) s.histogram[b];
+                text << "\n";
+                text << "result=" << (s.callbacks == 0 ? "ERROR no audio callbacks" : s.overBudget == 0 && s.lateCalls == 0 ? "OK" : "GLITCHES") << "\n";
+                report.replaceWithText (text);
+                setApplicationReturnValue (s.callbacks == 0 ? 1 : 0);
+                quit();
+            });
+        });
     }
 
     // LYNX.exe --render project.(flp|lynx) output.wav [seconds]

@@ -195,4 +195,113 @@ std::vector<int> flVst3SlotPositions (const std::vector<std::int32_t>& savedSlot
 
     return positions;
 }
+
+bool parseFlVst2State (const std::vector<std::uint8_t>& state, FlVst2State& out)
+{
+    out = {};
+    std::size_t pos = 0;
+    bool ok = true;
+    auto take = [&] (void* dst, std::size_t n) {
+        if (! ok || pos + n > state.size())
+        {
+            ok = false;
+            return;
+        }
+        std::memcpy (dst, state.data() + pos, n);
+        pos += n;
+    };
+    auto i32 = [&] {
+        std::int32_t v = 0;
+        take (&v, 4);
+        return v;
+    };
+    auto size = [&] {
+        const auto marker = i32();
+        if (marker != -2)
+            return (std::int64_t) marker;
+        std::int64_t v = 0;
+        take (&v, 8);
+        return v;
+    };
+
+    const auto v = i32();
+    if (! ok || v >= 0 || v < -9)
+        return false; // ≥ 0 (and the 123456 marker): older layouts, not decoded
+    out.version = v;
+
+    std::int64_t chunkSize = -3; // FL's "not read yet"
+    if (v <= -6)
+        take (&out.flags, 1);
+    if (v <= -5)
+        chunkSize = size();
+    if (v == -7 && chunkSize == 0)
+        i32(); // an extra count only this version writes (its meaning is not confirmed)
+    if (v <= -6)
+        out.currentProgram = i32();
+    if (v == -5 || v == -4)
+        out.currentProgram = i32();
+    if (v >= -4)
+        chunkSize = size();
+    if (! ok || chunkSize > (std::int64_t) (state.size() - pos))
+        return false;
+    if (chunkSize > 0)
+    {
+        out.chunk.assign (state.begin() + (std::ptrdiff_t) pos, state.begin() + (std::ptrdiff_t) (pos + (std::size_t) chunkSize));
+        pos += (std::size_t) chunkSize;
+    }
+
+    // raw parameters: read only when there is no chunk (or for version −2)
+    if (v == -2 || (v <= -5 && (chunkSize == 0 || chunkSize == -1)))
+    {
+        const auto n = i32();
+        if (! ok || n < 0 || (std::size_t) n > (state.size() - pos) / 4)
+            return false;
+        out.params.resize ((std::size_t) n);
+        take (out.params.data(), (std::size_t) n * 4);
+    }
+
+    // program names (optional at the end)
+    if (ok && pos + 4 <= state.size())
+    {
+        const auto m = i32();
+        const auto names = m <= 0 ? 0 : (v <= -6 ? 1 : m);
+        for (int i = 0; i < names && pos + 25 <= state.size(); ++i)
+        {
+            out.programNames.push_back (text (state.data() + pos, 25, false));
+            pos += 25;
+        }
+    }
+
+    return ok;
+}
+
+std::vector<std::uint8_t> writeFlVst2State (const FlVst2State& s)
+{
+    std::vector<std::uint8_t> out;
+    auto put = [&] (const void* p, std::size_t n) { out.insert (out.end(), (const std::uint8_t*) p, (const std::uint8_t*) p + n); };
+    auto i32 = [&] (std::int32_t v) { put (&v, 4); };
+
+    i32 (-9);
+    put (&s.flags, 1);
+    i32 (-2);
+    const auto size = (std::int64_t) s.chunk.size();
+    put (&size, 8);
+    i32 (s.currentProgram);
+    if (! s.chunk.empty())
+    {
+        put (s.chunk.data(), s.chunk.size()); // FL writes nothing after the chunk
+        return out;
+    }
+    i32 ((std::int32_t) s.params.size());
+    if (! s.params.empty())
+        put (s.params.data(), s.params.size() * 4);
+    i32 (s.programNames.empty() ? 0 : 1);
+    if (! s.programNames.empty())
+    {
+        char name[25] {};
+        std::memcpy (name, s.programNames.front().data(), std::min<std::size_t> (24, s.programNames.front().size()));
+        put (name, 25);
+    }
+    return out;
+}
 } // namespace lynx

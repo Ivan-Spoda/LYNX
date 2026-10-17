@@ -7,6 +7,7 @@
 
 #include <array>
 #include <complex>
+#include <memory>
 #include <vector>
 
 #include "core/ParametricEqFl.h"
@@ -30,11 +31,19 @@ LinearOptions parseLinearOptions (const std::vector<std::uint8_t>& state);
 // The engine's block FFT convolver (shared with Frequency Splitter's linear-phase mode and Maximus's linear-phase band
 // split, REA_rodada62): stereo, block n/2, FFT n, the kernel an n/2-tap windowed zero-phase FIR from an n/2 + 1 bin
 // magnitude table; output delayed by 3n/4. Computed here in double precision.
+// Twiddle factors of the convolver's FFT for one size (ParametricEqLinear.cpp)
+struct Twiddles
+{
+    std::vector<std::complex<double>> forward, inverse;
+};
+
 struct FftConvolver
 {
     int n = 0, hop = 0, pos = 0;
     std::vector<std::complex<double>> kernel;          // spectrum of the zero-padded FIR
     std::vector<float> in[2], out[2];                  // block input (hop) and overlap-add output (n), per channel
+    std::vector<std::complex<double>> work, work2;     // FFT scratch (n), so the audio thread does not allocate
+    std::shared_ptr<const Twiddles> twiddles;       // per-size table shared by every convolver of that size
     void init (int size);
     void clear() noexcept;
     void setKernel (const std::vector<float>& table);

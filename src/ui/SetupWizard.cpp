@@ -261,7 +261,7 @@ private:
 
     juce::Label title, intro, flStatus, scanStatus;
     SectionLabel languageLabel { tr ("Language") }, audioLabel { tr ("Audio output") }, flLabel { "FL Studio" },
-        foldersLabel { tr ("Plugin folders (VST3 and CLAP)") };
+        foldersLabel { tr ("Plugin folders (VST, VST3 and CLAP)") };
     juce::ComboBox languageBox;
     juce::AudioDeviceSelectorComponent devices;
     juce::StringArray folderList;

@@ -495,10 +495,14 @@ private:
                         juce::dontSendNotification);
         status.setColour (juce::Label::textColourId, theme::colour::textPrimary);
         const auto xruns = device->getXRunCount();
+        const auto rt = engine.getRtStats().snapshot();
+        const auto dot = juce::String::fromUTF8 ("   \xc2\xb7   ");
         load.setText (tr ("Audio CPU load: {0}%", { juce::String (juce::roundToInt (devices.getCpuUsage() * 100.0)) })
-                          + (xruns > 0 ? juce::String::fromUTF8 ("   \xc2\xb7   ") + tr ("{0} dropouts (buffer underruns) so far", { juce::String (xruns) }) : juce::String()),
+                          + (xruns > 0 ? dot + tr ("{0} dropouts (buffer underruns) so far", { juce::String (xruns) }) : juce::String())
+                          + (rt.overBudget > 0 ? dot + tr ("{0} blocks over the deadline (max {1}%)", { juce::String ((juce::int64) rt.overBudget), juce::String (juce::roundToInt (rt.maxLoad * 100.0)) })
+                                               : juce::String()),
                       juce::dontSendNotification);
-        load.setColour (juce::Label::textColourId, xruns > 0 ? theme::colour::warning : theme::colour::textSecondary);
+        load.setColour (juce::Label::textColourId, xruns > 0 || rt.overBudget > 0 ? theme::colour::warning : theme::colour::textSecondary);
     }
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
