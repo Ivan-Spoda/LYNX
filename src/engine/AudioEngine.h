@@ -294,6 +294,9 @@ public:
     };
     UiPulse takeUiPulse() noexcept { return std::exchange (uiPulse, {}); }
 
+    // Writes `state` (a createStateXml() taken earlier; nullptr = none was saved) back as the saved device and stops
+    // saving later changes: a test run (--rtstress --type ...) leaves the user's device as it found it.
+    void restoreAudioDeviceState (const juce::XmlElement* state);
     // Device, buffer, deadline and the callback statistics in a few lines (CPU meter hint, glitch log, --rtstress).
     juce::String describeRealtime (bool withUnits = true) const;
 
