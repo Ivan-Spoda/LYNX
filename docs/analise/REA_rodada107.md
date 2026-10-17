@@ -105,6 +105,12 @@ that clip's voice (other callers, key < 128, still stop everything).
 Every window within 0.1 dB except the last one (0.4–0.5 dB, the song's end).
 
 ## Where I stopped / next steps
-- Verifying all fixes on her laptop (kwe, game over, luisa) against FL; then land.
-- Export report now lists plugin_found / plugin_missing lines and each insert's chain (Main.cpp runExport);
-  `--find-plugins` runs the app's targeted plugin scan first. renderwav: LYNX_SUBSTITUTES=1 / LYNX_DISABLE="t.k".
+- Landed (see the commit). Verified on her laptop with the Windows build: `kwe` vocal path without plugins within
+  0.1 dB of FL in 50–80 s (0.6 dB in the last window); with the FX insert 0.3–0.5 dB.
+- Her LYNX settings were restored after the tests (plugins.xml from the backup, no scan-retry marker), so the update
+  itself retries the Waves shell scan.
+- Open: the `kwe` stems stopping at 78 s (§7), the 0.3 dB insert-fader residue (§7), the Waves chain cannot be
+  checked against FL's command-line render on her laptop (§6); demo regression baselines may move where a project
+  has route levels other than 12800 (now on FL's fader curve).
+- Tools: export report lines plugin_found / plugin_missing / insert chains; `--find-plugins`; renderwav
+  LYNX_SUBSTITUTES=1 / LYNX_DISABLE="t.k".
