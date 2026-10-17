@@ -11,6 +11,11 @@
 
 namespace lynx
 {
+// Audio clip events carry the clip's own "key" (above the MIDI range): the end of a clip stops only the voice that clip
+// started. Two clips of the same channel overlapping (FL's crossfaded vocal comps) both play, as in FL (REA_rodada107 §5).
+constexpr int audioClipKeyBase = 128;
+constexpr int audioClipKey (std::size_t playlistIndex) noexcept { return audioClipKeyBase + (int) (playlistIndex % 1000000u); }
+
 struct NoteEvent
 {
     enum class Type : std::uint8_t { on, off, slide, choke }; // slide: glides the sounding notes to `key`; choke: cut group
@@ -18,7 +23,7 @@ struct NoteEvent
     int sampleOffset = 0;   // 0 .. numSamples-1 within the block
     Type type = Type::on;
     int channel = 0;
-    int key = 60;
+    int key = 60;           // audio clips: audioClipKey (the clip's playlist index), so a clip's end stops only its voice
     float velocity = 0.0f;
     double startSeconds = 0.0; // audio clips: where the sample starts playing from
     float pan = 0.0f;          // -1..1, from the note

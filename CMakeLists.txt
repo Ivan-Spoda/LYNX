@@ -31,6 +31,7 @@ add_library(lynx_core STATIC
     src/core/PluginSubstitutes.cpp
     src/core/Preferences.cpp
     src/core/PluginLayout.cpp
+    src/core/StateParams.cpp
     src/core/FlEffects.cpp
     src/core/Effector.cpp
     src/core/FlSamplers.cpp

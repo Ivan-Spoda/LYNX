@@ -68,6 +68,7 @@ public:
     void prepare (double sampleRate, bool hqRender = false) noexcept;
     void set (const State& s) noexcept; // a newly loaded state (as after FL's state load)
     void setKnobs (const State& s) noexcept; // knob / option changes on the running engine
+    void setBands (const State& s) noexcept; // band table / band mode changes on the running engine (values glide)
     void reset() noexcept;              // as freshly loaded: filters cleared, gains ramp in from zero
     void flush() noexcept;              // FL's Flush message: filters cleared, gains jump to their targets
     void process (float* left, float* right, int n) noexcept; // stereo, in place, any n (FL blocks of 512)

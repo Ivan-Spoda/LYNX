@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "core/Effects.h"
+#include "core/StateHandoff.h"
 
 // Bit-exactness with FL's plugin needs every float operation in the plugin's order and precision: no contraction into
 // fused multiply-adds, and the x87 extended precision of its pan law kept (long double; 80-bit on every x86 target LYNX
@@ -1058,7 +1059,29 @@ namespace
 class DelayBankEffect final : public Effect
 {
 public:
-    explicit DelayBankEffect (const std::vector<std::uint8_t>& slotState) : state (parse (slotState).value_or (defaultState())) {}
+    explicit DelayBankEffect (const std::vector<std::uint8_t>& slotState) : state (parse (slotState).value_or (defaultState())), accepted (state) {}
+
+    // the editor changed bank controls (0…130 go to the running engine as FL's ProcessParam); options, the solo or the
+    // oversampling need a new engine
+    bool acceptState (const std::vector<std::uint8_t>& bytes) noexcept override
+    {
+        const auto s = parse (bytes);
+        if (! s || s->p[131] != accepted.p[131] || s->p[132] != accepted.p[132])
+            return false;
+        for (int b = 0; b < banks; ++b)
+        {
+            const auto& x = s->bank[(std::size_t) b];
+            const auto& y = accepted.bank[(std::size_t) b];
+            if (x.filterType[0] != y.filterType[0] || x.filterType[1] != y.filterType[1] || x.filterOrder[0] != y.filterOrder[0]
+                || x.filterOrder[1] != y.filterOrder[1] || x.filterAfter != y.filterAfter || x.mode != y.mode || x.steps != y.steps
+                || x.amount != y.amount || x.enabled != y.enabled || x.tapBeforeFeedback != y.tapBeforeFeedback || x.sync != y.sync)
+                return false;
+        }
+        if (! incoming.offer (s->p))
+            return false;
+        accepted = *s;
+        return true;
+    }
 
     void prepare (double sampleRate) noexcept override
     {
@@ -1080,6 +1103,12 @@ public:
             engine = std::make_unique<Engine> (state, rate, bpm, block, true);
             tempo = bpm;
         }
+        if (std::array<int, stateControls> p {}; incoming.take (p))
+            for (int i = globalControls; i < automatable; ++i)
+            {
+                state.p[(std::size_t) i] = p[(std::size_t) i];
+                engine->setControl (i, p[(std::size_t) i]);
+            }
         for (int i = 0; i < globalControls; ++i)
             engine->setControl (i, g[i]);
         if (bpm != tempo)
@@ -1099,6 +1128,8 @@ private:
     static constexpr int block = 512;
     double rate = 44100.0, tempo = 0.0;
     State state;
+    State accepted; // the last state taken by acceptState (its thread only)
+    StateHandoff<std::array<int, stateControls>> incoming;
     std::unique_ptr<Engine> engine;
 };
 } // namespace
@@ -1120,6 +1151,64 @@ std::string globalText (int index, float value)
             std::snprintf (text, sizeof (text), "-inf dB");
         else
             std::snprintf (text, sizeof (text), "%.1f dB", 20.0 * std::log10 ((double) g));
+    }
+    return text;
+}
+
+std::string controlText (const State& s, int index, int raw)
+{
+    char text[48];
+    if (index < 0 || index >= automatable)
+        return {};
+    if (index < globalControls)
+        return globalText (index, (float) raw / 128.0f);
+    const int b = (index - 4) >> 4, k = index - 4 - 16 * b;
+    const auto db = [&] (float g) {
+        if (g == 0.0f)
+            std::snprintf (text, sizeof (text), "-inf dB");
+        else
+            std::snprintf (text, sizeof (text), "%.1f dB%s", 20.0 * std::log10 (std::fabs ((double) g)), g < 0.0f ? " (inv.)" : "");
+    };
+    const auto pan = [&] {
+        if (raw == 0)
+            std::snprintf (text, sizeof (text), "Centred");
+        else
+            std::snprintf (text, sizeof (text), "%d%% %s", (int) std::lround (std::abs (raw) * 100.0 / 128.0), raw < 0 ? "left" : "right");
+    };
+    switch (k)
+    {
+        case 0: case 5: case 13: pan(); break;
+        case 1: case 14: case 15: db (signedVolume (raw)); break;
+        case 2: case 10:
+        {
+            // the filter's corner (REA_rodada56 §1.5): low-pass and the other types use different scales
+            const auto type = s.bank[(std::size_t) b].filterType[k == 2 ? 0 : 1];
+            const auto c = (double) raw / 65536.0;
+            const auto f = (std::exp (c * std::log (1501.0)) - 1.0) * (type == 1 ? 0.00066466664 : 0.00039993334);
+            std::snprintf (text, sizeof (text), "%.0f Hz", (std::min (f, type == 4 ? 0.6001 : 1.0001) + (type == 1 ? 0.003 : 0.0001)) * 44100.0);
+            break;
+        }
+        case 3: case 11: std::snprintf (text, sizeof (text), "%d%%", (int) std::lround (raw * 100.0 / 65536.0)); break;
+        case 4: case 12: // the shelf / peak amplitude A (unity at 128), shown as the cookbook gain 40·log10 A
+        {
+            const auto a = (std::exp (raw / 128.0 * std::log (10.0 / 9.0)) - 1.0) * 8.1 + 0.1;
+            std::snprintf (text, sizeof (text), "%+.1f dB", 40.0 * std::log10 (a));
+            break;
+        }
+        case 6: case 7: std::snprintf (text, sizeof (text), "%d%%", (int) std::lround (raw * 100.0 / 128.0)); break;
+        case 8:
+            if (s.bank[(std::size_t) b].sync) // 1920 = one beat = four steps
+                std::snprintf (text, sizeof (text), "%.2f steps", raw / 480.0);
+            else // 3840 = one second
+                std::snprintf (text, sizeof (text), "%.1f ms", raw * 1000.0 / 3840.0);
+            break;
+        case 9:
+        {
+            const auto ms = (std::exp (std::abs (raw) / 512.0 * std::log (1001.0)) - 1.0) * 50.0 / 100.0;
+            std::snprintf (text, sizeof (text), raw == 0 ? "0 ms" : "%.2f ms %s", ms, raw < 0 ? "left" : "right");
+            break;
+        }
+        default: std::snprintf (text, sizeof (text), "%d", raw); break;
     }
     return text;
 }
