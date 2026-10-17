@@ -17,6 +17,8 @@ public:
     SampleLibrary();
 
     std::shared_ptr<const SampleData> load (const juce::String& path);
+    // The file changed on disk (the audio editor saved over it): the next load() reads it again.
+    void forget (const juce::String& path);
 
     // The sample time-stretched without changing pitch (WSOLA), cached by (path, ratio).
     std::shared_ptr<const SampleData> loadStretched (const juce::String& path, double ratio);

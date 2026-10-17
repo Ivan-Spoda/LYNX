@@ -314,6 +314,12 @@ void prefetchSample (const SampleData& data, double fromSeconds, double toSecond
     juce::ignoreUnused (sink);
 }
 
+void SampleLibrary::forget (const juce::String& path)
+{
+    cache.erase (path);
+    stretchedCache.erase (path);
+}
+
 std::shared_ptr<const SampleData> SampleLibrary::load (const juce::String& path)
 {
     if (auto cached = cache[path].lock())

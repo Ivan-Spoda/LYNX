@@ -361,10 +361,15 @@ int AudioEngine::snapInputKey (int key) const noexcept
     return scale > 0 ? notetools::snapToScale (key, inputScaleRoot.load(), scale) : key;
 }
 
-void AudioEngine::previewSample (std::shared_ptr<const SampleData> sample)
+void AudioEngine::previewSample (std::shared_ptr<const SampleData> sample, bool loop, float gain)
 {
     if (preview != nullptr)
-        preview->play (std::move (sample));
+        preview->play (std::move (sample), loop, gain);
+}
+
+double AudioEngine::getPreviewPosition() const noexcept
+{
+    return preview != nullptr ? preview->getPlayPosition() : -1.0;
 }
 
 void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on, bool record)
@@ -661,28 +666,33 @@ void AudioEngine::setAudioRecordingArmed (bool armed)
 
     if (armed)
     {
-        // opens the default input (stereo if possible) on the same device/driver type
-        auto setup = deviceManager.getAudioDeviceSetup();
-
-        if (auto* type = deviceManager.getCurrentDeviceTypeObject(); type != nullptr && setup.inputDeviceName.isEmpty())
-        {
-            const auto names = type->getDeviceNames (true);
-            const auto index = type->getDefaultDeviceIndex (true);
-
-            if (juce::isPositiveAndBelow (index, names.size()))
-                setup.inputDeviceName = names[index];
-        }
-
-        setup.useDefaultInputChannels = false;
-        setup.inputChannels.clear();
-        setup.inputChannels.setRange (0, 2, true);
-        recordingError = deviceManager.setAudioDeviceSetup (setup, true);
+        recordingError = openAudioInput();
 
         if (! recordThread.isThreadRunning())
             recordThread.startThread();
     }
 
     sendChangeMessage();
+}
+
+juce::String AudioEngine::openAudioInput()
+{
+    // opens the default input (stereo if possible) on the same device/driver type
+    auto setup = deviceManager.getAudioDeviceSetup();
+
+    if (auto* type = deviceManager.getCurrentDeviceTypeObject(); type != nullptr && setup.inputDeviceName.isEmpty())
+    {
+        const auto names = type->getDeviceNames (true);
+        const auto index = type->getDefaultDeviceIndex (true);
+
+        if (juce::isPositiveAndBelow (index, names.size()))
+            setup.inputDeviceName = names[index];
+    }
+
+    setup.useDefaultInputChannels = false;
+    setup.inputChannels.clear();
+    setup.inputChannels.setRange (0, 2, true);
+    return deviceManager.setAudioDeviceSetup (setup, true);
 }
 
 void AudioEngine::setRecording (bool shouldRecord)
@@ -1224,6 +1234,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
 
     // With the loop region on, the block is split at the loop end and the position jumps back to
     // its start (the nodes see a jump and release their notes, as in FL).
+    // the audio editor's input recording (nothing happens unless it chose the input)
+    meters.capture.push (AudioCapture::input, numInputChannels > 0 ? inputChannelData[0] : nullptr, numInputChannels > 1 ? inputChannelData[1] : nullptr,
+                         numSamples);
+
     std::array<const float*, 64> inputs {};
     std::array<float*, 64> outputs {};
     numInputChannels = juce::jmin (numInputChannels, (int) inputs.size());

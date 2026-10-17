@@ -95,7 +95,9 @@ public:
     // Preview of an audio file (browser). An invalid/empty file stops the preview.
     void previewFile (const juce::File& file);
     // Plays a sound made in memory through the same preview output (the start-up sound). UI thread.
-    void previewSample (std::shared_ptr<const SampleData> sample);
+    void previewSample (std::shared_ptr<const SampleData> sample, bool loop = false, float gain = 0.8f);
+    // The frame of the previewed sample being played, -1 when the preview is silent.
+    double getPreviewPosition() const noexcept;
 
     // Note played live (PC keyboard, preview). UI thread.
     // `record` = goes into the recording if recording is on (Piano Roll preview doesn't).
@@ -118,6 +120,9 @@ public:
     // Enabling it opens the device input (only then does Windows show the mic as in use).
     void setAudioRecordingArmed (bool armed);
     bool isAudioRecordingArmed() const noexcept { return audioArmed; }
+    // Opens the default input (stereo if possible) on the current device without arming a take (the audio editor's
+    // recording). Returns an error message or empty.
+    juce::String openAudioInput();
     juce::String getLastRecordingError() const { return recordingError; }
 
     // MIDI learn: the next CC received becomes a controller linked to `target`.
