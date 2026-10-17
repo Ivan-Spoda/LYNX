@@ -1514,6 +1514,7 @@ private:
             kinds.push_back (lynx::EffectKind::maximus); // Soundgoodizer (below)
             const auto database = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin database/Effects");
 
+            auto maximusPasses = 0; // Maximus has its own page (first pass); the second pass shows Soundgoodizer
             for (const auto kind : kinds)
             {
                 auto fx = lynx::makeEffectSlot (kind);
@@ -1542,7 +1543,7 @@ private:
                     break;
                 }
 
-                if (kind == lynx::EffectKind::maximus) // Soundgoodizer: preset A of the installation, Amount 60 %
+                if (kind == lynx::EffectKind::maximus && ++maximusPasses == 2) // Soundgoodizer: preset A of the installation, Amount 60 %
                 {
                     juce::MemoryBlock data;
                     juce::File (juce::String::fromUTF8 (roots.factoryData.c_str())).getChildFile ("Plugins/Fruity/Effects/Soundgoodizer/Data/Presets/a.dat").loadFileAsData (data);
