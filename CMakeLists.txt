@@ -88,6 +88,7 @@ add_library(lynx_core STATIC
     src/core/DelphiMath.cpp
     src/core/FruityMultiband.cpp
     src/core/FlangusFastDist.cpp
+    src/core/FruityPhaser.cpp
     src/core/FruityFilters.cpp
     src/core/NewtoneFx.cpp
     src/core/MixSuite.cpp
