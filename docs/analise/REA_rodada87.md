@@ -16,6 +16,32 @@ demos, `ba.sh` before/after).
 
 ## 1. Causes found
 
+### 1.0 Patchers were rebuilt about twice a second during playback (clicks + a frozen UI)
+
+[MEASURED] `--rtstress` on *Astes – Bien Duro* (window hidden): the engine's 30 Hz timer ran **1.6 times a second**
+(longest gap 713 ms) and the PDC plan was rebuilt **18 times in 10 s** ("unit 344: 0 → 1536 samples").
+[CODE] Two defects fed each other:
+
+1. `RackState::build` never reused a parallel container (FL's Patcher, `EffectKind::parallel`): every snapshot —
+   every knob turn, and every PDC re-plan — built a new Patcher, i.e. new children with empty reverb tails, delay
+   lines and linear-phase convolvers.
+2. A fresh Frequency Splitter in linear-phase mode reported latency 0 until its first block applied its parameters,
+   then 3n/4 (1536). The engine's timer sees a latency change → publishes a new snapshot (re-planned PDC: delay lines
+   of new lengths, i.e. emptied) → which rebuilds the Patcher → whose splitter reports 0 again → …
+
+So any project with a Patcher holding a linear-phase splitter/EQ re-planned forever: each round cost a full
+`RackState::build` on the UI thread (~0.6 s for this project: the UI froze between rounds) and, on the audio side,
+restarted the Patcher's effects and emptied the PDC delay lines of every edge whose length changed — audible
+dropouts/clicks roughly twice a second.
+
+Fix: a container is reused when its branches, children (kind, enabled, parameters, mix, state, sample, plugin id,
+side-chains, nested containers) and links are unchanged (`sameContainer`); the Frequency Splitter built from a slot
+reports its latency from the slot's parameters before its first block. After the fix: the timer runs at 30.0/s
+(longest gap 35 ms), one PDC re-plan right after loading (effects whose latency is known only after their first
+block — Fruity Limiter 0→88, Multiband Compressor 0→52, Pitch Shifter, Pitch correction 9→257, Compressor 64→0 —
+listed by `renderwav` for every demo; **not changed**, they re-plan once when added). Test
+`patcher_container_is_reused_across_snapshots`.
+
 ### 1.1 The linear-phase FFT convolver evaluated sin/cos for every butterfly (most of a heavy project's CPU)
 
 [MEASURED] `perf` on the render phase of *Astes – Bien Duro* (262 channels, 71 inserts with effects): **55.6 %** of
@@ -115,8 +141,49 @@ not the whole story on this project (its critical path is a few heavy serial ins
 
 ## 3. Results
 
-(filled in below from `tmp/r87/ba1.txt` and `survey*.txt`)
+**Core, single thread** [MEASURED] (`renderwav`, live quality, 512-sample blocks, first 20 s of the song; `before` =
+main + the instrumentation only, `after` = this branch without the app-side fixes, which renderwav does not exercise).
+Instructions retired (`perf stat`, independent of the machine's load, includes loading) and the thread-CPU share of the
+11.61 ms deadline per block (noisy on this shared machine):
+
+| Project | Instructions before → after | Blocks over the deadline before → after | p99 before → after |
+|---|---|---|---|
+| Astes – Bien Duro | 92.9 G → 51.7 G | 183 → 1 (of 1723) | 181 % → 68 % |
+| Purps On The Beat – Stroll Up | 124.1 G → 46.1 G | 1018 → 7 | 192 % → 94 % |
+| Bombs Away – I'm Awake | 44.8 G → 42.7 G | 46 → 3 | 137 % → 80 % |
+| LollieVox – I'll Be Your Madonna | 45.8 G → 41.9 G | 55 → 6 | 137 % → 88 % |
+| Edlan & Ella Noël – Song For You | 28.4 G → 26.3 G | 55 → 1 | 110 % → 43 % |
+| Olbaid – Harmless Essentials (control) | 44.50 G → 44.50 G | 20 → 43 (noise) | 103 % → 110 % |
+
+The 10 s raw render of *Astes* is bit-identical before/after the FFT change (`cmp`); the convolver's levels change
+the float summation order only (tests within 2e-5 of the FL goldens / of direct convolution).
+
+**App, Windows** [MEASURED] (`LYNX.exe --rtstress … 10`, this PC: Ryzen 5 3600, 6 cores / 12 threads, WASAPI shared,
+48 kHz, 512 samples = 10.67 ms, 7 workers, window shown):
+
+| Project | Over deadline | Average / max load | UI timer |
+|---|---|---|---|
+| Astes – Bien Duro (before the Patcher fix, window hidden) | 0 | 17 % / 65–85 % | 1.6/s, gaps 0.7 s, 18 PDC re-plans |
+| Astes – Bien Duro | 0 | 14–17 % / 42–44 % | 30/s, 1 re-plan at load |
+| Bombs Away | 0 | 18 % / 44 % | 30/s |
+| LollieVox | 0 | 22 % / 42 % | 30/s |
+| Purps On The Beat | 0 | 35 % / 59 % | 30/s |
+| Harmless Essentials | 0 | 7 % / 14 % | 30/s |
+| Astes at 256 samples (5.33 ms) | 18 in 10 s | 42 % / 148 % | — |
+
+The "load" here is the callback's time against its deadline, so with 7 workers it is far below the single-thread
+figures above. At 256 samples the heaviest demo still misses deadlines on this 6-core PC: the 512 default is
+justified; the glitch log also records one missed deadline right after loading (stopped, the effects' first block).
 
 ## Where I stopped / next steps
 
-- Next candidates: per-note start cost of Sytrus/Ogun/Harmor voices; first-block initialisation; Harmless pads cost.
+- Ask the user to run `LYNX.exe --rtstress "<friend's project>.flp" report.txt 30` (and send `report.txt` plus
+  `%APPDATA%\LYNX\audio-glitches.log`): the report names the device, the deadline misses, late device calls and the
+  heaviest channels/effects of *their* projects (VST plugins included).
+- Effects whose latency is known only after their first block (Limiter, Multiband Compressor, Pitch Shifter, Pitch
+  correction, Compressor) still re-plan PDC once when created; computing it at construction would avoid that click.
+- The first block after loading costs 2–3 deadlines (effects' first-block set-up, e.g. Delay 3's `settle()`).
+- Per-note start cost of Sytrus / Ogun voices (10–20 ms single calls in the survey) and Harmless pads.
+- `RackRenderer` still prepares a snapshot built for another sample rate on the audio thread (device rate change).
+- The two per-unit timers (round 84's `ProcessTimes` for the Plugin performance monitor, this round's `UnitTimes`) could
+  be merged.
