@@ -427,6 +427,17 @@ struct TrackEq
     static double shelfSlope (float w) noexcept;
 };
 
+// When an insert's external audio input is heard through it (FL's "Monitor external input": Off / When armed /
+// Auto / On, REA_rodada88 §1). Auto [model]: like "When armed", except during playback without recording, so a
+// take plays back without the live input on top.
+enum class InputMonitor : std::uint8_t
+{
+    off,
+    whenArmed,
+    automatic,
+    on
+};
+
 struct MixerTrack
 {
     std::string name;
@@ -442,6 +453,11 @@ struct MixerTrack
     bool swapChannels = false;
     std::vector<MixerSend> sends;    // to other inserts
     TrackEq eq;
+    // external audio input (FL's "Audio input source"): the device's input channel `inputChannel` (0-based;
+    // -1 = none) and, when `inputStereo`, the next one too
+    int inputChannel = -1;
+    bool inputStereo = true;
+    InputMonitor monitor = InputMonitor::automatic;
 };
 
 struct Note

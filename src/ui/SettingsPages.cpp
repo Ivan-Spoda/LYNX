@@ -281,7 +281,7 @@ public:
     {
         for (auto* c : std::initializer_list<juce::Component*> { &deviceTitle, &statusTitle, &recordTitle, &driverLabel, &driverBox, &outputLabel,
                                                                  &outputBox, &inputLabel, &inputBox, &rateLabel, &rateBox, &bufferLabel, &bufferBox,
-                                                                 &bufferNote, &panelButton, &testButton, &status, &load, &recordInput, &recordNote })
+                                                                 &bufferNote, &panelButton, &testButton, &status, &load, &recordInput, &recordNote, &inputChannels })
             add (*c);
 
         styleLabel (driverLabel, tr ("Driver"));
@@ -315,20 +315,21 @@ public:
             apply ([this] (juce::AudioDeviceManager::AudioDeviceSetup& s) { s.outputDeviceName = outputBox.getText(); });
         };
         inputBox.onChange = [this] {
-            apply ([this] (juce::AudioDeviceManager::AudioDeviceSetup& s) {
-                if (inputBox.getSelectedId() <= 1)
-                {
+            if (updating)
+                return;
+            if (inputBox.getSelectedId() <= 1)
+                apply ([] (juce::AudioDeviceManager::AudioDeviceSetup& s) {
                     s.inputDeviceName = {};
-                    s.inputChannels.clear();
-                }
-                else
-                {
-                    s.inputDeviceName = inputBox.getText();
                     s.useDefaultInputChannels = false;
                     s.inputChannels.clear();
-                    s.inputChannels.setRange (0, 2, true);
-                }
-            });
+                });
+            else
+            {
+                // every channel of the device opens: each mixer insert picks its own (pair or single channel)
+                const auto result = engine.openAudioInput (inputBox.getText());
+                error = result.issue == AudioEngine::InputIssue::failed ? result.detail : juce::String();
+                refresh();
+            }
         };
         rateBox.onChange = [this] {
             apply ([this] (juce::AudioDeviceManager::AudioDeviceSetup& s) { s.sampleRate = (double) rateBox.getSelectedId(); });
@@ -349,7 +350,8 @@ public:
         testButton.onClick = [this] { devices.playTestSound(); };
 
         styleToggle (recordInput, tr ("Record input audio"));
-        styleNote (recordNote, tr ("With recording on, the sound card input becomes a Playlist clip (the Input device above)."));
+        styleNote (recordNote, tr ("Choose each mixer insert's input in the Mixer (the input box above its effect slots), arm it, then Rec + Play. "
+                                   "This switch records the first two input channels into a new insert when nothing is armed."));
         recordInput.onClick = [this] { engine.setAudioRecordingArmed (recordInput.getToggleState()); };
 
         devices.addChangeListener (this);
@@ -380,8 +382,9 @@ private:
         status.setBounds (r.full (22));
         load.setBounds (r.full (22));
         r.section (recordTitle);
+        inputChannels.setBounds (r.full (34));
         recordInput.setBounds (r.full (24));
-        recordNote.setBounds (r.full (16).translated (0, -6));
+        recordNote.setBounds (r.full (32).translated (0, -6));
         return r.bottom();
     }
 
@@ -463,6 +466,15 @@ private:
         panelButton.setEnabled (device != nullptr && device->hasControlPanel());
         testButton.setEnabled (device != nullptr);
         recordInput.setToggleState (engine.isAudioRecordingArmed(), juce::dontSendNotification);
+        {
+            // what the mixer inserts can take their input from
+            const auto names = engine.getInputChannelNames();
+            juce::StringArray list;
+            for (const auto& n : names)
+                list.add (juce::String::fromUTF8 (n.c_str()));
+            styleNote (inputChannels, names.empty() ? tr ("Input channels: none open. Choose an input device above to record a microphone or an instrument.")
+                                                    : tr ("Input channels ({0}): {1}", { juce::String ((int) names.size()), list.joinIntoString (", ") }));
+        }
         updateStatus();
     }
 
@@ -501,7 +513,7 @@ private:
     bool updating = false;
     juce::String error;
     SectionTitle deviceTitle { tr ("Audio device") }, statusTitle { tr ("Status") }, recordTitle { tr ("Recording") };
-    juce::Label driverLabel, outputLabel, inputLabel, rateLabel, bufferLabel, bufferNote, status, load, recordNote;
+    juce::Label driverLabel, outputLabel, inputLabel, rateLabel, bufferLabel, bufferNote, status, load, recordNote, inputChannels;
     juce::ComboBox driverBox, outputBox, inputBox, rateBox, bufferBox;
     juce::TextButton panelButton { tr ("Driver settings...") }, testButton { tr ("Play a test sound") };
     juce::ToggleButton recordInput;
