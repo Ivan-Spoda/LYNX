@@ -52,6 +52,9 @@ has two).
 [DATA] Files saved by FL 11 and older close an effect slot without the 0x62 slot-index event; the slot index is the
 second i32 of the 0xD4 plugin record, and the next slot / route / insert event ends the slot. Before, such slots were
 dropped (e.g. "Fruity Phase Inverter" render test, "nucleon - Steptime" insert 3 with 4 effects).
+[EXEC] The 13 render tests of wrapped Fruity effects (Balance, Bass Boost, Center, Chorus, Compressor, Fast LP, Filter,
+Flanger, Free Filter, Mute 2, Phase Inverter, Phaser, Reeverb) now show up as Fruity Wrapper slots with VST2 states:
+they decode (layout −9) but round 89's writer does not give back the same bytes (not confirmed why).
 `tools/renderwav` reads Ogg samples and renders the whole song with the app's 1-second empty tail, so a song does not
 wrap back to its start inside the tail (FL's exports don't).
 
