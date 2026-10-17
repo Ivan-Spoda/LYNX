@@ -135,15 +135,22 @@ public:
 
     // Third-party plugins from an imported .flp (ForeignPlugin): finds the same plugin among the
     // scanned ones (VST3 by class ID, CLAP by id; then the file FL Studio's plugin database lists for it; then
-    // by name as a fallback, also for the VST2s LYNX doesn't host) and converts the VST3 state to JUCE's format.
+    // VST2 by its ID; by name as a fallback) and carries the state over (VST3: JUCE's format; VST2: FL's layout as is).
     // Matched channels become plugin channels; unmatched effect slots are dropped. Returns how many were matched.
     // `matched` gets one "name → file (how)" line per plugin found.
-    int adoptFlPlugins (Song& song, juce::StringArray* missing = nullptr, juce::StringArray* matched = nullptr);
+    // `withoutState` gets the plugins found whose saved settings couldn't be carried over (VST2 <-> VST3 swap).
+    int adoptFlPlugins (Song& song, juce::StringArray* missing = nullptr, juce::StringArray* matched = nullptr,
+                        juce::StringArray* withoutState = nullptr);
     std::optional<juce::PluginDescription> findForeign (const ForeignPlugin& plugin, bool instrument, juce::String* how = nullptr);
 
     // Plugin files worth a targeted scan so a project's plugins can be found: for each plugin not known yet, the
     // file FL's database or the project names, and same-named VST3/CLAP files in pluginFolders(). Cheap (no loading).
     juce::StringArray filesToScanFor (const std::vector<FlpPluginUse>& uses);
+
+    // Plugins of the song that are known but failed to load ("name: reason"; they play silence / are bypassed).
+    // Kept until clearLoadFailures (a new project). Any thread.
+    juce::StringArray getLoadFailures() const;
+    void clearLoadFailures();
 
     std::shared_ptr<Instrument> makeInstrument (const PluginRef& ref, double sampleRate, juce::String* error = nullptr);
     std::shared_ptr<Effect> makeEffect (const PluginRef& ref, double sampleRate, juce::String* error = nullptr);
@@ -169,6 +176,8 @@ private:
 
     class BackgroundScan;
     std::unique_ptr<BackgroundScan> background;
+    mutable std::mutex failuresLock;
+    juce::StringArray loadFailures;
     mutable std::mutex stateLock;
     ScanState state;
 };
