@@ -89,7 +89,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: LYNX-unsigned
-          path: build-win/LYNX.exe
+          path: |
+            build-win/LYNX.exe
+            build-win/lynx-asio.dll
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------------------------
@@ -127,7 +129,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: LYNX-signed
-          path: signed/LYNX.exe
+          path: |
+            signed/LYNX.exe
+            signed/lynx-asio.dll
           if-no-files-found: error
 
   package:
@@ -175,6 +179,8 @@ jobs:
           $p = Start-Process bin\LYNX.exe -ArgumentList '--showcase', "$PWD\pkg\$name\Demo.lynx" -Wait -PassThru
           if (-not (Test-Path "pkg\$name\Demo.lynx")) { throw "showcase did not write Demo.lynx (exit $($p.ExitCode))" }
           Copy-Item bin\LYNX.exe, LICENSE, THIRD_PARTY.md, PRIVACY.md "pkg\$name\"
+          # LYNX ASIO driver and its registration helpers (REA round 97)
+          if (Test-Path bin\lynx-asio.dll) { Copy-Item bin\lynx-asio.dll, "asio\Register LYNX ASIO.bat", "asio\Unregister LYNX ASIO.bat" "pkg\$name\" }
           New-Item -ItemType Directory -Force dist | Out-Null
           Compress-Archive -Path "pkg\$name" -DestinationPath "dist\$name.zip"
           Copy-Item bin\LYNX.exe dist\
