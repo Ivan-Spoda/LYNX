@@ -122,5 +122,5 @@ OUT GAIN), measured on the FL 2026 capture of the Default preset (`tmp/r93/flref
 
 ## Where I stopped
 
-- Engine, import, automation, editor layout, tests: done on `feature/phaser105` (pushed to `wip/phaser105`).
-- Next: build-local with the FL Data dir, Windows build, selftest, land.
+- Engine, import (incl. old wrapped VST2 states), automation, editor layout, tests, FL render check: done on
+  `feature/phaser105`; build-local with the FL Data dir: 1 175 373 checks, 0 failures. Landing via land.sh.
