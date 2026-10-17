@@ -124,6 +124,7 @@ private:
     void refreshChannelBox();
     void stepChannel (int direction, bool withNotesOnly);
     void zoomToTicks (double from, double to);
+    void zoomIn (int anchorX);
     void zoomOut (int anchorX);
     void listenAt (int x);
     void stopListening();

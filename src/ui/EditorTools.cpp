@@ -20,7 +20,7 @@ const std::vector<EditToolInfo>& editTools()
         { EditTool::mute, Icon::mute, TR_NOOP ("Mute"), TR_NOOP ("Click or drag to mute or unmute"), 'T' },
         { EditTool::knife, Icon::knife, TR_NOOP ("Knife"), TR_NOOP ("Drag a line to cut; a click cuts at the cursor"), 'C' },
         { EditTool::lasso, Icon::select, TR_NOOP ("Lasso"), TR_NOOP ("Click or drag to select (Shift adds)"), 'E' },
-        { EditTool::zoom, Icon::zoom, TR_NOOP ("Zoom"), TR_NOOP ("Drag a range to zoom in; a click zooms out"), 'Z' },
+        { EditTool::zoom, Icon::zoom, TR_NOOP ("Zoom"), TR_NOOP ("Click zooms in, drag a range to zoom to it; right-click zooms out"), 'Z' },
         { EditTool::listen, Icon::listen, TR_NOOP ("Listen"), TR_NOOP ("Click or drag to hear what is under the cursor"), 'Y' },
         { EditTool::slip, Icon::slip, TR_NOOP ("Slip"), TR_NOOP ("Drag inside a clip to move its content under it"), 'S' },
     };
@@ -206,7 +206,7 @@ juce::String actionHint (gesture::Action action, bool playlist)
         case A::erase: return tr ("[LMB] click or drag deletes");
         case A::toggleMute: return tr ("[LMB] click or drag mutes / unmutes");
         case A::slice: return tr ("[LMB] drag a line to cut across, a click cuts here") + "  " + tr ("[Alt] no snap");
-        case A::zoomRange: return tr ("[LMB] drag a range to zoom into it, a click zooms out");
+        case A::zoomRange: return tr ("[LMB] click zooms in, drag a range to zoom to it  [RMB] zooms out");
         case A::listen: return playlist ? tr ("[LMB] click or drag plays from here") : tr ("[LMB] click or drag plays the notes under the cursor");
         case A::fade: return tr ("Fade: [LMB] drag sets its length");
         case A::movePoint: return tr ("Point: [LMB] drag moves, then [Shift] keeps time, [Ctrl] keeps value  [RMB] deletes");

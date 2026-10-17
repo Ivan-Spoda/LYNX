@@ -1207,6 +1207,13 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
             return;
         }
 
+    // Zoom tool: right-click zooms out around the point (a click zooms in, a drag zooms to the range)
+    if (tool == EditTool::zoom && e.mods.isRightButtonDown() && ! e.mods.isCtrlDown())
+    {
+        zoomOut (e.x);
+        return;
+    }
+
     // every tool: right click deletes (double right-click on a ghost note switches to its channel; with
     // editable ghost notes a right-click deletes the ghost note itself)
     if (e.mods.isRightButtonDown())
@@ -1802,7 +1809,7 @@ void PianoRollComponent::mouseUp (const juce::MouseEvent& e)
         if (rubberBand.getWidth() > 4)
             zoomToTicks (xToTick (rubberBand.getX()), xToTick (rubberBand.getRight()));
         else
-            zoomOut (e.x);
+            zoomIn (e.x); // a click zooms in around the point (right-click zooms out)
     }
 
     if (drag == Drag::select && rubberBand.isEmpty() && dragNote >= 0)
@@ -2149,6 +2156,15 @@ void PianoRollComponent::zoomToTicks (double from, double to)
 
     pixelsPerTick = juce::jlimit (2.0 / ticksPerStep, 120.0 / ticksPerStep, gridArea().getWidth() / (to - from));
     scrollTicks = juce::jmax (0.0, from);
+    updateScrollBars();
+    repaint();
+}
+
+void PianoRollComponent::zoomIn (int anchorX)
+{
+    const auto anchor = xToTick (anchorX);
+    pixelsPerTick = juce::jlimit (2.0 / ticksPerStep, 120.0 / ticksPerStep, pixelsPerTick * 2.0);
+    scrollTicks = juce::jmax (0.0, anchor - (anchorX - keyboardWidth) / pixelsPerTick);
     updateScrollBars();
     repaint();
 }
