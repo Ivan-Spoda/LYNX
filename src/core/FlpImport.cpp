@@ -2547,17 +2547,25 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
                 if (std::isfinite (item.startOffset) && item.startOffset > 0.0f)
                 {
+                    // offsets in ms are kept to the sample: the sub-tick rest goes to offsetFraction (REA_rodada110 §1:
+                    // a 77 019.27 ms offset rounded to whole ticks played 2 samples late against FL)
+                    const auto setOffset = [&clip] (double ticks)
+                    {
+                        clip.offset = (std::int64_t) std::llround (ticks);
+                        clip.offsetFraction = (float) (ticks - (double) clip.offset);
+                    };
+
                     if (std::abs (span - beats) < 0.02 * std::max (1.0, beats))
                         clip.offset = (std::int64_t) std::llround (item.startOffset * ppq);
                     else if (std::abs (span - beats * 60000.0 / song.bpm) < 0.02 * std::max (1.0, span))
-                        clip.offset = (std::int64_t) std::llround (item.startOffset / 1000.0 * song.bpm / 60.0 * ppq);
+                        setOffset (item.startOffset / 1000.0 * song.bpm / 60.0 * ppq);
                     else if (const auto& ch = song.channels[(std::size_t) channel->second]; ch.sampler.stretchBeats > 0.0f && span > 0.0 && beats > 0.0)
                     {
                         // time-stretched clip: start/end are in the SAMPLE's milliseconds, so the span is the clip
                         // length times the stretch factor (e.g. 31 219 ms over 64 beats = 29 538 ms at 130 BPM)
                         const auto factor = span / (beats * 60000.0 / song.bpm);
                         if (factor > 0.25 && factor < 4.0)
-                            clip.offset = (std::int64_t) std::llround (item.startOffset / factor / 1000.0 * song.bpm / 60.0 * ppq);
+                            setOffset (item.startOffset / factor / 1000.0 * song.bpm / 60.0 * ppq);
                     }
                 }
 

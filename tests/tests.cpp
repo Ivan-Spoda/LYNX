@@ -435,6 +435,10 @@ TEST (flp_channel_level_adjustments_and_stretched_clip_start)
     // 788.46 sample ms / 1.056892 = 746.0 ms = 1.6164 beats into the clip
     CHECK (song.channels[0].sampler.stretchBeats > 0.0f);
     CHECK (std::llabs (song.playlist[0].offset - (std::int64_t) std::llround (1.61638 * lynx::ppq)) <= 1);
+    // REA_rodada110 §1: the sub-tick rest is kept (offset + fraction = the exact position, to the sample)
+    const auto exact = 788.4615 / ((double) (788.4615f + 31218.92f - 788.4615f) / (64.0 * 60000.0 / 130.0)) / 1000.0 * 130.0 / 60.0 * lynx::ppq;
+    CHECK (std::abs ((double) song.playlist[0].offset + (double) song.playlist[0].offsetFraction - exact) < 1e-3);
+    CHECK (std::abs (song.playlist[0].offsetFraction) <= 0.5f);
 }
 
 TEST (flp_parses_project_model)

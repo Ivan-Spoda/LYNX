@@ -611,6 +611,7 @@ struct Clip
     std::int64_t start = 0;   // ticks in the song
     std::int64_t length = 0;  // ticks
     std::int64_t offset = 0;  // how much of the start of the pattern/audio is skipped (ticks)
+    float offsetFraction = 0.0f; // audio clips: sub-tick part of `offset` (-0.5..0.5 ticks; imported FL offsets in ms)
     ClipKind kind = ClipKind::pattern;
     int channel = -1;         // audio clips: channel (audioClip) that holds the sample
     int automation = -1;      // automation clips: index into Song::automations

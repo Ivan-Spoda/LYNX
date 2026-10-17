@@ -426,14 +426,17 @@ juce::var clipsToVar (const std::vector<Clip>& list)
                                       (juce::int64) c.offset, (int) c.kind,
                                       c.kind == ClipKind::automation ? c.automation : c.channel };
 
-        // [.., fade-in, fade-out, gain, muted] only when not default
-        if (c.fadeIn > 0 || c.fadeOut > 0 || c.gain != 1.0f || c.muted)
+        // [.., fade-in, fade-out, gain, muted, sub-tick offset] only when not default
+        const auto fraction = juce::roundToInt (c.offsetFraction * 10000.0f) / 10000.0;
+        if (c.fadeIn > 0 || c.fadeOut > 0 || c.gain != 1.0f || c.muted || fraction != 0.0)
         {
             clip.add ((juce::int64) c.fadeIn);
             clip.add ((juce::int64) c.fadeOut);
             clip.add (juce::roundToInt (c.gain * 1000.0f) / 1000.0);
-            if (c.muted)
-                clip.add (true);
+            if (c.muted || fraction != 0.0)
+                clip.add (c.muted);
+            if (fraction != 0.0)
+                clip.add (fraction);
         }
 
         clips.add (clip);
@@ -466,6 +469,7 @@ std::vector<Clip> clipsFromVar (const juce::var& v, const Song& song)
                 clip.fadeOut = juce::jmax<juce::int64> (0, (juce::int64) c[8]);
                 clip.gain = juce::jlimit (0.0f, 4.0f, (float) (double) c[9]);
                 clip.muted = c.size() >= 11 && (bool) c[10];
+                clip.offsetFraction = c.size() >= 12 ? juce::jlimit (-0.5f, 0.5f, (float) (double) c[11]) : 0.0f;
             }
 
             if (c.size() >= 7 && (int) c[5] == 2)
