@@ -439,7 +439,7 @@ public:
             }, persistent);
 
         pluginFolders = std::make_unique<FolderList> (
-            tr ("Plugin folders"), tr ("Scanned for VST3 and CLAP plugins (Options > Scan for plugins)."),
+            tr ("Plugin folders"), tr ("Scanned for VST, VST3 and CLAP plugins (Options > Scan for plugins)."),
             [persistent, sample, &host] {
                 juce::StringArray list;
                 if (persistent)

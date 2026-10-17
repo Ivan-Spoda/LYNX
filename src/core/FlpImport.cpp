@@ -42,6 +42,7 @@
 #include "core/FlSamplers.h"
 #include "core/FlSynths.h"
 #include "core/FlWrapper.h"
+#include "core/FruityDynamics.h"
 #include "core/SynthPresets.h"
 #include "core/NewtoneFx.h"
 
@@ -560,6 +561,32 @@ std::optional<SynthSettings> synthFromFlPreset (const std::vector<std::uint8_t>&
         return std::nullopt;
     }
 }
+
+namespace
+{
+// Old FL saved its own Fruity effects as VST2 plugins inside Fruity Wrapper: the wrapper keeps their parameters as
+// 0…1 floats (REA_rodada89 §2). Fruity Compressor's 6 controls map linearly onto its native ranges — an untouched
+// instance's floats land exactly on the native defaults [DATA, RawFL demo] — so its native state (layout v1:
+// 6 × i32) is rebuilt; the lookahead flag has no VST2 parameter (off, not confirmed). Other effects: defaults.
+std::vector<std::uint8_t> wrappedFruityState (const ForeignPlugin& plugin)
+{
+    std::vector<std::uint8_t> native;
+    FlVst2State state;
+    if (plugin.name != "Fruity Compressor" || ! parseFlVst2State (plugin.state, state) || state.params.size() < fldyn::compressorControls)
+        return native;
+    auto put = [&native] (std::int32_t v) {
+        for (int b = 0; b < 4; ++b)
+            native.push_back ((std::uint8_t) ((std::uint32_t) v >> (8 * b)));
+    };
+    put (1);
+    for (std::size_t k = 0; k < (std::size_t) fldyn::compressorControls; ++k)
+    {
+        const auto lo = fldyn::compressorMin[k], hi = fldyn::compressorMax[k];
+        put (lo + (std::int32_t) std::lround (std::clamp (state.params[k], 0.0f, 1.0f) * (float) (hi - lo)));
+    }
+    return native;
+}
+} // namespace
 
 Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 {
@@ -1573,6 +1600,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || (plugin == "harmless" && def.instrument == InstrumentKind::harmless)
                      || (plugin == "harmor" && def.instrument == InstrumentKind::harmor))
                 ++r.converted[c.pluginName];
+            else if (plugin == "fruity wrapper" && def.plugin.foreign.format == ForeignPlugin::Format::none)
+                ++r.unsupported["Fruity Wrapper (plugin state not readable)"]; // e.g. a wrapper version newer than 12
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && plugin != "midi out"
                      && def.instrument == InstrumentKind::synth)
                 ++r.unsupported[c.pluginName]; // (Keyboard Controller only sends notes to other channels)
@@ -1618,11 +1647,14 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         {
             track.toMaster = std::find (insert.routes.begin(), insert.routes.end(), 0) != insert.routes.end();
 
-            // The level comes from 0xE1 (below). Without a record, FL templates route every insert to the
-            // send tracks at the end of the mixer (100+) at level 0; routes to regular inserts are 100%.
+            // The level comes from 0xE1 (below). Without a record a route is 100%, except in FL 11 and older,
+            // whose templates route every insert to the send tracks at the end of the mixer (100+) at level 0.
+            // FL 12+ plays an unrecorded route to insert 100+ at full level (REA_rodada89 §4.1 [EXEC]: FL's
+            // "Advanced" templates feed bus tracks 117…125 that way); the exact version boundary is not confirmed.
+            const auto oldSendTracks = project.versionNumber < 12'000'000u;
             for (auto target : insert.routes)
                 if (target > 0 && target < tracks && target != insert.index)
-                    track.sends.push_back ({ target, target >= 100 ? 0.0f : 1.0f });
+                    track.sends.push_back ({ target, target >= 100 && oldSendTracks ? 0.0f : 1.0f });
         }
     }
 
@@ -1857,7 +1889,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
                 // old FL saved its own Fruity effects as VST2 inside the wrapper: becomes the internal effect
                 if (wrapped && foreign.format == ForeignPlugin::Format::vst2 && effectForFlPlugin (foreign.name))
-                    made = effectFromFl (foreign.name, {}, song.bpm);
+                    made = effectFromFl (foreign.name, wrappedFruityState (foreign), song.bpm);
                 else if (wrapped)
                 {
                     // the app swaps in the installed plugin; without it, the slot is removed
@@ -1880,8 +1912,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                                                     "Fruity Formula Controller", "Fruity LSD", "Fruity dB Meter", "Fruity Spectroman" };
                     const auto harmless = std::any_of (std::begin (silent), std::end (silent), [&] (const char* n) { return slot.plugin == n; });
 
-                    if (options.report != nullptr && slot.plugin != "Fruity Wrapper" && ! harmless)
-                        ++options.report->droppedEffects[slot.plugin];
+                    if (options.report != nullptr && ! harmless)
+                        ++options.report->droppedEffects[slot.plugin == "Fruity Wrapper" ? std::string ("Fruity Wrapper (plugin state not readable)")
+                                                                                          : slot.plugin];
                     continue;
                 }
 
