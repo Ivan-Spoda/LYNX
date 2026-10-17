@@ -1,4 +1,5 @@
 #include "engine/DllAsioDevice.h"
+#include <juce_gui_basics/juce_gui_basics.h>
 
 #if JUCE_WINDOWS
  #ifndef NOMINMAX
