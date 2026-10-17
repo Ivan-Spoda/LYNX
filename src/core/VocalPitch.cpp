@@ -518,10 +518,10 @@ void Psola::process (const float* x, float* y, int channels) noexcept
             for (int c = 0; c < channels; ++c)
                 acc[c][(std::size_t) (o & m)] += w * readIn (c, src);
         }
-        // unshifted voiced grains drift toward their marks, so an unshifted voice comes out as the input itself
-        // (delayed), not displaced by up to half a period
+        // unshifted voiced grains (within 1.7 cents) drift toward their marks, so a voice already on its note comes
+        // out as the input itself (delayed), not displaced by up to half a period
         auto hop = isVoiced ? ha / r : ha;
-        if (isVoiced && std::abs (r - 1.0) < 1e-9 && std::abs (f - 1.0) < 1e-9)
+        if (isVoiced && std::abs (r - 1.0) < 1e-3 && std::abs (f - 1.0) < 1e-3)
             hop += 0.25 * std::clamp (ta - ts, -0.5 * ha, 0.5 * ha);
         nextSynth = ts + hop;
     }

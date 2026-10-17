@@ -14,6 +14,8 @@
 #include "ui/PluginWindow.h"
 #include "ui/HintBar.h"
 #include "ui/I18n.h"
+#include "core/LynxTune.h"
+#include "core/VocalPitch.h"
 #include "ui/Icons.h"
 #include "ui/ValueControl.h"
 #include "ui/Theme.h"
@@ -1538,6 +1540,8 @@ int shownParams (const EffectSlot& slot)
     const auto all = (int) effectInfo (slot.kind).params.size();
     if (slot.kind == EffectKind::rhythmGain)
         return std::min (all, 2 + 3 * (int) std::lround (slot.params[1] * 12.0f));
+    if (slot.kind == EffectKind::lynxTune) // the note switches are the keyboard strip above the knobs
+        return std::min (all, (int) lynxtune::noteC);
     return all;
 }
 } // namespace
@@ -1564,6 +1568,8 @@ juce::Rectangle<int> EffectsPanel::knobBounds (int param) const
     }
     if (vocoderSelected()) // the band levels above the knobs
         top = bandLevelsBounds().getBottom() + 22;
+    if (tuneSelected()) // LYNX Tune's note keyboard above the knobs
+        top = tuneKeysBounds().getBottom() + 22;
 
     return { 8 + (param % columns) * w, top + (param / columns) * rowHeight, w, rowHeight - 4 };
 }
@@ -1593,6 +1599,53 @@ bool EffectsPanel::vocoderSelected() const
 {
     const auto* s = slots();
     return s != nullptr && selectedSlot >= 0 && selectedSlot < (int) s->size() && (*s)[(std::size_t) selectedSlot].kind == EffectKind::vocoder;
+}
+
+bool EffectsPanel::tuneSelected() const
+{
+    const auto* s = slots();
+    return s != nullptr && selectedSlot >= 0 && selectedSlot < (int) s->size() && (*s)[(std::size_t) selectedSlot].kind == EffectKind::lynxTune;
+}
+
+juce::Rectangle<int> EffectsPanel::tuneKeysBounds() const
+{
+    return { 10, slotsTop + maxEffectSlots * slotHeight + 40, getWidth() - 20, 54 };
+}
+
+namespace
+{
+// LYNX Tune's keyboard strip: one octave, white keys in a row, black keys on top (C … B → key rectangles)
+juce::Rectangle<float> tuneKeyRect (juce::Rectangle<float> area, int pc)
+{
+    static constexpr int whiteIndex[12] { 0, -1, 1, -1, 2, 3, -1, 4, -1, 5, -1, 6 };
+    static constexpr float blackAt[12] { 0, 1.0f, 0, 2.0f, 0, 0, 4.0f, 0, 5.0f, 0, 6.0f, 0 };
+    const auto w = area.getWidth() / 7.0f;
+    if (whiteIndex[pc] >= 0)
+        return { area.getX() + whiteIndex[pc] * w, area.getY(), w, area.getHeight() };
+    return { area.getX() + blackAt[pc] * w - w * 0.3f, area.getY(), w * 0.6f, area.getHeight() * 0.58f };
+}
+
+int tuneKeyAt (juce::Rectangle<float> area, juce::Point<float> p)
+{
+    for (int pc = 0; pc < 12; ++pc) // black keys first: they lie on top
+        if ((pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10) && tuneKeyRect (area, pc).contains (p))
+            return pc;
+    for (int pc = 0; pc < 12; ++pc)
+        if (tuneKeyRect (area, pc).contains (p))
+            return pc;
+    return -1;
+}
+} // namespace
+
+void EffectsPanel::toggleTuneNote (juce::Point<int> p)
+{
+    const auto pc = tuneKeyAt (tuneKeysBounds().toFloat(), p.toFloat());
+    if (pc < 0)
+        return;
+    engine.editSong ([t = track, slot = selectedSlot, pc] (Song& song) {
+        auto& v = song.mixer[(std::size_t) t].effects[(std::size_t) slot].params[(std::size_t) (lynxtune::noteC + pc)];
+        v = v >= 0.5f ? 0.0f : 1.0f;
+    });
 }
 
 juce::Rectangle<int> EffectsPanel::bandLevelsBounds() const
@@ -1911,8 +1964,49 @@ void EffectsPanel::paint (juce::Graphics& g)
     const auto vocoder = slot.kind == EffectKind::vocoder;
     g.setColour (colour::textPrimary);
     g.setFont (font (type::title, true));
-    g.drawText (juce::String::fromUTF8 (info.name), 10, (gate ? gateStepsBounds().getY() : vocoder ? bandLevelsBounds().getY() : knobBounds (0).getY()) - 28,
+    const auto tune = slot.kind == EffectKind::lynxTune;
+    g.drawText (juce::String::fromUTF8 (info.name), 10, (gate ? gateStepsBounds().getY() : vocoder ? bandLevelsBounds().getY() : tune ? tuneKeysBounds().getY() : knobBounds (0).getY()) - 28,
                 getWidth() - 20, 20, juce::Justification::centredLeft);
+
+    if (tune) // the scale's notes on one octave; a note switched off is never a target
+    {
+        const auto area = tuneKeysBounds().toFloat();
+        const auto scaleMask = vocal::scaleMask ((vocal::Scale) lynxtune::scaleIndex (slot.params[lynxtune::scale]), lynxtune::keyIndex (slot.params[lynxtune::key]), 0xfff);
+        const auto custom = lynxtune::scaleIndex (slot.params[lynxtune::scale]) == (int) vocal::Scale::custom;
+        for (const auto black : { false, true })
+            for (int pc = 0; pc < 12; ++pc)
+            {
+                const auto isBlack = pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
+                if (isBlack != black)
+                    continue;
+                const auto r = tuneKeyRect (area, pc).reduced (1.0f);
+                const auto on = slot.params[(std::size_t) (lynxtune::noteC + pc)] >= 0.5f;
+                const auto inScale = custom || (scaleMask & (1u << pc)) != 0;
+                auto fill = isBlack ? colour::bg0 : colour::bg2;
+                if (inScale && on)
+                    fill = (slot.enabled ? colour::accent : colour::textDisabled).withAlpha (isBlack ? 0.85f : 0.65f);
+                g.setColour (fill);
+                g.fillRoundedRectangle (r, 2.0f);
+                g.setColour (colour::gridBar);
+                g.drawRoundedRectangle (r, 2.0f, 1.0f);
+                if (inScale && ! on) // in the scale but switched off
+                {
+                    g.setColour (colour::textSecondary);
+                    g.drawLine (r.getX() + 3.0f, r.getBottom() - 3.0f, r.getRight() - 3.0f, r.getBottom() - 14.0f, 1.2f);
+                }
+                if (! isBlack)
+                {
+                    static const char* names[12] { "C", "", "D", "", "E", "F", "", "G", "", "A", "", "B" };
+                    g.setColour (inScale && on ? colour::textPrimary : colour::textSecondary);
+                    g.setFont (font (type::caption));
+                    g.drawText (names[pc], r.withTrimmedTop (r.getHeight() - 16.0f), juce::Justification::centred);
+                }
+            }
+        g.setColour (colour::textSecondary);
+        g.setFont (font (type::caption));
+        g.drawFittedText (tr ("Target notes: click a key to switch it off or on"), tuneKeysBounds().withY (tuneKeysBounds().getBottom() + 2).withHeight (14),
+                          juce::Justification::centredLeft, 1, 0.8f);
+    }
 
     if (vocoder) // the analysis bands' levels, low to high (FL's band level strip)
     {
@@ -2081,6 +2175,12 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
             dragParam = bandLevelParam;
             setBandLevel (e.getPosition());
         }
+        return;
+    }
+
+    if (tuneSelected() && tuneKeysBounds().contains (e.getPosition()))
+    {
+        toggleTuneNote (e.getPosition());
         return;
     }
 

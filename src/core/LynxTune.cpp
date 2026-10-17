@@ -181,7 +181,8 @@ public:
 
         for (int i = 0; i < n; ++i)
         {
-            const float xin[2] { l[i], stereo ? r[i] : l[i] };
+            auto clean = [] (float v) { return std::isfinite (v) ? v : 0.0f; };
+            const float xin[2] { clean (l[i]), clean (stereo ? r[i] : l[i]) };
             const auto mid = stereo ? 0.5f * (xin[0] + xin[1]) : xin[0];
 
             if (det.push (mid))

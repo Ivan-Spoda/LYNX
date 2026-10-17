@@ -208,6 +208,9 @@ private:
     juce::Rectangle<int> bandLevelsBounds() const;
     void setBandLevel (juce::Point<int> p);
     void showBandLevelMenu();
+    bool tuneSelected() const;                // LYNX Tune: its 12 note switches are a keyboard strip
+    juce::Rectangle<int> tuneKeysBounds() const;
+    void toggleTuneNote (juce::Point<int> p);
     int knobAt (juce::Point<int> p) const;
     const std::vector<EffectSlot>* slots() const;
     void showAddMenu (int slot);

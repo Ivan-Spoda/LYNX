@@ -157,6 +157,20 @@ Rhythmic envelope, Auto-pan and the parallel container (Patcher graphs from FL p
 inside running its own engine), plus any VST3/CLAP plugin. FL's Peak, Envelope and Keyboard Controllers are imported
 as LYNX controllers.
 
+## LYNX originals: vocal pitch
+
+| LYNX engine | In the role of | What it is |
+|---|---|---|
+| LYNX Tune | automatic vocal pitch correctors, e.g. Antares Auto-Tune, Waves Tune Real-Time | real-time pitch correction on every mixer insert (*Insert*): key and scale (13 scales + custom), per-note switches on a keyboard strip, retune speed (0 ms = the hard "robot" effect … 400 ms), humanize (lets held notes keep their vibrato), formant preserve and formant shift, transpose, A4 reference 430–450 Hz, voice range, low-latency mode (≈ 16 ms instead of ≈ 25 ms for alto / tenor), MIDI target notes (the notes held on a Channel Rack channel — played live or from a pattern — become the targets), mix |
+
+LYNX Tune is LYNX's own design, written only from published DSP: YIN pitch detection (de Cheveigné & Kawahara, 2002)
+and TD-PSOLA pitch shifting (Moulines & Charpentier, 1990), which keeps the formants in place. No third-party plugin was
+opened, run or analysed to make it, and no preset, name, graphic or manual text of one is used
+([`docs/analise/REA_rodada95.md`](analise/REA_rodada95.md)). Accuracy on synthetic vowels: within 3 cents of the target
+note with instant retune; it never allocates on the audio thread and reports its latency to PDC. Antares and Auto-Tune
+are trademarks of Antares Audio Technologies, Waves Tune of Waves Audio; they are named only to say which role LYNX Tune
+plays. LYNX is not affiliated with, endorsed or sponsored by them.
+
 ---
 
 FL Studio and the names of its plugins (3x Osc, Sytrus, Harmor, Fruity …) are trademarks of Image-Line Software.

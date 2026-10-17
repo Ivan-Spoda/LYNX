@@ -29,6 +29,24 @@ namespace lynx::newtonefx
 {
 constexpr int paramCount = 1;
 
+// One note ("pitch object", XML "Pitch_N") as Newtone's render uses it (REA_rodada95 §2). Times in source samples.
+struct Note
+{
+    std::int64_t origStart = 0, origEnd = 0; // iOrigStartSamplePos / iOrigEndSamplePos: where it lies in the source
+    std::int64_t curStart = 0, curEnd = 0;   // iCurStartSamplePos / iCurEndSamplePos: where it plays (it owns [curStart, curEnd))
+    double origPitch = 0.0;                  // fOrigPitch (MIDI note; shown, not used by the render)
+    double shift = 0.0;                      // fCurrentPitchOffset + fAdditionalPitchOffset, semitones (fCurPitch is not read)
+    double stretch = 1.0;                    // fCurInvStretchFactor: source samples per output sample
+    double volume = 1.0, formant = 1.0, drift = 1.0;   // fCurVolume, fCurFormantFactor, fDrift
+    double smoothIn = 0.0, smoothOut = 0.0;            // fPitchSmoothInTime / fPitchSmoothOutTime (samples)
+    double fadeInTime = 0.0, fadeOutTime = 0.0, fadeInGain = 1.0, fadeOutGain = 1.0;
+    double vibPeriod = 0.0, vibAmpStart = 0.0, vibAmpEnd = 0.0, tremAmp = 0.0; // fVibFreq is a period in seconds
+    bool enabled = true;
+
+    // the render differs from the source over this note
+    bool edited (double globalFormant) const noexcept;
+};
+
 // One track of the engine's project (XML "Trk_N")
 struct Track
 {
@@ -39,6 +57,8 @@ struct Track
     std::int64_t frames = 0;      // "OriginalFileLength"
     double selfBpm = 0.0;         // "SelfBPM"
     bool edited = false;          // a note or a global setting differs from the analysis (pitch, time, volume, formant...)
+    std::vector<Note> pitches;    // the notes, in order
+    double globalFormant = 1.0;   // GlobalFormantShift (the one global the render reads)
 };
 
 // The plugin's saved state (record 0xD5 of a mixer slot), REA_rodada73 §2
@@ -65,4 +85,13 @@ std::string paramText (int param, float value01);
 // The effect: the input passes through; with [0] on, while the host plays, `source` is added from the song time on.
 // `source` may be null (sample not found): the effect is then a pass-through.
 std::unique_ptr<Effect> make (std::shared_ptr<const SampleData> source);
+// The same for a Newtone slot with FL's saved state: with note edits, the edited render of the first track plays
+// instead of the plain source (renderEdits; Newtime's warping is still not reproduced).
+std::unique_ptr<Effect> make (std::shared_ptr<const SampleData> source, const std::vector<std::uint8_t>& state);
+
+// LYNX's Newtone engine (REA_rodada95 §2-3): renders a track's note edits over its source sample — pitch offsets with
+// the note transitions, drift, vibrato, formant factor, volume and fades, timing (moved / stretched notes),
+// disabled notes — with LYNX's own pitch analysis (YIN) and TD-PSOLA (core/VocalPitch.h). Unedited notes are copied
+// sample for sample. nullptr when nothing differs from the source.
+std::shared_ptr<SampleData> renderEdits (const SampleData& source, const Track& track);
 } // namespace lynx::newtonefx

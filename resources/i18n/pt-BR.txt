@@ -1766,3 +1766,4 @@ countries: br
 "Note names" = "Nomes das notas"
 "Plays: {0}" = "Toca: {0}"
 "Select a channel in the Channel Rack" = "Selecione um canal no Channel Rack"
+"Target notes: click a key to switch it off or on" = "Notas-alvo: clique numa tecla para desligar ou ligar a nota"
