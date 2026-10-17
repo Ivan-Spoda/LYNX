@@ -1518,6 +1518,14 @@ private:
                     offline.dispatchPendingMessages();
                     saveSnapshot (ui, prefix + "-desktop-" + juce::String (w) + ".png");
                     saveArea (ui, ui.getToolbarBoundsForSnapshot(), prefix + "-toolbar-" + juce::String (w) + ".png");
+
+                    if (w == 1920) // the rack scrolled to its last steps: the controls column stays in view (round 90)
+                    {
+                        ui.scrollRackForSnapshot (100000);
+                        offline.dispatchPendingMessages();
+                        saveSnapshot (ui, prefix + "-desktop-rack-scrolled.png");
+                        ui.scrollRackForSnapshot (0);
+                    }
                 }
                 // the toolbar with small and large icons, and a customized one (groups hidden and reordered)
                 ui.setSize (1600, 900);

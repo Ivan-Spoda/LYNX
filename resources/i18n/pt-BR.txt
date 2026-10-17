@@ -1606,6 +1606,7 @@ countries: br
 "Input channels: none open. Choose an input device above to record a microphone or an instrument." = "Canais de entrada: nenhum aberto. Escolha um dispositivo de entrada acima para gravar um microfone ou um instrumento."
 "Input channels ({0}): {1}" = "Canais de entrada ({0}): {1}"
 "Piano Roll notes: [LMB] opens them in the Piano Roll" = "Notas do Piano Roll: [LMB] abre no Piano Roll"
+"Overview: [LMB] drag the window to scroll, drag its edges to zoom, click elsewhere to jump there  [2xLMB] show everything" = "Visão geral: [LMB] arraste a janela para rolar, arraste as bordas para dar zoom, clique fora para pular até lá  [2xLMB] mostra tudo"
 
 # Round 89: VST2 hosting, plugins that won't sound as in FL Studio
 "same VST2 ID" = "mesmo ID VST2"

@@ -171,6 +171,45 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
 };
 
+// --- overview strip ------------------------------------------------------------------------
+// The strip above the Piano Roll's and the Playlist's ruler: the whole content in miniature (drawn by
+// `paintContent`) with the visible window outlined. Drag the window to scroll, drag one of its edges to
+// zoom, click elsewhere to jump there (and keep dragging), double-click to show everything.
+// Units are the editor's (ticks); the editor calls setRange whenever its view changes.
+class OverviewBar final : public juce::Component
+{
+public:
+    OverviewBar();
+
+    void setRange (double total, double start, double length);
+    double getTotal() const noexcept { return total; }
+
+    // draws the miniature into `area` (the whole strip), `total` units across
+    std::function<void (juce::Graphics&, juce::Rectangle<float> area, double total)> paintContent;
+    // the user moved (same length) or resized (zoom) the window
+    std::function<void (double start, double length)> onChange;
+    std::function<void()> onShowAll;
+    double minLength = 1.0; // the shortest window the editor can zoom to
+
+    void paint (juce::Graphics& g) override;
+    void mouseMove (const juce::MouseEvent& e) override;
+    void mouseExit (const juce::MouseEvent& e) override;
+    void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDrag (const juce::MouseEvent& e) override;
+    void mouseUp (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
+
+private:
+    juce::Rectangle<float> windowArea() const;
+    gesture::OverviewGrab grabAt (int x) const;
+    void updateCursor (gesture::OverviewGrab g);
+
+    double total = 1.0, start = 0.0, length = 1.0;
+    gesture::OverviewGrab grab = gesture::OverviewGrab::none, hoverGrab = gesture::OverviewGrab::none;
+    gesture::OverviewWindow grabFrom;
+    bool dragging = false;
+};
+
 // --- Note inspector ------------------------------------------------------------------------
 // Edits velocity, pan, release, fine pitch, mod X/Y, slide and porta of `indices` (notes of the current
 // pattern) as one undo step on Apply; Revert puts the controls back. Time and length are offered when a

@@ -77,6 +77,19 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
         addAndMakeVisible (bar);
     }
 
+    // the overview strip is the horizontal scroller (FL's Piano Roll has its preview bar on top)
+    hBar.setVisible (false);
+    overview.paintContent = [this] (juce::Graphics& g, juce::Rectangle<float> area, double total) { paintOverview (g, area, total); };
+    overview.onChange = [this] (double start, double length) {
+        const auto width = (double) gridArea().getWidth();
+        pixelsPerTick = juce::jlimit (2.0 / ticksPerStep, 120.0 / ticksPerStep, width / juce::jmax (1.0, length));
+        scrollTicks = juce::jmax (0.0, start);
+        updateScrollBars();
+        repaint();
+    };
+    overview.onShowAll = [this] { zoomAll(); };
+    addAndMakeVisible (overview);
+
     grid::fillEditorBox (snapBox);
     snapBox.setTooltip (tr ("Piano Roll grid: follows the global grid in the toolbar, or its own; hold Alt while dragging to ignore it"));
     snapBox.setWantsKeyboardFocus (false);
@@ -204,7 +217,7 @@ PianoRollComponent::~PianoRollComponent()
 juce::Rectangle<int> PianoRollComponent::gridArea() const
 {
     return getLocalBounds().withTrimmedLeft (keyboardWidth).withTrimmedTop (headerHeight)
-        .withTrimmedRight (scrollBarSize).withTrimmedBottom (scrollBarSize + velocityHeight);
+        .withTrimmedRight (scrollBarSize).withTrimmedBottom (velocityHeight);
 }
 
 juce::Rectangle<int> PianoRollComponent::velocityArea() const
@@ -306,6 +319,8 @@ void PianoRollComponent::updateScrollBars()
     vBar.setCurrentRange (scrollY, grid.getHeight(), juce::dontSendNotification);
     scrollTicks = hBar.getCurrentRangeStart();
     scrollY = (int) vBar.getCurrentRangeStart();
+    overview.minLength = grid.getWidth() / (120.0 / ticksPerStep);
+    overview.setRange (total, scrollTicks, grid.getWidth() / pixelsPerTick);
 }
 
 void PianoRollComponent::setTitleBarInsets (int left, int right)
@@ -344,13 +359,12 @@ void PianoRollComponent::resized()
         scaleSnapButton.setVisible (false);
     place (moreButton, h);
     laneBox.setBounds (2, velocityArea().getY() + 4, keyboardWidth - 4, 20);
-    hBar.setBounds (keyboardWidth, getHeight() - scrollBarSize, getWidth() - keyboardWidth - scrollBarSize, scrollBarSize);
-    vBar.setBounds (getWidth() - scrollBarSize, headerHeight, scrollBarSize,
-                    getHeight() - headerHeight - scrollBarSize - velocityHeight);
+    overview.setBounds (keyboardWidth, toolbarHeight, getWidth() - keyboardWidth - scrollBarSize, overviewHeight);
+    vBar.setBounds (getWidth() - scrollBarSize, headerHeight, scrollBarSize, getHeight() - headerHeight - velocityHeight);
     updateScrollBars();
 }
 
-void PianoRollComponent::scrollToNotes()
+void PianoRollComponent::scrollToNotes (bool fitPattern)
 {
     const auto& song = engine.getSong();
     const auto channel = engine.getSelectedChannel();
@@ -367,6 +381,14 @@ void PianoRollComponent::scrollToNotes()
     const auto centreKey = high >= 0 ? (low + high) / 2 : 66;
     scrollY = (127 - centreKey) * rowHeight - gridArea().getHeight() / 2;
     scrollTicks = 0.0;
+
+    // FL opens the Piano Roll with the whole pattern across the view (at least one bar)
+    if (fitPattern && gridArea().getWidth() > 0)
+    {
+        const auto bar = (double) ppq * juce::jmax (1, song.beatsPerBar);
+        const auto length = juce::jmax (bar, (double) currentPattern (song).effectiveLength (song.beatsPerBar));
+        pixelsPerTick = juce::jlimit (4.0 / ticksPerStep, 64.0 / ticksPerStep, gridArea().getWidth() / length);
+    }
     updateScrollBars();
     repaint();
 }
@@ -529,6 +551,57 @@ void PianoRollComponent::drumPaintAt (juce::Point<int> p, bool snapOn)
 
 // --- painting ------------------------------------------------------------------
 
+void PianoRollComponent::paintOverview (juce::Graphics& g, juce::Rectangle<float> area, double total)
+{
+    // the channel's notes across the whole view length, pitch mapped onto the strip's height; the part past
+    // the pattern's end is darker; bar lines every bar (every 4 when they get dense)
+    using namespace theme::colour;
+    const auto& song = engine.getSong();
+    const auto& pattern = currentPattern (song);
+    const auto channel = engine.getSelectedChannel();
+    const auto scale = area.getWidth() / juce::jmax (1.0, total);
+    const auto bar = (double) ppq * juce::jmax (1, song.beatsPerBar);
+    const auto end = (float) (pattern.effectiveLength (song.beatsPerBar) * scale);
+
+    g.setColour (bg2);
+    g.fillRect (area.withWidth (juce::jmin (area.getWidth(), end)));
+
+    const auto every = bar * scale < 6.0 ? 4 : 1;
+    g.setColour (gridBar.withAlpha (0.6f));
+    for (int b = every; b * bar < total; b += every)
+        g.fillRect ((float) (area.getX() + b * bar * scale), area.getY(), 1.0f, area.getHeight());
+
+    int low = 128, high = -1;
+    for (const auto& n : pattern.notes)
+        if (n.channel == channel)
+        {
+            low = juce::jmin (low, n.key);
+            high = juce::jmax (high, n.key);
+        }
+
+    if (high < 0)
+        return;
+
+    const auto span = (float) juce::jmax (12, high - low + 1);
+    const auto mid = (low + high) / 2.0f;
+    const auto inner = area.reduced (0.0f, 2.0f);
+    auto colour = accent;
+    if (channel < (int) song.channels.size() && song.channels[(std::size_t) channel].colour != 0)
+        colour = theme::tame (juce::Colour (song.channels[(std::size_t) channel].colour));
+
+    for (const auto& n : pattern.notes)
+    {
+        if (n.channel != channel)
+            continue;
+
+        const auto y = inner.getCentreY() - ((float) n.key - mid) / span * inner.getHeight();
+        const auto x = area.getX() + (float) (n.start * scale);
+        g.setColour (n.muted ? colour.withAlpha (0.35f) : colour);
+        g.fillRect (x, juce::jlimit (inner.getY(), inner.getBottom() - 2.0f, y - 1.0f),
+                    juce::jmax (1.0f, (float) (n.length * scale) - 0.5f), 2.0f);
+    }
+}
+
 void PianoRollComponent::paint (juce::Graphics& g)
 {
     const auto& song = engine.getSong();
@@ -538,6 +611,19 @@ void PianoRollComponent::paint (juce::Graphics& g)
     const auto patternLength = pattern.effectiveLength (song.beatsPerBar);
     const auto bar = (std::int64_t) ppq * song.beatsPerBar;
     const auto snapGrid = gridTicks();
+
+    // the overview follows the notes (edits, undo, another channel or pattern) and the view
+    {
+        auto signature = (std::size_t) song.currentPattern * 1000003u + (std::size_t) channel * 7919u + pattern.notes.size();
+        for (const auto& n : pattern.notes)
+            signature = signature * 31u + (std::size_t) (n.start * 131 + n.length * 7 + n.key + n.channel * 257 + (n.muted ? 1 : 0));
+        if (signature != overviewSignature)
+        {
+            overviewSignature = signature;
+            overview.repaint();
+        }
+        overview.setRange ((double) viewLengthTicks(), scrollTicks, grid.getWidth() / pixelsPerTick);
+    }
 
     using namespace theme::colour;
     g.fillAll (bg1);
@@ -777,7 +863,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
 
     // --- time ruler --------------------------------------------------------
     {
-        const auto ruler = juce::Rectangle<int> (keyboardWidth, toolbarHeight, grid.getWidth(), timelineHeight);
+        const auto ruler = juce::Rectangle<int> (keyboardWidth, rulerTop, grid.getWidth(), timelineHeight);
         g.setColour (bg2);
         g.fillRect (ruler);
         g.setColour (border);
@@ -793,15 +879,15 @@ void PianoRollComponent::paint (juce::Graphics& g)
         {
             const auto x = (int) tickToX ((double) (b * bar));
             g.setColour (textSecondary);
-            g.drawVerticalLine (x, (float) toolbarHeight + 10.0f, (float) headerHeight);
-            g.drawText (juce::String (b + 1), x + 3, toolbarHeight + 2, 40, timelineHeight - 4, juce::Justification::centredLeft);
+            g.drawVerticalLine (x, (float) rulerTop + 10.0f, (float) headerHeight);
+            g.drawText (juce::String (b + 1), x + 3, rulerTop + 2, 40, timelineHeight - 4, juce::Justification::centredLeft);
         }
 
         if (playheadTick >= 0.0)
         {
             const auto x = (float) tickToX (playheadTick);
             juce::Path tri;
-            tri.addTriangle (x - 5, (float) toolbarHeight, x + 5, (float) toolbarHeight, x, (float) toolbarHeight + 8);
+            tri.addTriangle (x - 5, (float) rulerTop, x + 5, (float) rulerTop, x, (float) rulerTop + 8);
             g.setColour (playhead);
             g.fillPath (tri);
         }
@@ -871,7 +957,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
     g.setColour (bg3);
     g.fillRect (0, 0, keyboardWidth, toolbarHeight);
     g.setColour (bg2);
-    g.fillRect (0, toolbarHeight, keyboardWidth, timelineHeight);
+    g.fillRect (0, toolbarHeight, keyboardWidth, headerHeight - toolbarHeight);
     g.setColour (border);
     g.fillRect (0, headerHeight - 1, keyboardWidth, 1);
     g.fillRect (keyboardWidth - 1, 0, 1, headerHeight);
@@ -880,11 +966,11 @@ void PianoRollComponent::paint (juce::Graphics& g)
     {
         const auto& ch = song.channels[(std::size_t) channel];
         g.setColour (ch.colour != 0 ? theme::tame (juce::Colour (ch.colour)) : accent);
-        g.fillRoundedRectangle (4.0f, (float) toolbarHeight + 5.0f, 3.0f, (float) timelineHeight - 10.0f, 1.0f);
+        g.fillRoundedRectangle (4.0f, (float) toolbarHeight + 6.0f, 3.0f, (float) (headerHeight - toolbarHeight) - 12.0f, 1.0f);
         g.setColour (textPrimary);
         g.setFont (theme::font (theme::type::caption, true));
-        g.drawFittedText (juce::String::fromUTF8 (ch.name.c_str()), 11, toolbarHeight, keyboardWidth - 14, timelineHeight,
-                          juce::Justification::centredLeft, 1, 0.8f);
+        g.drawFittedText (juce::String::fromUTF8 (ch.name.c_str()), 11, toolbarHeight, keyboardWidth - 14, headerHeight - toolbarHeight,
+                          juce::Justification::centredLeft, 2, 0.8f);
     }
 }
 
@@ -1126,7 +1212,7 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
     }
 
     // ruler: Ctrl+drag selects the notes in a time range
-    if (e.y >= toolbarHeight && e.y < headerHeight && e.x >= keyboardWidth && e.mods.isCtrlDown() && e.mods.isLeftButtonDown())
+    if (e.y >= rulerTop && e.y < headerHeight && e.x >= keyboardWidth && e.mods.isCtrlDown() && e.mods.isLeftButtonDown())
     {
         drag = Drag::rulerSelect;
         selectionBefore = e.mods.isShiftDown() ? selection : std::vector<int> {};
@@ -1979,7 +2065,7 @@ void PianoRollComponent::updateCursor (juce::ModifierKeys mods)
         const auto tool = tools.getTool();
         cursor = gesture::cursorFor (gesture::leftAction (tool, targetAt (hover), m, false), tool);
     }
-    else if (p.y >= toolbarHeight && p.y < headerHeight && p.x >= keyboardWidth && mods.isCtrlDown())
+    else if (p.y >= rulerTop && p.y < headerHeight && p.x >= keyboardWidth && mods.isCtrlDown())
         cursor = gesture::Cursor::select;
 
     setMouseCursor (editorCursor (cursor));
@@ -2013,7 +2099,7 @@ ui::Hint PianoRollComponent::hintAt (juce::Point<int> p)
         return hint;
     }
 
-    if (p.y >= toolbarHeight && p.y < headerHeight && p.x >= keyboardWidth)
+    if (p.y >= rulerTop && p.y < headerHeight && p.x >= keyboardWidth)
     {
         hint.text = tr ("Ruler: [Ctrl][LMB] drag selects the notes in a time range  [Ctrl][Wheel] zoom  [Shift][Wheel] scroll");
         return hint;
@@ -2085,7 +2171,7 @@ ui::Hint PianoRollComponent::hoverForSnapshot()
 {
     rowHeight = 18;
     pixelsPerTick = 64.0 / ticksPerStep;
-    scrollToNotes();
+    scrollToNotes (false);
     const auto notes = channelNotes();
 
     if (notes.empty())

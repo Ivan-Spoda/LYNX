@@ -49,3 +49,39 @@ TEST (uilook90_flp_track_colours)
     }
     CHECK (song.playlistTracks.size() <= 40 || song.playlistTracks[40].colour == 0);
 }
+
+TEST (uilook90_overview_strip_gestures)
+{
+    using namespace lynx::gesture;
+    // 1000 px strip over 100 bars of 10 units; the window shows bars 20..40
+    const OverviewWindow w { 200.0, 200.0 };
+    CHECK (overviewGrabAt (200.0, 1000.0, 1000.0, w) == OverviewGrab::left);
+    CHECK (overviewGrabAt (404.0, 1000.0, 1000.0, w) == OverviewGrab::right);
+    CHECK (overviewGrabAt (300.0, 1000.0, 1000.0, w) == OverviewGrab::move);
+    CHECK (overviewGrabAt (700.0, 1000.0, 1000.0, w) == OverviewGrab::none);
+
+    // moving keeps the length and stays inside the content
+    auto m = overviewDrag (OverviewGrab::move, w, 100.0, 1000.0, 1000.0, 10.0);
+    CHECK (m.start == 300.0 && m.length == 200.0);
+    m = overviewDrag (OverviewGrab::move, w, 5000.0, 1000.0, 1000.0, 10.0);
+    CHECK (m.start == 800.0 && m.length == 200.0);
+    m = overviewDrag (OverviewGrab::move, w, -5000.0, 1000.0, 1000.0, 10.0);
+    CHECK (m.start == 0.0);
+
+    // the edges zoom: the other edge stays, the window never gets shorter than minLength
+    auto l = overviewDrag (OverviewGrab::left, w, -100.0, 1000.0, 1000.0, 10.0);
+    CHECK (l.start == 100.0 && l.length == 300.0);
+    l = overviewDrag (OverviewGrab::left, w, 1000.0, 1000.0, 1000.0, 10.0);
+    CHECK (l.start == 390.0 && l.length == 10.0);
+    auto r = overviewDrag (OverviewGrab::right, w, 100.0, 1000.0, 1000.0, 10.0);
+    CHECK (r.start == 200.0 && r.length == 300.0);
+    r = overviewDrag (OverviewGrab::right, w, 5000.0, 1000.0, 1000.0, 10.0);
+    CHECK (r.length == 800.0);
+
+    // a click outside the window centres it there
+    CHECK (overviewCentredOn (700.0, w, 1000.0).start == 600.0);
+    CHECK (overviewCentredOn (990.0, w, 1000.0).start == 800.0);
+
+    // a tiny window still has a middle to grab
+    CHECK (overviewGrabAt (201.5, 1000.0, 1000.0, { 200.0, 3.0 }) == OverviewGrab::move);
+}
