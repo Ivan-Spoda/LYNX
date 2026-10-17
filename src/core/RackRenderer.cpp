@@ -236,7 +236,9 @@ std::unique_ptr<const RackState> RackState::build (Song song,
             else if ((kind == EffectKind::newtone || kind == EffectKind::newtime))
             {
                 // Newtone / Newtime: their source sample (loaded off the audio thread), REA_rodada73
-                effect = newtonefx::make (factories.samples && ! slots[i].samplePath.empty() ? factories.samples (slots[i].samplePath) : nullptr);
+                // (Newtone: its note edits rendered by LYNX's engine, REA_rodada95)
+                effect = newtonefx::make (factories.samples && ! slots[i].samplePath.empty() ? factories.samples (slots[i].samplePath) : nullptr,
+                                          slots[i].state);
                 effect->prepare (sampleRate);
             }
             else

@@ -142,7 +142,8 @@ instruments (built-in synth, sampler, drums) or any VST3/CLAP plugin.
 | Vocodex † | Vocodex | Import | Near-exact | −136…−145 dB (internal Sytrus carrier −112 dB) |
 | Vintage Phaser | Vintage Phaser | Import | Near-exact | within −121 dB |
 | Pitch correction | Pitcher | Insert | Close | bit-exact with the reference model; MIDI mode / Harmonize get no MIDI in LYNX |
-| Newtone / Newtime | Newtone, Newtime | Import | Placeholder | pass-through (as FL) + the source sample in slave mode; note/time edits not reproduced |
+| Newtone | Newtone | Import | Close | pass-through as FL; in slave mode the note edits (pitch offsets and transitions, drift, vibrato, formant, volume, timing, disabled notes) rendered by LYNX's own pitch engine; tremolo / ramps and FL's sample re-alignment after edits missing |
+| Newtime | Newtime | Import | Placeholder | pass-through (as FL) + the source sample in slave mode; time warping not reproduced |
 | Utility | Fruity Send, Transporter | Insert | Approximate | mapped to a utility stage |
 | EQ | Fruity 7 Band EQ, Fruity Bass Boost | Insert | Approximate | settings mapped to LYNX's EQs |
 | Delay | Fruity Delay (v1) | Insert | Approximate | |

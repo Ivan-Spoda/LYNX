@@ -1996,7 +1996,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                                     addMissingFile (options.report->missingFiles, candidates.front(),
                                                     (insert.name.empty() ? "Insert " + std::to_string (insert.index) : insert.name) + ": " + slot.plugin);
                             }
-                            if (parsed->edited())
+                            // Newtone's note edits are rendered by LYNX's engine (REA_rodada95, close, not exact); Newtime's
+                            // warping is not reproduced. Only slave mode plays them (otherwise FL passes the input through).
+                            if (parsed->edited() && parsed->slave() && fx.kind == EffectKind::newtime)
                                 ++options.report->droppedEffects[slot.plugin + " (edits not reproduced: plays the original sample)"];
                             else if (fx.kind == EffectKind::newtime)
                                 ++options.report->droppedEffects["Newtime (time warping engine not reproduced: plays the original sample)"];

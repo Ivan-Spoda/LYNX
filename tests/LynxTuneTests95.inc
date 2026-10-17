@@ -467,3 +467,97 @@ TEST (lynx_tune_slot_and_project_round95)
     CHECK (lynx::formatEffectParam (lynx::EffectKind::lynxTune, lynx::lynxtune::transpose, 1.0f, 120.0) == "+12 st");
     CHECK (lynx::lynxtune::latencyFor (44100.0, 0, true) < lynx::lynxtune::latencyFor (44100.0, 3, false));
 }
+
+namespace r95
+{
+// a Newtone project (our reading of the XML, REA_rodada73 §2 / REA_rodada95 §2) with three notes of `len` samples
+std::string newtoneXml (int len, const std::string& note1Extra, const std::string& global = "")
+{
+    std::string x = "<NewToneProject NumOfTracks=\"1\"><Tracks><Trk_0 TrackNum=\"0\" Type=\"class CzplJPositionablePSOLASource\" FilePath=\"v.wav\">"
+                    "<AudioObject SelfBPM=\"120.0\" OriginalFileLength=\"" + std::to_string (3 * len) + "\" " + global + ">";
+    for (int k = 0; k < 3; ++k)
+    {
+        const auto a = std::to_string (k * len), b = std::to_string ((k + 1) * len);
+        x += "<Pitch_" + std::to_string (k) + " fOrigPitch=\"60.0\" fCurPitch=\"60.0\" iOrigStartSamplePos=\"" + a + "\" iOrigEndSamplePos=\"" + b
+             + "\" iCurStartSamplePos=\"" + a + "\" iCurEndSamplePos=\"" + b + "\" fPitchSmoothInTime=\"0.0\" fPitchSmoothOutTime=\"0.0\" "
+             + (k == 1 ? note1Extra : std::string()) + "/>";
+    }
+    return x + "</AudioObject></Trk_0></Tracks></NewToneProject>";
+}
+
+lynx::newtonefx::Track newtoneTrack (int len, const std::string& note1Extra, const std::string& global = "")
+{
+    const auto s = lynx::newtonefx::parse (newtonetest::state (0, 4, newtoneXml (len, note1Extra, global), ""));
+    return s && ! s->tracks.empty() ? s->tracks.front() : lynx::newtonefx::Track {};
+}
+} // namespace r95
+
+TEST (newtone_engine_edits_round95)
+{
+    // REA_rodada95 §2 [EXEC] → LYNX's engine: the shift is fCurrentPitchOffset + fAdditionalPitchOffset (fCurPitch is not
+    // read), unedited notes are the source sample for sample, a disabled note is silent, fCurVolume is a plain gain
+    const double fs = 44100.0;
+    const int len = 22050;
+    lynx::SampleData src;
+    src.sampleRate = fs;
+    src.left = r95::vowel (fs, 3 * len, [] (double t) { return t < 0.5 ? 220.0 : t < 1.0 ? 246.94 : 261.63; });
+
+    CHECK (lynx::newtonefx::renderEdits (src, r95::newtoneTrack (len, "fCurPitch=\"62.0\"")) == nullptr); // display only
+    const auto track = r95::newtoneTrack (len, "fCurrentPitchOffset=\"1.5\" fAdditionalPitchOffset=\"0.5\"");
+    CHECK (track.pitches.size() == 3 && track.pitches[1].shift == 2.0 && track.pitches[1].edited (1.0) && ! track.pitches[0].edited (1.0));
+    const auto up = lynx::newtonefx::renderEdits (src, track);
+    CHECK (up != nullptr && (int) up->left.size() == 3 * len && up->right.empty());
+    if (up != nullptr)
+    {
+        CHECK (std::equal (src.left.begin(), src.left.begin() + len, up->left.begin()));
+        CHECK (std::equal (src.left.begin() + 2 * len, src.left.end(), up->left.begin() + 2 * len));
+        CHECK (std::abs (r95::cents (r95::measureHz (up->left, len + 6000, 4096, fs), 246.94 * std::exp2 (2.0 / 12.0))) < 3.0);
+        // formants stay (TD-PSOLA)
+        CHECK (std::abs (r95::formantPeak (up->left, len + 6000, 4096, fs, 450.0, 1000.0) / r95::formantPeak (src.left, len + 6000, 4096, fs, 450.0, 1000.0) - 1.0) < 0.06);
+    }
+
+    const auto quiet = lynx::newtonefx::renderEdits (src, r95::newtoneTrack (len, "fCurVolume=\"0.5\""));
+    const auto off = lynx::newtonefx::renderEdits (src, r95::newtoneTrack (len, "bIsEnabled=\"0\""));
+    const auto formant = lynx::newtonefx::renderEdits (src, r95::newtoneTrack (len, "fCurFormantFactor=\"1.2\""));
+    const auto global = lynx::newtonefx::renderEdits (src, r95::newtoneTrack (len, "", "GlobalFormantShift=\"0.8\""));
+    CHECK (quiet != nullptr && off != nullptr && formant != nullptr && global != nullptr);
+    if (quiet != nullptr && off != nullptr && formant != nullptr && global != nullptr)
+    {
+        double a = 0.0, b = 0.0;
+        for (int i = len + 2000; i < 2 * len - 2000; ++i)
+        {
+            a += (double) src.left[(std::size_t) i] * src.left[(std::size_t) i];
+            b += (double) quiet->left[(std::size_t) i] * quiet->left[(std::size_t) i];
+        }
+        CHECK (std::abs (10.0 * std::log10 (b / a) + 6.02) < 0.3);
+        CHECK (std::all_of (off->left.begin() + len, off->left.begin() + 2 * len, [] (float v) { return v == 0.0f; }));
+        CHECK (r95::formantPeak (formant->left, len + 6000, 4096, fs, 450.0, 1100.0) > 1.12 * r95::formantPeak (src.left, len + 6000, 4096, fs, 450.0, 1100.0));
+        CHECK (r95::formantPeak (global->left, len + 6000, 4096, fs, 350.0, 1000.0) < 0.9 * r95::formantPeak (src.left, len + 6000, 4096, fs, 350.0, 1000.0));
+        CHECK (std::abs (r95::cents (r95::measureHz (formant->left, len + 6000, 4096, fs), 246.94)) < 3.0);
+    }
+
+    // timing: the note plays 25 % longer (source read at 0.8 per output sample), pitch kept; it cuts the next one's head
+    const auto longer = lynx::newtonefx::renderEdits (src, r95::newtoneTrack (len, "fCurInvStretchFactor=\"0.8\" iCurEndSamplePos=\"" + std::to_string (len + len * 5 / 4) + "\""));
+    CHECK (longer != nullptr && longer != nullptr && std::abs (r95::cents (r95::measureHz (longer->left, 2 * len + 2000, 2048, fs), 246.94)) < 5.0);
+
+    // a pitch step into the next note ramps over that note's smoothing time (§2.4)
+    const auto ramp = lynx::newtonefx::renderEdits (src, r95::newtoneTrack (len, "fCurrentPitchOffset=\"-2.0\" fPitchSmoothOutTime=\"0.0\""));
+    CHECK (ramp != nullptr);
+
+    // the effect plays the rendered edits in slave mode
+    auto sample = std::make_shared<lynx::SampleData> (src);
+    auto fx = lynx::newtonefx::make (sample, newtonetest::state (0, 4, r95::newtoneXml (len, "fCurrentPitchOffset=\"2.0\""), ""));
+    fx->prepare (fs);
+    lynx::EffectParams on {};
+    on[0] = 1.0f;
+    std::vector<float> l (3 * len, 0.0f), r (3 * len, 0.0f);
+    const auto tps = lynx::ticksPerSample (120.0, fs);
+    fx->setPlaying (true);
+    for (int i = 0; i < 3 * len; i += 512)
+    {
+        fx->setSongPosition (i * tps);
+        fx->process (l.data() + i, r.data() + i, std::min (512, 3 * len - i), on, 120.0);
+    }
+    CHECK (std::abs (r95::cents (r95::measureHz (l, len + 6000, 4096, fs), 246.94 * std::exp2 (2.0 / 12.0))) < 3.0);
+    CHECK (std::equal (src.left.begin(), src.left.begin() + len, l.begin()));
+}
