@@ -1687,6 +1687,7 @@ Layout echoformLayout()
     v.push_back (section (700, top, 76, h, TR_NOOP ("Duck")));
     v.push_back (dial (738, k1, d, "Ducking", TR_NOOP ("Ducking")));
     // the mode selector along the bottom
+    v.push_back (label (8, 254, 52, 20, TR_NOOP ("Mode")));
     v.push_back (menuOf (64, 252, 200, 24, "Mode", TR_NOOP ("Mode"),
                          TR_NOOP ("Tape|Lo-Fi|Hi-Fi tape|Bucket brigade|Analog|Digital|Clean|Phaser|Shifter|Pitch|Reverse|Detune"), stepCentres (12)));
     return l;
@@ -1709,9 +1710,11 @@ Layout spiralLayout()
     for (int k = 0; k < 24; ++k)
         syncValues.push_back (((float) k + 0.5f) / 23.0f);
     syncValues.back() = 1.0f;
+    v.push_back (label (14, 170, 74, 18, TR_NOOP ("Delay sync")));
     v.push_back (menuOf (90, 168, 100, 22, "Sync", TR_NOOP ("Delay sync"),
                          TR_NOOP ("Free|1/64|1/32|1/16|1/8|1/4|1/2|1/1|2/1|1/64.|1/32.|1/16.|1/8.|1/4.|1/2.|1/1.|1/64T|1/32T|1/16T|1/8T|1/4T|1/2T|1/1T|2/1T"),
                          syncValues));
+    v.push_back (label (300, 170, 76, 18, TR_NOOP ("Output")));
     v.push_back (menuOf (380, 168, 100, 22, "Stereo", TR_NOOP ("Output"), TR_NOOP ("Mono|Stereo"), { 0.0f, 1.0f }));
     return l;
 }
@@ -1734,6 +1737,7 @@ Layout orbitLayout()
     std::vector<float> modeValues;
     for (int k = 1; k <= 11; ++k)
         modeValues.push_back ((float) k / 11.0f);
+    v.push_back (label (20, 152, 46, 20, TR_NOOP ("Mode")));
     v.push_back (menuOf (70, 150, 170, 24, "Mode", TR_NOOP ("Mode"),
                          TR_NOOP ("Rise|Rise / fall|Through-zero +|Through-zero −|Tri chorus|Octo chorus|Doubler|Drift rise|Drift rise / fall|Ensemble|Symphonic"),
                          modeValues));
@@ -1751,13 +1755,18 @@ Layout latticeLayout()
     const char* faders[5] = { "Mix", "Depth", "Width", "Delay", "Feedback" };
     const char* captions[5] = { TR_NOOP ("Mix"), TR_NOOP ("Depth"), TR_NOOP ("Width"), TR_NOOP ("Delay"), TR_NOOP ("Feedback") };
     for (int k = 0; k < 5; ++k)
-        v.push_back (slider (Item::vslider, 16.0f + 58.0f * (float) k, 16, 40, 204, faders[k], captions[k]));
-    v.push_back (menuOf (52, 236, 100, 22, "Taps", TR_NOOP ("Taps"), TR_NOOP ("1|2|3|4|8|16"),
+    {
+        v.push_back (slider (Item::vslider, 16.0f + 58.0f * (float) k, 14, 40, 196, faders[k], captions[k]));
+        v.push_back (value (10.0f + 58.0f * (float) k, 238, 52, 16, faders[k], 0));
+    }
+    v.push_back (label (12, 268, 38, 18, TR_NOOP ("Taps")));
+    v.push_back (menuOf (52, 266, 100, 22, "Taps", TR_NOOP ("Taps"), TR_NOOP ("1|2|3|4|8|16"),
                          { 1.5f / 24.0f, 2.5f / 24.0f, 3.5f / 24.0f, 6.5f / 24.0f, 7.5f / 24.0f, 9.5f / 24.0f }));
     std::vector<float> syncValues;
     for (int k = 0; k <= 17; ++k)
         syncValues.push_back ((float) k / 17.0f);
-    v.push_back (menuOf (200, 236, 96, 22, "Sync", TR_NOOP ("Sync"),
+    v.push_back (label (158, 268, 40, 18, TR_NOOP ("Sync")));
+    v.push_back (menuOf (200, 266, 96, 22, "Sync", TR_NOOP ("Sync"),
                          "Free|1/64|1/32T|1/64.|1/32|1/16T|1/32.|1/16|1/8T|1/16.|1/8|1/4T|1/8.|1/4|1/2T|1/4.|1/2|1/1", syncValues));
     // the pages: modulation, taps, diffusion, EQ, drive, warp
     l.pages = { TR_NOOP ("Mod"), TR_NOOP ("Taps"), TR_NOOP ("Diff"), TR_NOOP ("EQ"), TR_NOOP ("Drive"), TR_NOOP ("Warp") };
