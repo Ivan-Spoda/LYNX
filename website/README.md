@@ -9,3 +9,5 @@ The download buttons read the newest GitHub release at runtime, so a new release
   screenshots over that audio (ffmpeg zoompan + xfade); `peaks.json` is its waveform (600 peaks).
 - `?shot` in the URL disables the entrance animations (for headless screenshots).
 - Publish with `scripts/deploy-site.sh` (Hostinger API token in `~/.config/hostinger/token`, never committed).
+- The plugin section is data-driven: `FEATURED` (highlight cards, Exact/Near-exact only, `by` = the original's maker,
+  so engines inspired by third-party plugins can be added) and `PLUGINS` (full grid), kept in sync with `docs/PLUGINS.md`.

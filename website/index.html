@@ -214,6 +214,41 @@ input[type=range]{accent-color:var(--red);width:130px}
 .pl-all{margin-top:12px}
 .pl-more{margin-top:18px;font-size:14px;color:var(--muted)}
 .pl-more a{color:var(--red2)}
+/* featured plugins (data: FEATURED in the script) */
+.ft-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin-top:44px}
+.ft-head h3{font-size:22px}
+.ft-head p{color:var(--muted);font-size:14px}
+.ft-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-top:18px}
+@media (max-width:1100px){.ft-grid{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:560px){.ft-grid{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;margin:18px -24px 0;padding:6px 24px 10px;scroll-padding:0 24px;scrollbar-width:none}.ft-grid::-webkit-scrollbar{display:none}.ft-grid .ft{flex:0 0 80%;scroll-snap-align:start}.ft:hover{transform:none}}
+.ft{--x:50%;--y:0%;position:relative;display:flex;flex-direction:column;gap:8px;min-width:0;padding:18px 18px 16px;border-radius:14px;overflow:hidden;
+  background:radial-gradient(320px circle at var(--x) var(--y),rgba(229,56,59,.13),transparent 60%),linear-gradient(180deg,rgba(255,255,255,.035),transparent 60%),var(--panel);
+  border:1px solid var(--line);transition:transform .35s cubic-bezier(.2,.8,.2,1),border-color .3s,box-shadow .35s}
+.ft::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:linear-gradient(90deg,transparent,var(--red),var(--red2),transparent);transform:scaleX(.25);opacity:.5;transition:transform .5s cubic-bezier(.2,.8,.2,1),opacity .3s}
+.ft:hover{transform:translateY(-4px);border-color:rgba(229,56,59,.45);box-shadow:0 18px 44px -18px var(--redglow)}
+.ft:hover::before{transform:scaleX(1);opacity:1}
+.ft-grid:not(.in) .ft{opacity:0}
+.ft-grid.in .ft{animation:ftIn .8s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--i)*70ms)}
+@keyframes ftIn{from{opacity:0;transform:translateY(26px) scale(.97);filter:blur(4px)}to{opacity:1;transform:none;filter:none}}
+.ft .top{display:flex;align-items:center;gap:6px}
+.ft .badge{display:inline-flex;align-items:center;gap:6px;font:600 11px Inter;letter-spacing:.03em;border-radius:99px;padding:3px 9px 3px 7px;border:1px solid}
+.ft .badge.x{color:#8ff0b8;border-color:rgba(61,220,132,.4);background:rgba(61,220,132,.08)}
+.ft .badge.n{color:#d8f08f;border-color:rgba(197,232,93,.4);background:rgba(197,232,93,.07)}
+.ft .badge .st{width:7px;height:7px}
+.ft .k{margin-left:auto;font:500 10px "JetBrains Mono",monospace;color:var(--dim);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+.ft h4{font:700 19px/1.15 "Space Grotesk",Inter,sans-serif;letter-spacing:-.01em;margin-top:4px}
+.ft .by{font-size:12px;color:var(--dim);margin-top:-4px}
+.ft p{font-size:13.5px;line-height:1.5;color:var(--muted);flex:1}
+.ft .how{font-size:11.5px;color:var(--dim);display:flex;align-items:center;gap:6px}
+.ft .how svg{width:12px;height:12px;flex:none}
+.ft .eqb{position:absolute;right:14px;bottom:14px;display:flex;align-items:flex-end;gap:2px;height:16px;opacity:.35;transition:opacity .3s}
+.ft .eqb i{width:3px;height:30%;background:var(--red2);border-radius:1px}
+.ft:hover .eqb{opacity:.9}
+.ft:hover .eqb i{animation:eqb .9s ease-in-out infinite alternate}
+.ft .eqb i:nth-child(2){animation-delay:-.3s}.ft .eqb i:nth-child(3){animation-delay:-.6s}.ft .eqb i:nth-child(4){animation-delay:-.15s}
+@keyframes eqb{from{height:20%}to{height:100%}}
+.pl-sub{font-size:22px;margin-top:56px}
+.pl-sub+.pl-bar{margin-top:14px}
 /* gallery */
 .gallery{columns:3 280px;column-gap:16px;margin-top:56px}
 .gallery figure{break-inside:avoid;margin-bottom:16px;border-radius:12px;overflow:hidden;position:relative;cursor:zoom-in;box-shadow:0 0 0 1px var(--line)}
@@ -261,11 +296,11 @@ footer a:hover{color:var(--text)}
 .policy a:hover{text-decoration-color:var(--red)}
 .policy .tag{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--red2);border:1px solid rgba(229,56,59,.4);border-radius:6px;padding:1px 7px;margin-left:6px;vertical-align:1px}
 
-html.shot .hero{min-height:0}html.shot .reveal,html.shot .fade-up,html.shot .hero h1 .w{opacity:1!important;transform:none!important;filter:none!important;animation:none!important;transition:none!important}
+html.shot .ft{opacity:1!important;animation:none!important}html.shot .hero{min-height:0}html.shot .reveal,html.shot .fade-up,html.shot .hero h1 .w{opacity:1!important;transform:none!important;filter:none!important;animation:none!important;transition:none!important}
 @media (max-width:560px){.pill{font-size:11.5px;padding:5px 10px 5px 6px}.pill b{font-size:10px}.hero{padding-top:110px}.dl{padding:56px 20px}}
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition:none!important}
-  .reveal,.fade-up,.hero h1 .w{opacity:1;transform:none;filter:none}
+  .reveal,.fade-up,.hero h1 .w,.ft-grid .ft{opacity:1;transform:none;filter:none}
   .screen{transform:none!important}
 }
 </style>
@@ -417,6 +452,9 @@ html.shot .hero{min-height:0}html.shot .reveal,html.shot .fade-up,html.shot .her
     <div class="eyebrow reveal">// built-in plugins</div>
     <h2 class="sec-title reveal d1" data-i18n="pl.title">Native plugins, rebuilt from scratch.</h2>
     <p class="sec-lead reveal d2" data-i18n="pl.lead">Each engine is written natively in LYNX, inspired by an FL Studio plugin and checked against the original running unmodified. Exact means bit-identical output.</p>
+    <div class="ft-head reveal"><h3 data-i18n="ft.title">Featured</h3><p data-i18n="ft.lead">The plugins FL Studio users reach for most, all at Exact or Near-exact quality.</p></div>
+    <div class="ft-grid reveal" id="ftGrid"></div>
+    <h3 class="pl-sub reveal" data-i18n="pl.sub">Every built-in plugin</h3>
     <div class="pl-bar reveal">
       <button class="pl-f on" data-f="all" data-i18n="pl.all">All</button><button class="pl-f" data-f="g" data-i18n="pl.gen">Generators</button><button class="pl-f" data-f="e" data-i18n="pl.fx">Effects</button>
       <div class="pl-legend"><span><i class="st x"></i><em data-i18n="pl.x">Exact</em></span><span><i class="st n"></i><em data-i18n="pl.n">Near-exact</em></span><span><i class="st c"></i><em data-i18n="pl.c">Close</em></span><span><i class="st a"></i><em data-i18n="pl.a">Approximate</em></span><span><i class="st p"></i><em data-i18n="pl.p">Placeholder</em></span></div>
@@ -524,6 +562,7 @@ const PT = {
  'sig.privacy':'Privacidade','sig.pp':'Este programa não transfere nenhuma informação para outros sistemas em rede, a menos que isso seja solicitado especificamente pelo usuário ou pela pessoa que o instala ou opera. <a href="https://github.com/Ka1-S/LYNX/blob/main/PRIVACY.md">Política de privacidade</a>',
  'nav.plugins':'Plugins','pl.title':'Plugins nativos, refeitos do zero.','pl.lead':'Cada motor é escrito nativamente no LYNX, inspirado num plugin do FL Studio e conferido contra o original rodando sem modificação. Exato significa saída idêntica bit a bit.',
  'pl.all':'Todos','pl.gen':'Geradores','pl.fx':'Efeitos','pl.x':'Exato','pl.n':'Quase exato','pl.c':'Próximo','pl.a':'Aproximado','pl.p':'Só estado',
+ 'ft.title':'Destaques','ft.lead':'Os plugins que quem usa o FL Studio mais usa, todos com status Exato ou Quase exato.','pl.sub':'Todos os plugins embutidos',
  'pl.more':'Status, cobertura de testes e o que ainda falta em cada um: <a href="https://github.com/Ka1-S/LYNX/blob/main/docs/PLUGINS.md">docs/PLUGINS.md</a>.',
  'pl.tm':'FL Studio e os nomes dos seus plugins são marcas da Image-Line Software, citadas aqui só para descrever compatibilidade. O LYNX não é afiliado à Image-Line. Nenhum código ou dado de áudio da Image-Line vem com o LYNX; as ondas embutidas são lidas da sua própria instalação do FL Studio.',
  'f.sign':'Assinatura de código e privacidade'
@@ -551,7 +590,7 @@ function setLang(l){
   words(d['hero.title'] || EN['hero.title']);
   $('#lang').textContent = l==='pt' ? 'EN' : 'PT';
   try { localStorage.setItem('lynx-lang', l); } catch(e){}
-  renderPlugins();
+  renderPlugins(); renderFeatured();
 }
 
 /* ---------- built-in plugins (docs/PLUGINS.md) ---------- */
@@ -581,6 +620,42 @@ const PLUGINS = [
  ['EQ','Fruity 7 Band EQ, Fruity Bass Boost','e','a'],['Delay','Fruity Delay (v1)','e','a'],['Chorus','Fruity Phaser','e','a'],['Utility','Fruity Center, Phase Inverter, Send, Transporter','e','a'],
  ['Frequency shifter','Frequency Shifter','e','a'],['Limiter','Emphasis','e','a'],['Parametric EQ','Low Lifter','e','a']
 ];
+// Featured strip above the full list. To feature another engine (e.g. a future LYNX engine inspired by a
+// third-party plugin), add an entry: by = the original's maker, fl = the original plugin, t = g/e,
+// s = x/n (only Exact / Near-exact are featured), how = insert (any mixer insert) / flp (created from .flp).
+const FEATURED = [
+ {n:'3x Osc engine',fl:'3x Osc',by:'FL Studio',t:'g',s:'x',how:'flp',
+  en:'Three-oscillator subtractive synth, FL\'s classic starting point.',pt:'Synth subtrativo de três osciladores, o clássico ponto de partida do FL.'},
+ {n:'FL Keys engine',fl:'FL Keys',by:'FL Studio',t:'g',s:'x',how:'flp',
+  en:'Light sampled piano, electric piano and keys; samples from your own FL install.',pt:'Piano, piano elétrico e teclados sampleados e leves; samples da sua própria instalação do FL.'},
+ {n:'Gross Beat',fl:'Gross Beat',by:'FL Studio',t:'e',s:'x',how:'flp',
+  en:'Time and volume slicing for stutters, gates and tape stops.',pt:'Fatia tempo e volume para stutters, gates e tape stops.'},
+ {n:'Fruity Limiter',fl:'Fruity Limiter',by:'FL Studio',t:'e',s:'n',how:'insert',
+  en:'Limiter, compressor and noise gate in one: the master-bus staple.',pt:'Limiter, compressor e noise gate num só: presença certa no master.'},
+ {n:'Parametric EQ',fl:'Fruity Parametric EQ 2',by:'FL Studio',t:'e',s:'n',how:'insert',
+  en:'Seven-band parametric EQ, linear-phase mode included.',pt:'EQ paramétrico de sete bandas, com modo de fase linear.'},
+ {n:'Soundgoodizer',fl:'Soundgoodizer',by:'FL Studio',t:'e',s:'n',how:'flp',
+  en:'One knob, four characters: instant loudness and punch.',pt:'Um botão, quatro modos: volume e punch na hora.'},
+ {n:'Maximus',fl:'Maximus',by:'FL Studio',t:'e',s:'n',how:'flp',
+  en:'Multiband mastering maximizer and limiter.',pt:'Maximizador e limiter multibanda de masterização.'},
+ {n:'Fruity Delay 3',fl:'Fruity Delay 3',by:'FL Studio',t:'e',s:'x',how:'insert',
+  en:'Analog-style delay with modulation, diffusion and feedback filtering.',pt:'Delay estilo analógico com modulação, difusão e filtro no feedback.'},
+ {n:'Reeverb 2',fl:'Fruity Reeverb 2',by:'FL Studio',t:'e',s:'x',how:'insert',
+  en:'Algorithmic reverb, from small rooms to huge halls.',pt:'Reverb algorítmico, de salas pequenas a halls enormes.'},
+ {n:'Fruity Compressor',fl:'Fruity Compressor',by:'FL Studio',t:'e',s:'x',how:'insert',
+  en:'The classic FL compressor, sidechain included.',pt:'O compressor clássico do FL, com sidechain.'}
+];
+function renderFeatured(){
+  const pt = lang==='pt', d = pt ? PT : EN, esc = t => t.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  const how = {insert: pt ? 'Qualquer insert' : 'Any mixer insert', flp: pt ? 'Ao abrir um .flp' : 'From .flp projects'};
+  const howT = {insert: pt ? 'Pode ser adicionado em qualquer insert do mixer' : 'Can be added to any mixer insert', flp: pt ? 'Criado ao abrir um projeto do FL Studio (.flp); os controles continuam editáveis' : 'Created when you open an FL Studio project (.flp); its controls stay editable'};
+  const ic = {insert:'<path d="M4 6h16M4 12h16M4 18h10"/>', flp:'<path d="M4 4h10l6 6v10H4z"/><path d="M14 4v6h6"/>'};
+  $('#ftGrid').innerHTML = FEATURED.map((f,i) =>
+    `<article class="ft" style="--i:${i}"><div class="top"><span class="badge ${f.s}"><i class="st ${f.s}"></i>${d['pl.'+f.s]||EN['pl.'+f.s]}</span><span class="k">${f.t==='g'?'GEN':'FX'}</span></div>`+
+    `<h4>${esc(f.n)}</h4><div class="by">${pt?'inspirado em ':'inspired by '}${esc(f.fl)} · ${esc(f.by)}</div><p>${esc(pt?f.pt:f.en)}</p>`+
+    `<div class="how" title="${howT[f.how]}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${ic[f.how]}</svg>${how[f.how]}</div><div class="eqb" aria-hidden="true"><i></i><i></i><i></i><i></i></div></article>`).join('');
+}
+$('#ftGrid').addEventListener('pointermove', e => { const c = e.target.closest('.ft'); if (!c) return; const r = c.getBoundingClientRect(); c.style.setProperty('--x',(e.clientX-r.left)+'px'); c.style.setProperty('--y',(e.clientY-r.top)+'px'); });
 let plFilter = 'all', plOpen = false;
 function renderPlugins(){
   const insp = lang==='pt' ? 'inspirado em ' : 'inspired by ';
