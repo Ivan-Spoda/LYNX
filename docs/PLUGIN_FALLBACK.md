@@ -97,9 +97,11 @@ matches by name).
 | Valhalla Supermassive / Shimmer, FabFilter Pro-R | LuxeVerb (default) | name | — |
 | Waves H-Delay | Fruity Delay 3 ("Default") | VST3 class ID [DATA], Waves name | — |
 | Waves SuperTap, Soundtoys EchoBoy / PrimalTap, ValhallaDelay / FreqEcho, FabFilter Timeless | Fruity Delay 3 | VST2 ID [DATA] (EchoBoy), names | — |
-| Waves L1/L2/L3/L4, FabFilter Pro-L | Limiter | Waves name, names | — |
+| Waves L1/L2/L3/L4 | Limiter | Waves name | — |
+| FabFilter Pro-L | Apex Limiter (round 99) | names | — |
 | Waves RComp, CLA-2A (slower release), CLA-76, CLA-3A, C1, SSLComp, API-2500, FabFilter Pro-C | Compressor | VST3 class IDs [DATA], Waves names, names | — |
-| Waves SSL E-Channel, Q10, REQ, SSLEQ, FabFilter Pro-Q | Parametric EQ (flat) | VST3 class ID [DATA], Waves names, names | — |
+| Waves SSL E-Channel, Q10, REQ, SSLEQ | Parametric EQ (flat) | VST3 class ID [DATA], Waves names | — |
+| FabFilter Pro-Q | Facet EQ (flat, round 99) | names | — |
 | Soundtoys PanMan | Auto-pan | VST2 ID [DATA], name | — |
 
 | Antares Auto-Tune (Pro / Artist / Access / EFX+ / Hybrid), Waves Tune Real-Time | LYNX Tune (defaults: C major, 20 ms retune) | VST3 class ID [DATA] (Auto-Tune Pro), names, Waves name | — |
