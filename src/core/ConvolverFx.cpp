@@ -48,6 +48,13 @@ float f32At (const std::vector<std::uint8_t>& d, std::size_t o) noexcept
     return v;
 }
 
+// (a + bi)(c + di) for finite values, without std::complex's NaN/infinity recovery branch (a hot loop)
+inline cd mul (const cd& z, const cd& w) noexcept
+{
+    const double a = z.real(), b = z.imag(), c = w.real(), d = w.imag();
+    return { a * c - b * d, a * d + b * c };
+}
+
 // ---------------------------------------------------------------------------------------------- radix-2 FFT
 class Fft
 {
@@ -74,23 +81,37 @@ public:
     // in place; the inverse is unscaled
     void run (cd* a, bool inverse) const noexcept
     {
+        bitReverse (a);
+        for (int len = 2; len <= n; len <<= 1)
+            pass (a, len, inverse);
+    }
+    // the transform in pieces (a large one spread over an audio block): the reordering, then log2(n) passes
+    int passes() const noexcept
+    {
+        int p = 0;
+        for (int len = 2; len <= n; len <<= 1)
+            ++p;
+        return p;
+    }
+    void bitReverse (cd* a) const noexcept
+    {
         for (int i = 0; i < n; ++i)
             if (i < rev[(std::size_t) i])
                 std::swap (a[i], a[rev[(std::size_t) i]]);
-        for (int len = 2; len <= n; len <<= 1)
-        {
-            const int half = len / 2, step = n / len;
-            for (int i = 0; i < n; i += len)
-                for (int j = 0; j < half; ++j)
-                {
-                    cd w = tw[(std::size_t) (j * step)];
-                    if (inverse)
-                        w = std::conj (w);
-                    const cd u = a[i + j], v = a[i + j + half] * w;
-                    a[i + j] = u + v;
-                    a[i + j + half] = u - v;
-                }
-        }
+    }
+    void pass (cd* a, int len, bool inverse) const noexcept
+    {
+        const int half = len / 2, step = n / len;
+        for (int i = 0; i < n; i += len)
+            for (int j = 0; j < half; ++j)
+            {
+                cd w = tw[(std::size_t) (j * step)];
+                if (inverse)
+                    w = std::conj (w);
+                const cd u = a[i + j], v = mul (a[i + j + half], w);
+                a[i + j] = u + v;
+                a[i + j + half] = u - v;
+            }
     }
 
 private:
@@ -255,8 +276,11 @@ bool flat (const std::vector<EnvPoint>& e, double& level) noexcept
 }
 
 // ------------------------------------------------------------------------------- partitioned convolution
-// Zero-latency stereo convolution: a direct head, then uniformly partitioned overlap-save levels whose partitions
-// never start before their own size (so each level's output is ready when its block begins).
+// Zero-latency stereo convolution: a direct head, then uniformly partitioned overlap-save levels. The 128-sample level's
+// partitions start at its own size (its output is computed when its block begins); the larger levels' partitions start
+// at twice their size or later, so a block's output can be computed during the previous block, a slice every 128
+// samples (REA round 87: computing every level at once on the same sample took ~15 ms in one audio callback — a
+// crackle — once every 16384 samples).
 class Convolver
 {
 public:
@@ -269,8 +293,8 @@ public:
             headL[i] = i < kl.size() ? kl[i] : 0.0f, headR[i] = i < kr.size() ? kr[i] : 0.0f;
         levels.clear();
         static const int sizes[] = { 128, 1024, 8192, 16384 };
-        static const int starts[] = { 128, 1024, 8192, 65536 };
-        static const int ends[] = { 1024, 8192, 65536, 1 << 30 };
+        static const int starts[] = { 128, 2048, 16384, 65536 };
+        static const int ends[] = { 2048, 16384, 65536, 1 << 30 };
         for (int k = 0; k < 4; ++k)
         {
             if ((std::size_t) starts[k] >= len)
@@ -301,6 +325,11 @@ public:
             lv.xl.assign ((std::size_t) (lv.ages * bins), {});
             lv.xr.assign ((std::size_t) (lv.ages * bins), {});
             lv.out.assign ((std::size_t) (2 * lv.N), 0.0f);
+            lv.next.assign ((std::size_t) (2 * lv.N), 0.0f);
+            lv.spread = lv.j0 >= 2;
+            // the job's slices: copy + reorder + passes of the forward transform, one per partition, the inverse's
+            // reorder + passes, and the output
+            lv.units = 1 + 1 + lv.fft->passes() + lv.parts + 1 + 1 + lv.fft->passes() + 1;
             lv.work.assign ((std::size_t) (2 * lv.N), {});
             lv.accL.assign ((std::size_t) bins, {});
             lv.accR.assign ((std::size_t) bins, {});
@@ -324,7 +353,9 @@ public:
             std::fill (lv.xl.begin(), lv.xl.end(), cd {});
             std::fill (lv.xr.begin(), lv.xr.end(), cd {});
             std::fill (lv.out.begin(), lv.out.end(), 0.0f);
+            std::fill (lv.next.begin(), lv.next.end(), 0.0f);
             lv.newest = 0;
+            lv.done = lv.units; // no job in progress
         }
         t = 0;
     }
@@ -337,8 +368,23 @@ public:
         {
             if ((t & 127) == 0)
                 for (auto& lv : levels)
-                    if (t % lv.N == 0)
-                        step (lv);
+                {
+                    const auto phase = (int) (t % lv.N);
+                    if (! lv.spread)
+                    {
+                        if (phase == 0)
+                            step (lv);
+                        continue;
+                    }
+                    if (phase == 0)
+                    {
+                        advance (lv, lv.units); // (normally already complete)
+                        std::swap (lv.out, lv.next);
+                        startJob (lv);
+                    }
+                    // this 128-sample slice's share of the job: complete before the level's next block
+                    advance (lv, (int) (((long long) lv.units * (phase + 128) + lv.N - 1) / lv.N));
+                }
             const int w = (int) (t & mask);
             histL[(std::size_t) w] = l[s];
             histR[(std::size_t) w] = r[s];
@@ -369,7 +415,99 @@ private:
         std::vector<std::complex<float>> hl, hr, xl, xr; // spectra (N + 1 bins) of the partitions / of the inputs
         std::vector<cd> work, accL, accR;
         std::vector<float> out; // [0, N) left, [N, 2N) right: the level's output for the current block
+        // spread levels: the next block's output, built during the current one by `units` slices (`done` so far)
+        std::vector<float> next;
+        bool spread = false;
+        int units = 0, done = 0;
     };
+
+    // a spread level's block boundary: the newest 2N inputs go into the work buffer now (the history ring is
+    // overwritten during the block); the slices then compute the output of the block after this one
+    void startJob (Level& lv) noexcept
+    {
+        const int N = lv.N, mask = ring - 1;
+        for (int i = 0; i < 2 * N; ++i)
+        {
+            const auto q = (std::size_t) ((t - 2 * N + i) & mask);
+            lv.work[(std::size_t) i] = cd (histL[q], histR[q]);
+        }
+        lv.newest = (lv.newest + lv.ages - 1) % lv.ages;
+        lv.done = 0;
+    }
+
+    void advance (Level& lv, int target) noexcept
+    {
+        const int N = lv.N, bins = N + 1, passes = lv.fft->passes();
+        target = std::min (target, lv.units);
+        while (lv.done < target)
+        {
+            int u = lv.done++;
+            // 0: (inputs copied at the boundary) reorder, then the forward passes
+            if (u == 0)
+            {
+                lv.fft->bitReverse (lv.work.data());
+                continue;
+            }
+            u -= 1;
+            if (u < passes)
+            {
+                lv.fft->pass (lv.work.data(), 2 << u, false);
+                continue;
+            }
+            u -= passes;
+            if (u == 0)
+            {
+                split (lv.work, 2 * N, lv.xl.data() + lv.newest * bins, lv.xr.data() + lv.newest * bins);
+                std::fill (lv.accL.begin(), lv.accL.end(), cd {});
+                std::fill (lv.accR.begin(), lv.accR.end(), cd {});
+                continue;
+            }
+            u -= 1;
+            if (u < lv.parts)
+            {
+                // partition p meets the input that will be j0 − 1 + p blocks old in the next block
+                const int p = u;
+                const int slot = (lv.newest + lv.j0 - 2 + p) % lv.ages;
+                const auto* xl = lv.xl.data() + slot * bins;
+                const auto* xr = lv.xr.data() + slot * bins;
+                const auto* hl = lv.hl.data() + p * bins;
+                const auto* hr = lv.hr.data() + p * bins;
+                for (int k = 0; k < bins; ++k)
+                {
+                    lv.accL[(std::size_t) k] += mul (cd (xl[k]), cd (hl[k]));
+                    lv.accR[(std::size_t) k] += mul (cd (xr[k]), cd (hr[k]));
+                }
+                continue;
+            }
+            u -= lv.parts;
+            if (u == 0)
+            {
+                for (int k = 0; k <= N; ++k)
+                    lv.work[(std::size_t) k] = lv.accL[(std::size_t) k] + cd (0.0, 1.0) * lv.accR[(std::size_t) k];
+                for (int k = N + 1; k < 2 * N; ++k)
+                    lv.work[(std::size_t) k] = std::conj (lv.accL[(std::size_t) (2 * N - k)]) + cd (0.0, 1.0) * std::conj (lv.accR[(std::size_t) (2 * N - k)]);
+                continue;
+            }
+            u -= 1;
+            if (u == 0)
+            {
+                lv.fft->bitReverse (lv.work.data());
+                continue;
+            }
+            u -= 1;
+            if (u < passes)
+            {
+                lv.fft->pass (lv.work.data(), 2 << u, true);
+                continue;
+            }
+            const double inv = 1.0 / (double) (2 * N);
+            for (int i = 0; i < N; ++i)
+            {
+                lv.next[(std::size_t) i] = (float) (lv.work[(std::size_t) (N + i)].real() * inv);
+                lv.next[(std::size_t) (N + i)] = (float) (lv.work[(std::size_t) (N + i)].imag() * inv);
+            }
+        }
+    }
 
     // spectra of the two real signals packed in z = a + ib (bins 0…N of a 2N transform)
     template <typename T>

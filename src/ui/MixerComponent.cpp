@@ -2396,7 +2396,7 @@ void EffectsPanel::showAddMenu (int)
         repaint();
     });
     menu.addSeparator();
-    menu.addSubMenu (tr ("Plugin (VST3/CLAP)"), plugins);
+    menu.addSubMenu (tr ("Plugin (VST/VST3/CLAP)"), plugins);
     menu.addSeparator();
     menu.addItem (tr ("Audio editor (record this insert)..."), [this] { openAudioEditorForInsert (engine, track); });
 

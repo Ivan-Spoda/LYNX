@@ -1511,7 +1511,7 @@ void ChannelRackComponent::showChannelMenu (int channel)
         });
         openPluginWindow (channel);
     });
-    instruments.addSubMenu (tr ("Plugin (VST3/CLAP)"), plugins);
+    instruments.addSubMenu (tr ("Plugin (VST/VST3/CLAP)"), plugins);
 
     juce::PopupMenu menu;
     menu.addSectionHeader (juce::String::fromUTF8 (c.name.c_str()));
@@ -1701,7 +1701,7 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
         openPluginWindow (added); // the plugin opens when added
         openEditorRow = added;
     });
-    menu.addSubMenu (tr ("Plugin (VST3/CLAP)"), plugins);
+    menu.addSubMenu (tr ("Plugin (VST/VST3/CLAP)"), plugins);
 }
 
 void ChannelRackComponent::showAddChannelMenu (int insertAt)
