@@ -1,6 +1,7 @@
 // FL Studio's EQUO as an exact engine (docs/analise/REA_rodada61.md). Clean-room: our own code, written from the
 // behaviour documented there.
 
+#include "core/StateHandoff.h"
 #include "core/EquoFx.h"
 
 #include <algorithm>
@@ -578,6 +579,15 @@ void Engine::setKnobs (const State& s) noexcept
     }
 }
 
+void Engine::setBands (const State& s) noexcept
+{
+    d->st.table = s.table;
+    d->st.target = s.target;
+    d->computeValues();
+    d->computeVolume();
+    d->computeSmoother();
+}
+
 void Engine::reset() noexcept
 {
     d->fresh();
@@ -764,10 +774,23 @@ public:
 
     void reset() noexcept override { engine.reset(); }
 
+    // the editor drew in the band table: the running engine glides to the new values
+    bool acceptState (const std::vector<std::uint8_t>& bytes) noexcept override
+    {
+        const auto s = parse (bytes);
+        return s && valid && incoming.offer (*s);
+    }
+
     void process (float* left, float* right, int n, const EffectParams& p, double bpm) noexcept override
     {
         if (! valid)
             return; // not an EQUO state: pass the signal through
+        if (incoming.take (next))
+        {
+            state.table = next.table;
+            state.target = next.target;
+            engine.setBands (state);
+        }
         if (offlineRendering() != rendering)
         {
             rendering = offlineRendering();
@@ -792,7 +815,8 @@ public:
     }
 
 private:
-    State state;
+    State state, next;
+    StateHandoff<State> incoming;
     bool valid = false, rendering = false, haveParams = false;
     double rate = 44100.0;
     EffectParams lastParams {};

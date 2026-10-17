@@ -55,6 +55,8 @@ enum : std::uint32_t
     evChannelLevels = 0xDB,
     evChannelLevelAdjust = 0xE5, // i32 panAdj, i32 volAdj, i32 ?, i32 modXAdj, i32 modYAdj
     evChannelColour = 0x80,
+    evChannelFilterGroup = 0x91, // u32: index into the 0xE7 names (the Channel Rack's filter group, REA round 104)
+    evFilterGroupName = 0xE7,    // UTF-16 text: one per filter group, in order
     evMixerInsertColour = 0x95, // u32 0x00BBGGRR; comes before the 0xEC that opens the insert
     evMixerSlotIndex = 0x62,    // u16: closes the effect slot described by the preceding events     // u32 0x00BBGGRR (also appears in mixer slots)     // i32 pan, i32 volume, i32 pitch (cents), ...
     evPlaylistTrack = 0xEE,     // u32 index (1..500), u32 colour, u32 icon, u8 enabled, ...
@@ -740,6 +742,15 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                 break;
             }
 
+            case evChannelFilterGroup:
+                if (section == Section::channel)
+                    channel().filterGroup = (int) (std::int32_t) e.value;
+                break;
+
+            case evFilterGroupName:
+                project.filterGroups.push_back (text (e));
+                break;
+
             case evChannelColour:
                 if (section == Section::channel)
                     channel().colour = ((e.value & 0xFF) << 16) | (e.value & 0xFF00) | ((e.value >> 16) & 0xFF);
@@ -783,6 +794,19 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                     const auto c = readLE<std::uint32_t> (e.data, 4);
                     t.colour = ((c & 0xFF) << 16) | (c & 0xFF00) | ((c >> 16) & 0xFF);
                     t.enabled = e.data[12] != 0;
+                    // FL 20+ layout (70 bytes; REA round 104): f32 size at 13, u8 "grouped with above" at 46,
+                    // u8 "group expanded" at 61 (cleared when FL collapses the group)
+                    if (e.data.size() >= 17)
+                    {
+                        const auto h = readLE<float> (e.data, 13);
+                        if (std::isfinite (h) && h > 0.05f && h < 10.0f)
+                            t.heightScale = h;
+                    }
+                    if (e.data.size() >= 62)
+                    {
+                        t.grouped = e.data[46] != 0;
+                        t.expanded = e.data[61] != 0;
+                    }
                     arrangement().tracks.push_back (t);
                 }
                 break;

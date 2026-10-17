@@ -20,6 +20,11 @@ constexpr float unityFader = 0.8f;    // fader position that gives 0 dB, as in F
 // FL mixer fader curve: g = (11^v - 1) / 10 with v = position * 1.25 (0 dB at 0.8;
 // +5.6 dB at maximum). docs/analise/REA_rodada2.md §2.2.
 float faderGain (float position) noexcept;
+// Its inverse: the fader position (0..1) that gives `gain` (0 for gain <= 0, 1 for maxFaderGain and above).
+float faderPosition (float gain) noexcept;
+// Gain at the top of the fader: +5.6 dB. FL's insert-to-insert and insert-to-Master route levels use the same curve
+// and range (0..16000, 12800 = 0 dB; REA_rodada107 §3), so a send can reach it too.
+constexpr float maxFaderGain = 1.9031f;
 
 // Channel volume with the same curve, but 1.0 = 0 dB (FL's default, 0.78, gives -5.2 dB).
 // docs/analise/REA_rodada3.md §2.
@@ -289,6 +294,7 @@ struct ChannelDef
     int cutGroup = 0;        // playing this channel cuts channels with an equal cutBy (0 = none)
     int cutBy = 0;
     std::uint32_t colour = 0; // 0xFFRRGGBB; 0 = theme default
+    int group = -1;           // the Channel Rack filter group (index into Song::channelGroups); -1 = none
 };
 
 enum class EffectKind : std::uint8_t
@@ -425,7 +431,7 @@ struct EffectSlot
 struct MixerSend
 {
     int target = 0;      // destination track (> 0; Master is `toMaster`)
-    float level = 1.0f;  // 0..1 (linear gain)
+    float level = 1.0f;  // linear gain, 0..maxFaderGain (FL's send knob: the fader curve, 0 dB at 80%, +5.6 dB at 100%)
 
     bool operator== (const MixerSend& o) const noexcept { return target == o.target && level == o.level; }
 };
@@ -466,6 +472,7 @@ struct MixerTrack
     bool solo = false;
     std::vector<EffectSlot> effects; // up to maxEffectSlots, processed in order
     bool toMaster = true;            // inserts: output to Master (besides the sends)
+    float masterLevel = 1.0f;        // level of that route to Master (linear gain, 0..maxFaderGain; FL's route knob)
     float stereo = 0.0f;             // separation: -1 = widest, 0 = normal, +1 = mono (as in FL)
     std::uint32_t colour = 0;        // 0xFFRRGGBB; 0 = theme default
     bool invertPhase = false;
@@ -639,6 +646,10 @@ struct PlaylistTrack
     bool muted = false; // clips on this track don't play
     int height = 0;     // Playlist row height in px (0 = the default)
     std::uint32_t colour = 0; // header colour 0xFFRRGGBB (from the .flp or "Rename and color"); 0 = default
+    // Track groups (FL's "Group with above track"): a grouped track belongs to the group of the nearest
+    // ungrouped track above it (the group's header). `collapsed` on a header folds its members into thin rows.
+    bool grouped = false;
+    bool collapsed = false;
 };
 
 // Splits a clip at `tick` (absolute): the original keeps the start and the return value is the rest.
@@ -688,6 +699,7 @@ struct Song
     double bpm = 130.0;
     int beatsPerBar = 4;
     float swing = 0.0f; // 0..1: delays off-beat sixteenth notes (like the swing of FL's Channel Rack)
+    std::vector<std::string> channelGroups; // the Channel Rack's filter groups (FL's "All" dropdown), by name
     float masterPitch = 0.0f; // cents, -1200..1200: shifts every note of the built-in instruments (the toolbar's master pitch)
     ProjectInfo info;
     std::vector<ChannelDef> channels;

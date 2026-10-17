@@ -123,7 +123,7 @@ APP_SOURCES+=(src/core/OggVorbis.cpp)
 APP_SOURCES+=(src/core/ExportOptions.cpp src/core/Mp3Encoder.cpp src/core/PluginMonitor.cpp src/core/PlaylistOps.cpp)
 APP_SOURCES+=(src/ui/NewProjectDialog.cpp src/ui/ClipProperties.cpp src/ui/PluginMonitorWindow.cpp src/ui/TouchKeyboard.cpp)
 # native plugin editors in FL's arrangement (round 93)
-APP_SOURCES+=(src/core/PluginLayout.cpp src/ui/PluginEditors.cpp)
+APP_SOURCES+=(src/core/PluginLayout.cpp src/core/StateParams.cpp src/ui/PluginEditors.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"

@@ -24,10 +24,11 @@ enum class Icon
     countIn, waitInput, // recording: count-in and wait for input
     mouseLeft, mouseMiddle, mouseWheel, // hint bar gestures (with rightClick)
     tuningFork, // master pitch
-    drumBrush   // Piano Roll: the drum paint tool
+    drumBrush,  // Piano Roll: the drum paint tool
+    graph       // Channel Rack: the step graph editor (velocity, pan... bars)
 };
 
-constexpr int iconCount = (int) Icon::drumBrush + 1;
+constexpr int iconCount = (int) Icon::graph + 1;
 
 namespace icons
 {

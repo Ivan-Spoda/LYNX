@@ -3,6 +3,7 @@
 #include "core/Effects.h"
 #include "core/FlEffects.h"
 #include "core/FlpImport.h"
+#include "core/NoteEdit.h"
 #include "core/MaximusFx.h"
 #include "core/Harmor.h"
 #include "flp/Flp.h"
@@ -589,6 +590,10 @@ private:
         original.loopEnd = 7680;
         original.playlistTracks.resize (3);
         original.playlistTracks[2].colour = 0xFF2A6FDB; // a track colour (round 90)
+        original.playlistTracks[2].grouped = true;      // track groups and rack filter groups (round 104)
+        original.playlistTracks[1].collapsed = true;
+        original.channelGroups = { "Drums", "Keys" };
+        original.channels[1].group = 1;
         juce::String error;
 
         if (demoProjectPath.isNotEmpty()) // sample project for checking the UI with --snapshot
@@ -607,6 +612,8 @@ private:
                                && reloaded->loopStart == 960 && reloaded->loopEnd == 7680
                                && reloaded->playlistTracks.size() == 3 && reloaded->playlistTracks[2].colour == 0xFF2A6FDB
                                && reloaded->playlistTracks[1].colour == 0
+                               && reloaded->playlistTracks[2].grouped && reloaded->playlistTracks[1].collapsed && ! reloaded->playlistTracks[1].grouped
+                               && reloaded->channelGroups == original.channelGroups && reloaded->channels[1].group == 1 && reloaded->channels[0].group == -1
                                && reloaded->playlist[0].offset == 960 && reloaded->playlist[0].track == 2
                                && reloaded->mixer[3].effects.size() == 1
                                && reloaded->mixer[3].effects[0].kind == lynx::EffectKind::delay
@@ -1487,6 +1494,23 @@ private:
             lynx::AudioEngine loader (false);
             const juce::File input (inputPath);
 
+            // --find-plugins: first the targeted scan opening the project in the app runs (its plugins not known yet)
+            if (input.hasFileExtension ("flp") && juce::JUCEApplication::getCommandLineParameters().contains ("--find-plugins"))
+            {
+                juce::MemoryBlock data;
+                if (input.loadFileAsData (data))
+                    try
+                    {
+                        const auto uses = lynx::flpForeignPlugins (flp::parseProject ({ static_cast<const std::uint8_t*> (data.getData()), data.getSize() }));
+                        auto& host = loader.getPluginHost();
+                        report << "scanned=" << host.filesToScanFor (uses).joinIntoString (";") << "\n";
+                        host.scanFiles (host.filesToScanFor (uses), {});
+                    }
+                    catch (const flp::Error&)
+                    {
+                    }
+            }
+
             if (input.hasFileExtension ("flp"))
                 ok = loader.importFlpFile (input, error);
             else if (auto song = lynx::ProjectFile::load (input, error))
@@ -1542,6 +1566,32 @@ private:
                        << "unsupported=" << joined (importReport.unsupported) << "\n"
                        << "dropped_effects=" << joined (importReport.droppedEffects) << "\n"
                        << "missing_samples=" << importReport.missingSamples << "\n";
+                // third-party plugins: how each was found, or what plays in its place (diagnostics for level differences)
+                for (const auto& line : loader.getMatchedPlugins())
+                    report << "plugin_found=" << line << "\n";
+                for (const auto& m : loader.getMissingPluginDetails())
+                    report << "plugin_missing=" << juce::String::fromUTF8 (m.name.c_str()) << " -> "
+                           << juce::String::fromUTF8 (m.replacement.c_str()).replace ("{0}", juce::String::fromUTF8 (m.replacementArg.c_str())) << "\n";
+                {
+                    const auto& song = loader.getSong();
+                    for (std::size_t t = 0; t < song.mixer.size(); ++t)
+                    {
+                        const auto& track = song.mixer[t];
+                        if (track.effects.empty() && track.sends.empty())
+                            continue;
+                        report << "insert " << (int) t << " vol=" << juce::String (track.volume / lynx::unityFader, 3)
+                               << (track.muted ? " muted" : "") << (track.toMaster ? "" : " noMaster");
+                        for (const auto& s : track.sends)
+                            report << " send>" << s.target << "@" << juce::String (s.level, 3);
+                        report << " |";
+                        for (const auto& fx : track.effects)
+                            report << " [" << (fx.kind == lynx::EffectKind::plugin ? juce::String::fromUTF8 (fx.plugin.name.c_str())
+                                                                                 : juce::String::fromUTF8 (lynx::effectInfo (fx.kind).name))
+                                   << (fx.isSubstitute() ? " (substitute)" : "") << (fx.enabled ? "" : " off")
+                                   << (fx.mix < 0.999f ? " mix=" + juce::String (fx.mix, 2) : juce::String()) << "]";
+                        report << "\n";
+                    }
+                }
                 report << "open_ms=" << juce::roundToInt (loaded - started) << "\n"
                        << "prepare_ms=" << juce::roundToInt (prepared - loaded) << "\n"
                        << "render_ms=" << juce::roundToInt (juce::Time::getMillisecondCounterHiRes() - prepared) << "\n"
@@ -1939,6 +1989,33 @@ private:
             offline.dispatchPendingMessages();
             saveSnapshot (ui, prefix + "-playlist-timesel.png");
             ui.getPlaylistForSnapshot().setToolForSnapshot (lynx::EditTool::pencil);
+            // round 104: a folded track group (FL's thin member rows) and the Picker's audio tab
+            {
+                int header = -1;
+                for (int t = 0; t < (int) offline.getSong().playlistTracks.size() && header < 0; ++t)
+                    if (lynx::noteedit::isGroupHeader (offline.getSong(), t))
+                        header = t;
+                if (header >= 0)
+                {
+                    offline.editSong ([header] (lynx::Song& s) { lynx::noteedit::setGroupCollapsed (s, header, true); }, false);
+                    offline.dispatchPendingMessages();
+                    saveSnapshot (ui, prefix + "-playlist-group-folded.png");
+                    offline.editSong ([header] (lynx::Song& s) { lynx::noteedit::setGroupCollapsed (s, header, false); }, false);
+                }
+                ui.getPickerForSnapshot().setView (1);
+                offline.dispatchPendingMessages();
+                saveSnapshot (ui, prefix + "-playlist-picker-audio.png");
+                ui.getPickerForSnapshot().setView (0);
+            }
+            // round 104: the Channel Rack filtered to its first filter group
+            if (! offline.getSong().channelGroups.empty())
+            {
+                ui.selectTabForSnapshot (0);
+                ui.getRackForSnapshot().setFilterGroup (0);
+                offline.dispatchPendingMessages();
+                saveSnapshot (ui, prefix + "-rack-filter.png");
+                ui.getRackForSnapshot().setFilterGroup (-1);
+            }
             ui.selectTabForSnapshot (3);
             // LYNX_SNAPSHOT_TRACK=n: shows the effects of that mixer track
             if (const auto track = juce::SystemStats::getEnvironmentVariable ("LYNX_SNAPSHOT_TRACK", {}); track.isNotEmpty())

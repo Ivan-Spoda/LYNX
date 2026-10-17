@@ -1474,6 +1474,10 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::distructor: return { "Distructor" };
         case EffectKind::flPitchShifter: return { "Pitch Shifter" };
         case EffectKind::multibandDelay: return { "Multiband Delay" };
+        case EffectKind::vocoder: return { "Fruity Vocoder" };
+        case EffectKind::vocodex: return { "Vocodex" };
+        case EffectKind::effector: return { "Effector" };
+        case EffectKind::frequencySplitter: return { "Frequency Splitter" };
         default: return {};
     }
 }

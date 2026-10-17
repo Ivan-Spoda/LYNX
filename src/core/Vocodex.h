@@ -50,6 +50,7 @@ struct State
     std::array<std::uint8_t, 13> mapAxis {}; // per map: 0 = read at the band frequency, 1 = at the pitch-shifted one
     std::string tone;              // internal carrier synth preset
     std::vector<int> notes;        // notes latched on the internal carrier's keyboard
+    std::size_t paramsAt = 0;      // byte offset of `params` in the parsed state (the options block follows at +80)
 
     bool draft() const noexcept { return draftField == 0; }
     bool internalCarrier() const noexcept { return carIn < 0 && ! lrEncoding; }

@@ -1,4 +1,5 @@
 #include "core/Instruments.h"
+#include "core/Scheduler.h"
 
 #include "core/DirectWave.h"
 #include "core/FlSynths.h"
@@ -1744,7 +1745,14 @@ public:
     {
         if (clipMode)
         {
-            allNotesOff(); // the clip ended: fade out quickly
+            // the clip ended: its voice fades out quickly. A clip carries its own key (audioClipKey), so the next clip
+            // of the same channel that already started (a crossfade) keeps playing; other callers stop everything.
+            if (key < audioClipKeyBase)
+                allNotesOff();
+            else
+                for (auto& v : voices)
+                    if (v.active && v.key == key)
+                        v.stolen = true;
             return;
         }
 

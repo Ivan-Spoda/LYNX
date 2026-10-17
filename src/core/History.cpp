@@ -44,7 +44,7 @@ bool sameEffects (const MixerTrack& a, const MixerTrack& b) noexcept
 
 bool sameRouting (const MixerTrack& a, const MixerTrack& b) noexcept
 {
-    return a.sends == b.sends && a.toMaster == b.toMaster;
+    return a.sends == b.sends && a.toMaster == b.toMaster && a.masterLevel == b.masterLevel;
 }
 
 bool sameTrack (const MixerTrack& a, const MixerTrack& b) noexcept
@@ -207,7 +207,8 @@ ChangeLabel describeChange (const Song& before, const Song& after)
 
     for (std::size_t i = 0; i < after.playlistTracks.size(); ++i)
         if (before.playlistTracks[i].name != after.playlistTracks[i].name || before.playlistTracks[i].muted != after.playlistTracks[i].muted
-            || before.playlistTracks[i].colour != after.playlistTracks[i].colour)
+            || before.playlistTracks[i].colour != after.playlistTracks[i].colour || before.playlistTracks[i].grouped != after.playlistTracks[i].grouped
+            || before.playlistTracks[i].collapsed != after.playlistTracks[i].collapsed)
             return label (TR_NOOP ("Playlist tracks"));
 
     for (std::size_t i = 0; i < after.playlistTracks.size(); ++i)

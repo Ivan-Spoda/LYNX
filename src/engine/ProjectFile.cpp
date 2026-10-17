@@ -506,6 +506,13 @@ juce::String toJson (const Song& song)
 
     if (song.swing > 0.0f)
         root->setProperty ("swing", juce::roundToInt (song.swing * 1000.0f) / 1000.0);
+    if (! song.channelGroups.empty())
+    {
+        juce::Array<juce::var> groups;
+        for (const auto& name : song.channelGroups)
+            groups.add (str (name));
+        root->setProperty ("channelGroups", groups);
+    }
     if (song.masterPitch != 0.0f)
         root->setProperty ("masterPitch", (double) song.masterPitch);
     if (! song.info.empty())
@@ -565,6 +572,8 @@ juce::String toJson (const Song& song)
 
         if (c.colour != 0)
             o->setProperty ("colour", juce::String::toHexString ((juce::int64) (c.colour & 0xFFFFFF)).paddedLeft ('0', 6));
+        if (c.group >= 0)
+            o->setProperty ("group", c.group);
         if (c.swingMix != 1.0f)
             o->setProperty ("swingMix", c.swingMix);
         if (c.arp.enabled())
@@ -827,6 +836,15 @@ juce::String toJson (const Song& song)
 
         if (! colours.isEmpty())
             root->setProperty ("playlistTrackColours", colours);
+
+        // track groups: [index, grouped, collapsed] for the tracks that have either (older versions ignore it)
+        juce::Array<juce::var> groups;
+        for (std::size_t i = 0; i < song.playlistTracks.size(); ++i)
+            if (song.playlistTracks[i].grouped || song.playlistTracks[i].collapsed)
+                groups.add (juce::Array<juce::var> { (int) i, song.playlistTracks[i].grouped ? 1 : 0, song.playlistTracks[i].collapsed ? 1 : 0 });
+
+        if (! groups.isEmpty())
+            root->setProperty ("playlistTrackGroups", groups);
     }
 
     const auto anyMarkers = std::any_of (song.arrangements.begin(), song.arrangements.end(), [] (const Arrangement& a) { return ! a.markers.empty(); });
@@ -878,6 +896,8 @@ juce::String toJson (const Song& song)
 
         if (! t.toMaster)
             o->setProperty ("toMaster", false);
+        if (t.masterLevel != 1.0f)
+            o->setProperty ("masterLevel", juce::roundToInt (t.masterLevel * 10000.0f) / 10000.0);
         if (t.colour != 0)
             o->setProperty ("colour", juce::String::toHexString ((juce::int64) (t.colour & 0xFFFFFF)).paddedLeft ('0', 6));
         if (t.stereo != 0.0f)
@@ -955,6 +975,9 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
     song.bpm = juce::jlimit (10.0, 999.0, (double) root.getProperty ("bpm", 130.0));
     song.beatsPerBar = juce::jlimit (1, 32, (int) root.getProperty ("beatsPerBar", 4));
     song.swing = juce::jlimit (0.0f, 1.0f, (float) (double) root.getProperty ("swing", 0.0));
+    if (auto* groups = root["channelGroups"].getArray())
+        for (const auto& name : *groups)
+            song.channelGroups.push_back (name.toString().toStdString());
     song.masterPitch = juce::jlimit (-1200.0f, 1200.0f, (float) (double) root.getProperty ("masterPitch", 0.0));
     if (const auto info = root.getProperty ("info", {}); info.isObject())
     {
@@ -1023,6 +1046,8 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
             if (c.hasProperty ("colour"))
                 def.colour = 0xFF000000u | (std::uint32_t) c["colour"].toString().getHexValue32();
+            if (const int group = c.getProperty ("group", -1); group >= 0 && group < (int) song.channelGroups.size())
+                def.group = group;
 
             def.swingMix = juce::jlimit (0.0f, 1.0f, (float) (double) c.getProperty ("swingMix", 1.0));
 
@@ -1292,6 +1317,19 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                 song.playlistTracks[index].colour = 0xFF000000u | ((std::uint32_t) (int) t[1] & 0xFFFFFFu);
             }
 
+    if (auto* groups = root["playlistTrackGroups"].getArray())
+        for (const auto& t : *groups)
+            if (t.isArray() && t.size() == 3 && (int) t[0] >= 0 && (int) t[0] < 500)
+            {
+                const auto index = (std::size_t) (int) t[0];
+
+                if (song.playlistTracks.size() <= index)
+                    song.playlistTracks.resize (index + 1);
+
+                song.playlistTracks[index].grouped = index > 0 && (int) t[1] != 0;
+                song.playlistTracks[index].collapsed = (int) t[2] != 0;
+            }
+
     if (auto* arrangements = root["arrangements"].getArray(); arrangements != nullptr && ! arrangements->isEmpty())
     {
         song.arrangements.clear();
@@ -1343,6 +1381,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             track.muted = (bool) t.getProperty ("muted", false);
             track.solo = (bool) t.getProperty ("solo", false);
             track.toMaster = (bool) t.getProperty ("toMaster", true);
+            track.masterLevel = juce::jlimit (0.0f, maxFaderGain, (float) (double) t.getProperty ("masterLevel", 1.0));
             track.stereo = juce::jlimit (-1.0f, 1.0f, (float) (double) t.getProperty ("stereo", 0.0));
 
             if (t.hasProperty ("colour"))
@@ -1364,7 +1403,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             if (auto* sends = t["sends"].getArray())
                 for (const auto& send : *sends)
                     if (send.isArray() && send.size() == 2)
-                        track.sends.push_back ({ (int) send[0], juce::jlimit (0.0f, 1.0f, (float) (double) send[1]) });
+                        track.sends.push_back ({ (int) send[0], juce::jlimit (0.0f, maxFaderGain, (float) (double) send[1]) });
 
             if (auto* effects = t["effects"].getArray())
                 for (const auto& e : *effects)

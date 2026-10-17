@@ -250,9 +250,11 @@ product = Renaissance Compressor
 vendor = Waves
 lynx = Compressor
 # [DATA] class ID (stereo component) and <PluginName> from real projects; its RealWorld values are readable but
-# their meaning is not confirmed, so the default preset is used
+# their meaning is not confirmed, so the default preset is used, with auto gain: the substitute shapes the dynamics
+# but keeps the level (its makeup gain is unknown; round 107: without it her vocals came out 4 dB quieter)
 vst3 = 5554535643527253636f6d7072657373
 waves = RComp
+preset = Auto gain=1
 
 [waves-cla-2a]
 product = CLA-2A
@@ -269,6 +271,7 @@ product = Waves compressor (CLA-76 / CLA-3A / C1 / SSLComp / API-2500)
 vendor = Waves
 lynx = Compressor
 waves = CLA-76; CLA-3A; C1 comp; C1comp; SSLComp; API-2500
+preset = Auto gain=1
 
 [fabfilter-pro-c]
 product = FabFilter Pro-C
@@ -279,6 +282,8 @@ names = FabFilter Pro-C 2; FabFilter Pro-C 3; Pro-C 2; Pro-C 3
 # (component state "FFBS", 100 values) is translated: style, threshold, ratio, knee, range, attack, release, hold,
 # look-ahead, character, side-chain EQ (3 bands), levels, mix, oversampling. Pro-C 2 states keep the defaults.
 translate = pro-c3
+# auto gain on by default (round 107): keeps the level when the state is not readable
+preset = Auto gain=1
 
 [fabfilter-pro-mb]
 product = FabFilter Pro-MB

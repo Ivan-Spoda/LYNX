@@ -1,4 +1,5 @@
 #include "core/FlpImport.h"
+#include "core/EditorPolish.h"
 #include "core/FruityPhaser.h"
 #include "core/FlPluginDb.h"
 #include "core/FlVoiceProcessor.h"
@@ -662,6 +663,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     song.bpm = project.tempo > 0.0 ? project.tempo : 140.0;
     song.beatsPerBar = std::clamp (project.beatsPerBar, 1, 32);
     song.swing = std::clamp (project.swing / 128.0f, 0.0f, 1.0f);
+    song.channelGroups = project.filterGroups;
     song.info.title = project.title;
     song.info.author = project.artist;
     song.info.genre = project.genre;
@@ -742,6 +744,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
         if (c.colour != 0)
             def.colour = 0xFF000000u | c.colour;
+
+        if (c.filterGroup >= 0 && c.filterGroup < (int) project.filterGroups.size())
+            def.group = c.filterGroup;
 
         if (c.hasLevels)
         {
@@ -2126,7 +2131,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
         auto& track = song.mixer[(std::size_t) t];
 
-        // FL ranges: volume 0..16000 (12800 = 0 dB), pan ±6400, send 0..16000 (12800 = 100%)
+        // FL ranges: volume 0..16000 (12800 = 0 dB), pan ±6400, route levels 0..16000 on the fader curve too
+        // (12800 = 0 dB, 16000 = +5.6 dB; destination 0 = the route to Master). REA_rodada107 §3: FL renders with
+        // a route level of 16000 / 12800 / 6400 differ by +5.6 / 0 / −12.7 dB, the fader curve's values.
         if (p == flp::ControlId::mixerVolume)
             track.volume = std::clamp (control.value / 16000.0f, 0.0f, 1.0f);
         else if (p == flp::ControlId::mixerPan)
@@ -2147,10 +2154,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             else
                 track.eq.width[band] = (float) std::clamp (v / 65536.0, 0.0, 1.0);
         }
-        else if (p >= flp::ControlId::mixerSendBase && p < flp::ControlId::mixerSendBase + tracks)
+        else if (p == flp::ControlId::mixerSendBase)
+            track.masterLevel = faderGain (control.value / 16000.0f);
+        else if (p > flp::ControlId::mixerSendBase && p < flp::ControlId::mixerSendBase + tracks)
             for (auto& send : track.sends)
                 if (send.target == p - flp::ControlId::mixerSendBase)
-                    send.level = std::clamp (control.value / 12800.0f, 0.0f, 1.0f);
+                    send.level = faderGain (control.value / 16000.0f);
     }
 
     // the FL template routes every insert to the send tracks at level 0; that makes no sound, only wastes CPU
@@ -2642,12 +2651,20 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             {
                 const auto coloured = (t.colour & 0xFFFFFF) != 0x485156;
 
-                if (t.index >= 0 && t.index < 500 && (! t.name.empty() || ! t.enabled || coloured))
+                const auto sized = std::abs (t.heightScale - 1.0f) > 0.01f;
+
+                if (t.index >= 0 && t.index < 500 && (! t.name.empty() || ! t.enabled || coloured || t.grouped || ! t.expanded || sized))
                 {
                     if ((int) song.playlistTracks.size() <= t.index)
                         song.playlistTracks.resize ((std::size_t) t.index + 1);
 
-                    song.playlistTracks[(std::size_t) t.index] = { t.name, ! t.enabled, 0, coloured ? 0xFF000000u | t.colour : 0u };
+                    auto& track = song.playlistTracks[(std::size_t) t.index];
+                    track = { t.name, ! t.enabled, 0, coloured ? 0xFF000000u | t.colour : 0u };
+                    // FL's size is relative to its default row; LYNX keeps the same proportion of its own default
+                    if (sized)
+                        track.height = polish::clampTrackHeight ((int) std::lround (polish::defaultTrackHeight * t.heightScale));
+                    track.grouped = t.index > 0 && t.grouped;
+                    track.collapsed = ! t.expanded;
                 }
             }
     }

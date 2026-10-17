@@ -66,6 +66,8 @@ struct State
     std::array<std::uint8_t, 4> flags {};            // [3] = normalise
     int option = 0;                                  // the int after the flags (version > 14), 0 in every known state
     std::array<int, 5> knobs { 0, 0, 0, 0, 1000 };   // page, predelay, blend, speed, EQ amount (raw)
+    std::size_t flagsAt = 0, knobsAt = 0;            // byte offsets of the flags and the knobs in the parsed state (0 = absent)
+    int knobCount = 0;                               // knobs stored (5 from version 11, else 4)
 };
 std::optional<State> parseState (const std::vector<std::uint8_t>& state);
 
