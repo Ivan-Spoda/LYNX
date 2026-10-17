@@ -522,6 +522,13 @@ Shape make (Icon icon)
             fi.addRoundedRectangle (15.0f, 17.0f, 4.0f, 3.5f, 1.0f);
             break;
         }
+        case Icon::graph: // bars of different heights standing on a base line (a step graph)
+            line (st, 3.5f, 20.5f, 20.5f, 20.5f);
+            fi.addRoundedRectangle (4.0f, 11.0f, 3.0f, 8.0f, 1.0f);
+            fi.addRoundedRectangle (8.5f, 6.0f, 3.0f, 13.0f, 1.0f);
+            fi.addRoundedRectangle (13.0f, 13.5f, 3.0f, 5.5f, 1.0f);
+            fi.addRoundedRectangle (17.5f, 9.0f, 3.0f, 10.0f, 1.0f);
+            break;
         case Icon::tuningFork: // two prongs on a stem, with a weighted foot
         {
             juce::Path f;

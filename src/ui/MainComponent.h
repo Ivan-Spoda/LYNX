@@ -90,6 +90,7 @@ public:
     MixerComponent& getMixerForSnapshot() { return mixer; }
     std::unique_ptr<juce::Component> makeQuickAddForSnapshot();
     PlaylistComponent& getPlaylistForSnapshot() { return playlist; }
+    PatternPicker& getPickerForSnapshot() { return picker; }
     void selectMixerTrackForSnapshot (int track, int slot = -1)
     {
         mixer.selectTrack (track);
@@ -255,6 +256,27 @@ private:
     IconButton newPatternButton { "newPattern", Icon::plus };
     IconButton patternMenuButton { "patternMenu", Icon::more };
     juce::Slider swingSlider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox }; // in the Channel Rack's title bar
+    // The Channel Rack's title tools (FL keeps them in the rack's title bar, REA round 104): the channel filter
+    // group box ("All"), the global swing knob and the graph editor switch.
+    struct FilterBox final : public juce::Component
+    {
+        juce::String text;
+        bool hovered = false;
+        std::function<void()> onClick;
+        void paint (juce::Graphics& g) override;
+        void mouseEnter (const juce::MouseEvent&) override { hovered = true; repaint(); }
+        void mouseExit (const juce::MouseEvent&) override { hovered = false; repaint(); }
+        void mouseDown (const juce::MouseEvent&) override { if (onClick) onClick(); }
+    };
+    struct RackTitleTools final : public juce::Component
+    {
+        std::function<void()> layout;
+        void resized() override { if (layout) layout(); }
+    };
+    RackTitleTools rackTitleTools;
+    FilterBox rackFilterBox;
+    IconButton rackGraphButton { "rackGraph", Icon::graph };
+    static constexpr int rackTitleToolsWidth = 96 + 4 + 26 + 4 + 24;
     // one icon per workspace panel (F5..F9): click toggles, right-click shows it maximized
     std::array<IconButton, workspace::panelCount> panelButtons { IconButton { "playlistPanel", Icon::playlist },
                                                                  IconButton { "rackPanel", Icon::channelRack },

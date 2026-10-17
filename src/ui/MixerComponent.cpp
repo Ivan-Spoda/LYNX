@@ -8,6 +8,9 @@
 #include "ui/BrowserComponent.h"
 #include "ui/ExportDialog.h"
 
+#include <complex>
+
+#include "core/Biquad.h"
 #include "core/Effects.h"
 #include "engine/Text.h"
 #include "ui/FacetEqEditor.h"
@@ -1456,6 +1459,7 @@ const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, 
                                       EffectKind::ridgeStrip, EffectKind::glowLeveler, EffectKind::hushDeEsser, EffectKind::aether, EffectKind::ember, // LYNX's mixing suite
                                       EffectKind::lynxTune, // LYNX's own pitch corrector
                                       EffectKind::epochVerb, EffectKind::atrium, EffectKind::foilPlate, EffectKind::nebula, EffectKind::halo, EffectKind::horizon, // LYNX's reverbs
+                                      EffectKind::echoform, EffectKind::spiralEcho, EffectKind::orbit, EffectKind::latticeMod, // LYNX's delay / modulation suite
                                       EffectKind::fruityLimiter, EffectKind::fruityCompressor,
                                       EffectKind::fruityWaveShaper, EffectKind::fruitySoftClipper,
                                       EffectKind::reeverb2, EffectKind::reeverb1,
@@ -1535,7 +1539,288 @@ const std::vector<EffectSlot>* EffectsPanel::slots() const
 
 juce::Rectangle<int> EffectsPanel::mixBounds (int slot) const
 {
-    return slotBounds (slot).removeFromRight (26);
+    return slotBounds (slot).withTrimmedRight (20).removeFromRight (24);
+}
+
+juce::Rectangle<int> EffectsPanel::ledBounds (int slot) const
+{
+    return slotBounds (slot).removeFromRight (20);
+}
+
+juce::Rectangle<int> EffectsPanel::arrowBounds (int slot) const
+{
+    return slotBounds (slot).removeFromLeft (18);
+}
+
+// --- the insert's built-in EQ and its output (FL's layout under the slots, REA round 104) ---------
+
+namespace
+{
+constexpr int eqGraphHeight = 84, eqKnobsHeight = 46, outputRowHeight = 30;
+constexpr float eqMinHz = 20.0f, eqMaxHz = 20000.0f, eqRangeDb = 18.0f;
+const char* const eqBandNames[] = { TR_NOOP ("Low shelf"), TR_NOOP ("Peak"), TR_NOOP ("High shelf") };
+
+juce::Colour eqBandColour (int band)
+{
+    return band == 0 ? juce::Colour (0xFFE0A33Au) : band == 1 ? juce::Colour (0xFF5FC27Eu) : juce::Colour (0xFF5B9BE6u);
+}
+
+// stored 0..1 <-> the band's value
+float eqToValue (const TrackEq& eq, int band, int what)
+{
+    const auto b = (std::size_t) band;
+    if (what == 0)
+        return (eq.gainDb[b] + eqRangeDb) / (2.0f * eqRangeDb);
+    if (what == 1)
+        return std::log (eq.hz[b] / 10.0f) / std::log (1600.0f);
+    return eq.width[b];
+}
+
+void eqFromValue (TrackEq& eq, int band, int what, float v)
+{
+    const auto b = (std::size_t) band;
+    v = juce::jlimit (0.0f, 1.0f, v);
+    if (what == 0)
+        eq.gainDb[b] = std::round ((v * 2.0f * eqRangeDb - eqRangeDb) * 10.0f) / 10.0f;
+    else if (what == 1)
+        eq.hz[b] = std::round (10.0f * std::pow (1600.0f, v));
+    else
+        eq.width[b] = v;
+}
+
+// the EQ's response at `hz` (dB), with the filters the mixer runs (RackRenderer::applyTrackEq)
+float eqResponseDb (const TrackEq& eq, double hz, double sampleRate)
+{
+    Biquad bands[3];
+    bands[0].shelf (sampleRate, std::min ((double) eq.hz[0], sampleRate * 0.45), eq.gainDb[0], false, TrackEq::shelfSlope (eq.width[0]));
+    bands[1].peaking (sampleRate, std::min ((double) eq.hz[1], sampleRate * 0.45), TrackEq::peakQ (eq.width[1]), eq.gainDb[1]);
+    bands[2].shelf (sampleRate, std::min ((double) eq.hz[2], sampleRate * 0.45), eq.gainDb[2], true, TrackEq::shelfSlope (eq.width[2]));
+    const auto w = juce::MathConstants<double>::twoPi * hz / sampleRate;
+    const std::complex<double> z1 = std::polar (1.0, -w), z2 = std::polar (1.0, -2.0 * w);
+    double db = 0.0;
+    for (int b = 0; b < 3; ++b)
+    {
+        if (eq.gainDb[(std::size_t) b] == 0.0f)
+            continue; // a band at 0 dB is not processed (like FL)
+        const auto& f = bands[b];
+        const auto h = (f.b0 + f.b1 * z1 + f.b2 * z2) / (1.0 + f.a1 * z1 + f.a2 * z2);
+        db += 20.0 * std::log10 (std::max (1e-9, std::abs (h)));
+    }
+    return (float) db;
+}
+} // namespace
+
+int EffectsPanel::bottomTop() const
+{
+    return getHeight() - (eqGraphHeight + eqKnobsHeight + outputRowHeight + 22);
+}
+
+juce::Rectangle<int> EffectsPanel::eqGraphBounds() const
+{
+    return { 8, bottomTop() + 8, getWidth() - 16 - 3 * 18 - 6, eqGraphHeight };
+}
+
+juce::Rectangle<int> EffectsPanel::eqFaderBounds (int band) const
+{
+    const auto graph = eqGraphBounds();
+    return { graph.getRight() + 6 + band * 18, graph.getY(), 16, graph.getHeight() };
+}
+
+juce::Rectangle<int> EffectsPanel::eqKnobBounds (int band, int what) const
+{
+    const auto fader = eqFaderBounds (band);
+    return { fader.getCentreX() - 11, eqGraphBounds().getBottom() + 2 + (what - 1) * 22, 22, 22 };
+}
+
+juce::Rectangle<int> EffectsPanel::outputBounds() const
+{
+    return { 34, getHeight() - outputRowHeight - 2, getWidth() - 42, outputRowHeight - 8 };
+}
+
+juce::Point<float> EffectsPanel::eqHandle (int band) const
+{
+    const auto graph = eqGraphBounds().toFloat().reduced (4.0f);
+    const auto& eq = engine.getSong().mixer[(std::size_t) track].eq;
+    const auto hz = juce::jlimit (eqMinHz, eqMaxHz, eq.hz[(std::size_t) band]);
+    const auto x = graph.getX() + graph.getWidth() * std::log (hz / eqMinHz) / std::log (eqMaxHz / eqMinHz);
+    const auto y = graph.getCentreY() - graph.getHeight() * 0.5f * eq.gainDb[(std::size_t) band] / eqRangeDb;
+    return { x, y };
+}
+
+int EffectsPanel::eqControlAt (juce::Point<int> p) const
+{
+    if (slots() == nullptr)
+        return 0;
+    for (int b = 0; b < 3; ++b)
+    {
+        if (eqFaderBounds (b).contains (p))
+            return eqParamBase - b * 3;
+        for (int what = 1; what <= 2; ++what)
+            if (eqKnobBounds (b, what).contains (p))
+                return eqParamBase - b * 3 - what;
+    }
+    if (eqGraphBounds().contains (p))
+    {
+        // the nearest handle (by distance in the graph): FL's "Tweak band N"
+        int best = 0;
+        float bestDistance = 1e9f;
+        for (int b = 0; b < 3; ++b)
+            if (const auto d = eqHandle (b).getDistanceFrom (p.toFloat()); d < bestDistance)
+            {
+                bestDistance = d;
+                best = b;
+            }
+        return eqPointBase - best;
+    }
+    return 0;
+}
+
+void EffectsPanel::setEqFromGraph (int band, juce::Point<int> p)
+{
+    const auto graph = eqGraphBounds().toFloat().reduced (4.0f);
+    const auto fx = juce::jlimit (0.0f, 1.0f, (p.x - graph.getX()) / graph.getWidth());
+    const auto hz = juce::jlimit (10.0f, 16000.0f, std::round (eqMinHz * std::pow (eqMaxHz / eqMinHz, fx)));
+    const auto db = juce::jlimit (-eqRangeDb, eqRangeDb, std::round ((graph.getCentreY() - p.y) / (graph.getHeight() * 0.5f) * eqRangeDb * 10.0f) / 10.0f);
+    engine.editSong ([t = track, band, hz, db] (Song& s) {
+        if (t < (int) s.mixer.size())
+        {
+            s.mixer[(std::size_t) t].eq.hz[(std::size_t) band] = hz;
+            s.mixer[(std::size_t) t].eq.gainDb[(std::size_t) band] = db;
+        }
+    });
+}
+
+void EffectsPanel::paintEq (juce::Graphics& g)
+{
+    using namespace theme;
+    const auto& song = engine.getSong();
+    if (track < 0 || track >= (int) song.mixer.size())
+        return;
+    const auto& eq = song.mixer[(std::size_t) track].eq;
+    const auto top = bottomTop();
+    g.setColour (colour::border);
+    g.fillRect (8, top, getWidth() - 16, 1);
+
+    // the response graph: frequency (log) across, ±18 dB up and down
+    const auto graph = eqGraphBounds().toFloat();
+    g.setColour (colour::bg1);
+    g.fillRoundedRectangle (graph, radius::sm);
+    g.setColour (colour::border);
+    g.drawRoundedRectangle (graph.reduced (0.5f), radius::sm, 1.0f);
+    const auto inner = graph.reduced (4.0f);
+    g.setColour (colour::gridBeat);
+    for (float hz : { 100.0f, 1000.0f, 10000.0f })
+    {
+        const auto x = inner.getX() + inner.getWidth() * std::log (hz / eqMinHz) / std::log (eqMaxHz / eqMinHz);
+        g.drawVerticalLine ((int) x, inner.getY(), inner.getBottom());
+    }
+    g.drawHorizontalLine ((int) inner.getCentreY(), inner.getX(), inner.getRight());
+
+    juce::Path curve;
+    const auto sampleRate = juce::jmax (8000.0, engine.getTransport().sampleRate.load());
+    for (int i = 0; i <= (int) inner.getWidth(); i += 2)
+    {
+        const auto hz = eqMinHz * std::pow (eqMaxHz / eqMinHz, (float) i / inner.getWidth());
+        const auto db = juce::jlimit (-eqRangeDb, eqRangeDb, eqResponseDb (eq, hz, sampleRate));
+        const auto y = inner.getCentreY() - inner.getHeight() * 0.5f * db / eqRangeDb;
+        if (i == 0)
+            curve.startNewSubPath (inner.getX(), y);
+        else
+            curve.lineTo (inner.getX() + (float) i, y);
+    }
+    g.setColour (eq.active() ? colour::accent : colour::textSecondary.withAlpha (0.6f));
+    g.strokePath (curve, juce::PathStrokeType (1.5f));
+
+    for (int b = 0; b < 3; ++b)
+    {
+        const auto hot = hoverEq == eqPointBase - b || dragParam == eqPointBase - b;
+        const auto handle = eqHandle (b);
+        g.setColour (eqBandColour (b).withAlpha (hot ? 1.0f : 0.8f));
+        g.fillEllipse (juce::Rectangle<float> (hot ? 10.0f : 8.0f, hot ? 10.0f : 8.0f).withCentre (handle));
+    }
+
+    // the gain faders (one per band) and the frequency / width knobs under them
+    for (int b = 0; b < 3; ++b)
+    {
+        const auto fader = eqFaderBounds (b).toFloat();
+        const auto hot = hoverEq == eqParamBase - b * 3 || dragParam == eqParamBase - b * 3;
+        g.setColour (colour::bg0);
+        g.fillRoundedRectangle (fader.withSizeKeepingCentre (3.0f, fader.getHeight() - 6.0f), 1.5f);
+        g.setColour (colour::border);
+        g.drawHorizontalLine ((int) fader.getCentreY(), fader.getX() + 2.0f, fader.getRight() - 2.0f);
+        const auto v = eqToValue (eq, b, 0);
+        const auto y = fader.getBottom() - 6.0f - v * (fader.getHeight() - 12.0f);
+        g.setColour (hot ? colour::textPrimary : colour::textSecondary);
+        g.fillRoundedRectangle (juce::Rectangle<float> (fader.getWidth() - 2.0f, 7.0f).withCentre ({ fader.getCentreX(), y }), 2.0f);
+        g.setColour (eqBandColour (b));
+        g.fillRect (juce::Rectangle<float> (fader.getWidth() - 6.0f, 1.5f).withCentre ({ fader.getCentreX(), y }));
+
+        for (int what = 1; what <= 2; ++what)
+        {
+            const auto code = eqParamBase - b * 3 - what;
+            drawKnob (g, eqKnobBounds (b, what).toFloat().reduced (2.0f), eqToValue (eq, b, what), false, eqBandColour (b),
+                      hoverEq == code || dragParam == code);
+        }
+    }
+
+    g.setColour (colour::textSecondary);
+    g.setFont (font (type::title));
+    g.drawText (tr ("Equalizer"), 10, eqGraphBounds().getBottom() + 4, eqKnobBounds (0, 1).getX() - 40, 20, juce::Justification::centredLeft);
+    g.setFont (font (type::caption));
+    g.setColour (colour::textDisabled);
+    g.drawText (tr ("Freq"), eqKnobBounds (0, 1).getX() - 34, eqKnobBounds (0, 1).getY(), 32, 22, juce::Justification::centredRight);
+    g.drawText (tr ("Width"), eqKnobBounds (0, 2).getX() - 34, eqKnobBounds (0, 2).getY(), 32, 22, juce::Justification::centredRight);
+
+    // the audio output target
+    auto box = outputBounds().toFloat();
+    g.setColour (colour::border);
+    g.fillRect (8, (int) box.getY() - 5, getWidth() - 16, 1);
+    icons::draw (g, Icon::exportAudio, juce::Rectangle<float> (10.0f, box.getY(), 18.0f, box.getHeight()).withSizeKeepingCentre (16.0f, 16.0f),
+                 colour::textSecondary);
+    g.setColour (hoverOutput ? colour::bg4 : colour::bg3);
+    g.fillRoundedRectangle (box, radius::sm);
+    g.setColour (hoverOutput ? colour::borderStrong : colour::border);
+    g.drawRoundedRectangle (box.reduced (0.5f), radius::sm, 1.0f);
+    g.setColour (track == 0 ? colour::textPrimary : colour::textSecondary);
+    g.setFont (font (type::body));
+    g.drawText (outputName(), box.withTrimmedLeft (8.0f).withTrimmedRight (18.0f).toNearestInt(), juce::Justification::centredLeft, true);
+    icons::draw (g, Icon::chevronDown, box.removeFromRight (18.0f).reduced (4.0f).translated (-2.0f, 0.0f), colour::textSecondary);
+}
+
+juce::String EffectsPanel::outputName() const
+{
+    // Master plays into the device's first output pair; inserts reach it through Master (FL's "(none)")
+    if (track != 0)
+        return tr ("(none)");
+    auto* device = const_cast<AudioEngine&> (engine).getDeviceManager().getCurrentAudioDevice();
+    if (device == nullptr)
+        return tr ("(no audio device)");
+    const auto names = device->getOutputChannelNames();
+    const auto active = device->getActiveOutputChannels();
+    juce::StringArray used;
+    for (int i = 0; i < names.size() && used.size() < 2; ++i)
+        if (active[i])
+            used.add (names[i]);
+    return used.isEmpty() ? tr ("(none)") : used.joinIntoString (" - ");
+}
+
+void EffectsPanel::showOutputMenu()
+{
+    juce::PopupMenu menu;
+    menu.addSectionHeader (tr ("Audio output target"));
+    if (track != 0)
+    {
+        menu.addItem (tr ("(none)"), false, true, [] {});
+        menu.addItem (tr ("Inserts reach the audio device through the Master"), false, false, [] {});
+    }
+    else
+        menu.addItem (outputName(), false, true, [] {});
+    menu.addSeparator();
+    menu.addItem (tr ("Audio settings..."), [] {
+        if (mixerinput::openAudioSettings)
+            mixerinput::openAudioSettings();
+    });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (outputBounds())));
 }
 
 juce::Rectangle<int> EffectsPanel::slotBounds (int slot) const
@@ -1567,7 +1852,7 @@ juce::Rectangle<int> EffectsPanel::knobBounds (int param) const
     const auto columns = count > 9 ? 4 : 3;
     const auto w = (getWidth() - 16) / columns;
     const auto rows = juce::jmax (1, (count + columns - 1) / columns);
-    const auto rowHeight = count > 9 ? juce::jlimit (64, 86, (getHeight() - top - 4) / rows) : 86;
+    const auto rowHeight = count > 9 ? juce::jlimit (64, 86, (bottomTop() - top - 4) / rows) : 86;
 
     // volume gate: the 32 steps are bars (gateStepsBounds); the knobs are mix/attack/release
     if (gateSelected())
@@ -1853,6 +2138,7 @@ void EffectsPanel::paint (juce::Graphics& g)
 
     g.setFont (font (type::body));
 
+    // the 10 slots, as FL draws them: options arrow, name ("Slot N" when empty), mix knob, LED
     for (int i = 0; i < maxEffectSlots; ++i)
     {
         const auto r = slotBounds (i);
@@ -1861,12 +2147,8 @@ void EffectsPanel::paint (juce::Graphics& g)
         const auto slotHovered = i == hoverSlot && dragSlot < 0;
         g.setColour (isSelected ? colour::bg5 : filled ? (slotHovered ? colour::bg4 : colour::bg3) : (slotHovered ? colour::bg3 : colour::bg2.brighter (0.03f)));
         g.fillRoundedRectangle (r.toFloat(), radius::sm);
-
-        if (! filled)
-        {
-            g.setColour (slotHovered ? colour::borderStrong : colour::border);
-            g.drawRoundedRectangle (r.toFloat().reduced (0.5f), radius::sm, 1.0f);
-        }
+        g.setColour (slotHovered ? colour::borderStrong : colour::border);
+        g.drawRoundedRectangle (r.toFloat().reduced (0.5f), radius::sm, 1.0f);
 
         if (isSelected)
         {
@@ -1874,15 +2156,26 @@ void EffectsPanel::paint (juce::Graphics& g)
             g.fillRoundedRectangle (r.toFloat().withWidth (3.0f).reduced (0.0f, 3.0f), 1.5f);
         }
 
+        {
+            const auto a = arrowBounds (i).toFloat().withSizeKeepingCentre (5.0f, 8.0f).translated (1.0f, 0.0f);
+            juce::Path tri;
+            tri.addTriangle (a.getX(), a.getY(), a.getRight(), a.getCentreY(), a.getX(), a.getBottom());
+            g.setColour (slotHovered && hoverArrow ? colour::textPrimary : colour::textSecondary.withAlpha (filled ? 1.0f : 0.6f));
+            g.fillPath (tri);
+        }
+
+        const auto ledArea = ledBounds (i).toFloat().withSizeKeepingCentre (8.0f, 8.0f);
+        const auto textArea = r.withTrimmedLeft (20).withTrimmedRight (46);
+
         if (filled)
         {
             const auto& slot = (*s)[(std::size_t) i];
             g.setColour (muteLed (! slot.enabled));
-            g.fillEllipse ((float) r.getX() + 8, (float) r.getCentreY() - 4, 8, 8);
+            g.fillEllipse (ledArea);
             if (slotHovered && hoverLed)
             {
                 g.setColour (colour::textSecondary);
-                g.drawEllipse ((float) r.getX() + 6, (float) r.getCentreY() - 6, 12, 12, 1.0f);
+                g.drawEllipse (ledArea.expanded (2.0f), 1.0f);
             }
             g.setColour (slot.enabled ? colour::textPrimary : colour::textDisabled);
             // a LYNX substitute shows the plugin it stands in for, with a "LYNX" badge
@@ -1892,10 +2185,10 @@ void EffectsPanel::paint (juce::Graphics& g)
                                                         : juce::String::fromUTF8 (effectInfo (slot.kind).name);
             if (slot.sidechain > 0 && slot.sidechain < (int) engine.getSong().mixer.size())
                 name << juce::String::fromUTF8 (" \xe2\x86\x90 ") << juce::String::fromUTF8 (engine.getSong().mixer[(std::size_t) slot.sidechain].name.c_str());
-            auto textArea = r.withTrimmedLeft (24).withTrimmedRight (28);
+            auto text = textArea;
             if (substitute)
             {
-                const auto badge = textArea.removeFromRight (34).withSizeKeepingCentre (32, 14).toFloat();
+                const auto badge = text.removeFromRight (34).withSizeKeepingCentre (32, 14).toFloat();
                 g.setColour (colour::info.withAlpha (slot.enabled ? 0.25f : 0.12f));
                 g.fillRoundedRectangle (badge, 3.0f);
                 g.setColour (slot.enabled ? colour::info : colour::textDisabled);
@@ -1905,19 +2198,28 @@ void EffectsPanel::paint (juce::Graphics& g)
                 g.setFont (keep);
                 g.setColour (slot.enabled ? colour::textPrimary : colour::textDisabled);
             }
-            g.drawText (juce::String (i + 1) + ". " + name, textArea, juce::Justification::centredLeft);
+            g.drawText (name, text, juce::Justification::centredLeft);
 
             // slot's dry/wet knob
             const auto mixActive = (hoverParam == mixParam && hoverSlot == i) || (dragParam == mixParam && selectedSlot == i);
-            drawKnob (g, mixBounds (i).toFloat().withSizeKeepingCentre (20.0f, 20.0f), slot.mix, false,
+            drawKnob (g, mixBounds (i).toFloat().withSizeKeepingCentre (18.0f, 18.0f), slot.mix, false,
                       slot.enabled ? (dragParam == mixParam && selectedSlot == i ? colour::accent : colour::info) : colour::textDisabled, mixActive);
         }
-        else if (i == (int) s->size() || slotHovered)
+        else
         {
+            // an empty slot keeps its controls in place (dimmed), as FL shows them
+            g.setColour (muteLed (false).withAlpha (0.3f));
+            g.fillEllipse (ledArea);
+            drawKnob (g, mixBounds (i).toFloat().withSizeKeepingCentre (18.0f, 18.0f), 1.0f, false, colour::textDisabled.withAlpha (0.5f), false);
             g.setColour (slotHovered ? colour::textSecondary : colour::textDisabled);
-            g.drawText (juce::String (i + 1) + ". " + tr ("(empty: click to add)"), r.withTrimmedLeft (24), juce::Justification::centredLeft);
+            g.setFont (juce::Font (font (type::body)).italicised());
+            g.drawText (tr ("Slot {0}", { juce::String (i + 1) }), textArea, juce::Justification::centredLeft);
+            g.setFont (font (type::body));
         }
     }
+
+    paintEq (g);
+    g.reduceClipRegion (0, 0, getWidth(), bottomTop() - 6); // the selected effect's knobs stay above the EQ
 
     if (dragSlot >= 0 && dropSlot >= 0 && dropSlot != dragSlot) // where the dragged slot lands
     {
@@ -2135,6 +2437,34 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
     if (s == nullptr)
         return;
 
+    // the built-in EQ and the output target (bottom section)
+    if (outputBounds().contains (e.getPosition()))
+    {
+        showOutputMenu();
+        return;
+    }
+
+    if (const auto eqControl = eqControlAt (e.getPosition()); eqControl != 0)
+    {
+        if (isEqPoint (eqControl))
+        {
+            dragParam = eqControl;
+            setEqFromGraph (eqPointBase - eqControl, e.getPosition());
+            return;
+        }
+        if (e.mods.isPopupMenu())
+            ui::showValueMenu (*this, &engine, specFor (eqControl, -1), valueOf (eqControl, -1), [this, eqControl] (double v) { setValue (eqControl, -1, v); });
+        else if (ui::isResetClick (e))
+            setValue (eqControl, -1, specFor (eqControl, -1).defaultValue);
+        else
+        {
+            dragParam = eqControl;
+            drag.begin (e, valueOf (eqControl, -1));
+            showTip (eqControl, -1, false);
+        }
+        return;
+    }
+
     if (track > 0 && armBounds().contains (e.getPosition()))
     {
         if (e.mods.isPopupMenu())
@@ -2176,6 +2506,14 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
             return;
         }
 
+        if (arrowBounds (i).contains (e.getPosition())) // FL's slot options arrow
+        {
+            selectedSlot = i;
+            repaint();
+            showSlotMenu (i);
+            return;
+        }
+
         selectedSlot = i;
         repaint();
 
@@ -2200,7 +2538,7 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
 
         if (e.mods.isPopupMenu())
             showSlotMenu (i);
-        else if (e.x < r.getX() + 22) // LED: bypass
+        else if (ledBounds (i).contains (e.getPosition())) // LED: bypass
             engine.editSong ([t = track, i] (Song& song) {
                 auto& slot = song.mixer[(std::size_t) t].effects[(std::size_t) i];
                 slot.enabled = ! slot.enabled;
@@ -2302,6 +2640,26 @@ ui::ValueSpec EffectsPanel::specFor (int param, int slot) const
     ui::ValueSpec spec;
     spec.pixelsForRange = 150.0;
 
+    if (isEqParam (param)) // the built-in EQ (stored 0..1 here: gain ±18 dB, frequency 10 Hz..16 kHz log, width)
+    {
+        const auto band = (eqParamBase - param) / 3, what = (eqParamBase - param) % 3;
+        const juce::String whatName = what == 0 ? tr ("level") : what == 1 ? tr ("frequency") : tr ("width");
+        spec.name = juce::String::fromUTF8 (song.mixer[(std::size_t) track].name.c_str()) + " - " + tr ("EQ band {0} ({1})", { juce::String (band + 1), tr (eqBandNames[band]) })
+                    + " " + whatName;
+        TrackEq defaults;
+        spec.defaultValue = eqToValue (defaults, band, what);
+        spec.toText = [band, what] (double v) {
+            TrackEq eq;
+            eqFromValue (eq, band, what, (float) v);
+            const auto b = (std::size_t) band;
+            return what == 0 ? juce::String (eq.gainDb[b], 1) + " dB"
+                   : what == 1 ? (eq.hz[b] >= 1000.0f ? juce::String (eq.hz[b] / 1000.0f, 2) + " kHz" : juce::String ((int) eq.hz[b]) + " Hz")
+                               : juce::String (eq.width[b], 2);
+        };
+        spec.fromText = ui::inverseOf (spec.toText, 0.0, 1.0);
+        return spec;
+    }
+
     if (const auto* s = slots(); s == nullptr || slot < 0 || slot >= (int) s->size())
         return spec;
 
@@ -2329,6 +2687,11 @@ ui::ValueSpec EffectsPanel::specFor (int param, int slot) const
 
 double EffectsPanel::valueOf (int param, int slot) const
 {
+    if (isEqParam (param))
+        return track >= 0 && track < (int) engine.getSong().mixer.size()
+                   ? eqToValue (engine.getSong().mixer[(std::size_t) track].eq, (eqParamBase - param) / 3, (eqParamBase - param) % 3)
+                   : 0.0;
+
     const auto* s = slots();
 
     if (s == nullptr || slot < 0 || slot >= (int) s->size())
@@ -2340,6 +2703,15 @@ double EffectsPanel::valueOf (int param, int slot) const
 
 void EffectsPanel::setValue (int param, int slot, double value)
 {
+    if (isEqParam (param))
+    {
+        engine.editSong ([t = track, band = (eqParamBase - param) / 3, what = (eqParamBase - param) % 3, v = (float) value] (Song& song) {
+            if (t < (int) song.mixer.size())
+                eqFromValue (song.mixer[(std::size_t) t].eq, band, what, v);
+        });
+        return;
+    }
+
     const auto* s = slots();
 
     if (s == nullptr || slot < 0 || slot >= (int) s->size())
@@ -2364,6 +2736,18 @@ int EffectsPanel::mixKnobAt (juce::Point<int> p) const
 
 void EffectsPanel::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
 {
+    if (auto eqControl = eqControlAt (e.getPosition()); eqControl != 0)
+    {
+        if (isEqPoint (eqControl)) // the wheel over a handle changes the band's width
+            eqControl = eqParamBase - (eqPointBase - eqControl) * 3 - 2;
+        if (const auto v = ui::wheelValue (valueOf (eqControl, -1), e, wheel, specFor (eqControl, -1)))
+        {
+            setValue (eqControl, -1, *v);
+            showTip (eqControl, -1, true);
+        }
+        return;
+    }
+
     if (const auto slot = mixKnobAt (e.getPosition()); slot >= 0)
     {
         if (const auto v = ui::wheelValue (valueOf (mixParam, slot), e, wheel, specFor (mixParam, slot)))
@@ -2402,6 +2786,29 @@ void EffectsPanel::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseW
 ui::Hint EffectsPanel::hintAt (juce::Point<int> p)
 {
     const auto gesture = ui::valueGestures();
+
+    if (isEqParam (dragParam))
+        return ui::valueHint (specFor (dragParam, -1), valueOf (dragParam, -1), gesture);
+
+    if (const auto eqControl = eqControlAt (p); eqControl != 0)
+    {
+        if (isEqParam (eqControl))
+            return ui::valueHint (specFor (eqControl, -1), valueOf (eqControl, -1), gesture);
+        ui::Hint h;
+        const auto band = eqPointBase - eqControl;
+        h.text = tr ("EQ: [LMB] drag the band's frequency and level  [Wheel] width  [2xLMB] back to 0 dB");
+        h.value = tr ("Band {0}", { juce::String (band + 1) }) + " - " + tr (eqBandNames[band]);
+        return h;
+    }
+
+    if (outputBounds().contains (p))
+    {
+        ui::Hint h;
+        h.text = tr ("Audio output target: where this insert's sound leaves LYNX");
+        h.value = outputName();
+        h.hasMenu = true;
+        return h;
+    }
 
     if (dragParam == mixParam || (dragParam >= 0 && drag.isActive()))
         return ui::valueHint (specFor (dragParam, dragParam == mixParam ? juce::jmax (0, selectedSlot) : selectedSlot),
@@ -2446,7 +2853,8 @@ ui::Hint EffectsPanel::hintAt (juce::Point<int> p)
         if (slotBounds (i).contains (p))
         {
             const auto used = slots() != nullptr && i < (int) slots()->size();
-            h.text = used ? tr ("Effect slot: click edits, the LED bypasses, drag or wheel reorders, right-click: replace, move, delete")
+            h.text = used ? (arrowBounds (i).contains (p) ? tr ("Effect slot options: replace, move, delete...")
+                                                          : tr ("Effect slot: click edits, double-click opens its window, the LED bypasses, drag or wheel reorders, right-click: options"))
                           : tr ("Empty slot: click to add an effect");
             h.hasMenu = used;
         }
@@ -2469,6 +2877,19 @@ void EffectsPanel::mouseDrag (const juce::MouseEvent& e)
                 repaint();
             }
         }
+        return;
+    }
+
+    if (isEqPoint (dragParam))
+    {
+        setEqFromGraph (eqPointBase - dragParam, e.getPosition());
+        return;
+    }
+
+    if (isEqParam (dragParam))
+    {
+        setValue (dragParam, -1, drag.update (e, specFor (dragParam, -1)));
+        showTip (dragParam, -1, false);
         return;
     }
 
@@ -2500,6 +2921,19 @@ void EffectsPanel::mouseDrag (const juce::MouseEvent& e)
 
 void EffectsPanel::showTip (int param, int slot, bool transient)
 {
+    if (isEqParam (param))
+    {
+        const auto band = (eqParamBase - param) / 3, what = (eqParamBase - param) % 3;
+        const auto area = what == 0 ? eqFaderBounds (band) : eqKnobBounds (band, what);
+        const auto spec = specFor (param, -1);
+        ui::postHint (ui::valueHint (spec, valueOf (param, -1), ui::valueGestures()));
+        if (transient)
+            ui::flashValueTip (*this, area, spec.text (valueOf (param, -1)));
+        else
+            ui::showValueTip (*this, area, spec.text (valueOf (param, -1)));
+        return;
+    }
+
     const auto* s = slots();
 
     if (s == nullptr || slot < 0 || slot >= (int) s->size())
@@ -2537,9 +2971,23 @@ void EffectsPanel::mouseMove (const juce::MouseEvent& e)
         led = p.x < slotBounds (slot).getX() + 22;
 
     const auto input = track > 0 && armBounds().contains (p) ? 1 : track > 0 && inputBoxBounds().contains (p) ? 2 : 0;
+    const auto eq = eqControlAt (p);
+    const auto output = outputBounds().contains (p);
+    auto arrow = false;
+    for (int i = 0; i < maxEffectSlots; ++i)
+        if (arrowBounds (i).contains (p))
+        {
+            slot = i;
+            arrow = true;
+        }
+    if (slot >= 0)
+        led = ledBounds (slot).contains (p);
 
-    if (slot != hoverSlot || param != hoverParam || led != hoverLed || input != hoverInput)
+    if (slot != hoverSlot || param != hoverParam || led != hoverLed || input != hoverInput || eq != hoverEq || output != hoverOutput || arrow != hoverArrow)
     {
+        hoverEq = eq;
+        hoverOutput = output;
+        hoverArrow = arrow;
         hoverInput = input;
         hoverSlot = slot;
         hoverParam = param;
@@ -2550,8 +2998,10 @@ void EffectsPanel::mouseMove (const juce::MouseEvent& e)
 
 void EffectsPanel::mouseExit (const juce::MouseEvent&)
 {
-    if (hoverSlot >= 0 || hoverParam != -1 || hoverInput != 0)
+    if (hoverSlot >= 0 || hoverParam != -1 || hoverInput != 0 || hoverEq != 0 || hoverOutput || hoverArrow)
     {
+        hoverEq = 0;
+        hoverOutput = hoverArrow = false;
         hoverInput = 0;
         hoverSlot = hoverParam = -1;
         hoverLed = false;
@@ -2582,13 +3032,22 @@ void EffectsPanel::mouseUp (const juce::MouseEvent&)
 
 void EffectsPanel::mouseDoubleClick (const juce::MouseEvent& e)
 {
+    if (const auto eqControl = eqControlAt (e.getPosition()); eqControl != 0)
+    {
+        if (isEqPoint (eqControl)) // the band back to 0 dB
+            setValue (eqParamBase - (eqPointBase - eqControl) * 3, -1, specFor (eqParamBase, -1).defaultValue);
+        else
+            setValue (eqControl, -1, specFor (eqControl, -1).defaultValue);
+        return;
+    }
+
     for (int i = 0; slots() != nullptr && i < (int) slots()->size(); ++i)
         if (mixBounds (i).contains (e.getPosition()))
         {
             engine.editSong ([t = track, i] (Song& song) { song.mixer[(std::size_t) t].effects[(std::size_t) i].mix = 1.0f; });
             return;
         }
-        else if (slotBounds (i).contains (e.getPosition()) && e.x >= slotBounds (i).getX() + 22)
+        else if (slotBounds (i).contains (e.getPosition()) && ! arrowBounds (i).contains (e.getPosition()) && ! ledBounds (i).contains (e.getPosition()))
         {
             openEditor (i); // double-click on the name: the effect's window (as clicking a slot in FL)
             return;
@@ -2673,7 +3132,7 @@ int EffectsPanel::slotAt (juce::Point<int> p) const
 {
     const auto* s = slots();
     for (int i = 0; s != nullptr && i < (int) s->size(); ++i)
-        if (slotBounds (i).contains (p) && ! mixBounds (i).contains (p) && p.x >= slotBounds (i).getX() + 22)
+        if (slotBounds (i).contains (p) && ! mixBounds (i).contains (p) && ! ledBounds (i).contains (p) && ! arrowBounds (i).contains (p))
             return i;
     return -1;
 }

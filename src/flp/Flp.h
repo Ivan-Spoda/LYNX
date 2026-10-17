@@ -95,6 +95,7 @@ struct Channel
     // event 0xDB (channel "levels"): pan 0..12800 (6400 = center), volume 0..12800
     // (10000 = 78%, the default), pitch in cents
     std::uint32_t colour = 0; // 0xRRGGBB (0 = no stored colour)
+    int filterGroup = -1;     // 0x91: index into Project::filterGroups (-1 = none)
     bool hasLevels = false;
     int pan = 6400, volume = 10000, pitchCents = 0;
     int modX = 256, modY = 0, filterType = 0; // channel filter (0xDB with 24 B; docs/analise/REA_rodada4.md §3)
@@ -257,6 +258,9 @@ struct PlaylistTrackInfo
     std::string name;
     bool enabled = true;  // false = track muted
     std::uint32_t colour = 0x485156; // 0xRRGGBB (stored as 0x00BBGGRR); 0x485156 = FL's default grey
+    float heightScale = 1.0f; // the track's size (FL's Size menu: 0.33 .. 2.0; 1 = 100 %)
+    bool grouped = false;     // "Group with above track"
+    bool expanded = true;     // a group header's members are shown (false = "Collapse grouped tracks")
 };
 
 // Playlist time marker: 0x94 (u32: type << 24 | position in ticks), followed by
@@ -311,6 +315,7 @@ struct Project
     std::string comments; // event 0xC3 (the Info page's comments; line breaks saved as CR)
 
     std::vector<Channel> channels;
+    std::vector<std::string> filterGroups; // 0xE7: the Channel Rack's filter groups, in order
     std::vector<Pattern> patterns;
     std::vector<Arrangement> arrangements;
     std::vector<MixerInsert> mixer;
