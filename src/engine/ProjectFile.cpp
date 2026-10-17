@@ -220,6 +220,7 @@ const char* effectId (EffectKind k)
         case EffectKind::spiralEcho: return "spiralEcho";
         case EffectKind::orbit: return "orbit";
         case EffectKind::latticeMod: return "latticeMod";
+        case EffectKind::fruitySend: return "fruitySend";
     }
     return "eq";
 }
@@ -386,7 +387,8 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::newtone, EffectKind::newtime, EffectKind::facetEq, EffectKind::apexLimiter,
                     EffectKind::ridgeStrip, EffectKind::glowLeveler, EffectKind::hushDeEsser, EffectKind::aether, EffectKind::ember, EffectKind::lynxTune, EffectKind::fruityPhaser,
                     EffectKind::epochVerb, EffectKind::atrium, EffectKind::foilPlate, EffectKind::nebula, EffectKind::halo, EffectKind::horizon,
-                    EffectKind::echoform, EffectKind::spiralEcho, EffectKind::orbit, EffectKind::latticeMod })
+                    EffectKind::echoform, EffectKind::spiralEcho, EffectKind::orbit, EffectKind::latticeMod,
+                    EffectKind::fruitySend })
         if (id == effectId (k))
             return k;
 
