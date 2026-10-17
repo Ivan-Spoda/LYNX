@@ -547,7 +547,7 @@ gesture or reduced scope · **No** = absent (searched, not found). Locations are
 
 | ID | LYNX | Where / note |
 |---|---|---|
-| W1 | Partial | Native window with minimise and close (`ui/PluginWindow.cpp`); no header bar, presets or menu |
+| W1 | Partial | External plugins: native window with minimise and close (`ui/PluginWindow.cpp`); no header bar, presets or menu. **Native effects (round 93): their own window in the FL plugin's arrangement** (`ui/PluginEditors.cpp`, layouts in `core/PluginLayout.cpp`, study in `docs/analise/UI_STUDY_plugins93.md`) with FL's wrapper bar: options arrow (presets, reset, hidden switches, bypass), preset name with the FL presets of the plugin, previous / next; opened by double-clicking the Mixer slot or the **Editor** button. 3x Osc and FL Keys pages follow FL's arrangement in the channel settings |
 | W2 | **Done** | The channel button toggles the plugin window (`PluginWindows::isOpen/close`) |
 | W3 | Partial | Always detached; parameters are reachable through the "Automate plugin parameter" submenus |
 | W4, W5 | No | — |

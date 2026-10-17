@@ -684,6 +684,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.instrument = InstrumentKind::audioClip; // no file: stays silent, but the clip remains in the playlist
 
         def.mixerTrack = std::clamp (c.mixerTrack, 0, maxMixerTracks - 1);
+        def.muted = ! c.enabled; // switched off in FL's Channel Rack: its notes don't play (REA_rodada80 §3.1)
 
         if (c.colour != 0)
             def.colour = 0xFF000000u | c.colour;
