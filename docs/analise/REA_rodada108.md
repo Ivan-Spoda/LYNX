@@ -154,12 +154,28 @@ each band oversampled on its own with its own auto gain; low cut before, tone / 
 
 ## 7. UI
 
-Own panels (PluginLayout, dark / red): Crest — transfer curve with the live input dot, scrolling gain-reduction
-history over the input / output levels, GR meter, level bars, style grid, character, side-chain section and the
-side-chain EQ curve with its three bands; Prism — the band display (crossovers, live per-band gain change bars and
-the resulting response curve) and four band columns; Sentry — gate curve with the live dot, GR history and meter;
-Ember — a Bands section (split display, band count, slope, crossovers, per-band rows shown with > 1 band). The live
-graphs are in src/ui/DynamicsDisplays.cpp; meters per effect slot went from 2 to 8 (ProcessTimes::meterOutputs).
+Round 108 UI rule: the reference editors were opened in our own host (fxmeasure `editor`: the plugin's editor in a
+window, captured with PrintWindow; the trial's "Evaluate" button clicked as a user would) and screenshotted to
+tmp/comp108/ref (never in the repo); LYNX's panels were rendered with `LYNX.exe --plugui` to tmp/comp108/lynx and
+compared side by side. What we took is the *layout logic*, drawn in LYNX's own style (colours, knobs, fonts):
+
+- Crest (as the style compressor): the window is the display — a scrolling input / output level and gain-reduction
+  history with the threshold line, tall In / Out / GR meters on the right; the transfer curve at the left of the
+  knob row; one row of big knobs (threshold, ratio | style button | attack, release) with their small companions
+  under them (knee, range, input | look-ahead, hold, side-chain level); auto gain, output and mix on the right;
+  oversampling and maximum look-ahead in the bottom bar; character and the side chain (link, external input, listen,
+  the side-chain EQ curve and its three bands) folded into pages at the bottom.
+- Prism (as the multiband): the band display fills the window — click a band to edit it, drag a crossover line to move
+  it; the selected band's panel under it (on / solo, compress / expand, threshold and range big, ratio, knee, attack,
+  release, level), the global bar below (slope, crossovers, look-ahead, mix, trims). Live: per-band gain-change bars and
+  the resulting response curve.
+- Sentry (as the gate): threshold big on the left with ratio and range under it, the style button over the curve and
+  the level / reduction history in the centre, attack and release big on the right with hold / knee / look-ahead
+  beside them, the side-chain / output strip at the bottom.
+- Ember keeps round 96's panel with the new Bands section (split display with draggable crossovers, band count,
+  slope, per-band rows); a Saturn-like per-band panel is left for later.
+
+Live graphs: src/ui/DynamicsDisplays.cpp; meters per effect slot went from 2 to 8 (ProcessTimes::meterOutputs).
 pt-BR strings for every new caption.
 
 ## 8. Where I stopped / next steps
@@ -168,4 +184,5 @@ pt-BR strings for every new caption.
   tests (tests/DynamicsTests108.inc), pt-BR, docs/PLUGINS.md.
 - Not done / ideas: the reference's release tails (closer to exponential in gain), Classic's two-stage attack,
   upward compression with the reference's range-dependent slope (§1.1), Prism with more than four bands, dynamic EQ
-  in the side chain, mid / side processing, a screenshot review of the panels on Windows (`LYNX.exe --plugin-shots`).
+  in the side chain, mid / side processing, highlighting the selected band in Prism's display, a Saturn-like
+  per-band panel for Ember, dragging the threshold on Crest's display.
