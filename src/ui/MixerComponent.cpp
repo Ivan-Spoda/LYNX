@@ -18,6 +18,7 @@
 #include "ui/Icons.h"
 #include "ui/ValueControl.h"
 #include "ui/Theme.h"
+#include "ui/AudioEditor.h"
 
 namespace lynx
 {
@@ -1444,7 +1445,7 @@ constexpr int panelHeader = 30;
 constexpr int inputRowHeight = 30; // the input row (arm, audio input source) above the slots
 constexpr int slotsTop = panelHeader + inputRowHeight;
 constexpr int slotHeight = 24;
-const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, EffectKind::compressor, EffectKind::limiter,
+const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, EffectKind::facetEq, EffectKind::compressor, EffectKind::limiter, EffectKind::apexLimiter,
                                       EffectKind::delay,  EffectKind::reverb,       EffectKind::chorus,     EffectKind::filter,
                                       EffectKind::distortion, EffectKind::utility, EffectKind::volumeGate,
                                       EffectKind::pitchShift, EffectKind::freqShift, EffectKind::lofi, EffectKind::effector, EffectKind::crossover, EffectKind::frequencySplitter, EffectKind::autoPan, EffectKind::vocoder, EffectKind::pitchCorrect,
@@ -2625,6 +2626,8 @@ void EffectsPanel::showAddMenu (int)
     });
     menu.addSeparator();
     menu.addSubMenu (tr ("Plugin (VST/VST3/CLAP)"), plugins);
+    menu.addSeparator();
+    menu.addItem (tr ("Audio editor (record this insert)..."), [this] { openAudioEditorForInsert (engine, track); });
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
@@ -2641,6 +2644,7 @@ void EffectsPanel::showSlotMenu (int slot)
     const auto count = (int) slots()->size();
     juce::PopupMenu menu;
     menu.addSubMenu (tr ("Replace with"), replace);
+    menu.addItem (tr ("Audio editor (record this insert)..."), [this] { openAudioEditorForInsert (engine, track); });
 
     // FL presets (Plugin presets\Effects\<plugin>) that map to this effect
     {

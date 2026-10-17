@@ -14,12 +14,14 @@ void showNameAndColourDialog (const juce::String& title, const juce::String& nam
                               std::function<void (const juce::String&, std::uint32_t)> onDone);
 
 // The record button's question (FL's "Recording - What would you like to record?", REA_rodada88): audio into
-// the Playlist, notes, or everything. `onChoice(choice, dontAskAgain)`: 1 = audio, 2 = notes, 3 = everything.
+// the Playlist, notes, everything, or audio into the audio editor. `onChoice(choice, dontAskAgain)`: 1 = audio,
+// 2 = notes, 3 = everything, 4 = audio editor.
 enum RecordChoice
 {
     recordChoiceAudio = 1,
     recordChoiceNotes = 2,
-    recordChoiceEverything = 3
+    recordChoiceEverything = 3,
+    recordChoiceAudioEditor = 4
 };
 void showRecordChoiceDialog (std::function<void (int, bool)> onChoice);
 std::unique_ptr<juce::AlertWindow> makeRecordChoiceDialog();

@@ -105,7 +105,9 @@ public:
     // Preview of an audio file (browser). An invalid/empty file stops the preview.
     void previewFile (const juce::File& file);
     // Plays a sound made in memory through the same preview output (the start-up sound). UI thread.
-    void previewSample (std::shared_ptr<const SampleData> sample);
+    void previewSample (std::shared_ptr<const SampleData> sample, bool loop = false, float gain = 0.8f);
+    // The frame of the previewed sample being played, -1 when the preview is silent.
+    double getPreviewPosition() const noexcept;
 
     // Note played live (PC keyboard, preview). UI thread.
     // `record` = goes into the recording if recording is on (Piano Roll preview doesn't).
@@ -294,6 +296,9 @@ public:
     };
     UiPulse takeUiPulse() noexcept { return std::exchange (uiPulse, {}); }
 
+    // Writes `state` (a createStateXml() taken earlier; nullptr = none was saved) back as the saved device and stops
+    // saving later changes: a test run (--rtstress --type ...) leaves the user's device as it found it.
+    void restoreAudioDeviceState (const juce::XmlElement* state);
     // Device, buffer, deadline and the callback statistics in a few lines (CPU meter hint, glitch log, --rtstress).
     juce::String describeRealtime (bool withUnits = true) const;
 

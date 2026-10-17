@@ -118,6 +118,8 @@ private:
     void timerCallback() override;
 
     Area areaAt (int x, int y, int& row) const;
+    void moved() override;
+    int stickyX = 0; // how far the viewport scrolled the rack sideways (the controls column stays in view)
     int numSteps() const;
     int nameLeft() const noexcept { return muteWidth + 2 * knobWidth + routeWidth + 2; }
     int selectLeft() const noexcept { return nameLeft() + nameWidth + 4; }
