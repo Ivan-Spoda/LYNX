@@ -1660,7 +1660,7 @@ struct Panel
         ReleaseDC (nullptr, screen);
         auto px = [dpi] (int v) { return MulDiv (v, dpi > 0 ? dpi : 96, 96); };
 
-        RECT rc { 0, 0, px (460), px (392) };
+        RECT rc { 0, 0, px (460), px (368) };
         AdjustWindowRectEx (&rc, WS_CAPTION | WS_SYSMENU, FALSE, WS_EX_DLGMODALFRAME);
         window = CreateWindowExW (WS_EX_DLGMODALFRAME, L"LynxAsioPanel", L"LYNX ASIO", WS_CAPTION | WS_SYSMENU | WS_POPUP,
                                   CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, owner, nullptr, moduleHandle, this);
@@ -1685,8 +1685,8 @@ struct Panel
         row (tr (L"Safety margin", L"Margem de segurança"), idSafety);
         make (L"STATIC", L"", SS_LEFT, 14, y + 4, 432, 66, idInfo);
         make (L"STATIC", L"", SS_LEFT, 14, y + 72, 432, 56, idLatency);
-        make (L"BUTTON", L"OK", BS_DEFPUSHBUTTON | WS_TABSTOP, 270, 352, 84, 28, idOk);
-        make (L"BUTTON", tr (L"Cancel", L"Cancelar"), BS_PUSHBUTTON | WS_TABSTOP, 362, 352, 84, 28, idCancel);
+        make (L"BUTTON", L"OK", BS_DEFPUSHBUTTON | WS_TABSTOP, 270, 328, 84, 28, idOk);
+        make (L"BUTTON", tr (L"Cancel", L"Cancelar"), BS_PUSHBUTTON | WS_TABSTOP, 362, 328, 84, 28, idCancel);
 
         addString (item (idMode), tr (L"Shared (other programs keep their sound)", L"Compartilhado (os outros programas continuam com som)"));
         addString (item (idMode), tr (L"Exclusive (lowest latency, device used alone)", L"Exclusivo (menor latência, dispositivo só do LYNX ASIO)"));
