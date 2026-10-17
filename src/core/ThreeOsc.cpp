@@ -378,6 +378,7 @@ struct Osc
     std::uint32_t spo = 0;
     const float* tab = nullptr;
     bool noise = false;
+    bool aa = false; // P+0x1a1: neither noise nor the sine table — the host's HQ render oversamples it (FUN_0073a000)
     float g = 0, gL = 0, gR = 0;
 };
 
@@ -428,6 +429,7 @@ public:
             else
                 o.tab = T.t[3].data(); // (negative shapes: outside the knob's range)
             o.noise = sh == 5;
+            o.aa = ! o.noise && o.tab != T.t[0].data(); // FUN_00739060, parameter kind 2
         }
         const auto g3 = (float) p[13] * 0.0078125f;
         const auto rest = P.am ? 1.0f : 1.0f - g3;
@@ -552,6 +554,33 @@ public:
                     ph[(std::size_t) k] = hqRender (k, x + side, n, phase, inc, side == 0 ? o.gL : o.gR, am, first && ! am);
                     if (! am)
                         first = false;
+                }
+                else if (bitsOf (o.g) != 0 && hostHq && o.aa && k != amIndex())
+                {
+                    // FUN_0073a000 (FL's HQ render, Dispatcher 1 bit 1): k = max(inc >> 22, 1) copies of the
+                    // oscillator at gain g/k (float), the first at the stored phase (mode 11 when it is the first
+                    // written, else 10; its end phase is kept), copy j at that phase + j·(inc/k) (int division)
+                    const auto copies = std::max<std::uint32_t> (inc >> 22, 1u);
+                    const auto g = (ld) ((side == 0 ? o.gL : o.gR) / (float) copies);
+                    const auto step = (std::uint32_t) ((std::int32_t) inc / (std::int32_t) copies);
+                    float* y = x + side;
+                    auto start = phase;
+                    for (std::uint32_t c = 0; c < copies; ++c)
+                    {
+                        auto q = start;
+                        if (first)
+                        {
+                            for (int i = 0; i < n; ++i, q += inc)
+                                y[2 * i] = (float) ((ld) o.tab[q >> 18] * g);
+                            first = false;
+                        }
+                        else
+                            for (int i = 0; i < n; ++i, q += inc)
+                                y[2 * i] = (float) ((ld) o.tab[q >> 18] * g + (ld) y[2 * i]);
+                        if (c == 0)
+                            ph[(std::size_t) k] = q;
+                        start += step;
+                    }
                 }
                 else if (bitsOf (o.g) != 0)
                 {
@@ -698,6 +727,7 @@ public:
     }
 
     Params P;
+    bool hostHq = false; // FL's "HQ render" host mode (P+0x1fd): set while LYNX exports, as FL's renders do
     flvp::Settings S;
     std::array<std::uint8_t, snapshotSize> snap = flvp::defaultSnapshot();
     std::shared_ptr<const std::vector<float>> custom; // the channel's sample as a custom wave (16384 points), if any
@@ -902,6 +932,8 @@ struct Setup
 class ThreeOscInstrument final : public Instrument
 {
 public:
+    bool (*hostHq)() noexcept = nullptr; // FL's HQ-render host mode while this returns true (checked on prepare)
+
     ThreeOscInstrument()
     {
         engine.prepareBlock (blockSize);
@@ -919,6 +951,7 @@ public:
         rate = sr;
         take();
         engine.custom = current.custom, engine.hqCustomSet = current.hq;
+        engine.hostHq = hostHq != nullptr && hostHq();
         engine.init (current.P, sr, current.snap.data(), current.ppq, current.tempo);
         engine.reset();
         tickPhase = 0.0;
@@ -1062,6 +1095,7 @@ private:
             current = *s;
             engine.P = current.P;
             engine.custom = current.custom, engine.hqCustomSet = current.hq;
+            engine.hostHq = hostHq != nullptr && hostHq();
             std::memcpy (engine.snap.data(), current.snap.data(), snapshotSize);
             engine.timing (current.ppq, current.tempo); // (FL: parameters and tempo reach the plugin while voices play)
             engine.update();
@@ -1087,7 +1121,12 @@ private:
 };
 } // namespace
 
-std::unique_ptr<Instrument> makeThreeOscInstrument() { return std::make_unique<ThreeOscInstrument>(); }
+std::unique_ptr<Instrument> makeThreeOscInstrument (bool (*hostHq)() noexcept)
+{
+    auto i = std::make_unique<ThreeOscInstrument>();
+    i->hostHq = hostHq;
+    return i;
+}
 
 namespace threeosc
 {
