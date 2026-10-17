@@ -536,7 +536,7 @@ bool parseMap (const std::string& text, EffectKind kind, SubstituteParamMap& out
     else
         return false;
 
-    if (lowerAscii (target) == "mix")
+    if (target == "mix") // lower case: the slot's dry/wet ("Mix" is an effect parameter, e.g. of LYNX's reverbs)
         out.toSlotMix = true;
     else if ((out.target = paramNamed (kind, target)) < 0)
         return false;

@@ -72,7 +72,8 @@ struct Settings
     double loopLowCut = 0.0;                   // one-pole high-pass inside the loop (Hz, 0 = off)
     double loopDiffusion = 0.5;    // 0..1: in-loop all-pass coefficient scale
     double feedback = -1.0;        // ≥ 0: gain per pass instead of rt60 (delay-network style)
-    double crossFeed = 1.0;        // 0..1: how much the lines exchange energy (0 = parallel combs)
+    double crossFeed = 1.0;        // 0..1: how much the two halves of the tank exchange energy
+    bool parallelLines = false;    // no mixing at all: eight parallel feedback delays (plain echoes)
     double modRateHz = 0.5;
     double modDepthMs = 0.0;       // peak excursion of the line taps
     double lateLevel = 1.0;

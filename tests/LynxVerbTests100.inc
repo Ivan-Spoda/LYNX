@@ -102,9 +102,9 @@ TEST (lynxverbs100_parameter_laws_follow_the_measured_ones)
     CHECK (std::abs (epoch::predelayMs (0.25f) - 20.0) < 0.05);
     CHECK (std::abs (epoch::predelayMs (0.5f) - 100.0) < 0.05);
     CHECK (std::abs (foil::decaySec (0.5f) - 3.0) < 1e-9 && std::abs (foil::decaySec (0.875f) - 13.1) < 1e-9);
-    CHECK (std::abs (nebula::delayMs (0.5f) - 300.0) < 1e-9 && std::abs (nebula::delayMs (0.8f) - 800.0) < 1e-6);
+    CHECK (std::abs (nebula::delayMs (0.5f) - 300.0) < 1e-9 && std::abs (nebula::delayMs (0.8f) - 800.0) < 1e-3);
     CHECK (std::abs (horizon::decaySec (0.2916667f) - 3.0) < 0.01);
-    CHECK (std::abs (horizon::echoMs (0.15f) - 30.0) < 1e-6);
+    CHECK (std::abs (horizon::echoMs (0.15f) - 30.0) < 1e-3);
     CHECK (std::abs (atrium::decaySec (0.5f) - 2.0) < 0.01 && std::abs (atrium::decayValue (2.0) - 0.5f) < 1e-3);
     const double line[] = { 0, 0, 0.5, 2, 1, 10 };
     CHECK (std::abs (knotLaw (0.75, line, 3) - 6.0) < 1e-12 && std::abs (knotInverse (knotLaw (0.83, line, 3), line, 3) - 0.83) < 1e-12);

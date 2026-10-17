@@ -461,7 +461,8 @@ struct Engine::Impl
         const auto norm = (float) (1.0 / std::sqrt ((double) lineCount));
         const auto early = (float) s.earlyLevel, late = (float) s.lateLevel, send = (float) s.earlySend;
         const auto gated = s.gateSec > 0.0, build = gated || s.buildSec > 0.0005;
-        const auto crossAngle = 0.25 * pi * std::clamp (s.crossFeed, 0.0, 1.0);
+        const auto parallel = s.parallelLines;
+        const auto crossAngle = parallel ? 0.0 : 0.25 * pi * std::clamp (s.crossFeed, 0.0, 1.0);
         const auto crossCos = (float) std::cos (crossAngle), crossSin = (float) std::sin (crossAngle);
         const auto ratio = std::pow (2.0, s.shiftSemis / 12.0), ratio2 = std::pow (2.0, s.shiftSemis2 / 12.0);
         const auto voice2 = (float) std::clamp (s.shift2Mix, 0.0, 1.0);
@@ -544,7 +545,10 @@ struct Engine::Impl
             // mixing: each half of the tank (lines 0–3 fed from the left, 4–7 from the right) through a normalised 4-point
             // Hadamard, then the halves rotated into each other by crossFeed × 45° (orthogonal for any amount)
             float h[lineCount];
-            for (int half = 0; half < lineCount; half += 4)
+            if (parallel)
+                for (int i = 0; i < lineCount; ++i)
+                    h[i] = sOut[i];
+            for (int half = 0; half < lineCount && ! parallel; half += 4)
             {
                 const auto a0 = sOut[half] + sOut[half + 1], a1 = sOut[half] - sOut[half + 1];
                 const auto a2 = sOut[half + 2] + sOut[half + 3], a3 = sOut[half + 2] - sOut[half + 3];
@@ -556,7 +560,9 @@ struct Engine::Impl
             for (int i = 0; i < 4; ++i)
             {
                 const auto a = h[i], b = h[i + 4];
-                const auto inj = (i & 1) == 0 ? 0.5f : -0.5f;
+                // parallel lines (plain echoes): input signs = the output patterns of their own side, so the left input
+                // reaches only the left output and the right only the right
+                constexpr float injL[4] = { 0.5f, 0.5f, 0.5f, -0.5f }, injR[4] = { 0.5f, -0.5f, 0.5f, 0.5f };
                 auto u = crossCos * a + crossSin * b, w = -crossSin * a + crossCos * b;
                 if (shimmer > 0.0f && (i & 1) == 0)
                 {
@@ -566,8 +572,9 @@ struct Engine::Impl
                     u = (1.0f - amount) * u + amount * shifters[i / 2].process (u, r);
                     w = (1.0f - amount) * w + amount * shifters[2 + i / 2].process (w, i == 2 && voice2 > 0.0f ? ratio2 : ratio);
                 }
-                lines[i].write (u + inj * in[0]);
-                lines[i + 4].write (w + inj * in[1]);
+                const auto alt = (i & 1) == 0 ? 0.5f : -0.5f; // reverbs: decorrelated sides from the first pass on
+                lines[i].write (u + (parallel ? injL[i] : alt) * in[0]);
+                lines[i + 4].write (w + (parallel ? injR[i] : alt) * in[1]);
             }
 
             auto ol = late * lateL + early * e[0];
@@ -788,13 +795,13 @@ const AtriumType atriumTypes[atrium::typeCount] = {
     { "Bright Room", 1, 0.90, 0.88, 0.9, 0.80, 0.90, 0.0, 1.0 },
     { "Large Chamber", 1, 1.20, 1.00, 1.0, 0.85, 1.05, 0.0, 1.0 },
     { "Dark Room", 1, 1.00, 1.00, 1.0, 1.00, 1.00, 0.0, 1.0 },
-    { "Dark Chamber", 1, 1.15, 1.00, 1.0, 0.90, 1.00, 13000.0, 1.0 },
-    { "Dark Space", 0, 1.10, 1.00, 1.0, 0.90, 1.00, 12000.0, 1.0 },
-    { "Deep Space", 0, 1.20, 1.00, 1.0, 0.85, 1.00, 12500.0, 1.2 },
-    { "Mirror Space", 0, 0.90, 1.00, 0.7, 1.10, 1.00, 12500.0, 1.0 },
-    { "Vast Space", 0, 1.30, 1.00, 0.8, 1.00, 1.00, 12000.0, 1.2 },
-    { "Distant Space", 0, 1.25, 1.00, 1.0, 0.70, 1.10, 12500.0, 1.0 },
-    { "Dense Room", 1, 1.00, 1.00, 1.0, 1.05, 1.00, 12500.0, 1.0 },
+    { "Dark Chamber", 1, 1.15, 1.00, 1.0, 0.90, 1.00, 11000.0, 1.0 },
+    { "Dark Space", 0, 1.10, 1.00, 1.0, 0.90, 1.00, 10000.0, 1.0 },
+    { "Deep Space", 0, 1.20, 1.00, 1.0, 0.85, 1.00, 10500.0, 1.2 },
+    { "Mirror Space", 0, 0.90, 1.00, 0.7, 1.10, 1.00, 10500.0, 1.0 },
+    { "Vast Space", 0, 1.30, 1.00, 0.8, 1.00, 1.00, 10000.0, 1.2 },
+    { "Distant Space", 0, 1.25, 1.00, 1.0, 0.70, 1.10, 10500.0, 1.0 },
+    { "Dense Room", 1, 1.00, 1.00, 1.0, 1.05, 1.00, 10500.0, 1.0 },
 };
 
 double atriumDecaySec (float v) { return skewLaw (v, 0.1, 100.0, 5.717); }
@@ -855,18 +862,18 @@ struct FoilType
 // plate types: line scale, own onset (ms), bass RT ×, high-frequency absorption (1/s at 8 kHz), band limit (Hz, 0 = full band),
 // early level, gain
 const FoilType foilTypes[foil::typeCount] = {
-    { "Silver", 1.00, 20.5, 1.0, 0.34, 11000.0, 0.35, 1.30 },
-    { "Pewter", 0.85, 1.0, 1.0, 0.30, 11000.0, 0.45, 1.00 },
-    { "Nickel", 1.10, 56.0, 1.0, 0.25, 13000.0, 0.35, 2.30 },
-    { "Bronze", 0.90, 17.0, 1.0, 0.30, 11000.0, 0.55, 0.77 },
-    { "Bismuth", 1.20, 6.5, 1.0, 0.20, 10000.0, 0.30, 1.45 },
-    { "Tin", 1.00, 18.5, 1.0, 0.32, 11000.0, 0.35, 1.30 },
-    { "Zinc", 1.30, 6.5, 1.1, 0.18, 11500.0, 0.30, 1.50 },
-    { "Platinum", 1.20, 81.0, 1.3, 0.35, 10000.0, 0.25, 1.00 },
-    { "Tungsten", 1.00, 21.0, 1.0, 0.30, 0.0, 0.35, 1.10 },
-    { "Iron", 1.10, 56.0, 1.1, 0.30, 0.0, 0.30, 2.10 },
-    { "Gold", 1.00, 20.5, 1.0, 0.30, 0.0, 0.35, 1.10 },
-    { "Lead", 1.00, 1.5, 1.0, 0.45, 10000.0, 0.40, 1.00 },
+    { "Silver", 1.00, 20.5, 1.0, 0.34, 9000.0, 0.35, 1.00 },
+    { "Pewter", 0.85, 1.0, 1.0, 0.30, 9000.0, 0.45, 1.13 },
+    { "Nickel", 1.10, 56.0, 1.0, 0.25, 10000.0, 0.35, 0.83 },
+    { "Bronze", 0.90, 17.0, 1.0, 0.30, 9000.0, 0.55, 1.05 },
+    { "Bismuth", 1.20, 6.5, 1.0, 0.20, 8500.0, 0.30, 1.00 },
+    { "Tin", 1.00, 18.5, 1.0, 0.32, 9000.0, 0.35, 1.13 },
+    { "Zinc", 1.30, 6.5, 1.1, 0.18, 9500.0, 0.30, 1.16 },
+    { "Platinum", 1.20, 81.0, 1.3, 0.35, 8500.0, 0.25, 0.62 },
+    { "Tungsten", 1.00, 21.0, 1.0, 0.30, 0.0, 0.35, 0.68 },
+    { "Iron", 1.10, 56.0, 1.1, 0.30, 0.0, 0.30, 0.60 },
+    { "Gold", 1.00, 20.5, 1.0, 0.30, 0.0, 0.35, 0.68 },
+    { "Lead", 1.00, 1.5, 1.0, 0.45, 8500.0, 0.40, 1.00 },
 };
 double foilDecaySec (float v) { return knotLaw (v, foilDecayKnots, foilDecayCount); }
 
@@ -894,7 +901,8 @@ protected:
         s.bandLimit = t.bw;
         s.inDiffusion = 1.0;
         s.loopDiffusion = 0.85;
-        s.width = 2.0 * p[4]; // 100 % = decorrelated, 0 % = mono, 200 % = anti-correlated (measured)
+        // 0 % = mono, 100 % = decorrelated, 200 % = slightly anti-correlated (−0.21, measured)
+        s.width = p[4] <= 0.5f ? 2.0 * p[4] : 1.0 + 0.48 * (p[4] - 0.5);
         s.modRateHz = skewLaw (p[5], 0.05, 5.0, 2.381);
         s.modDepthMs = 1.0 * p[6] / std::sqrt (std::max (0.3, s.modRateHz));
         s.lowShelfHz = 20.0 + 1980.0 * p[7];
@@ -964,6 +972,7 @@ protected:
         s.inDiffusion = dens;
         s.loopDiffusion = 0.85 * dens;
         s.crossFeed = 0.3 + 0.7 * dens;
+        s.parallelLines = dens < 0.02; // density 0: plain repeats of the delay
         // stereo: plain echoes are mono (density 0); the shape's correlation at full density; warp decorrelates
         const auto corr = (1.0 + (m.corr - 1.0) * dens) * (1.0 - std::min (1.0, 2.0 * warp));
         const auto w = std::sqrt ((1.0 - corr) / (1.0 + corr + 1e-3));
@@ -1014,11 +1023,14 @@ protected:
         s.buildSec = 0.02 + 0.3 * size * (1.0 - p[3] * 0.5);
         s.shape = 0;
         s.lineScale = m.scale * (0.3 + 1.2 * size);
-        s.rt60 = (1.5 + 12.5 * size) * m.rtScale * (1.0 + 1.4 * p[2] * p[2]); // feedback lengthens the tail (§5)
+        s.rt60 = (1.5 + 12.5 * size) * m.rtScale * std::min (3.0, 1.0 + 2.8 * p[2] * p[2]); // feedback lengthens the tail (§5)
         s.earlyLevel = 0.45; // it speaks at once
         s.earlySec = 0.03;
         s.earlyDiffusion = p[3];
-        s.loopLowCut = 1000.0 * p[5] * 0.5; // the reference's low cut acts mostly on the recirculation (§5)
+        s.outLowCut = 250.0 * p[5]; // gentle: the reference's low cut barely shows at 63 Hz (§5, not confirmed)
+        s.outLowOrder = 1;
+        if (s.outLowCut < 5.0)
+            s.outLowCut = 0.0;
         s.outHighCut = 100.0 + 14900.0 * p[6];
         s.outHighOrder = 1;
         if (shiftMode == 2 || shiftMode == 3 || m.bright > 0.0)
@@ -1047,9 +1059,9 @@ struct HorizonReverb
     double scale, rtScale, preMs, buildMs, early, gain;
 };
 const HorizonReverb horizonReverbs[horizon::reverbModeCount] = {
-    { "Room", 1, 1.0, 0.80, 50.0, 30.0, 0.3, 1.0 },  { "Chamber", 1, 1.2, 0.82, 45.0, 30.0, 0.3, 1.0 },
-    { "Plate", 2, 1.0, 1.00, 25.0, 15.0, 0.0, 1.2 }, { "Hall", 0, 1.0, 1.00, 35.0, 40.0, 0.2, 1.0 },
-    { "Cathedral", 0, 1.3, 0.95, 60.0, 80.0, 0.1, 0.6 }, { "Space", 0, 1.5, 1.05, 70.0, 90.0, 0.0, 0.5 },
+    { "Room", 1, 1.0, 0.80, 50.0, 60.0, 0.3, 1.5 },  { "Chamber", 1, 1.2, 1.00, 45.0, 45.0, 0.3, 3.0 },
+    { "Plate", 2, 1.0, 1.00, 25.0, 8.0, 0.0, 3.6 },  { "Hall", 0, 1.0, 0.92, 35.0, 60.0, 0.2, 1.25 },
+    { "Cathedral", 0, 1.3, 1.05, 60.0, 80.0, 0.1, 1.6 }, { "Space", 0, 1.5, 1.10, 70.0, 90.0, 0.0, 0.5 },
     { "Freeze", 0, 1.4, 3.30, 70.0, 900.0, 0.0, 0.4 },   { "Gated", 1, 0.8, 0.60, 30.0, 0.0, 0.1, 0.9 },
 };
 const char* const horizonColours[4] = { "Bright", "Neutral", "Dark", "Vintage" };

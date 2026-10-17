@@ -75,7 +75,7 @@ map = xml:decay -> Decay | curve 0:0 0.019:0.5 1:1      # other laws: piecewise-
 
 Map sources: `vst2:<n>` (float parameter n of the current program in FL's VST2 state), `xml:<attribute>` (an
 attribute of the first element of a JUCE XML state, found after `VC2!` or `<?xml`), `waves:<n>` (value n of the
-active setup's "RealWorld" list in a Waves preset chunk). Targets: `mix` (the slot's dry/wet) or a parameter name of
+active setup's "RealWorld" list in a Waves preset chunk). Targets: `mix` (lower case: the slot's dry/wet) or a parameter name of
 the LYNX effect; the optional range maps the source linearly (clamped) onto the normalised parameter. Instead of the
 range, `| curve x:y x:y …` maps through piecewise-linear points (clamped at the ends) and `| steps x:y …` gives the y
 of the last point whose x ≤ the value (enumerations); x must ascend.
