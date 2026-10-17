@@ -35,6 +35,8 @@
 #include "core/FlWrapper.h"
 #include "core/FlPluginDb.h"
 #include "core/MissingFiles.h"
+#include "core/PianoRollTools.h"
+#include "core/EventEdit.h"
 #include "core/Preferences.h"
 #include "core/History.h"
 #include "core/Gms.h"
@@ -14244,5 +14246,455 @@ TEST (project_info_history_and_flp_import)
     CHECK (song.info.comments == "line 1\nline 2");
 }
 #include "UiFixTests.inc"
+
+// ---------------------------------------------------------------------------
+// Piano Roll tools of round 83 (expected values worked out from FL's formulas, docs/analise/REA_rodada83.md)
+
+namespace
+{
+lynx::Note prNote (std::int64_t start, std::int64_t length, int key = 60, float velocity = 100.0f / 128.0f)
+{
+    lynx::Note n;
+    n.start = start;
+    n.length = length;
+    n.key = key;
+    n.velocity = velocity;
+    return n;
+}
+
+std::vector<int> allOf (const lynx::Pattern& p)
+{
+    std::vector<int> v;
+    for (int i = 0; i < (int) p.notes.size(); ++i)
+        v.push_back (i);
+    return v;
+}
+} // namespace
+
+TEST (prtools_score_file)
+{
+    using namespace lynx::prtools;
+    FlpBuilder b (96);
+    b.ascii (0xC7, "20.9.0");
+    b.u8 (0x41); b.u16 (0);
+    auto notes = noteRecord (0, 0, 24, 60, 100);
+    auto n2 = noteRecord (48, 0, 24, 67, 64);
+    n2[19] = 4; // colour 4
+    notes.insert (notes.end(), n2.begin(), n2.end());
+    b.data (0xE0, notes);
+    const auto score = parseScore (b.bytes);
+    CHECK (score && score->notes.size() == 2);
+    if (score && score->notes.size() == 2)
+    {
+        CHECK (score->notes[0].start == 0 && score->notes[0].length == 240 && score->notes[0].key == 60);
+        CHECK (score->notes[1].start == 480 && score->notes[1].colour == 4 && score->notes[1].velocity == 0.5f);
+        CHECK (score->length() == 720);
+    }
+    CHECK (! parseScore (std::vector<std::uint8_t> { 1, 2, 3 }));
+
+    const auto grid = gridScore (240);
+    CHECK (grid.notes.size() == 4 && grid.length() == 960 && grid.notes[3].start == 720);
+    CHECK (gridScore (240, 1.0f).notes[1].start == 240 + 120);
+
+    if (! realFlpDir.empty()) // the installation's templates
+    {
+        std::ifstream f (realFlpDir + "/Patches/Scores/Quantization/Default.fsc", std::ios::binary);
+        std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (f)), {});
+        const auto fsc = parseScore (bytes);
+        CHECK (fsc && fsc->notes.size() == 16 && fsc->length() == 3840 && fsc->notes[1].start == 240);
+
+        // an old (FL 3.5, 20-byte records) chopping pattern with colour-3 notes, read as colour 12
+        std::ifstream g (realFlpDir + "/Patches/Scores/Chopping/Default.fsc", std::ios::binary);
+        std::vector<std::uint8_t> chopBytes ((std::istreambuf_iterator<char> (g)), {});
+        const auto chop = parseScore (chopBytes);
+        CHECK (chop && ! chop->notes.empty());
+    }
+}
+
+TEST (prtools_quantize)
+{
+    using namespace lynx;
+    using namespace lynx::prtools;
+    const auto grid = gridScore (240);
+
+    Pattern p;
+    p.notes = { prNote (1010, 500), prNote (1130, 100) };
+    QuantizeOptions o; // start strength 64/128, sensitivity 36 (180 ticks)
+    quantize (p, allOf (p), grid, o);
+    CHECK (p.notes[0].start == 985 && p.notes[0].length == 500); // 1010 - (50 * 64) / 128
+    CHECK (p.notes[1].start == 1165);                            // toward 1200: 1130 + (70 * 64) / 128
+
+    p.notes = { prNote (1010, 500), prNote (1130, 100) };
+    o.start = 1.0f;
+    o.sensitivity = 12; // 60 ticks: 1130 is 70 away from 1200
+    quantize (p, allOf (p), grid, o);
+    CHECK (p.notes[0].start == 960 && p.notes[1].start == 1130);
+
+    p.notes = { prNote (1010, 500) };
+    o.sensitivity = 36;
+    o.durationMode = QuantizeOptions::leaveEnd;
+    quantize (p, allOf (p), grid, o);
+    CHECK (p.notes[0].start == 960 && p.notes[0].length == 550); // the end (1509) stays
+
+    p.notes = { prNote (1010, 500) };
+    o.durationMode = QuantizeOptions::quantizeEnd;
+    o.duration = 1.0f;
+    quantize (p, allOf (p), grid, o);
+    CHECK (p.notes[0].start == 960 && p.notes[0].length == 1439 - 960 + 1); // end 1509 -> the nearest end 1439
+
+    // levels: a template velocity of 50/100 halves the velocity; 0 removes the note
+    Score half = grid;
+    for (auto& n : half.notes)
+        n.velocity = 50.0f / 128.0f;
+    p.notes = { prNote (960, 100, 60, 0.8f) };
+    o = {};
+    quantize (p, allOf (p), half, o);
+    CHECK (std::abs (p.notes[0].velocity - 0.4f) < 1e-5f);
+    for (auto& n : half.notes)
+        n.velocity = 0.0f;
+    quantize (p, allOf (p), half, o);
+    CHECK (p.notes.empty());
+}
+
+TEST (prtools_chop)
+{
+    using namespace lynx;
+    using namespace lynx::prtools;
+    Score pat;
+    pat.notes = { ScoreNote { 0, 240, 60 }, ScoreNote { 480, 240, 67 } }; // period 720
+
+    Pattern p;
+    p.notes = { prNote (0, 1920, 50) };
+    ChopOptions o;
+    chop (p, allOf (p), pat, o);
+    CHECK (p.notes.size() == 5);
+    if (p.notes.size() == 5)
+    {
+        CHECK (p.notes[0].start == 0 && p.notes[0].key == 50 && p.notes[1].start == 480 && p.notes[1].key == 57);
+        CHECK (p.notes[2].start == 720 && p.notes[3].start == 1200 && p.notes[4].start == 1440 && p.notes[4].length == 240);
+    }
+
+    // absolute: the pattern stays on the song grid; a piece before the note start is cut
+    p.notes = { prNote (100, 600, 50) };
+    chop (p, allOf (p), pat, o);
+    CHECK (p.notes.size() == 2 && p.notes[0].start == 100 && p.notes[0].length == 140 && p.notes[1].start == 480);
+    o.absolute = false;
+    p.notes = { prNote (100, 600, 50) };
+    chop (p, allOf (p), pat, o);
+    CHECK (p.notes.size() == 2 && p.notes[0].start == 100 && p.notes[0].length == 240 && p.notes[1].start == 580
+           && p.notes[1].length == 120);
+
+    // time mul x2 (wheel 5); colour 4 holds to the end in the first round only
+    o = {};
+    o.timeMul = 5;
+    p.notes = { prNote (0, 1920, 60) };
+    chop (p, allOf (p), pat, o);
+    CHECK (p.notes.size() == 3 && p.notes[1].start == 960 && p.notes[1].length == 480 && p.notes[2].start == 1440);
+    pat.notes[1].colour = 4;
+    o.timeMul = 4;
+    p.notes = { prNote (0, 1920, 60) };
+    chop (p, allOf (p), pat, o);
+    CHECK (p.notes.size() == 4 && p.notes[1].length == 1920 - 480 && p.notes[3].start == 1440);
+}
+
+TEST (prtools_flam)
+{
+    using namespace lynx;
+    using namespace lynx::prtools;
+    Pattern p;
+    p.notes = { prNote (960, 480, 60, 0.75f) };
+    flam (p, allOf (p), flamPreset (FlamPreset::doubleStroke), 120.0); // +1 step after
+    CHECK (p.notes.size() == 2 && p.notes[0].start == 960 && p.notes[1].start == 1200 && p.notes[1].length == 480);
+    CHECK (std::abs (p.notes[1].velocity - 0.75f * 85.0f / 128.0f) < 1e-6f);
+
+    p.notes = { prNote (960, 480) };
+    flam (p, allOf (p), flamPreset (FlamPreset::earlyDoubleStroke), 120.0); // the flam one step before, shortened
+    CHECK (p.notes.size() == 2 && p.notes[0].start == 720 && p.notes[0].length == 240 && p.notes[1].start == 960);
+
+    // absolute: -64 = -33.3 ms = -64 ticks at 120 BPM (960 PPQ); the original moves, the flam stays on the grid
+    CHECK (flamOffset (flamPreset (FlamPreset::flam), 120.0) == -64);
+    p.notes = { prNote (960, 480) };
+    flam (p, allOf (p), flamPreset (FlamPreset::flam), 120.0);
+    CHECK (p.notes.size() == 2 && p.notes[0].start == 960 && p.notes[0].length == 64 && p.notes[1].start == 1024);
+    p.notes = { prNote (960, 480) };
+    flam (p, allOf (p), flamPreset (FlamPreset::earlyFlam), 120.0);
+    CHECK (p.notes.size() == 2 && p.notes[0].start == 896 && p.notes[1].start == 960 && p.notes[1].length == 480);
+}
+
+TEST (prtools_lfo)
+{
+    using namespace lynx;
+    using namespace lynx::prtools;
+    CHECK (lfoPeriod (20480) == 3840.0 && lfoPeriod (0) == 960.0 * 128 && lfoPeriod (40960) == 120.0);
+
+    LfoOptions o; // sine, phase 1/2: starts at the bottom (value 1/2, range 1/4)
+    const auto c = lfoCurve (o, 3840);
+    CHECK (std::abs (c[0] - 0.25f) < 1e-4f && std::abs (c[960] - 0.5f) < 1e-3f && std::abs (c[1920] - 0.75f) < 1e-3f);
+
+    o.shape = LfoOptions::square;
+    o.phase = 0; // phase 0.5: Round (0.5) = 0 (half to even) -> +1, then -1
+    const auto sq = lfoCurve (o, 3840);
+    CHECK (sq[0] == 0.75f && sq[10] == 0.25f && sq[2000] == 0.75f);
+
+    o = {};
+    o.useEnd = true;
+    o.endRange = 0; // the range fades out
+    const auto fade = lfoCurve (o, 3840);
+    CHECK (std::abs (fade[3839] - 0.5f) < 0.01f);
+
+    Pattern p;
+    p.notes = { prNote (0, 100), prNote (960, 100), prNote (1920, 100) };
+    lfo (p, allOf (p), notetools::Level::velocity, LfoOptions {});
+    CHECK (std::abs (p.notes[0].velocity - 0.25f) < 1e-4f && std::abs (p.notes[1].velocity - 0.5f) < 1e-3f
+           && std::abs (p.notes[2].velocity - 0.75f) < 1e-3f);
+}
+
+TEST (prtools_claw)
+{
+    using namespace lynx;
+    using namespace lynx::prtools;
+    ClawOptions o; // beat, trash the 4th quarter, stretch, remove short notes
+    Pattern p;
+    p.notes = { prNote (0, 240), prNote (960, 240), prNote (750, 100), prNote (1440, 240) };
+    claw (p, allOf (p), o);
+    CHECK (p.notes.size() == 3); // the note inside the trashed slice is gone
+    if (p.notes.size() == 3)
+    {
+        CHECK (p.notes[0].start == 0 && p.notes[0].length == 320);
+        CHECK (p.notes[1].start == 960 && p.notes[1].length == 320);
+        CHECK (p.notes[2].start == 1600 && p.notes[2].length == 320); // 1440 - 240 = 1200 -> x 4/3
+    }
+
+    o.trash = 9; // none: only the warp, which is neutral
+    p.notes = { prNote (100, 300) };
+    claw (p, allOf (p), o);
+    CHECK (p.notes.size() == 1 && p.notes[0].start == 100 && p.notes[0].length == 300);
+
+    o.timeDistortion = 1024; // strong bend: the period's ends stay, the middle moves
+    p.notes = { prNote (0, 480), prNote (960, 480) };
+    claw (p, allOf (p), o);
+    CHECK (p.notes[0].start == 0 && p.notes[1].start == 960 && p.notes[0].length > 480 && p.notes[1].length > 480);
+
+    o.trash = 0; // the first quarter
+    o.timeDistortion = 0;
+    o.stretch = false;
+    p.notes = { prNote (0, 240), prNote (240, 240) };
+    claw (p, allOf (p), o);
+    CHECK (p.notes.size() == 1 && p.notes[0].start == 0 && p.notes[0].length == 240);
+}
+
+TEST (prtools_articulate)
+{
+    using namespace lynx;
+    using namespace lynx::prtools;
+    Pattern p;
+    p.notes = { prNote (0, 100), prNote (480, 100), prNote (960, 100) };
+    articulate (p, allOf (p), articulatePreset (ArticulatePreset::legato), 4);
+    CHECK (p.notes[0].length == 480 && p.notes[1].length == 480 && p.notes[2].length == 3840 - 960); // to the bar line
+
+    p.notes = { prNote (0, 100), prNote (480, 100), prNote (960, 2880) };
+    articulate (p, allOf (p), articulatePreset (ArticulatePreset::staccato), 4);
+    CHECK (p.notes[0].length == 96 && p.notes[1].length == 96 && p.notes[2].length == 576); // ends on a bar: own length
+
+    auto o = articulatePreset (ArticulatePreset::legato);
+    o.gap = 20;
+    p.notes = { prNote (0, 100), prNote (480, 100) };
+    articulate (p, allOf (p), o, 4);
+    CHECK (p.notes[0].length == 460);
+
+    // chop chords: a held note is cut where the next one starts
+    p.notes = { prNote (0, 960, 48), prNote (480, 480, 60) };
+    articulate (p, allOf (p), articulatePreset (ArticulatePreset::chopChordsOnly), 4);
+    CHECK (p.notes.size() == 3 && p.notes[0].length == 480 && p.notes[1].start == 480 && p.notes[2].start == 480);
+
+    // variation is seeded (MT19937): same seed, same result; lengths only get shorter
+    o = articulatePreset (ArticulatePreset::legato);
+    o.variation = 50;
+    o.seed = 7;
+    Pattern a, b2;
+    a.notes = b2.notes = { prNote (0, 100), prNote (480, 100), prNote (960, 100) };
+    articulate (a, allOf (a), o, 4);
+    articulate (b2, allOf (b2), o, 4);
+    CHECK (a.notes[0].length == b2.notes[0].length && a.notes[0].length <= 480 && a.notes[0].length >= 240);
+}
+
+TEST (prtools_chords)
+{
+    using namespace lynx::prtools;
+    auto c = parseProgression ("I-V-vi-IV", 0, false);
+    CHECK (c && c->size() == 4);
+    if (c && c->size() == 4)
+    {
+        CHECK ((*c)[0].root == 0 && (*c)[1].root == 7 && (*c)[2].root == 9 && (*c)[3].root == 5);
+        CHECK ((*c)[2].intervals == std::vector<int> ({ 0, 3, 7 }) && chordName ((*c)[2]) == "Am");
+    }
+
+    c = parseProgression ("ii 7-V 7-I \xE2\x88\x86-IV/\xE2\x99\xADVII", 0, false);
+    CHECK (c && c->size() == 4);
+    if (c && c->size() == 4)
+    {
+        CHECK ((*c)[0].intervals == std::vector<int> ({ 0, 3, 7, 10 }) && chordName ((*c)[0]) == "Dm7");
+        CHECK ((*c)[2].intervals == std::vector<int> ({ 0, 4, 7, 11 }) && chordName ((*c)[2]) == "Cmaj7");
+        CHECK ((*c)[3].root == 5 && (*c)[3].bass == 10 && chordName ((*c)[3]) == "F/A#");
+    }
+
+    c = parseProgression ("i-v-\xE2\x99\xADVI-iv", 9, true); // A minor: Am Em F Dm
+    CHECK (c && c->size() == 4 && (*c)[2].root == 5 && (*c)[3].root == 2 && (*c)[1].intervals[1] == 3);
+    CHECK (parseProgression ("Isus2 add9", 0, false) && parseProgression ("Isus2 add9", 0, false)->front().intervals
+                                                             == std::vector<int> ({ 0, 2, 7, 14 }));
+    CHECK (! parseProgression ("I-X-V", 0, false));
+
+    const auto presets = parseProgressionPresets ("-Major\r\n\r\nI-V-vi-IV: Hopeful\r\nI-vi-IV-V: Optimistic\r\n\r\n-Minor\r\n\r\ni-iv-v-i\r\n");
+    CHECK (presets.size() == 3 && presets[0].numerals == "I-V-vi-IV" && ! presets[0].minor && presets[2].minor);
+
+    const auto rhythms = parseRhythmPresets ("Default,4,>,-,-,-,>,-,-,-,>,-,-,-,>,-,-,-\nRandom 1,4,r,16,2,1.5\n");
+    CHECK (rhythms.size() == 1 && rhythms[0].cells == ">--->--->--->---");
+
+    const auto g = generateProgression (0, false, 8, 0.3f, 5);
+    CHECK (g.size() == 8 && g[0].root == 0 && g == generateProgression (0, false, 8, 0.3f, 5));
+    for (std::uint32_t seed = 1; seed < 40; ++seed) // numerals read back as the same chords
+    {
+        const auto gen = generateProgression (2, seed % 2 == 0, 8, 1.0f, seed);
+        const auto back = parseProgression (toNumerals (gen, 2), 2, seed % 2 == 0);
+        CHECK (back && *back == gen);
+    }
+    CHECK (toNumerals (*parseProgression ("I-V-vi-IV/bVII", 0, false), 0) == "I-V-vi-IV/bVII");
+
+    lynx::Pattern p;
+    const auto chords = *parseProgression ("I-IV", 0, false);
+    ChordWriteOptions w;
+    const auto added = writeProgression (p, 2, 0, chords, w);
+    CHECK (added.size() == 8 && p.notes.size() == 8 && p.notes[0].channel == 2);
+    CHECK (std::any_of (p.notes.begin(), p.notes.end(), [] (auto& n) { return n.key == 48; })); // bass C3
+    w.rhythm = ">-`->-`->-`->-`-";
+    lynx::Pattern r;
+    writeProgression (r, 0, 0, chords, w);
+    CHECK (r.notes.size() == 8 && r.notes[0].length == 1920); // '>' + '-' of 960-tick cells
+}
+
+TEST (prtools_riff_machine)
+{
+    using namespace lynx;
+    using namespace lynx::prtools;
+    Pattern p;
+    p.notes = { prNote (0, 100, 70) };
+    p.notes[0].channel = 1;
+    RiffOptions o;
+    o.channel = 1;
+    o.bars = 2;
+    const auto notes = riffMachine (p, { 0 }, o, 4);
+    CHECK (! notes.empty() && notes.size() == p.notes.size());
+    CHECK (std::all_of (p.notes.begin(), p.notes.end(), [] (auto& n) {
+        return n.channel == 1 && n.start >= 0 && n.start < 2 * 3840 && n.key >= 36 && n.key <= 84;
+    }));
+
+    // only the first step: the progression shape, chopped from one note at key 48
+    o.stepsUpTo = 0;
+    Pattern q;
+    const auto first = riffMachine (q, {}, o, 4);
+    CHECK (first.size() == builtInRiffProgression (0).notes.size() * 2 && q.notes[0].key == 48);
+}
+
+TEST (event_editor_lanes)
+{
+    using namespace lynx;
+    Pattern p;
+    const AutomationTarget vol { AutomationTargetKind::channelVolume, 2 };
+    auto& lane = eventedit::laneFor (p, vol);
+    CHECK (p.events.size() == 1 && &eventedit::laneFor (p, vol) == &lane && eventedit::findLane (p, { AutomationTargetKind::channelPan, 2 }) == nullptr);
+
+    eventedit::fill (lane, 0, 960, 0.25f, 240);
+    CHECK (lane.events.size() == 4 && lane.events[3].tick == 720 && lane.events[3].value == 0.25f);
+    CHECK (lane.valueAt (-5.0) == 0.25f && lane.valueAt (5000.0) == 0.25f);
+
+    eventedit::line (lane, 960, 1920, 0.0f, 1.0f, 240); // 4 cells: 0, 1/3, 2/3, 1
+    CHECK (lane.events.size() == 8 && lane.events[4].value == 0.0f && lane.events[7].value == 1.0f);
+    CHECK (std::abs (lane.valueAt (1500.0) - 2.0f / 3.0f) < 1e-6f); // held from 1440
+
+    eventedit::setEvent (lane, 1440, 0.1f);
+    CHECK (lane.events.size() == 8 && lane.valueAt (1440.0) == 0.1f);
+    eventedit::setEvent (lane, 100, 0.9f);
+    CHECK (lane.events.size() == 9 && lane.events[1].tick == 100);
+
+    eventedit::scale (lane, 0, 960, 2.0f, 0.0f, false);
+    CHECK (lane.events[0].value == 0.5f && lane.events[1].value == 1.0f); // clamped
+    eventedit::scale (lane, 0, 960, 0.0f, 0.0f, true); // bipolar: toward the centre
+    CHECK (lane.events[0].value == 0.5f && lane.events[2].value == 0.5f);
+
+    eventedit::erase (lane, 0, 960);
+    CHECK (lane.events.size() == 4 && lane.events.front().tick == 960);
+
+    auto copy = lane;
+    eventedit::randomize (lane, 0, 4000, 0.2f, 3);
+    eventedit::randomize (copy, 0, 4000, 0.2f, 3);
+    CHECK (lane.events[1].value == copy.events[1].value && std::abs (lane.events[1].value - 1.0f / 3.0f) <= 0.2f + 1e-6f);
+
+    prtools::LfoOptions o;
+    eventedit::applyLfo (lane, 0, 3840, o, 960); // FL's LFO: bottom, middle, top, middle
+    CHECK (lane.events.size() == 4 && std::abs (lane.events[0].value - 0.25f) < 1e-4f && std::abs (lane.events[2].value - 0.75f) < 1e-3f);
+
+    p.events.push_back ({ { AutomationTargetKind::channelPan, 1 }, {} });
+    eventedit::removeEmptyLanes (p);
+    CHECK (p.events.size() == 1);
+
+    // undo label
+    auto before = Song::makeDefault();
+    auto after = before;
+    after.patterns[0].events.push_back ({ vol, { { 0, 0.5f } } });
+    CHECK (describeChangeText (before, after) == "Edit events: " + after.patterns[0].name);
+
+    // channel removal re-targets the lanes like automations
+    auto song = Song::makeDefault();
+    song.patterns[0].events.push_back ({ { AutomationTargetKind::channelVolume, 3 }, { { 0, 0.5f } } });
+    song.removeChannel (1);
+    CHECK (song.patterns[0].events[0].target.index == 2);
+}
+
+TEST (event_editor_playback)
+{
+    // pattern events on the Master volume: silent first half of each pattern, sound in the second half
+    auto song = lynx::Song::makeDefault();
+    song.bpm = 120.0;
+    const auto bar = (std::int64_t) lynx::ppq * 4;
+    song.patterns[0].lengthTicks = bar;
+    song.patterns[0].notes.clear();
+    for (int s = 0; s < 16; ++s)
+        song.patterns[0].notes.push_back ({ s * 240, 200, 0, 60 });
+    song.patterns[0].events.push_back ({ { lynx::AutomationTargetKind::mixerVolume, 0 }, { { 0, 0.0f }, { bar / 2, 0.8f } } });
+
+    const auto peaks = [&] (lynx::PlayMode mode) {
+        song.mode = mode;
+        song.playlist.clear();
+        song.playlist.push_back ({ 0, 0, bar, bar, 0 }); // one clip, in the second bar
+        const double sr = 48000.0;
+        auto state = lynx::RackState::build (song, nullptr, sr);
+        lynx::RackRenderer r;
+        r.prepare (sr, 512);
+        std::vector<float> l (512), rr (512);
+        const auto tps = lynx::ticksPerSample (song.bpm, sr);
+        std::array<float, 6> peak {}; // half bars
+        for (double tick = 0.0; tick < (double) (bar * 3); tick += 512 * tps)
+        {
+            r.process (state.get(), true, tick, 512, l.data(), rr.data());
+            // blocks inside a half bar, away from its edges (the gain glides over one chunk at a change)
+            const auto blockEnd = tick + 512 * tps;
+            const auto half = (std::size_t) (tick / (double) (bar / 2));
+            const auto edge = (double) half * (double) (bar / 2);
+            if (half > 5 || tick - edge < 2 * 512 * tps || blockEnd > edge + (double) (bar / 2))
+                continue;
+            for (auto v : l)
+                peak[half] = std::max (peak[half], std::abs (v));
+        }
+        return std::make_pair (state->eventLanes.size(), peak);
+    };
+
+    const auto [lanesSong, song3] = peaks (lynx::PlayMode::song);
+    CHECK (lanesSong == 1);
+    CHECK (song3[2] < 1.0e-4f && song3[3] > 0.01f); // inside the clip: silent, then sound
+
+    const auto [lanesPattern, loop] = peaks (lynx::PlayMode::pattern);
+    CHECK (lanesPattern == 1);
+    CHECK (loop[0] < 1.0e-4f && loop[1] > 0.01f && loop[2] < 1.0e-4f && loop[3] > 0.01f);
+}
 #include "PrefsTests.inc"
 #include "DialogsTests84.inc"

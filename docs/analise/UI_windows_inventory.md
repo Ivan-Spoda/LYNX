@@ -78,7 +78,7 @@ window); **missing** = nothing yet; **n/a** = not applicable to LYNX.
 | TPLClipPropForm "Clip properties" | **exists (round 84)** | clip menu › Properties...: source/name/colour, track, start/length/offset, mute; audio gain, fades, pitch, stretch; group mute/gain |
 | TPLMergeArrangementForm "Merge arrangement" | **exists (round 84)** | Arrangements window: list, show/new/duplicate/rename/remove/reorder, merge insert/merge/replace at start/playback/end |
 | TPRNotePropForm "Note properties" | exists | Note inspector in the Piano Roll |
-| TEventEditForm "Piano roll - " (event editor) | missing | automation editor covers automation clips only |
+| TEventEditForm "Piano roll - " (event editor) | **exists (round 83)** | Event editor: pattern events of a target (draw, line, select, scale, randomise, LFO); knob menus "Edit events in the pattern" |
 | TEnvMapForm "Mapping" (velocity/controller curves) | missing | |
 | TParamCtrlForm (link to controller) | exists | "Link to MIDI controller" |
 | TMIDIInputForm "Remote control settings", TMIDIInputForm_Generic "Global link settings" | partial | MIDI learn exists, no settings dialog |
@@ -97,20 +97,20 @@ window); **missing** = nothing yet; **n/a** = not applicable to LYNX.
 
 | FL form (Caption) | LYNX | Notes |
 |---|---|---|
-| TPRQuantizeForm "Piano roll - quantizer" | partial | quantise starts / starts and lengths (menu), no dialog with strength/swing |
-| TPRSliceForm "Piano roll - chopper" | partial | "Chop to grid" |
+| TPRQuantizeForm "Piano roll - quantizer" | **exists (round 83)** | Quantize: FL templates (.fsc) or the grid + swing, start/duration strength, duration modes, sensitivity, level strengths |
+| TPRSliceForm "Piano roll - chopper" | **exists (round 83)** | Chop: FL chopping patterns (.fsc) or the grid, time multiplier, song-grid alignment, level strengths |
 | TPRArpForm "Piano roll - arpeggiator" | exists | Arpeggiate tool |
 | TPRStrumForm "Piano roll - strumizer" | exists | Strum tool |
 | TPRFlipForm "Piano roll - score flipper" | exists | Flip tool |
 | TPRRandomForm "Piano roll - randomizer" | exists | Randomise tool |
 | TPRLevelScaleForm "Piano roll - level scaling" | exists | Scale levels tool |
 | TPRKeyLimitForm "Piano roll - limiter / transposer" | exists | Limit tool |
-| TPRLegatoForm "Piano roll - articulator" | partial | "Make legato" |
-| TPRFlamForm "Piano roll - flamer" | missing | |
-| TPRLFOForm "Piano roll - LFO" | missing | |
-| TPRTripletForm "Piano roll - claw machine" | missing | |
-| TPRScoreCreatorForm "Piano roll - riff machine" | missing | |
-| TPRChordToolForm "Piano roll - generate chord progression" | missing | |
+| TPRLegatoForm "Piano roll - articulator" | **exists (round 83)** | Articulate: legato/portato/staccato presets, length, variation, gap, chop chords |
+| TPRFlamForm "Piano roll - flamer" | **exists (round 83)** | Flam: FL presets, time (steps or ms), velocity, before |
+| TPRLFOForm "Piano roll - LFO" | **exists (round 83)** | LFO on a note level (and in the Event editor) |
+| TPRTripletForm "Piano roll - claw machine" | **exists (round 83)** | Claw machine: period, remove every, time distortion, stretch |
+| TPRScoreCreatorForm "Piano roll - riff machine" | **exists (round 83)** | Riff machine: FL's 8-step chain over LYNX's tools, throw dice |
+| TPRChordToolForm "Piano roll - generate chord progression" | **exists (round 83)** | Chord progression: presets (FL's presets.cpt), Roman numerals, generator, rhythm, voicing (own generator) |
 | TPRFillForm "Advanced fill" | partial | fill every N steps, Euclidean fill |
 
 ### Edison / audio editor tools (TME* forms)
@@ -129,10 +129,10 @@ Round 82 did items 1 (General + Audio; not pan law / data folder), 2, 4 (inputs;
 1. **Settings › General** (moves the scattered Options items into one page) and **Settings › Audio** as a page
    (today a separate dialog); Project page: pan law, data folder.
 2. **Plugin manager**: scanned plugins (name, vendor, format, path, status), scan folders, rescan, failed plugins.
-3. **Event editor** for a channel's or insert's parameter events (FL's TEventEditForm), next to automation clips.
+3. ~~Event editor~~ (round 83).
 4. **MIDI settings** page: inputs on/off, which channel each input plays, output/sync.
-5. Piano roll tools still missing: quantizer dialog (strength, swing, start/end), chopper dialog, flamer, LFO,
-   articulator dialog, claw machine, riff machine, chord progression.
+5. ~~Piano roll tools~~ (round 83: quantizer, chopper, flamer, LFO, articulator, claw machine, riff machine, chord
+   progression).
 6. **Shortcut manager** (a GUI over keys.json).
 7. **Touch keyboard** window.
 8. **Clip properties**, **Merge arrangement** (after the Playlist work of the other agents lands).
