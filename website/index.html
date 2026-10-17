@@ -210,7 +210,7 @@ input[type=range]{accent-color:var(--red);width:130px}
 .pl small{display:block;font-size:12px;line-height:1.35;color:var(--dim)}
 .pl .k{font:500 10px "JetBrains Mono",monospace;color:var(--dim);border:1px solid var(--line);border-radius:5px;padding:1px 5px;flex:none}
 .st{width:9px;height:9px;border-radius:50%;flex:none}
-.st.x{background:var(--green);box-shadow:0 0 8px rgba(61,220,132,.5)}.st.n{background:#c5e85d}.st.c{background:#f0ad4e}.st.a{background:var(--red2)}.st.p{background:var(--dim)}
+.st.x{background:var(--green);box-shadow:0 0 8px rgba(61,220,132,.5)}.st.n{background:#c5e85d}.st.c{background:#f0ad4e}.st.a{background:var(--red2)}.st.p{background:var(--dim)}.st.o{background:#7aa7ff;box-shadow:0 0 8px rgba(122,167,255,.45)}
 .pl-all{margin-top:12px}
 .pl-more{margin-top:18px;font-size:14px;color:var(--muted)}
 .pl-more a{color:var(--red2)}
@@ -457,7 +457,7 @@ html.shot .ft{opacity:1!important;animation:none!important}html.shot .hero{min-h
     <h3 class="pl-sub reveal" data-i18n="pl.sub">Every built-in plugin</h3>
     <div class="pl-bar reveal">
       <button class="pl-f on" data-f="all" data-i18n="pl.all">All</button><button class="pl-f" data-f="g" data-i18n="pl.gen">Generators</button><button class="pl-f" data-f="e" data-i18n="pl.fx">Effects</button>
-      <div class="pl-legend"><span><i class="st x"></i><em data-i18n="pl.x">Exact</em></span><span><i class="st n"></i><em data-i18n="pl.n">Near-exact</em></span><span><i class="st c"></i><em data-i18n="pl.c">Close</em></span><span><i class="st a"></i><em data-i18n="pl.a">Approximate</em></span><span><i class="st p"></i><em data-i18n="pl.p">Placeholder</em></span></div>
+      <div class="pl-legend"><span><i class="st x"></i><em data-i18n="pl.x">Exact</em></span><span><i class="st n"></i><em data-i18n="pl.n">Near-exact</em></span><span><i class="st c"></i><em data-i18n="pl.c">Close</em></span><span><i class="st a"></i><em data-i18n="pl.a">Approximate</em></span><span><i class="st p"></i><em data-i18n="pl.p">Placeholder</em></span><span><i class="st o"></i><em data-i18n="pl.o">LYNX original</em></span></div>
     </div>
     <div class="pl-grid reveal" id="plGrid"></div>
     <button class="btn btn-ghost btn-sm pl-all" id="plAll"></button>
@@ -561,7 +561,7 @@ const PT = {
  'sig.team':'Funções da equipe','sig.roles':'Autores, revisores e aprovadores: <a href="https://github.com/Ka1-S">Ka1-S</a> (dono do repositório).',
  'sig.privacy':'Privacidade','sig.pp':'Este programa não transfere nenhuma informação para outros sistemas em rede, a menos que isso seja solicitado especificamente pelo usuário ou pela pessoa que o instala ou opera. <a href="https://github.com/Ka1-S/LYNX/blob/main/PRIVACY.md">Política de privacidade</a>',
  'nav.plugins':'Plugins','pl.title':'Plugins nativos, refeitos do zero.','pl.lead':'Cada motor é escrito nativamente no LYNX, inspirado num plugin do FL Studio e conferido contra o original rodando sem modificação. Exato significa saída idêntica bit a bit.',
- 'pl.all':'Todos','pl.gen':'Geradores','pl.fx':'Efeitos','pl.x':'Exato','pl.n':'Quase exato','pl.c':'Próximo','pl.a':'Aproximado','pl.p':'Só estado',
+ 'pl.all':'Todos','pl.gen':'Geradores','pl.fx':'Efeitos','pl.x':'Exato','pl.n':'Quase exato','pl.c':'Próximo','pl.a':'Aproximado','pl.p':'Só estado','pl.o':'Original do LYNX',
  'ft.title':'Destaques','ft.lead':'Os plugins que quem usa o FL Studio mais usa, todos com status Exato ou Quase exato.','pl.sub':'Todos os plugins embutidos',
  'pl.more':'Status, cobertura de testes e o que ainda falta em cada um: <a href="https://github.com/Ka1-S/LYNX/blob/main/docs/PLUGINS.md">docs/PLUGINS.md</a>.',
  'pl.tm':'FL Studio e os nomes dos seus plugins são marcas da Image-Line Software, citadas aqui só para descrever compatibilidade. O LYNX não é afiliado à Image-Line. Nenhum código ou dado de áudio da Image-Line vem com o LYNX; as ondas embutidas são lidas da sua própria instalação do FL Studio.',
@@ -594,7 +594,8 @@ function setLang(l){
 }
 
 /* ---------- built-in plugins (docs/PLUGINS.md) ---------- */
-// [LYNX engine, inspired by (FL Studio), g/e, status x=exact n=near-exact c=close a=approximate p=placeholder]
+// [LYNX engine, inspired by (FL Studio), g/e, status x=exact n=near-exact c=close a=approximate p=placeholder
+//  o=LYNX original: an own design in the role of a kind of studio processor (no plugin is reproduced)]
 const PLUGINS = [
  ['3x Osc engine','3x Osc','g','x'],['FL Keys engine','FL Keys','g','x'],['DirectWave engine','DirectWave','g','x'],['DX10 engine','Fruity DX10','g','x'],
  ['SimSynth engine','SimSynth','g','x'],['Fruit Kick engine','Fruit Kick','g','x'],['BassDrum engine','BassDrum','g','x'],['Toxic engine','Toxic Biohazard','g','x'],
@@ -618,7 +619,9 @@ const PLUGINS = [
  ['Vintage Phaser','Vintage Phaser','e','n'],['Squeeze','Fruity Squeeze','e','n'],
  ['Pitch correction','Pitcher','e','c'],['Newtone / Newtime','Newtone, Newtime','e','p'],
  ['EQ','Fruity 7 Band EQ, Fruity Bass Boost','e','a'],['Delay','Fruity Delay (v1)','e','a'],['Chorus','Fruity Phaser','e','a'],['Utility','Fruity Center, Phase Inverter, Send, Transporter','e','a'],
- ['Frequency shifter','Frequency Shifter','e','a'],['Limiter','Emphasis','e','a'],['Parametric EQ','Low Lifter','e','a']
+ ['Frequency shifter','Frequency Shifter','e','a'],['Limiter','Emphasis','e','a'],['Parametric EQ','Low Lifter','e','a'],
+ ['Ridge Strip','channel strips','e','o'],['Glow Leveler','opto compressors','e','o'],['Hush De-esser','de-essers','e','o'],
+ ['Aether','air EQ / exciters','e','o'],['Ember Saturator','analog saturation','e','o']
 ];
 // Featured strip above the full list. To feature another engine (e.g. a future LYNX engine inspired by a
 // third-party plugin), add an entry: by = the original's maker, fl = the original plugin, t = g/e,
@@ -659,7 +662,7 @@ $('#ftGrid').addEventListener('pointermove', e => { const c = e.target.closest('
 let plFilter = 'all', plOpen = false;
 function renderPlugins(){
   const insp = lang==='pt' ? 'inspirado em ' : 'inspired by ';
-  const st = {x:'pl.x',n:'pl.n',c:'pl.c',a:'pl.a',p:'pl.p'}, d = lang==='pt' ? PT : EN;
+  const st = {x:'pl.x',n:'pl.n',c:'pl.c',a:'pl.a',p:'pl.p',o:'pl.o'}, d = lang==='pt' ? PT : EN;
   const esc = t => t.replace(/&/g,'&amp;').replace(/</g,'&lt;');
   const list = PLUGINS.filter(p => plFilter==='all' || p[2]===plFilter);
   // collapsed: the first 10 of each type
