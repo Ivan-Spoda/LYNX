@@ -42,6 +42,9 @@ public:
     // Meters (for the UI); export turns them off to avoid wasting CPU.
     void setMetering (bool on) noexcept { metering.store (on); }
 
+    // Per instrument / effect processing time (Plugin performance monitor).
+    ProcessTimes& processTimes() noexcept { return renderer.processTimes(); }
+
 private:
     std::atomic<bool> metering { true };
     Transport& transport;

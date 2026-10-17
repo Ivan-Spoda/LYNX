@@ -843,6 +843,17 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
     auto* l = trackBuffer (track, 0);
     auto* r = trackBuffer (track, 1);
     int audible = -1; // -1 = not measured yet; an effect's output is the next one's input
+    const auto timing = times->enabled.load (std::memory_order_relaxed);
+    auto timed = [this, timing] (std::size_t key, auto&& run) {
+        if (! timing || key >= times->effectNs.size())
+        {
+            run();
+            return;
+        }
+        const auto before = ProcessTimes::now();
+        run();
+        times->effectNs[key].fetch_add (ProcessTimes::now() - before, std::memory_order_relaxed);
+    };
 
     for (std::size_t i = 0; i < effects.size() && i < slots.size(); ++i)
     {
@@ -902,14 +913,14 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
             effects[i]->setSongPosition (chunkTick);
             effects[i]->setPlaying (chunkPlaying);
             setSidechain (state, slots[i], *effects[i], track);
-            effects[i]->process (l, r, n, params, bpm);
+            timed (key, [&] { effects[i]->process (l, r, n, params, bpm); });
         }
         else
         {
             effects[i]->setSongPosition (chunkTick);
             effects[i]->setPlaying (chunkPlaying);
             setSidechain (state, slots[i], *effects[i], track);
-            effects[i]->process (l, r, n, slots[i].params, bpm);
+            timed (key, [&] { effects[i]->process (l, r, n, slots[i].params, bpm); });
         }
 
 
@@ -950,6 +961,9 @@ void RackRenderer::process (const RackState* state,
 
     if (state == nullptr || blockCapacity == 0)
         return;
+
+    const auto timing = times->enabled.load (std::memory_order_relaxed);
+    const auto wallStart = timing ? ProcessTimes::now() : 0;
 
     // A snapshot built before the device opened may have another rate. The instruments'
     // prepare() does not allocate, so it can run here.
@@ -1037,6 +1051,12 @@ void RackRenderer::process (const RackState* state,
         processChunk (*state, playing, startTick + done * tps, n, left + done, right + done, meters);
         resumeAudio = false;
     }
+
+    if (timing)
+    {
+        times->wallNs.fetch_add (ProcessTimes::now() - wallStart, std::memory_order_relaxed);
+        times->audioNs.fetch_add ((std::uint64_t) ((double) numSamples / sampleRate * 1.0e9), std::memory_order_relaxed);
+    }
 }
 
 void RackRenderer::processChunk (const RackState& state, bool playing, double startTick, int numSamples,
@@ -1100,7 +1120,16 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
 
     // 1) channels, each with its own notes at the exact sample (in parallel when worth it)
     const auto channels = std::min<int> ({ (int) state.instruments.size(), (int) song.channels.size(), maxChannels });
-    auto channel = [this, &state, numSamples] (int c) { renderChannel (state, c, numSamples); };
+    auto channel = [this, &state, numSamples] (int c) {
+        if (! times->enabled.load (std::memory_order_relaxed) || c >= ProcessTimes::channels)
+        {
+            renderChannel (state, c, numSamples);
+            return;
+        }
+        const auto before = ProcessTimes::now();
+        renderChannel (state, c, numSamples);
+        times->channelNs[(std::size_t) c].fetch_add (ProcessTimes::now() - before, std::memory_order_relaxed);
+    };
 
     if (workers != nullptr && state.parallel)
         workers->parallelFor (channels, channel);
