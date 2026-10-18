@@ -28,8 +28,8 @@ std::atomic<DllAsioDevice*> activeDevice { nullptr }; // ASIO callbacks carry no
 class DllAsioDevice final : public juce::AudioIODevice
 {
 public:
-    DllAsioDevice (const juce::String& name, const juce::String& dllPath, const juce::String& clsidText)
-        : juce::AudioIODevice (name, dllAsioTypeName)
+    DllAsioDevice (const juce::String& name, const juce::String& typeName, const juce::String& dllPath, const juce::String& clsidText)
+        : juce::AudioIODevice (name, typeName)
     {
         module = LoadLibraryW (dllPath.toWideCharPointer());
         if (module == nullptr)
@@ -341,8 +341,18 @@ private:
                 if (auto* d = activeDevice.load())
                     d->requestReset();
                 return 1;
+            case kAsioLatenciesChanged: // e.g. LYNX ASIO raised its input FIFO after late packets
+                if (auto* d = activeDevice.load(); d != nullptr && d->driver != nullptr)
+                {
+                    long in = 0, out = 0;
+                    if (d->driver->getLatencies (&in, &out) == ASE_OK)
+                    {
+                        d->inputLatency = (int) in;
+                        d->outputLatency = (int) out;
+                    }
+                }
+                return 1;
             case kAsioResyncRequest:
-            case kAsioLatenciesChanged:
                 return 1;
             default:
                 return 0;
@@ -355,7 +365,8 @@ private:
     juce::StringArray inputNames, outputNames;
     juce::Array<double> rates;
     juce::Array<int> bufferSizes;
-    int preferredSize = 512, currentSize = 512, inputLatency = 0, outputLatency = 0;
+    int preferredSize = 512, currentSize = 512;
+    std::atomic<int> inputLatency { 0 }, outputLatency { 0 };
     double currentRate = 48000.0;
     juce::BigInteger activeIns, activeOuts;
     std::vector<ASIOBufferInfo> infos;
@@ -371,11 +382,12 @@ private:
 class DllAsioDeviceType final : public juce::AudioIODeviceType
 {
 public:
-    explicit DllAsioDeviceType (const juce::String& s) : juce::AudioIODeviceType (dllAsioTypeName)
+    DllAsioDeviceType (const juce::String& s, const juce::String& typeName, const juce::String& deviceName)
+        : juce::AudioIODeviceType (typeName.isNotEmpty() ? typeName : juce::String (dllAsioTypeName))
     {
         path = s.upToFirstOccurrenceOf ("|", false, false).unquoted();
         clsid = s.fromFirstOccurrenceOf ("|", false, false).trim();
-        name = juce::File (path).getFileNameWithoutExtension();
+        name = deviceName.isNotEmpty() ? deviceName : juce::File (path).getFileNameWithoutExtension();
     }
     void scanForDevices() override {}
     juce::StringArray getDeviceNames (bool) const override { return { name }; }
@@ -386,7 +398,7 @@ public:
     {
         if ((out.isNotEmpty() && out != name) || (in.isNotEmpty() && in != name))
             return nullptr;
-        auto device = std::make_unique<DllAsioDevice> (name, path, clsid);
+        auto device = std::make_unique<DllAsioDevice> (name, getTypeName(), path, clsid);
         return device->isValid() ? device.release() : nullptr;
     }
 
@@ -395,9 +407,17 @@ private:
 };
 } // namespace
 
-std::unique_ptr<juce::AudioIODeviceType> makeDllAsioDeviceType (const juce::String& spec)
+std::unique_ptr<juce::AudioIODeviceType> makeDllAsioDeviceType (const juce::String& spec, const juce::String& typeName, const juce::String& deviceName)
 {
-    return std::make_unique<DllAsioDeviceType> (spec);
+    return std::make_unique<DllAsioDeviceType> (spec, typeName, deviceName);
+}
+
+std::unique_ptr<juce::AudioIODeviceType> makeBuiltInLynxAsioType()
+{
+    const auto dll = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getSiblingFile ("lynx-asio.dll");
+    if (! dll.existsAsFile() || juce::WindowsRegistry::keyExists ("HKEY_LOCAL_MACHINE\\SOFTWARE\\ASIO\\LYNX ASIO"))
+        return nullptr;
+    return makeDllAsioDeviceType (dll.getFullPathName(), lynxAsioTypeName, lynxAsioTypeName);
 }
 } // namespace lynx
 
@@ -405,7 +425,8 @@ std::unique_ptr<juce::AudioIODeviceType> makeDllAsioDeviceType (const juce::Stri
 
 namespace lynx
 {
-std::unique_ptr<juce::AudioIODeviceType> makeDllAsioDeviceType (const juce::String&) { return nullptr; }
+std::unique_ptr<juce::AudioIODeviceType> makeDllAsioDeviceType (const juce::String&, const juce::String&, const juce::String&) { return nullptr; }
+std::unique_ptr<juce::AudioIODeviceType> makeBuiltInLynxAsioType() { return nullptr; }
 } // namespace lynx
 
 #endif

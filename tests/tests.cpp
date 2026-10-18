@@ -7765,6 +7765,7 @@ TEST (driver_kind_and_shared_mode_buffer_sizes)
     CHECK (lynx::prefs::driverKind ("Windows Audio (Exclusive Mode)") == DriverKind::wasapiExclusive);
     CHECK (lynx::prefs::driverKind ("Windows Audio (Low Latency Mode)") == DriverKind::wasapiLowLatency);
     CHECK (lynx::prefs::driverKind ("ASIO") == DriverKind::asio);
+    CHECK (lynx::prefs::driverKind ("LYNX ASIO") == DriverKind::lynxAsio);
     CHECK (lynx::prefs::driverKind ("DirectSound") == DriverKind::directSound);
     CHECK (lynx::prefs::driverKind ("ALSA") == DriverKind::other);
     const std::vector<int> offered { 144, 192, 256, 480, 512, 1024 };
@@ -15409,6 +15410,8 @@ TEST (flp_pattern_events_import)
 #include "PrefsTests.inc"
 #include "AudioEditTests.inc"
 #include "InputTests.inc"
+#include "../asio/InputDrift.h"
+#include "AsioDriftTests.inc"
 
 TEST (level_audit_demo_imports_round89)
 {
