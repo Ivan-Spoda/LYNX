@@ -1581,6 +1581,8 @@ public:
         const auto stretched = stretchBeats.load() > 0.0f;
         const auto base = baseRate (*data);
         auto startFrame = first + std::max (0.0, startSeconds * sampleRate * base);
+        if (clipMode) // FL starts an audio clip on a whole source frame (round 110 §1: ceil or round fit, floor is 1 late)
+            startFrame = std::round (startFrame);
 
         if (startFrame >= last + 1.0)
             return;

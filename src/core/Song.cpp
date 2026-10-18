@@ -194,6 +194,39 @@ bool Song::routes (int from, int to) const noexcept
     return std::any_of (t.sends.begin(), t.sends.end(), [to] (const MixerSend& s) { return s.target == to; });
 }
 
+float Song::routeLevel (int from, int to) const noexcept
+{
+    if (! routes (from, to))
+        return 0.0f;
+
+    const auto& t = mixer[(std::size_t) from];
+
+    if (to == 0)
+        return t.masterLevel;
+
+    for (const auto& s : t.sends)
+        if (s.target == to)
+            return s.level;
+
+    return 0.0f;
+}
+
+void Song::setRouteLevel (int from, int to, float level)
+{
+    if (! routes (from, to))
+        return;
+
+    const auto v = std::clamp (level, 0.0f, maxFaderGain);
+    auto& t = mixer[(std::size_t) from];
+
+    if (to == 0)
+        t.masterLevel = v;
+    else
+        for (auto& s : t.sends)
+            if (s.target == to)
+                s.level = v;
+}
+
 bool Song::canRoute (int from, int to) const
 {
     const auto n = (int) mixer.size();

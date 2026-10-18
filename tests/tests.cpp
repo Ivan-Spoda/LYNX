@@ -435,6 +435,10 @@ TEST (flp_channel_level_adjustments_and_stretched_clip_start)
     // 788.46 sample ms / 1.056892 = 746.0 ms = 1.6164 beats into the clip
     CHECK (song.channels[0].sampler.stretchBeats > 0.0f);
     CHECK (std::llabs (song.playlist[0].offset - (std::int64_t) std::llround (1.61638 * lynx::ppq)) <= 1);
+    // REA_rodada110 §1: the sub-tick rest is kept (offset + fraction = the exact position, to the sample)
+    const auto exact = 788.4615 / ((double) (788.4615f + 31218.92f - 788.4615f) / (64.0 * 60000.0 / 130.0)) / 1000.0 * 130.0 / 60.0 * lynx::ppq;
+    CHECK (std::abs ((double) song.playlist[0].offset + (double) song.playlist[0].offsetFraction - exact) < 1e-3);
+    CHECK (std::abs (song.playlist[0].offsetFraction) <= 0.5f);
 }
 
 TEST (flp_parses_project_model)
@@ -4947,6 +4951,21 @@ TEST (mixer_sends_between_inserts)
     CHECK (pos (4) < pos (2) && pos (2) < pos (1));
     song.setRoute (4, 2, false);
     CHECK (! song.routes (4, 2) && song.routes (4, 0));
+
+    // route levels (FL's route knobs): to inserts and to Master, clamped to the fader range; none without a route
+    song.setRoute (3, 5, true);
+    song.setRouteLevel (3, 5, 0.5f);
+    song.setRouteLevel (3, 0, 1.4f);
+    CHECK (song.routeLevel (3, 5) == 0.5f && song.routeLevel (3, 0) == 1.4f && song.mixer[3].masterLevel == 1.4f);
+    song.setRouteLevel (3, 0, 9.0f);
+    CHECK (song.routeLevel (3, 0) == lynx::maxFaderGain);
+    song.setRouteLevel (3, 6, 0.5f); // no such route: ignored
+    CHECK (! song.routes (3, 6) && song.routeLevel (3, 6) == 0.0f);
+    song.setRoute (3, 0, false);
+    CHECK (song.routeLevel (3, 0) == 0.0f);
+
+    // the route to Master's level scales what insert 1 sends there (0.5 + 0.5·0.25)
+    CHECK (std::abs (renderMixerCase ([] (lynx::Song& s) { s.setRouteLevel (1, 0, 0.25f); }) - 0.625f) < 1e-4f);
 }
 
 namespace

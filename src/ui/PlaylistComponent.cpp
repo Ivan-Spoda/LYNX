@@ -2755,7 +2755,9 @@ juce::PopupMenu PlaylistComponent::buildClipMenu (int index, int mouseX)
                 for (auto& c : s.playlist)
                     if (c.kind == ClipKind::audio && c.channel == ch)
                     {
-                        c.offset = (std::int64_t) std::llround ((double) c.offset * k);
+                        const auto exact = ((double) c.offset + (double) c.offsetFraction) * k;
+                        c.offset = (std::int64_t) std::llround (exact);
+                        c.offsetFraction = (float) (exact - (double) c.offset);
                         c.length = juce::jmax<std::int64_t> (1, (std::int64_t) std::llround ((double) c.length * k));
                         c.fadeIn = (std::int64_t) std::llround ((double) c.fadeIn * k);
                         c.fadeOut = (std::int64_t) std::llround ((double) c.fadeOut * k);

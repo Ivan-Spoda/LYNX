@@ -167,7 +167,7 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
             {
                 e.type = NoteEvent::Type::on;
                 e.sampleOffset = 0;
-                e.startSeconds = ((double) clip.offset + loopStart - (double) clip.start) * secondsPerTick;
+                e.startSeconds = ((double) clip.offset + (double) clip.offsetFraction + loopStart - (double) clip.start) * secondsPerTick;
                 e.clipElapsed = (float) ((loopStart - (double) clip.start) / tps);
                 e.clipRemaining = (float) (((double) clip.end() - loopStart) / tps);
                 out.add (e);
@@ -177,7 +177,7 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
                 continue;
 
             e.type = NoteEvent::Type::on;
-            e.startSeconds = (double) clip.offset * secondsPerTick;
+            e.startSeconds = std::max (0.0, ((double) clip.offset + (double) clip.offsetFraction) * secondsPerTick);
             e.clipElapsed = 0.0f;
             e.clipRemaining = (float) ((double) clip.length / tps);
             emitOccurrences ((double) clip.start, loop, startTick, endTick, tps, numSamples, e, out);
