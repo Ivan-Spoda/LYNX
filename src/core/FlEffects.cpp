@@ -1456,6 +1456,9 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::newtone: return { "Newtone" };
         case EffectKind::newtime: return { "Newtime" };
         case EffectKind::facetEq:
+        case EffectKind::crestCompressor:
+        case EffectKind::prismMultiband:
+        case EffectKind::sentryGate:
         case EffectKind::apexLimiter: return {}; // LYNX's own effects: no FL counterpart
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };

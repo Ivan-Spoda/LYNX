@@ -1,4 +1,5 @@
 #include "core/RackRenderer.h"
+#include "core/DynamicsSuite.h"
 #include "core/MixSuite.h"
 
 #include "core/WorkerPool.h"
@@ -1074,7 +1075,7 @@ void RackRenderer::applyTrackEq (const MixerTrack& track, int t, float* l, float
 // effects whose controlOutput() an editor shows live
 static bool hasLiveMeters (EffectKind kind) noexcept
 {
-    return mixsuite::isSuiteKind (kind) || kind == EffectKind::lynxTune || kind == EffectKind::facetEq;
+    return mixsuite::isSuiteKind (kind) || dyn::isDynKind (kind) || kind == EffectKind::lynxTune || kind == EffectKind::facetEq;
 }
 
 void RackRenderer::setSidechain (const RackState& state, const EffectSlot& slot, Effect& effect, int track) noexcept

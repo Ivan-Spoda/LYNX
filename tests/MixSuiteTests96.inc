@@ -430,7 +430,7 @@ TEST (mixsuite_panels_place_every_parameter)
     using namespace lynx;
     // LYNX's own panels (not FL arrangements): every parameter has exactly one control, controls stay inside the body
     // and never overlap, and the dynamics effects show their live gain-reduction meter
-    CHECK (plugui::ownLayoutKinds().size() == 15); // the mixing suite, the reverbs of round 100, the delay / modulation suite of round 101
+    CHECK (plugui::ownLayoutKinds().size() == 18); // the mixing suite, the reverbs of round 100, the delay / modulation suite of round 101, the dynamics of round 108
     for (const auto kind : plugui::ownLayoutKinds())
     {
         if (kind == EffectKind::echoform || kind == EffectKind::spiralEcho || kind == EffectKind::orbit || kind == EffectKind::latticeMod)
@@ -469,6 +469,8 @@ TEST (mixsuite_panels_place_every_parameter)
             {
                 const auto& i = *controls[a];
                 const auto& j = *controls[b];
+                if (i.page >= 0 && j.page >= 0 && i.page != j.page) // different pages never show together
+                    continue;
                 const auto overlap = i.x + 0.5f < j.x + j.w && j.x + 0.5f < i.x + i.w && i.y + 0.5f < j.y + j.h && j.y + 0.5f < i.y + i.h;
                 if (overlap)
                 {
@@ -477,7 +479,9 @@ TEST (mixsuite_panels_place_every_parameter)
                     CHECK (false);
                 }
             }
-        CHECK (meters == (kind == EffectKind::ridgeStrip ? 2 : (kind == EffectKind::glowLeveler || kind == EffectKind::hushDeEsser) ? 1 : 0));
+        CHECK (meters == (kind == EffectKind::ridgeStrip ? 2
+                          : (kind == EffectKind::glowLeveler || kind == EffectKind::hushDeEsser || kind == EffectKind::crestCompressor
+                             || kind == EffectKind::sentryGate) ? 1 : 0));
     }
 }
 

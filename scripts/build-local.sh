@@ -50,6 +50,8 @@ CORE="$CORE src/core/OggVorbis.cpp"
 CORE="$CORE src/core/ExportOptions.cpp src/core/Mp3Encoder.cpp src/core/PluginMonitor.cpp src/core/PlaylistOps.cpp"
 # LYNX's Facet EQ and Apex Limiter (round 99)
 CORE="$CORE src/core/FacetEq.cpp src/core/ApexLimiter.cpp"
+# LYNX's dynamics suite and FabFilter state translation (round 108)
+CORE="$CORE src/core/DynamicsSuite.cpp src/core/FabFilterStates.cpp"
 # WavPack decoder (C)
 if [[ -z "${CC:-}" ]]; then
     case "$CXX" in

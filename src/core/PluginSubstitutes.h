@@ -71,6 +71,9 @@ struct SubstituteEntry
     std::vector<std::pair<int, float>> preset; // parameter position -> normalised value, over makeEffectSlot (effect)
     float mix = 1.0f;                          // slot dry/wet of the substitute
     std::vector<SubstituteParamMap> params;
+    // a built-in state translator (core/FabFilterStates.h: "pro-c3", "pro-mb", "pro-g", "saturn2") run after the
+    // maps; it reads the vendor's state layout we observed black-box and only acts when that layout matches
+    std::string translator;
     // VST2 parameters per program (AEffect::numParams), needed to find the current program in a state saved with
     // "all programs" (FL doesn't store the count); 0 = unknown (then only program 0 can be read from such a state)
     int vst2Params = 0;

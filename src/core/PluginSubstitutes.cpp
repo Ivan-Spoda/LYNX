@@ -7,6 +7,7 @@
 #include <limits>
 
 #include "core/Effects.h"
+#include "core/FabFilterStates.h"
 #include "core/FlPluginDb.h"
 #include "core/FlWrapper.h"
 
@@ -388,9 +389,33 @@ preset = Auto gain=1
 [fabfilter-pro-c]
 product = FabFilter Pro-C
 vendor = FabFilter
-lynx = Compressor
+lynx = Crest Compressor
 names = FabFilter Pro-C 2; FabFilter Pro-C 3; Pro-C 2; Pro-C 3
+# LYNX's style compressor (round 108), fitted to our black-box measurements (MEASURE_fabfilter §2); a Pro-C 3 state
+# (component state "FFBS", 100 values) is translated: style, threshold, ratio, knee, range, attack, release, hold,
+# look-ahead, character, side-chain EQ (3 bands), levels, mix, oversampling. Pro-C 2 states keep the defaults.
+translate = pro-c3
+# auto gain on by default (round 107): keeps the level when the state is not readable
 preset = Auto gain=1
+
+[fabfilter-pro-mb]
+product = FabFilter Pro-MB
+vendor = FabFilter
+lynx = Prism Multiband
+names = FabFilter Pro-MB; Pro-MB
+# LYNX's 4-band dynamics (round 108, MEASURE_fabfilter §6 / §12.4): the enabled bands are laid out low → high on
+# Prism's four bands (gaps become bypassed bands), with threshold, ratio, range, mode, knee, attack / release %,
+# level, solo, look-ahead, mix and levels. Without a readable state the bands start at a gentle -12 dB range.
+translate = pro-mb
+
+[fabfilter-pro-g]
+product = FabFilter Pro-G
+vendor = FabFilter
+lynx = Sentry Gate
+names = FabFilter Pro-G; Pro-G
+# LYNX's gate / expander (round 108, MEASURE_fabfilter §7): every setting of the state is translated (style,
+# thresholds, ratios, range, attack, release, hold, knee, look-ahead, side-chain filters, wet / dry, output)
+translate = pro-g
 
 # ---------------------------------------------------------------- EQs and channel strips -> Parametric EQ (flat)
 [waves-ssl-channel]
@@ -459,6 +484,9 @@ vendor = FabFilter
 lynx = Ember Saturator
 names = FabFilter Saturn; FabFilter Saturn 2; Saturn 2
 preset = Drive=0.15
+# a Saturn 2 state ("FFBS", 951 values) sets Ember's multiband mode (round 108): up to four bands with their
+# crossovers, style family, drive, mix and level, the global mix and output
+translate = saturn2
 
 # ---------------------------------------------------------------- modulation
 [soundtoys-panman]
@@ -539,7 +567,7 @@ std::string matchKey (const std::string& name)
 std::optional<EffectKind> effectKindNamed (const std::string& name)
 {
     const auto wanted = lowerAscii (trim (name));
-    for (int k = 0; k <= (int) EffectKind::fruitySend; ++k) // the last EffectKind: extend when one is appended
+    for (int k = 0; k <= (int) EffectKind::sentryGate; ++k) // the last EffectKind: extend when one is appended
     {
         const auto kind = (EffectKind) k;
         if (kind == EffectKind::plugin || kind == EffectKind::parallel)
@@ -1018,6 +1046,13 @@ std::vector<SubstituteEntry> parseSubstituteTable (std::string_view text, int* e
         }
         else if (key == "map")
             mapItems.push_back (value);
+        else if (key == "translate")
+        {
+            if (fabfilter::translatorNamed (value) != nullptr)
+                e.translator = value;
+            else
+                ++bad;
+        }
         else if (key == "vst2params")
         {
             float v = 0;
@@ -1190,6 +1225,10 @@ EffectSlot makeSubstituteSlot (const SubstituteEntry& entry, const PluginIdentit
             ++count;
         }
     }
+    if (original != nullptr && ! original->state.empty() && ! entry.translator.empty())
+        if (const auto translate = fabfilter::translatorNamed (entry.translator))
+            if (const auto state = fabfilter::parseState (original->state))
+                count += translate (*state, slot);
     if (translated != nullptr)
         *translated = count;
     return slot;

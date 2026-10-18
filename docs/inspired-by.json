@@ -18,6 +18,15 @@
     "Apex Limiter": {"own": true, "kind": "Limiter",
       "en": "Transparent mastering limiter: look-ahead, true-peak ceiling, two-stage release and four styles.",
       "pt": "Limiter de masterização transparente: look-ahead, teto true-peak, release em dois estágios e quatro estilos."},
+    "Crest Compressor": {"own": true, "kind": "Compressor",
+      "en": "Style compressor fitted to black-box measurements: 11 styles, knee, range, look-ahead, 3-band side-chain EQ, character, oversampling and a live gain-reduction graph.",
+      "pt": "Compressor de estilos ajustado a medições caixa-preta: 11 estilos, knee, range, look-ahead, EQ de sidechain de 3 bandas, caráter, oversampling e gráfico de redução de ganho ao vivo."},
+    "Prism Multiband": {"own": true, "kind": "Multiband",
+      "en": "4-band dynamics: compress or expand, downward or upward, per-band attack, release, knee and level; transparent while a band rests.",
+      "pt": "Dinâmica de 4 bandas: comprime ou expande, para baixo ou para cima, ataque, release, knee e nível por banda; transparente enquanto a banda repousa."},
+    "Sentry Gate": {"own": true, "kind": "Gate",
+      "en": "Gate and expander with Classic, Clean, Vocal, Guitar and Upward styles, hold, knee, look-ahead and side-chain filters.",
+      "pt": "Gate e expansor com estilos Clássico, Limpo, Vocal, Guitarra e Para cima, hold, knee, look-ahead e filtros de sidechain."},
     "LYNX Tune": {"own": true, "kind": "Pitch",
       "en": "Real-time vocal pitch correction: key and scale, retune from natural to the hard robot effect, formant preserve, MIDI target notes.",
       "pt": "Afinação vocal em tempo real: tom e escala, retune do natural ao efeito robô, preservação de formantes, notas-alvo por MIDI."},
@@ -34,8 +43,8 @@
       "en": "Air EQ: a broad high shelf up to +15 dB plus an oversampled harmonic exciter, even or odd character.",
       "pt": "EQ de ar: shelf agudo largo até +15 dB e um excitador harmônico com oversampling, caráter par ou ímpar."},
     "Ember Saturator": {"own": true, "kind": "Saturation",
-      "en": "Tube, tape, transistor and fuzz saturation with tone tilt, auto gain and up to 8x oversampling.",
-      "pt": "Saturação valvulada, de fita, transistor e fuzz, com tilt de timbre, ganho automático e oversampling até 8x."},
+      "en": "Tube, tape, transistor and fuzz saturation with tone tilt, auto gain and up to 8x oversampling; up to four bands, each with its own style and drive.",
+      "pt": "Saturação valvulada, de fita, transistor e fuzz, com tilt de timbre, ganho automático e oversampling até 8x; até quatro bandas, cada uma com estilo e drive próprios."},
     "Epoch Verb": {"own": true, "kind": "Reverb",
       "en": "22 vintage-digital reverb algorithms (halls, plates, rooms, chorused and random spaces, gated) with 1970s, 1980s or now colour.",
       "pt": "22 algoritmos de reverb digital vintage (salões, placas, salas, espaços com chorus e aleatórios, gated) com cor dos anos 70, 80 ou atual."},
@@ -85,10 +94,9 @@
     "valhalla-freqecho": {"short": "FreqEcho"},
     "valhalla-spacemodulator": {"short": "SpaceModulator"},
     "valhalla-ubermod": {"short": "UberMod"},
-    "fabfilter-pro-c": {
-      "wip": {"standIn": "Compressor", "kind": "Compressor", "en": "New LYNX compressor", "pt": "Novo compressor do LYNX",
-        "noteEn": "A dedicated LYNX compressor, fitted to black-box measurements of the official trial, is being built.",
-        "notePt": "Um compressor dedicado do LYNX, ajustado a medições caixa-preta do trial oficial, está em desenvolvimento."}},
+    "fabfilter-pro-c": {"short": "Pro-C 2 / 3"},
+    "fabfilter-pro-mb": {"short": "Pro-MB"},
+    "fabfilter-pro-g": {"short": "Pro-G"},
     "fabfilter-pro-q": {"short": "Pro-Q 2 / 3 / 4"},
     "fabfilter-pro-l": {"short": "Pro-L 2"},
     "fabfilter-pro-r": {"short": "Pro-R 2"},
@@ -101,12 +109,5 @@
     "ssl-native-channel": {"short": "Native Channel Strip, 4K E"},
     "antares-auto-tune": {"short": "Auto-Tune"}
   },
-  "upcoming": [
-    {"id": "fabfilter-pro-mb", "product": "FabFilter Pro-MB", "short": "Pro-MB", "vendor": "FabFilter", "kind": "Multiband",
-      "en": "New LYNX multiband compressor", "pt": "Novo compressor multibanda do LYNX",
-      "noteEn": "A dedicated LYNX multiband dynamics engine is being built.", "notePt": "Um motor de dinâmica multibanda dedicado do LYNX está em desenvolvimento."},
-    {"id": "fabfilter-pro-g", "product": "FabFilter Pro-G", "short": "Pro-G", "vendor": "FabFilter", "kind": "Gate",
-      "en": "New LYNX gate / expander", "pt": "Novo gate / expansor do LYNX",
-      "noteEn": "A dedicated LYNX gate and expander is being built.", "notePt": "Um gate e expansor dedicado do LYNX está em desenvolvimento."}
-  ]
+  "upcoming": []
 }

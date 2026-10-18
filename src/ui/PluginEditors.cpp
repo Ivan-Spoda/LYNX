@@ -23,6 +23,7 @@
 #include "core/MultibandDelayFx.h"
 #include "core/Vocodex.h"
 #include "engine/Text.h"
+#include "ui/DynamicsDisplays.h"
 #include "ui/I18n.h"
 #include "ui/Icons.h"
 #include "ui/FacetEqEditor.h"
@@ -83,8 +84,9 @@ public:
                 page = maximusfx::selectedBand (fx->state); // FL reopens Maximus on the band selected when it was saved
         engine.addChangeListener (this);
         const auto& l = activeLayout();
-        for (const auto& item : l.items) // live meters (the mixing suite's gain reduction): refreshed at 30 Hz
-            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "pitchgraph") == 0))
+        for (const auto& item : l.items) // live meters and graphs (mixing suite, LYNX Tune's pitch, round 108's dynamics): 30 Hz
+            if (item.type == Item::display && item.display != nullptr
+                && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "pitchgraph") == 0 || dynui::isLive (item.display)))
             {
                 startTimerHz (30);
                 break;
@@ -163,6 +165,7 @@ public:
                 continue;
             if (item.type == Item::display && rectOf (item).contains (p) && (juce::String (item.display) == "eq" || juce::String (item.display) == "xy"
                                                                     || juce::String (item.display) == "sgamount" || juce::String (item.display) == "sgpresets"
+                                                                    || juce::String (item.display) == "prismbands" || juce::String (item.display) == "emberbands"
                                                                     || isBars (item)))
                 return i;
             if (item.type == Item::display || (item.param == nullptr && ! hasStyle (item, plugui::pageTabs)))
@@ -941,6 +944,8 @@ public:
         const juce::String id (item.display != nullptr ? item.display : "");
         const auto curveColour = fx.enabled ? colour::accent : colour::textDisabled;
         const auto inner = r.reduced (6.0f * s);
+        if (dynui::paint (g, id, r, s, fx, [this] (int k) { return liveMeter (k); }, dynHistory)) // the dynamics suite
+            return;
 
         auto grid = [&] (int columns, int rows) {
             g.setColour (colour::gridBeat);
@@ -1802,6 +1807,23 @@ public:
             ui::showValueTip (*this, rectOf (item).toNearestInt(), juce::String (sgStart * 100.0f, 0) + "%");
             return;
         }
+        if (item.type == Item::display && (juce::String (item.display) == "prismbands" || juce::String (item.display) == "emberbands"))
+        {
+            // band displays (round 108): drag a crossover line, or click a band to edit it (its page)
+            const auto* fx = current();
+            if (const auto p = dynui::crossoverNear (*fx, r, e.position.x, 6.0f * scale()); p >= 0)
+            {
+                dragItem = index;
+                crossoverDrag = p;
+                return;
+            }
+            if (! activeLayout().pages.empty())
+            {
+                page = juce::jlimit (0, (int) activeLayout().pages.size() - 1, dynui::bandAt (*fx, r, e.position.x));
+                repaint();
+            }
+            return;
+        }
         if (item.type == Item::display && juce::String (item.display) == "xy")
         {
             dragItem = index;
@@ -1921,6 +1943,14 @@ public:
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (crossoverDrag >= 0 && dragItem >= 0)
+        {
+            const auto r = rectOf (activeLayout().items[(std::size_t) dragItem]);
+            const auto v = dynui::crossoverValueAt (*current(), r, e.position.x);
+            setValue (crossoverDrag, v);
+            ui::showValueTip (*this, r.toNearestInt(), valueText (crossoverDrag, v));
+            return;
+        }
         if (eqDragging)
         {
             eqMouseDrag (e);
@@ -1963,6 +1993,12 @@ public:
     void mouseUp (const juce::MouseEvent&) override
     {
         eqDragging = false;
+        if (crossoverDrag >= 0)
+        {
+            crossoverDrag = -1;
+            dragItem = -1;
+            ui::hideValueTip();
+        }
         if (xyDragging || sgDragging || barsDragging)
         {
             xyDragging = sgDragging = barsDragging = false;
@@ -2193,6 +2229,7 @@ private:
 
     void timerCallback() override
     {
+        bool history = false;
         for (const auto& item : activeLayout().items)
         {
             if (item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "pitchgraph") == 0 && visible (item))
@@ -2203,9 +2240,14 @@ private:
                     pitchHistory.erase (pitchHistory.begin(), pitchHistory.begin() + (std::ptrdiff_t) (pitchHistory.size() - pitchHistoryLength));
                 repaint (rectOf (item).getSmallestIntegerContainer());
             }
-            if (item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "grmeter") == 0 && visible (item))
+            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || dynui::isLive (item.display)) && visible (item))
+            {
+                history = history || std::strcmp (item.display, "grhistory") == 0;
                 repaint (rectOf (item).getSmallestIntegerContainer());
+            }
         }
+        if (history)
+            dynHistory.push (liveMeter (0), liveMeter (2), liveMeter (3));
     }
 
     AudioEngine& engine;
@@ -2225,6 +2267,8 @@ private:
     float sgStart = 0.0f;
     std::array<std::vector<std::uint8_t>, 4> sgPresets {}; // the installation's preset files A–D (read on demand)
     juce::Point<float> eqDragOffset;
+    dynui::History dynHistory; // the dynamics suite's scrolling gain-reduction graph
+    int crossoverDrag = -1;    // the crossover parameter being dragged on a band display
 };
 
 // --- the window ------------------------------------------------------------------------------------

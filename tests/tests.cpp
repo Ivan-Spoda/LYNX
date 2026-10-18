@@ -15629,6 +15629,7 @@ TEST (plugin_layout_options_match_the_engine_values)
     CHECK (! plugui::layoutFor (EffectKind::distortion).items.empty());
 }
 #include "FabMeasureTests99.inc"
+#include "DynamicsTests108.inc"
 #include "LynxTuneTests95.inc"
 #include "LynxVerbTests100.inc"
 #include "FacetTests103.inc"

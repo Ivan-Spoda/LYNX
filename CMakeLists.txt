@@ -102,6 +102,8 @@ add_library(lynx_core STATIC
     src/core/HardcoreFx.cpp
     src/core/FacetEq.cpp
     src/core/ApexLimiter.cpp
+    src/core/DynamicsSuite.cpp
+    src/core/FabFilterStates.cpp
     src/core/FlResampler.cpp
     src/core/FlKeys.cpp
     src/core/DirectWave.cpp
@@ -227,6 +229,7 @@ if(LYNX_BUILD_APP)
         src/ui/ParametricEqEditor.cpp
         src/ui/FacetEqEditor.cpp
         src/ui/PluginEditors.cpp
+        src/ui/DynamicsDisplays.cpp
         src/ui/ExportDialog.cpp
         src/ui/AutomationUi.cpp
         src/ui/ChannelSettings.cpp

@@ -157,7 +157,7 @@ struct ProcessTimes
     std::atomic<std::uint64_t> audioNs { 0 };  // duration of the audio rendered while enabled
     std::atomic<std::uint64_t> wallNs { 0 };   // time the whole rack took for it
     // Live meters of the effects that have them (the mixing suite's gain reduction, REA round 96; LYNX Tune's pitch and
-    // Facet EQ's dynamic gains, round 103), always published:
+    // Facet EQ's dynamic gains, round 103; the dynamics suite's band gains and levels, round 108), always published:
     // [(track * maxEffectSlots + slot) * meterOutputs + output] = Effect::controlOutput (output) after the last block.
     static constexpr int meterOutputs = 8;
     std::array<std::atomic<float>, (std::size_t) maxMixerTracks * maxEffectSlots * meterOutputs> effectMeters {};

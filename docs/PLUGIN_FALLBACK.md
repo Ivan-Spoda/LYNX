@@ -71,6 +71,7 @@ vst2params = 12                         # VST2 parameters per program (to read "
 map = xml:Mix -> mix                    # translation: source -> target [| inLo inHi outLo outHi]
 map = xml:ReverbMode -> Mode | steps 0:0 0.0828:0.0476   # enumerations: breakpoints (round 100)
 map = xml:decay -> Decay | curve 0:0 0.019:0.5 1:1      # other laws: piecewise-linear points
+translate = pro-c3                      # a built-in state translator (round 108): pro-c3, pro-mb, pro-g, saturn2
 ```
 
 Map sources: `vst2:<n>` (float parameter n of the current program in FL's VST2 state), `xml:<attribute>` (an
@@ -79,6 +80,9 @@ active setup's "RealWorld" list in a Waves preset chunk). Targets: `mix` (lower 
 the LYNX effect; the optional range maps the source linearly (clamped) onto the normalised parameter. Instead of the
 range, `| curve x:y x:y …` maps through piecewise-linear points (clamped at the ends) and `| steps x:y …` gives the y
 of the last point whose x ≤ the value (enumerations); x must ascend.
+`translate` names a built-in translator (src/core/FabFilterStates.cpp) for states whose layout was learned from our own
+black-box observation (round 108: the FabFilter component states, "FFBS" / "FabF" + one float per VST3 parameter);
+it runs after the maps and only when the state's header and parameter count match the observed layout.
 
 Matching order: VST2 ID, VST3 class ID, CLAP id, Waves sub-plugin name, then names (a WaveShell's own name never
 matches by name).
@@ -112,14 +116,17 @@ matches by name).
 | ValhallaUberMod | Lattice Mod (round 101) | VST3 class ID [derived], name | all but DelaySync and InputPan (meaning not confirmed) |
 | Waves L1/L2/L3/L4 | Limiter | Waves name | — |
 | FabFilter Pro-L | Apex Limiter (round 99) | names | — |
-| Waves RComp, CLA-76, CLA-3A, C1, SSLComp, API-2500, FabFilter Pro-C | Compressor | VST3 class ID [DATA], Waves names, names | — |
+| Waves RComp, CLA-76, CLA-3A, C1, SSLComp, API-2500 | Compressor | VST3 class ID [DATA], Waves names | — |
+| FabFilter Pro-C (2 / 3) | Crest Compressor (round 108) | names | Pro-C 3: style, threshold, ratio, knee, range, attack, release, hold, look-ahead, character, side-chain EQ (3 bands), levels, mix, oversampling [EXEC layout] |
+| FabFilter Pro-MB | Prism Multiband (round 108) | names | enabled bands laid out on Prism's four, threshold, ratio, range, mode, knee, attack / release, level, solo, look-ahead, mix [EXEC layout] |
+| FabFilter Pro-G | Sentry Gate (round 108) | names | every control [EXEC layout] |
 | Waves CLA-2A | Glow Leveler (peak reduction 45 %, gain +3 dB; round 96) | VST3 class ID [DATA], Waves name | — |
 | Waves SSL E-Channel, SSL Native Channel Strip / 4K E / 4K B / Vocalstrip | Ridge Strip (neutral; round 96) | VST3 class ID [DATA], Waves name, names | — |
 | Waves Q10, REQ, SSLEQ | Parametric EQ (flat) | Waves names | — |
 | FabFilter Pro-Q | Facet EQ (flat, round 99) | names | — |
 | Waves DeEsser, FabFilter Pro-DS, Harrison De-Esser | Hush De-esser (default; round 96) | Waves name, names | — |
 | Slate Digital Fresh Air | Aether (neutral; round 96) | name | — |
-| Soundtoys Decapitator, FabFilter Saturn | Ember Saturator (drive +5.4 dB, auto gain; round 96) | names | — |
+| Soundtoys Decapitator, FabFilter Saturn | Ember Saturator (drive +5.4 dB, auto gain; round 96) | names | Saturn 2: multiband mode — bands, crossovers, style family, drive, mix, level (round 108) [EXEC layout] |
 | Soundtoys PanMan | Auto-pan | VST2 ID [DATA], name | — |
 
 | Antares Auto-Tune (Pro / Artist / Access / EFX+ / Hybrid), Waves Tune Real-Time | LYNX Tune (defaults: C major, 20 ms retune) | VST3 class ID [DATA] (Auto-Tune Pro), names, Waves name | — |

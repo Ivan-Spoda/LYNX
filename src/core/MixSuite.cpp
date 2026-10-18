@@ -7,6 +7,7 @@
 
 #include "core/Biquad.h"
 #include "core/Effects.h"
+#include "core/LrCrossover.h"
 
 // REA_rodada96. Every formula below is textbook material, cited where it matters:
 //  - biquads: R. Bristow-Johnson, "Cookbook formulae for audio EQ biquad filter coefficients";
@@ -823,6 +824,20 @@ double toneTilt (float v) noexcept { return lin (v, -1.0, 1.0); }
 double lowCutHz (float v) noexcept { return v <= 0.0f ? 0.0 : logMap (v, 20.0, 500.0); }
 double highCutHz (float v) noexcept { return v >= 1.0f ? 0.0 : logMap (v, 2000.0, 20000.0); }
 int oversampling (float v) noexcept { return v < 0.25f ? 2 : (v < 0.75f ? 4 : 8); }
+int bandCount (float v) noexcept { return std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * 3.0f), 0, 3) + 1; }
+double crossoverHz (float v) noexcept { return logMap (v, 30.0, 18000.0); }
+float crossoverValue (double hz) noexcept { return (float) std::clamp (std::log (hz / 30.0) / std::log (600.0), 0.0, 1.0); }
+int slopeDbOct (float v) noexcept { return v < 0.25f ? 12 : (v < 0.75f ? 24 : 48); }
+double bandLevelDb (float v) noexcept { return lin (v, -18.0, 18.0); }
+int bandParam (int band, int field) noexcept
+{
+    if (band <= 0)
+    {
+        static constexpr int first[] { style, drive, band1Mix, band1Level };
+        return first[std::clamp (field, 0, 3)];
+    }
+    return band2Style + (band - 1) * 4 + std::clamp (field, 0, 3);
+}
 
 float shape (Style s, float x) noexcept
 {
@@ -863,6 +878,11 @@ public:
         sr = rate;
         dry.setLength (Oversampler::latency());
         dc.set (sr, 8.0);
+        for (auto& d : bandDry)
+            d.setLength (Oversampler::latency());
+        for (auto& d : bandDc)
+            d.set (sr, 8.0);
+        splitBands = 0; // redesign the crossovers at the new rate
         reset();
     }
 
@@ -878,6 +898,15 @@ public:
         tiltHi.reset();
         highcut.reset();
         dc.reset();
+        for (auto& b : bandOs)
+            for (auto& o : b)
+                o.reset();
+        for (auto& d : bandDry)
+            d.reset();
+        for (auto& d : bandDc)
+            d.reset();
+        for (auto* x : { &split[0], &split[1], &split[2], &ap2Low, &ap3Low, &ap3Mid })
+            x->reset();
     }
 
     int latencySamples() const noexcept override { return Oversampler::latency(); }
@@ -892,6 +921,11 @@ public:
 private:
     void chunk (float* l, float* r, int n, const EffectParams& p) noexcept
     {
+        if (bandCount (p[bands]) > 1)
+        {
+            chunkBands (l, r, n, p);
+            return;
+        }
         const auto inPeak = Meters::peak (l, r, n);
         const auto factor = oversampling (p[quality]);
         for (auto& o : os)
@@ -964,6 +998,150 @@ private:
         meters.set (0.0f, 0.0f, inPeak, Meters::peak (l, r, n));
     }
 
+    // Multiband mode (REA_rodada108): Linkwitz-Riley bands (the lower ones through the higher splits' all-passes, so
+    // the bands sum flat), each with its own style, drive, mix and level, oversampled separately; the cuts, tone,
+    // global mix and output as in the single-band mode.
+    void chunkBands (float* l, float* r, int n, const EffectParams& p) noexcept
+    {
+        const auto inPeak = Meters::peak (l, r, n);
+        const int nb = bandCount (p[bands]);
+        const auto factor = oversampling (p[quality]);
+        std::array<double, 3> f { crossoverHz (p[xover1]), crossoverHz (p[xover2]), crossoverHz (p[xover3]) };
+        f[1] = std::max (f[1], f[0] * 1.05);
+        f[2] = std::max (f[2], f[1] * 1.05);
+        const auto slope = slopeDbOct (p[xoverSlope]);
+        if (f != splitHz || slope != splitSlope || nb != splitBands)
+        {
+            for (int k = 0; k < 3; ++k)
+                split[(std::size_t) k].design (sr, f[(std::size_t) k], slope);
+            ap2Low.design (sr, f[1], slope);
+            ap3Low.design (sr, f[2], slope);
+            ap3Mid.design (sr, f[2], slope);
+            if (nb != splitBands)
+            {
+                for (auto* x : { &split[0], &split[1], &split[2], &ap2Low, &ap3Low, &ap3Mid })
+                    x->reset();
+                for (auto& d : bandDry)
+                    d.reset();
+            }
+            splitHz = f;
+            splitSlope = slope;
+            splitBands = nb;
+        }
+        const auto lc = lowCutHz (p[lowCut]), hc = highCutHz (p[highCut]);
+        if (lc > 0.0)
+            lowcut.filter (sr, 1, lc, 0.70710678);
+        if (hc > 0.0)
+            highcut.filter (sr, 0, std::min (hc, sr * 0.45), 0.70710678);
+        const auto tilt = toneTilt (p[tone]);
+        tiltLo.shelf (sr, 1000.0, -6.0 * tilt, false, 0.5);
+        tiltHi.shelf (sr, 1000.0, 6.0 * tilt, true, 0.5);
+        const auto mx = std::clamp (p[mix], 0.0f, 1.0f);
+        const auto out = (float) dbToGain (lin (p[output], -18.0, 18.0));
+        const bool autoOn = on (p[autoGain]);
+
+        std::array<Style, maxBands> st {};
+        std::array<float, maxBands> drv {}, bmix {}, lvl {}, comp {};
+        for (int b = 0; b < nb; ++b)
+        {
+            st[(std::size_t) b] = styleOf (p[(std::size_t) bandParam (b, 0)]);
+            drv[(std::size_t) b] = (float) dbToGain (driveDb (p[(std::size_t) bandParam (b, 1)]));
+            bmix[(std::size_t) b] = std::clamp (p[(std::size_t) bandParam (b, 2)], 0.0f, 1.0f);
+            lvl[(std::size_t) b] = (float) dbToGain (bandLevelDb (p[(std::size_t) bandParam (b, 3)]));
+            comp[(std::size_t) b] = autoOn ? autoMakeup (st[(std::size_t) b], drv[(std::size_t) b]) : 1.0f;
+            bandOs[(std::size_t) b][0].setFactor (factor);
+            bandOs[(std::size_t) b][1].setFactor (factor);
+        }
+
+        for (int i = 0; i < n; ++i)
+        {
+            float x[2] { l[i], r[i] };
+            for (int c = 0; c < 2; ++c)
+            {
+                auto v = x[c];
+                if (lc > 0.0)
+                    v = lowcut.process (v, c);
+                float b0, rest, b1, rest2, b2, b3;
+                split[0].run (v, c, b0, rest);
+                if (nb == 2)
+                {
+                    band (0, c, i) = b0;
+                    band (1, c, i) = rest;
+                    continue;
+                }
+                split[1].run (rest, c, b1, rest2);
+                b0 = ap2Low.allpass (b0, c);
+                if (nb == 3)
+                {
+                    band (0, c, i) = b0;
+                    band (1, c, i) = b1;
+                    band (2, c, i) = rest2;
+                    continue;
+                }
+                split[2].run (rest2, c, b2, b3);
+                band (0, c, i) = ap3Low.allpass (b0, c);
+                band (1, c, i) = ap3Mid.allpass (b1, c);
+                band (2, c, i) = b2;
+                band (3, c, i) = b3;
+            }
+        }
+
+        // each band: keep its dry copy (delayed like the oversampled path), drive and shape it
+        for (int b = 0; b < nb; ++b)
+        {
+            auto* bl = bandBuf[(std::size_t) b][0].data();
+            auto* br = bandBuf[(std::size_t) b][1].data();
+            for (int i = 0; i < n; ++i)
+            {
+                float da = bl[i], db = br[i];
+                bandDry[(std::size_t) b].process (da, db);
+                dryBand[0][(std::size_t) i] = da;
+                dryBand[1][(std::size_t) i] = db;
+                bl[i] *= drv[(std::size_t) b];
+                br[i] *= drv[(std::size_t) b];
+            }
+            const auto s = st[(std::size_t) b];
+            auto curve = [s] (float v) noexcept { return shape (s, v); };
+            bandOs[(std::size_t) b][0].process (bl, n, curve);
+            bandOs[(std::size_t) b][1].process (br, n, curve);
+            const auto m = bmix[(std::size_t) b], g = lvl[(std::size_t) b], k = comp[(std::size_t) b];
+            for (int i = 0; i < n; ++i)
+            {
+                const auto wa = bandDc[(std::size_t) b].process (bl[i], 0) * k, wb = bandDc[(std::size_t) b].process (br[i], 1) * k;
+                const auto ya = (dryBand[0][(std::size_t) i] + (wa - dryBand[0][(std::size_t) i]) * m) * g;
+                const auto yb = (dryBand[1][(std::size_t) i] + (wb - dryBand[1][(std::size_t) i]) * m) * g;
+                if (b == 0)
+                {
+                    wl[(std::size_t) i] = ya;
+                    wr[(std::size_t) i] = yb;
+                }
+                else
+                {
+                    wl[(std::size_t) i] += ya;
+                    wr[(std::size_t) i] += yb;
+                }
+            }
+        }
+
+        for (int i = 0; i < n; ++i)
+        {
+            auto a = tiltHi.process (tiltLo.process (wl[(std::size_t) i], 0), 0);
+            auto b = tiltHi.process (tiltLo.process (wr[(std::size_t) i], 1), 1);
+            if (hc > 0.0)
+            {
+                a = highcut.process (a, 0);
+                b = highcut.process (b, 1);
+            }
+            float da = l[i], db = r[i];
+            dry.process (da, db);
+            l[i] = (da + (a - da) * mx) * out;
+            r[i] = (db + (b - db) * mx) * out;
+        }
+        meters.set (0.0f, 0.0f, inPeak, Meters::peak (l, r, n));
+    }
+
+    float& band (int b, int c, int i) noexcept { return bandBuf[(std::size_t) b][(std::size_t) c][(std::size_t) i]; }
+
     static constexpr int maxBlock = 2048;
     // level compensation: the RMS gain of the curve on a −12 dBFS sine at this drive, inverted
     static float autoMakeup (Style s, float drv) noexcept
@@ -992,6 +1170,16 @@ private:
     std::array<float, maxBlock> wl {}, wr {};
     float makeup = 1.0f, lastDrive = -1.0f;
     Style lastStyle = Style::tube;
+    // multiband mode
+    std::array<LrSplit, 3> split;
+    LrSplit ap2Low, ap3Low, ap3Mid;
+    std::array<double, 3> splitHz {};
+    int splitSlope = 0, splitBands = 0;
+    std::array<std::array<Oversampler, 2>, maxBands> bandOs;
+    std::array<Delay2<256>, maxBands> bandDry;
+    std::array<OnePoleHp, maxBands> bandDc;
+    std::array<std::array<std::array<float, maxBlock>, 2>, maxBands> bandBuf {};
+    std::array<std::array<float, maxBlock>, 2> dryBand {};
     Meters meters;
 };
 } // namespace
@@ -1043,7 +1231,12 @@ const EffectInfo& emberInfo()
 {
     static const EffectInfo info { "Ember Saturator",
                                    { { "Drive", 0.0f }, { "Style", 0.0f }, { "Tone", 0.5f }, { "Low cut", 0.0f }, { "High cut", 1.0f },
-                                     { "Mix", 1.0f }, { "Output", 0.5f }, { "Auto gain", 1.0f }, { "Oversampling", 0.5f } } };
+                                     { "Mix", 1.0f }, { "Output", 0.5f }, { "Auto gain", 1.0f }, { "Oversampling", 0.5f },
+                                     { "Bands", 0.0f }, { "Crossover 1", 0.3266f }, { "Crossover 2", 0.6574f }, { "Crossover 3", 0.9375f },
+                                     { "Crossover slope", 0.5f }, { "B1 mix", 1.0f }, { "B1 level", 0.5f },
+                                     { "B2 style", 0.0f }, { "B2 drive", 0.0f }, { "B2 mix", 1.0f }, { "B2 level", 0.5f },
+                                     { "B3 style", 0.0f }, { "B3 drive", 0.0f }, { "B3 mix", 1.0f }, { "B3 level", 0.5f },
+                                     { "B4 style", 0.0f }, { "B4 drive", 0.0f }, { "B4 mix", 1.0f }, { "B4 level", 0.5f } } };
     return info;
 }
 
@@ -1176,6 +1369,17 @@ std::string paramText (EffectKind kind, int param, float v)
             case output: return fmt ("%+.1f dB", lin (v, -18.0, 18.0));
             case autoGain: return onOff (v);
             case quality: return std::to_string (oversampling (v)) + "x";
+            case bands: return bandCount (v) == 1 ? "1 band" : std::to_string (bandCount (v)) + " bands";
+            case xover1: case xover2: case xover3: return hzText (crossoverHz (v));
+            case xoverSlope: return std::to_string (slopeDbOct (v)) + " dB/oct";
+            case band2Style: case band3Style: case band4Style:
+            {
+                static const char* names[] = { "tube", "tape", "transistor", "fuzz" };
+                return names[(int) styleOf (v)];
+            }
+            case band2Drive: case band3Drive: case band4Drive: return fmt ("%+.1f dB", driveDb (v));
+            case band1Mix: case band2Mix: case band3Mix: case band4Mix: return fmt ("%.0f%%", v * 100.0);
+            case band1Level: case band2Level: case band3Level: case band4Level: return fmt ("%+.1f dB", bandLevelDb (v));
             default: return fmt ("%.2f", v);
         }
     }
