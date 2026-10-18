@@ -81,6 +81,8 @@ bool apply (Song& song, int clip, const Props& p)
     c.track = std::clamp (p.track, 0, 499);
     c.start = std::max<std::int64_t> (0, p.start);
     c.length = std::max<std::int64_t> (1, p.length);
+    if (c.offset != p.offset)
+        c.offsetFraction = 0.0f; // an offset typed in ticks drops the imported sub-tick rest
     c.offset = std::max<std::int64_t> (0, p.offset);
     c.muted = p.muted;
 

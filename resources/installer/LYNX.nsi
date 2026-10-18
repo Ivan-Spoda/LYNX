@@ -96,6 +96,7 @@ Section "!$(SecApp)" SecMain
     File /nonfatal "${STAGE}\Demo.lynx"
     ; LYNX ASIO (REA round 97): LYNX loads it directly; the .bat files register it for other programs (administrator)
     File /nonfatal "${STAGE}\lynx-asio.dll"
+    File /nonfatal "${STAGE}\lynx-asio32.dll" ; for 32-bit programs (REA round 106)
     File /nonfatal "${STAGE}\Register LYNX ASIO.bat"
     File /nonfatal "${STAGE}\Unregister LYNX ASIO.bat"
     WriteUninstaller "$INSTDIR\Uninstall.exe"
@@ -154,13 +155,23 @@ Section "Uninstall"
     Delete "$INSTDIR\THIRD_PARTY.md"
     Delete "$INSTDIR\PRIVACY.md"
     Delete "$INSTDIR\Demo.lynx"
-    ; LYNX ASIO registered for other programs: unregister it first (Windows asks for administrator rights)
+    ; LYNX ASIO registered for other programs: unregister it first (Windows asks for administrator rights).
+    ; The 64-bit registration lives in the 64-bit registry view (this uninstaller is a 32-bit program).
+    SetRegView 64
     ReadRegStr $0 HKLM "SOFTWARE\ASIO\LYNX ASIO" "CLSID"
+    SetRegView 32
     ${If} $0 != ""
     ${AndIf} ${FileExists} "$INSTDIR\lynx-asio.dll"
         ExecShellWait "runas" "$WINDIR\Sysnative\regsvr32.exe" '/u /s "$INSTDIR\lynx-asio.dll"'
     ${EndIf}
+    ; the 32-bit registration lives in the 32-bit registry view
+    ReadRegStr $0 HKLM "SOFTWARE\ASIO\LYNX ASIO" "CLSID"
+    ${If} $0 != ""
+    ${AndIf} ${FileExists} "$INSTDIR\lynx-asio32.dll"
+        ExecShellWait "runas" "$WINDIR\SysWOW64\regsvr32.exe" '/u /s "$INSTDIR\lynx-asio32.dll"'
+    ${EndIf}
     Delete "$INSTDIR\lynx-asio.dll"
+    Delete "$INSTDIR\lynx-asio32.dll"
     Delete "$INSTDIR\Register LYNX ASIO.bat"
     Delete "$INSTDIR\Unregister LYNX ASIO.bat"
     Delete "$INSTDIR\Uninstall.exe"
