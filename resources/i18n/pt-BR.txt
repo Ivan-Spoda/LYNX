@@ -2530,6 +2530,7 @@ countries: br
 "Noise gain" = "Ruído"
 "Feedback mix" = "Mix do feedback"
 "1x|1/2x" = "1x|1/2x"
+"Send to" = "Enviar para"
 
 # --- Dynamics suite (round 108): Crest Compressor, Prism Multiband, Sentry Gate, Ember's bands
 "1 band|2|3|4" = "1 banda|2|3|4"

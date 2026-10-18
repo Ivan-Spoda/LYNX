@@ -91,8 +91,19 @@ struct RackState
         int source = 0;
         int delay = 0; // index into sendDelays[source]
         float level = 1.0f;
+        int tap = -1;  // ≥ 0: a Fruity Send slot's signal (sendTaps[tap]) instead of the source's output
     };
     std::vector<std::vector<MixerInput>> mixerInputs; // [track]; [0] = Master
+
+    // Fruity Send slots (FL's mid-chain sends to another insert): what each one sends is collected in its own
+    // buffer while its insert runs, and pulled by the destination like a route.
+    static constexpr int maxSendTaps = 64;
+    struct SendTap
+    {
+        int track = 0, slot = 0, target = 0;
+    };
+    std::vector<SendTap> sendTaps;
+    std::vector<std::vector<int>> slotTap; // [track][slot]: index into sendTaps, or −1
     std::vector<std::vector<int>> mixerLayers;        // inserts with no dependencies among them, in order
     bool parallel = false;                            // worth splitting across threads
     void buildMixerGraph();
@@ -252,6 +263,9 @@ private:
     std::array<float, RackState::maxAutomations> automationValues {}; // NaN = not evaluated yet
     std::array<float, maxMixerTracks * 2> lastTrackGain {}; // L/R gain of the previous block, for the ramp
     std::array<char, maxMixerTracks> trackActive {};        // the track output has sound in this block
+    std::vector<float> tapBuffers;                          // RackState::maxSendTaps * 2 * chunkCapacity
+    std::array<char, RackState::maxSendTaps> tapActive {};  // the Fruity Send slot sent something this block
+    float* tapBuffer (int tap, int side) noexcept;
     std::array<char, maxChannels> channelSilent {};          // channel skipped in this chunk (idle, no notes)
     std::array<NoteMask, maxChannels> heldNotes {};          // keys held on each channel (effects that follow notes: LYNX Tune)
     static constexpr int chunkCapacity = 512;               // chunks processed at once

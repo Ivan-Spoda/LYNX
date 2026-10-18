@@ -177,6 +177,14 @@ std::optional<BalanceState> parseBalance (const std::vector<std::uint8_t>& d)
     return BalanceState { i32At (d, 0), i32At (d, 4) };
 }
 
+std::optional<SendState> parseSend (const std::vector<std::uint8_t>& d)
+{
+    // pan, volume, dry (the plugin's three controls) and the insert it sends to (REA_rodada105_send §1)
+    if (d.size() < 16)
+        return std::nullopt;
+    return SendState { i32At (d, 0), i32At (d, 4), i32At (d, 8), i32At (d, 12) };
+}
+
 std::optional<BloodOverdriveState> parseBloodOverdrive (const std::vector<std::uint8_t>& d)
 {
     // i32 version (the plugin reads versions < 4; 3 today), 6 × i32 controls, then (version > 2) an editor-only i32
@@ -214,6 +222,19 @@ void balanceToParams (const BalanceState& s, float* p) noexcept
     p[1] = norm (s.vol, 0, 320);
 }
 BalanceState balanceFromParams (const float* p) noexcept { return { rawFrom (p[0], -128, 128), rawFrom (p[1], 0, 320) }; }
+float sendTrackValue (int track) noexcept { return norm (std::clamp (track, 0, maxMixerTracks - 1), 0, maxMixerTracks - 1); }
+int sendTrack (float value) noexcept { return rawFrom (value, 0, maxMixerTracks - 1); }
+void sendToParams (const SendState& s, float* p) noexcept
+{
+    p[0] = norm (s.pan, -128, 128);
+    p[1] = norm (s.vol, 0, 320);
+    p[2] = norm (s.dry, 0, 256);
+    p[3] = sendTrackValue (s.track);
+}
+SendState sendFromParams (const float* p) noexcept
+{
+    return { rawFrom (p[0], -128, 128), rawFrom (p[1], 0, 320), rawFrom (p[2], 0, 256), sendTrack (p[3]) };
+}
 void bloodOverdriveToParams (const BloodOverdriveState& s, float* p) noexcept
 {
     for (int i = 0; i < 6; ++i)
@@ -278,6 +299,25 @@ std::string balanceParamText (int param, float v01)
     if (param == 0)
         return panText (rawFrom (v01, -128, 128), 0, 128);
     return dbText (volumeGain (rawFrom (v01, 0, 320)));
+}
+
+std::string sendParamText (int param, float v01)
+{
+    char t[32];
+    switch (param)
+    {
+        case 0: return panText (rawFrom (v01, -128, 128), 0, 128);
+        case 1: return dbText (volumeGain (rawFrom (v01, 0, 320)));
+        case 2:
+            std::snprintf (t, sizeof (t), "%.0f%%", rawFrom (v01, 0, 256) * 100.0 / 256.0);
+            return t;
+        case 3:
+            if (sendTrack (v01) <= 0)
+                return "None";
+            std::snprintf (t, sizeof (t), "Insert %d", sendTrack (v01));
+            return t;
+        default: return {};
+    }
 }
 
 std::string bloodOverdriveParamText (int param, float v01)
@@ -445,6 +485,101 @@ void BalanceEngine::process (float* left, float* right, int n) noexcept
     for (int k = 0; k < 4; ++k)
         ramp (cur[(std::size_t) k], (float) target[(std::size_t) k], n, step, start[k], delta[k]);
     matrix (left, right, n, start, delta);
+}
+
+// ========================================================================================================== Send
+// REA_rodada105_send §2: the pan and the volume give a 2×2 matrix (one side keeps its gain, the other fades and
+// half of what it loses is folded into the kept side); the send is the input through that matrix, ramped like
+// Balance (host step +0x34, 0.001 per sample at 44.1 kHz), added into the destination's buffer; then the signal
+// continues × dry, without a ramp. Both levels use the L11 law.
+void SendEngine::prepare (int sampleRate) noexcept { step = rampStep (std::max (1, sampleRate)); }
+
+void SendEngine::set (const SendState& in) noexcept
+{
+    const SendState s { std::clamp (in.pan, -128, 128), std::clamp (in.vol, 0, 320), std::clamp (in.dry, 0, 256), in.track };
+    if (known && s.pan == raw.pan && s.vol == raw.vol && s.dry == raw.dry && s.track == raw.track)
+        return;
+    if (! known || s.pan != raw.pan)
+    {
+        pan = (float) s.pan * 0.0078125f;
+        dirty = true;
+    }
+    if (! known || s.vol != raw.vol)
+    {
+        volume = volumeGain (s.vol);
+        dirty = true;
+    }
+    if (! known || s.dry != raw.dry)
+        dry = volumeGain (s.dry);
+    raw = s;
+    known = true;
+}
+
+void SendEngine::flush() noexcept
+{
+    dirty = true;
+    // the targets now (only computed while an insert is chosen, as in FL), the current gains at them
+    process (nullptr, nullptr, nullptr, nullptr, 0);
+    cur = target;
+}
+
+void SendEngine::process (const float* left, const float* right, float* sendLeft, float* sendRight, int n) noexcept
+{
+    if (raw.track <= 0)
+        return;
+    if (dirty)
+    {
+        if (pan < 0.0f)
+        {
+            const float kept = pan + 1.0f;
+            target[2] = ((1.0f - kept) * 0.5f) * volume;
+            target[1] = kept * volume;
+            target[0] = volume - target[2];
+            target[3] = 0.0f;
+        }
+        else
+        {
+            const float kept = 1.0f - pan;
+            target[3] = ((1.0f - kept) * 0.5f) * volume;
+            target[0] = kept * volume;
+            target[1] = volume - target[3];
+            target[2] = 0.0f;
+        }
+        dirty = false;
+    }
+    if (n <= 0 || left == nullptr || sendLeft == nullptr)
+        return;
+    float g[4], d[4];
+    for (int k = 0; k < 4; ++k)
+        ramp (cur[(std::size_t) k], target[(std::size_t) k], n, step, g[k], d[k]);
+    if ((bitsOf (d[0]) | bitsOf (d[1]) | bitsOf (d[2]) | bitsOf (d[3])) != 0)
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            const float l = left[i], r = right[i];
+            sendLeft[i] = l * g[0] + r * g[2] + sendLeft[i];
+            sendRight[i] = r * g[1] + l * g[3] + sendRight[i];
+            for (int k = 0; k < 4; ++k)
+                g[k] = g[k] + d[k];
+        }
+    }
+    else if ((bitsOf (g[2]) | bitsOf (g[3])) != 0)
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            const float l = left[i], r = right[i];
+            sendLeft[i] = l * g[0] + r * g[2] + sendLeft[i];
+            sendRight[i] = r * g[1] + l * g[3] + sendRight[i];
+        }
+    }
+    else if ((bitsOf (g[0]) | bitsOf (g[1])) != 0)
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            sendLeft[i] = left[i] * g[0] + sendLeft[i];
+            sendRight[i] = right[i] * g[1] + sendRight[i];
+        }
+    }
 }
 
 // =============================================================================================== Blood Overdrive
@@ -616,6 +751,58 @@ private:
     bool ready = false;
 };
 
+class SendEffect final : public Effect
+{
+public:
+    void prepare (double sampleRate) noexcept override
+    {
+        rate = (int) std::lround (sampleRate);
+        ready = false;
+    }
+    void reset() noexcept override
+    {
+        if (ready)
+            engine.flush();
+    }
+    void setSendOutput (float* left, float* right) noexcept override
+    {
+        outL = left;
+        outR = right;
+    }
+    void process (float* left, float* right, int n, const EffectParams& params, double) noexcept override
+    {
+        engine.set (sendFromParams (params.data()));
+        if (! ready)
+        {
+            engine.prepare (rate);
+            engine.flush();
+            ready = true;
+        }
+        for (int done = 0; done < n;)
+        {
+            const int m = std::min (engineBlock, n - done);
+            engine.process (left + done, right + done, outL != nullptr ? outL + done : nullptr, outR != nullptr ? outR + done : nullptr, m);
+            done += m;
+        }
+        outL = outR = nullptr; // given again before every block
+        const float g = engine.dryGain();
+        if (bitsOf (g) == 0x3f800000u)
+            return;
+        for (int i = 0; i < n; ++i)
+        {
+            left[i] = left[i] * g;
+            right[i] = right[i] * g;
+        }
+    }
+
+private:
+    SendEngine engine;
+    float* outL = nullptr;
+    float* outR = nullptr;
+    int rate = 44100;
+    bool ready = false;
+};
+
 class BloodOverdriveEffect final : public Effect
 {
 public:
@@ -653,4 +840,5 @@ private:
 std::unique_ptr<Effect> makePanOMatic() { return std::make_unique<PanOMaticEffect>(); }
 std::unique_ptr<Effect> makeBalance() { return std::make_unique<BalanceEffect>(); }
 std::unique_ptr<Effect> makeBloodOverdrive() { return std::make_unique<BloodOverdriveEffect>(); }
+std::unique_ptr<Effect> makeSend() { return std::make_unique<SendEffect>(); }
 } // namespace lynx::flbasic
