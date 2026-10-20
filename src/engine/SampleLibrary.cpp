@@ -12,6 +12,26 @@ namespace lynx
 {
 namespace
 {
+// Decoded samples are shared by every SampleLibrary of the process (the export's engine finds what the open project
+// already decoded) and may be loaded from several threads at once (round 112: an open decodes its samples in parallel,
+// off the message thread). A path being decoded is waited for, not decoded twice (its stream cache file is written once).
+struct SharedCache
+{
+    std::mutex lock;
+    std::condition_variable done;
+    std::map<juce::String, std::weak_ptr<const SampleData>> entries;
+    std::set<juce::String> loading;
+};
+
+SharedCache& sharedCache()
+{
+    static SharedCache c;
+    return c;
+}
+} // namespace
+
+namespace
+{
 // FL stores many factory samples as WAV whose "data" is an Ogg Vorbis stream
 // (format tag 0x674F/0x6750/0x6751, "Og"). JUCE's WAV reader doesn't understand this.
 std::unique_ptr<juce::MemoryBlock> extractOggFromWav (const juce::File& file)
@@ -163,8 +183,11 @@ std::shared_ptr<const SampleData> SampleLibrary::loadStretched (const juce::Stri
 {
     const auto key = path + "|" + juce::String (ratio, 4);
 
-    if (auto it = stretchedCache.find (key); it != stretchedCache.end())
-        return it->second;
+    {
+        const std::scoped_lock l (stretchLock);
+        if (auto it = stretchedCache.find (key); it != stretchedCache.end())
+            return it->second;
+    }
 
     auto original = load (path);
 
@@ -174,6 +197,7 @@ std::shared_ptr<const SampleData> SampleLibrary::loadStretched (const juce::Stri
     std::shared_ptr<const SampleData> stretched = timeStretch (*original, ratio);
 
     // only one length per file is kept (changing the BPM replaces the stretched one)
+    const std::scoped_lock l (stretchLock);
     for (auto it = stretchedCache.begin(); it != stretchedCache.end();)
         it = it->first.startsWith (path + "|") ? stretchedCache.erase (it) : std::next (it);
 
@@ -320,6 +344,7 @@ void prefetchSample (const SampleData& data, double fromSeconds, double toSecond
 
 void SampleLibrary::forget (const juce::String& path)
 {
+    const std::scoped_lock l (stretchLock);
     {
         auto& shared = sharedCache();
         const std::scoped_lock l (shared.lock);
@@ -328,26 +353,6 @@ void SampleLibrary::forget (const juce::String& path)
     for (auto it = stretchedCache.begin(); it != stretchedCache.end();)
         it = it->first.startsWith (path + "|") ? stretchedCache.erase (it) : std::next (it);
 }
-
-namespace
-{
-// Decoded samples are shared by every SampleLibrary of the process (the export's engine finds what the open project
-// already decoded) and may be loaded from several threads at once (round 112: an open decodes its samples in parallel,
-// off the message thread). A path being decoded is waited for, not decoded twice (its stream cache file is written once).
-struct SharedCache
-{
-    std::mutex lock;
-    std::condition_variable done;
-    std::map<juce::String, std::weak_ptr<const SampleData>> entries;
-    std::set<juce::String> loading;
-};
-
-SharedCache& sharedCache()
-{
-    static SharedCache c;
-    return c;
-}
-} // namespace
 
 std::shared_ptr<const SampleData> SampleLibrary::load (const juce::String& path)
 {

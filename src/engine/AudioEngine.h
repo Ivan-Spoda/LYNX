@@ -254,7 +254,6 @@ public:
     };
     static void prepareFlpImport (const juce::File& file, const std::map<std::string, std::string>& relocations, SampleLibrary& library,
                                   PreparedFlp& out);
-    SampleLibrary& getSampleLibrary() noexcept { return samples; }
     // one hosted plugin of the queue (message thread); false when the queue is done
     bool preloadNextPlugin (PreparedFlp& prepared);
     bool finishFlpImport (PreparedFlp&& prepared, bool asEdit);

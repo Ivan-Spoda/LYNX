@@ -167,6 +167,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
         // multi-sample sampler: one zone per sample (DirectWave, FPC layers...)
         if (kind == InstrumentKind::sampler && ! channel.zones.empty())
         {
+            const loadtrace::Scope timing ("rack_zoned");
             std::vector<LoadedZone> zones;
 
             for (const auto& z : channel.zones)
@@ -258,6 +259,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
     }
 
     state->song = std::move (song);
+    const auto tailStarted = std::chrono::steady_clock::now();
 
     // scheduling: notes sorted by start (order among notes on the same tick is preserved)
     for (auto& p : state->song.patterns)
@@ -291,6 +293,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                 }
     const auto audible = state->song.soloAudible();
     state->mixerAudible.assign (audible.begin(), audible.end());
+    loadtrace::add ("rack_schedule_graph", loadtrace::msSince (tailStarted));
     return state;
 }
 

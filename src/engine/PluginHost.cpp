@@ -1089,10 +1089,15 @@ std::string PluginHost::preloadKey (const PluginRef& ref, double sampleRate)
            + std::to_string ((long long) std::llround (sampleRate));
 }
 
-void PluginHost::preload (const PluginRef& ref)
+void PluginHost::preload (const PluginRef& ref, int wanted)
 {
     if (ref.id.empty())
         return;
+    {
+        const std::scoped_lock lock (preloadLock);
+        if (const auto it = preloaded.find (preloadKey (ref, preloadRate)); it != preloaded.end() && (int) it->second.size() >= wanted)
+            return;
+    }
     Preloaded p;
     p.instance = createInstance (ref, preloadRate, &p.error);
     const std::scoped_lock lock (preloadLock);
@@ -1138,7 +1143,10 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::instantiate (const Plugin
 
 std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const PluginRef& ref, double sampleRate, juce::String* error)
 {
+    if (onInstantiate)
+        onInstantiate (juce::String::fromUTF8 (ref.name.c_str()));
     const loadtrace::Scope timing ("plugin_instantiate");
+    const loadtrace::Scope each ("plugin " + ref.name); // per plugin in load.log: which one is slow
     const auto description = find (juce::String::fromUTF8 (ref.id.c_str()));
 
     if (description == nullptr)

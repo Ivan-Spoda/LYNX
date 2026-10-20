@@ -1311,6 +1311,41 @@ void AudioEngine::prepareFlpImport (const juce::File& file, const std::map<std::
             t.join();
         for (auto& d : *decoded)
             out.decoded.push_back (std::move (d));
+
+        // pitch-preserving stretch (audio clips that follow the tempo): the stretched copy too, in parallel, with the
+        // same ratio the rack asks for (RackState::build) — it was computed on the message thread while building
+        struct Stretch
+        {
+            std::string path;
+            double ratio;
+        };
+        std::vector<Stretch> stretches;
+        for (const auto& c : out.song.channels)
+            if ((c.instrument == InstrumentKind::sampler || c.instrument == InstrumentKind::audioClip) && c.zones.empty() && ! c.samplePath.empty()
+                && c.sampler.keepPitch && c.sampler.stretchBeats > 0.0f)
+                if (const auto data = library.load (juce::String::fromUTF8 (c.samplePath.c_str())); data != nullptr && data->frames() > 0)
+                {
+                    const auto target = c.sampler.stretchBeats * 60.0 / std::max (1.0, out.song.bpm);
+                    const auto ratio = target / ((double) data->frames() / data->sampleRate);
+                    if (std::none_of (stretches.begin(), stretches.end(), [&] (const Stretch& x) { return x.path == c.samplePath && x.ratio == ratio; }))
+                        stretches.push_back ({ c.samplePath, ratio });
+                }
+        if (! stretches.empty())
+        {
+            const auto stretchStarted = std::chrono::steady_clock::now();
+            std::atomic<std::size_t> nextStretch { 0 };
+            auto stretchWorker = [&] {
+                for (auto i = nextStretch++; i < stretches.size(); i = nextStretch++)
+                    library.loadStretched (juce::String::fromUTF8 (stretches[i].path.c_str()), stretches[i].ratio);
+            };
+            std::vector<std::thread> helpers;
+            for (std::size_t i = 1; i < juce::jmin (threads, stretches.size()); ++i)
+                helpers.emplace_back (stretchWorker);
+            stretchWorker();
+            for (auto& t : helpers)
+                t.join();
+            loadtrace::add ("stretch_wall", loadtrace::msSince (stretchStarted), (int) stretches.size());
+        }
         loadtrace::add ("samples_wall", loadtrace::msSince (decodeStarted), (int) paths.size());
         out.ok = true;
     }
@@ -1348,8 +1383,10 @@ bool AudioEngine::preloadNextPlugin (PreparedFlp& prepared)
         return false;
     const auto total = (int) prepared.pluginQueue.size();
     const auto& ref = prepared.pluginQueue[prepared.pluginsDone];
-    loadtrace::step ((int) prepared.pluginsDone, total, ref.name, (int) prepared.pluginsDone + 1);
-    plugins.preload (ref);
+    auto wanted = 0;
+    for (std::size_t i = 0; i <= prepared.pluginsDone; ++i)
+        wanted += prepared.pluginQueue[i].id == ref.id && prepared.pluginQueue[i].state == ref.state ? 1 : 0;
+    plugins.preload (ref, wanted);
     ++prepared.pluginsDone;
     loadtrace::step ((int) prepared.pluginsDone, total, {});
     return prepared.pluginsDone < prepared.pluginQueue.size();
@@ -1485,6 +1522,7 @@ void AudioEngine::publishSong()
         return samples.load (juce::String::fromUTF8 (path.c_str()));
     };
     factories.stretchedSamples = [this] (const std::string& path, double ratio) {
+        const loadtrace::Scope timing ("rack_stretch");
         return samples.loadStretched (juce::String::fromUTF8 (path.c_str()), ratio);
     };
     factories.pluginInstruments = [this] (const PluginRef& ref, double sr) { return plugins.makeInstrument (ref, sr); };

@@ -2,6 +2,7 @@
 
 #include <map>
 #include <memory>
+#include <mutex>
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
@@ -10,7 +11,7 @@
 namespace lynx
 {
 // Decodes audio files into SampleData, cached by path (one cache for the whole process).
-// load() and forget() may be called from any thread except the audio thread; loadStretched() on the UI thread.
+// Any thread except the audio thread.
 class SampleLibrary
 {
 public:
@@ -38,6 +39,7 @@ private:
 
     juce::AudioFormatManager formats;
     std::map<juce::String, std::shared_ptr<const SampleData>> stretchedCache; // keeps the latest one per path
+    std::mutex stretchLock; // (an open prepares stretched copies on worker threads)
 };
 // Brings in from disk the range [from, to) (seconds) of a mapped sample. Any thread except the audio thread.
 void prefetchSample (const SampleData& data, double fromSeconds, double toSeconds);

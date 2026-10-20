@@ -39,6 +39,7 @@ public:
 
     ~LoadPanel() override
     {
+        engine.getPluginHost().onInstantiate = nullptr;
         stopTimer();
         abort = true;
         if (worker.joinable())
@@ -59,7 +60,7 @@ public:
 
         auto area = box.reduced (20, 16);
         g.setColour (theme::colour::textPrimary);
-        g.setFont (juce::Font (theme::type::font (15.0f, true)));
+        g.setFont (juce::Font (theme::font (15.0f, true)));
         g.drawFittedText (tr ("Opening {0}", { file.getFileNameWithoutExtension() }), area.removeFromTop (22), juce::Justification::centredLeft, 1);
         area.removeFromTop (12);
 
@@ -72,7 +73,7 @@ public:
         area.removeFromTop (10);
 
         auto line = area.removeFromTop (18);
-        g.setFont (juce::Font (theme::type::font (theme::type::small)));
+        g.setFont (juce::Font (theme::font (theme::type::small)));
         g.setColour (theme::colour::textSecondary);
         g.drawText (juce::String (juce::roundToInt (fraction * 100.0)) + " %", line.removeFromRight (48), juce::Justification::centredRight);
         g.drawFittedText (statusText, line, juce::Justification::centredLeft, 1);
@@ -184,6 +185,13 @@ private:
             }
             step = Step::plugins;
             loadtrace::stage (0.55, 0.90, TR_NOOP ("Loading plugins..."), TR_NOOP ("Loading {0}... {1}/{2}"));
+            // each hosted plugin named as it is created (also the ones the VST3 automation remap creates first)
+            engine.getPluginHost().onInstantiate = [this] (const juce::String& name) {
+                const auto total = juce::jmax ((int) (prepared.adopted ? prepared.pluginQueue.size() : prepared.uses.size()), created + 1);
+                loadtrace::step (created, total, name.toStdString(), created + 1);
+                ++created;
+                refresh();
+            };
             refresh();
             return; // (the panel shows the stage before the first plugin blocks the thread)
         }
@@ -223,6 +231,7 @@ private:
 
     void finish (bool ok, const juce::String& error)
     {
+        engine.getPluginHost().onInstantiate = nullptr;
         step = Step::finished;
         stopTimer();
         loadtrace::end();
@@ -246,6 +255,7 @@ private:
     bool resumeBackground = false;
     Step step = Step::scanning;
     double shown = 0.0;
+    int created = 0; // hosted plugins created so far
     juce::String statusText;
 };
 } // namespace

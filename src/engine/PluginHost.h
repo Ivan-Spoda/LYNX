@@ -176,9 +176,13 @@ public:
     // is the one the rack will be built at (also used by the VST3 automation remap, which reuses the same instance).
     // Message thread.
     void setPreloadRate (double sampleRate) noexcept { preloadRate = sampleRate; }
-    void preload (const PluginRef& ref);
+    // `wanted`: how many ready instances of this exact plugin+state the rack needs so far (one the VST3 automation
+    // remap already created counts, so it is not created twice)
+    void preload (const PluginRef& ref, int wanted = 1);
     void clearPreloaded();
     int preloadedCount() const;
+    // Called on the message thread just before a hosted plugin is created (the progress panel names it and repaints).
+    std::function<void (const juce::String& name)> onInstantiate;
 
     // Targeted scans on open (round 112): a project plugin that one targeted scan could not find is not searched
     // again on every open (it walked the plugin folders and rescanned files each time); a full scan, or a week,
