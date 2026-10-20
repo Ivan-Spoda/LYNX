@@ -11,6 +11,10 @@
 #include "engine/FlStudio.h"
 #include "ui/I18n.h"
 
+#if JUCE_WINDOWS
+ #include <windows.h>
+#endif
+
 namespace lynx
 {
 void preparePlugin (juce::AudioPluginInstance& plugin, double sampleRate, int blockSize)
@@ -232,14 +236,15 @@ PluginHost::PluginHost (bool keep)
         // once: files marked as failed by scans before the class-count timeout (REA_rodada107 §2) get another try,
         // since a large bundle (Waves shell) was marked "hung" only for taking longer than 30 s
         const auto retried = settingsFolder().getChildFile ("scan-retry.txt");
-        if (retried.loadFileAsString().getIntValue() < 1)
+        // round 113: once more, as the scan now keeps a description whose plugin only hung while closing
+        if (retried.loadFileAsString().getIntValue() < 2)
         {
             if (! known.getBlacklistedFiles().isEmpty())
             {
                 known.clearBlacklistedFiles();
                 save();
             }
-            retried.replaceWithText ("1\n");
+            retried.replaceWithText ("2\n");
         }
     }
 }
@@ -382,6 +387,24 @@ juce::File classCountFile (const juce::File& result)
 {
     return result.withFileExtension ("classes");
 }
+
+// the child wrote its whole answer (the file closes with the root element): a hang after it is the plugin's shutdown
+bool scanResultComplete (const juce::File& result)
+{
+    if (! result.existsAsFile())
+        return false;
+    const auto xml = juce::XmlDocument::parse (result);
+    return xml != nullptr && xml->hasTagName ("PLUGINS") && xml->getNumChildElements() > 0;
+}
+
+// why a plugin file was not described (%APPDATA%\LYNX\scan-failures.log), so a "missing" plugin can be explained
+void logScanFailure (const juce::String& file, const juce::String& why, juce::uint32 elapsedMs)
+{
+    const auto log = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX").getChildFile ("scan-failures.log");
+    if (log.getSize() > 256 * 1024)
+        log.deleteFile();
+    log.appendText (juce::Time::getCurrentTime().toISO8601 (true) + " | " + file + " | " + why + " | " + juce::String (elapsedMs / 1000.0, 1) + " s\n");
+}
 } // namespace
 
 bool PluginHost::scanOne (juce::AudioPluginFormat& format, const juce::String& file)
@@ -417,10 +440,15 @@ bool PluginHost::scanOne (juce::AudioPluginFormat& format, const juce::String& f
                 classCountFile (result).deleteFile();
                 return false;
             }
-            ok = false; // hung: blacklist
+            // the description may be complete and only the plugin's shutdown hung (round 113): keep it then
+            ok = scanResultComplete (result);
+            logScanFailure (file, ok ? "result kept, child killed after it" : (classesKnown ? "timeout while describing" : "timeout before the class count"),
+                            juce::Time::getMillisecondCounter() - started);
         }
+        else if (child.getExitCode() != 0)
+            logScanFailure (file, "exit code " + juce::String ((int) child.getExitCode()), juce::Time::getMillisecondCounter() - started);
     }
-    ok = ok && child.getExitCode() == 0;
+    ok = ok && (child.isRunning() || child.getExitCode() == 0 || scanResultComplete (result));
     if (auto xml = ok ? juce::XmlDocument::parse (result) : nullptr)
     {
         for (auto* e : xml->getChildIterator())
@@ -562,6 +590,12 @@ int PluginHost::scanOneFile (const juce::String& formatName, const juce::String&
     for (auto* d : found)
         xml.addChildElement (d->createXml().release());
     xml.writeTo (output);
+   #if JUCE_WINDOWS
+    // the answer is written: the child ends here, without unloading the plugin modules, whose shutdown can hang (a
+    // Waves shell in a desktop session) and get the whole file marked as hung (round 113)
+    if (! found.isEmpty())
+        TerminateProcess (GetCurrentProcess(), 0);
+   #endif
     return found.size();
 }
 
@@ -634,9 +668,16 @@ std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlu
         fileName = {};
         name = plainName (juce::String::fromUTF8 (wavesPluginName (pluginIdentity (plugin).state).c_str()));
     }
+    // a list entry whose file is gone (an uninstalled older version next to the current one, round 113) never matches:
+    // loading it fails and the slot would play nothing
+    auto present = [] (const juce::PluginDescription& d) {
+        return ! juce::File::isAbsolutePath (d.fileOrIdentifier) || juce::File (d.fileOrIdentifier).exists();
+    };
     // 1) the same plugin, by its format identifier
     for (const auto& d : types)
     {
+        if (! present (d))
+            continue;
         if (plugin.format == ForeignPlugin::Format::vst3 && plugin.hasClassId && d.pluginFormatName == "VST3"
             && (d.deprecatedUid == vst3Hash (plugin.classId) || d.uniqueId == vst3NormalisedHash (plugin.classId)))
             return found (d, TR_NOOP ("same VST3 class ID"));
@@ -654,15 +695,19 @@ std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlu
             return nullptr;
         const juce::File file (p);
         for (const auto& d : types)
-            if (d.isInstrument == instrument && juce::File::isAbsolutePath (d.fileOrIdentifier) && juce::File (d.fileOrIdentifier) == file)
+            if (d.isInstrument == instrument && juce::File::isAbsolutePath (d.fileOrIdentifier) && juce::File (d.fileOrIdentifier) == file && present (d))
                 return &d;
         return nullptr;
     };
-    if (const auto* entry = flPluginDatabase().match (plugin, instrument))
-        if (const auto* d = sameFile (entry->path))
-            return found (*d, TR_NOOP ("FL Studio's plugin database"));
-    if (const auto* d = sameFile (plugin.path))
-        return found (*d, TR_NOOP ("same file as in the project"));
+    // (not for a Waves shell: its file holds many plugins, the first one of the file would be the wrong one)
+    if (! shell)
+    {
+        if (const auto* entry = flPluginDatabase().match (plugin, instrument))
+            if (const auto* d = sameFile (entry->path))
+                return found (*d, TR_NOOP ("FL Studio's plugin database"));
+        if (const auto* d = sameFile (plugin.path))
+            return found (*d, TR_NOOP ("same file as in the project"));
+    }
     // 3) fallback, since FL swaps VST2 <-> VST3: same name (plugin or file), same role
     if (name.isEmpty() && fileName.isEmpty())
         return std::nullopt;
@@ -674,7 +719,7 @@ std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlu
     std::optional<juce::PluginDescription> byName;
     for (const auto& d : types)
     {
-        if (d.isInstrument != instrument)
+        if (d.isInstrument != instrument || ! present (d))
             continue;
         const auto candidate = plainName (d.name);
         const auto candidateFile = plainName (juce::File::createFileWithoutCheckingPath (d.fileOrIdentifier).getFileNameWithoutExtension());
