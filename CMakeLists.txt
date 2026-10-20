@@ -14,6 +14,13 @@ if(NOT MSVC)
     add_compile_options(-ffp-contract=off)
 endif()
 
+# FL Slayer's exact engine (x87 arithmetic under its own control word): with GCC 15 at -O1 and above, inlining in this
+# file breaks it (some presets silent or NaN against the DLL goldens; Clang and GCC -O0 / -fno-inline are exact; root
+# cause not isolated, REA round 117). Linux GCC builds compile it without inlining (Slayer about 1.7x slower there).
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i.86")
+    set_source_files_properties(src/core/Slayer.cpp PROPERTIES COMPILE_OPTIONS "-fno-inline")
+endif()
+
 # ---------------------------------------------------------------------------
 # JUCE-free core: model, sequencer, built-in instruments and .flp reader
 
