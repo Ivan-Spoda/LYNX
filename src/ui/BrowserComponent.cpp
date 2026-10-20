@@ -429,7 +429,7 @@ public:
                 fresh.kind = Kind::category;
                 fresh.category = n.category;
                 fresh.depth = n.depth;
-                listCategory (fresh, browser.engine.getSong(), &browser.engine);
+                listCategory (fresh, browser.engine.getSong(), &browser.engine, ! n.loaded);
                 if (n.detail != fresh.detail)
                 {
                     n.detail = fresh.detail;
@@ -824,8 +824,7 @@ private:
                 child->icon = categoryIcon (c);
                 child->depth = n.depth + 1;
                 child->parent = &n;
-                loadCategory (*child); // the counts show while closed
-                child->loaded = false;
+                listCategory (*child, browser.engine.getSong(), &browser.engine, true); // the counts show while closed
                 child->children.clear();
                 n.children.push_back (std::move (child));
                 if (c == Category::automation && browser.projectFile.existsAsFile()) // then the project's folder (FL's "Project data")
@@ -884,7 +883,7 @@ private:
     }
 
     // The items of one project section (history needs the engine; the PROJECT search passes none).
-    static void listCategory (Node& n, const Song& song, AudioEngine* engine)
+    static void listCategory (Node& n, const Song& song, AudioEngine* engine, bool countOnly = false)
     {
         auto add = [&n] (projectcontents::Item item, Icon icon, juce::Colour colour) -> Node& {
             auto c = std::make_unique<Node>();
@@ -905,8 +904,9 @@ private:
             case Category::history:
                 if (engine != nullptr)
                 {
+                    // each label compares two whole states: only listed while the section is open, the last 30
                     const auto size = engine->getHistorySize(), at = engine->getHistoryPosition();
-                    for (int i = size - 1; i >= juce::jmax (0, size - 100); --i) // newest first, as FL lists it
+                    for (int i = size - 1; ! countOnly && i >= juce::jmax (0, size - 30); --i) // newest first, as FL lists it
                     {
                         const auto l = engine->getHistoryLabel (i);
                         projectcontents::Item item;
@@ -962,7 +962,7 @@ private:
                         colour = PlaylistComponent::audioClipColour (song.channels[(std::size_t) item.index]);
                     auto& node = add (std::move (item), Icon::audioFile, colour);
                     node.file = file;
-                    node.missing = ! file.existsAsFile();
+                    node.missing = ! countOnly && ! file.existsAsFile();
                     if (node.missing)
                         node.detail = tr ("missing");
                 }
