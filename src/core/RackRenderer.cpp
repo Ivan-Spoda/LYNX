@@ -1144,7 +1144,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
                     times->effectMeters[at + (std::size_t) o].store (0.0f, std::memory_order_relaxed);
         };
 
-        if (! slots[i].enabled || wet <= 0.0f)
+        if (! state.song.slotActive (slots[i]) || wet <= 0.0f)
         {
             if (hasLiveMeters (slots[i].kind))
                 clearMeters();

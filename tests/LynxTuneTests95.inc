@@ -581,7 +581,8 @@ TEST (lynx_tune_substitutes_auto_tune_round95)
     slot.plugin.foreign = at;
     CHECK (lynx::substituteEffectSlot (slot, id));
     CHECK (slot.kind == lynx::EffectKind::lynxTune && slot.isSubstitute() && slot.mix == 1.0f);
-    CHECK (slot.params[lynx::lynxtune::scale] == lynx::effectInfo (lynx::EffectKind::lynxTune).params[lynx::lynxtune::scale].defaultValue);
+    // its key is not in this state: a gentle chromatic correction (round 113), not C major
+    CHECK (lynx::vocal::Scale (lynx::lynxtune::scaleIndex (slot.params[lynx::lynxtune::scale])) == lynx::vocal::Scale::chromatic);
 
     // by name too (another edition)
     lynx::ForeignPlugin artist;

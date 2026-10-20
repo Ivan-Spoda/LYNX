@@ -43,7 +43,7 @@ PdcPlan computePdc (const Song& song, const std::vector<int>& channelLatency, co
             const auto& slots = song.mixer[(std::size_t) t].effects;
 
             for (std::size_t s = 0; s < slots.size() && s < slotLatency[(std::size_t) t].size(); ++s)
-                if (slots[s].enabled)
+                if (song.slotActive (slots[s]))
                     sum += std::max (0, slotLatency[(std::size_t) t][s]);
         }
 
@@ -57,7 +57,7 @@ PdcPlan computePdc (const Song& song, const std::vector<int>& channelLatency, co
         {
             const auto& slots = song.mixer[(std::size_t) t].effects;
             for (int s = 0; s < slot && s < (int) slots.size() && s < (int) slotLatency[(std::size_t) t].size(); ++s)
-                if (slots[(std::size_t) s].enabled)
+                if (song.slotActive (slots[(std::size_t) s]))
                     sum += std::max (0, slotLatency[(std::size_t) t][(std::size_t) s]);
         }
         return sum;
