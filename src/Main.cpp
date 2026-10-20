@@ -1855,10 +1855,10 @@ private:
                     project.channels.front().type = flp::ChannelType::native;
                     lynx::FlpImportOptions options;
                     options.roots = roots;
-                    options.fileExists = [] (const std::string& path) { return juce::File (juce::String::fromUTF8 (path.c_str())).existsAsFile(); };
+                    options.fileExists = [] (const std::string& path) { return lynx::platform::localFile (path).existsAsFile(); };
                     options.readFile = [] (const std::string& path) {
                         juce::MemoryBlock block;
-                        juce::File (juce::String::fromUTF8 (path.c_str())).loadFileAsData (block);
+                        lynx::platform::localFile (path).loadFileAsData (block);
                         const auto* b = static_cast<const std::uint8_t*> (block.getData());
                         return std::vector<std::uint8_t> (b, b + block.getSize());
                     };

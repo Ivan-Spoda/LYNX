@@ -1,4 +1,5 @@
 #include "engine/AudioEngine.h"
+#include "platform/Paths.h"
 #include "engine/FlStudio.h"
 
 #include <map>
@@ -1183,10 +1184,10 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error, co
         FlpImportOptions options;
         options.roots = findFlStudioRoots();
         options.projectFolder = file.getParentDirectory().getFullPathName().toStdString();
-        options.fileExists = [] (const std::string& path) { return juce::File (juce::String::fromUTF8 (path.c_str())).existsAsFile(); };
+        options.fileExists = [] (const std::string& path) { return platform::localFile (path).existsAsFile(); };
         options.readFile = [] (const std::string& path) {
             juce::MemoryBlock data;
-            juce::File (juce::String::fromUTF8 (path.c_str())).loadFileAsData (data);
+            platform::localFile (path).loadFileAsData (data);
             const auto* bytes = static_cast<const std::uint8_t*> (data.getData());
             return std::vector<std::uint8_t> (bytes, bytes + data.getSize());
         };

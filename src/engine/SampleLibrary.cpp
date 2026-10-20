@@ -1,4 +1,5 @@
 #include "engine/SampleLibrary.h"
+#include "platform/Paths.h"
 
 #include "core/OggVorbis.h"
 #include "core/TimeStretch.h"
@@ -326,7 +327,7 @@ std::shared_ptr<const SampleData> SampleLibrary::load (const juce::String& path)
     if (auto cached = cache[path].lock())
         return cached;
 
-    const juce::File file (path);
+    const auto file = platform::localFile (path); // FL's Windows spelling on macOS/Linux (platform/Paths.h)
 
     if (! file.existsAsFile())
         return nullptr;

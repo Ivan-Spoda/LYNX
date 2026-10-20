@@ -1,5 +1,7 @@
 #include "platform/Paths.h"
 
+#include "core/FlpImport.h"
+
 namespace lynx::platform
 {
 namespace
@@ -82,4 +84,22 @@ juce::FileSearchPath standardPluginFolders()
     return paths;
 }
 
+juce::File localFile (const juce::String& path)
+{
+   #if JUCE_WINDOWS
+    return juce::File (path);
+   #else
+    if (! path.containsChar ('\\') && juce::File::isAbsolutePath (path) && juce::File (path).exists())
+        return juce::File (path);
+    const auto posix = path.replaceCharacter ('\\', '/');
+    if (! juce::File::isAbsolutePath (posix))
+        return {};
+    return juce::File (juce::String::fromUTF8 (existingPathIgnoringCase (posix.toStdString()).c_str()));
+   #endif
+}
+
+juce::File localFile (const std::string& utf8Path)
+{
+    return localFile (juce::String::fromUTF8 (utf8Path.c_str()));
+}
 } // namespace lynx::platform

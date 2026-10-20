@@ -9,6 +9,7 @@
  #include <immintrin.h>
  #define LYNX_X86 1
 #elif defined(__aarch64__) || defined(_M_ARM64)
+ #define SSE2NEON_SUPPRESS_WARNINGS 1
  #define SSE2NEON_PRECISE_MINMAX 1
  #define SSE2NEON_PRECISE_DIV 1
  #define SSE2NEON_PRECISE_SQRT 1
