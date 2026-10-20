@@ -1107,8 +1107,6 @@ countries: br
 "Plugins found on this PC:" = "Plugins encontrados neste PC:"
 "Plugins not installed on this PC (or in a folder LYNX doesn't scan; Options > Setup wizard):" = "Plugins não instalados neste PC (ou numa pasta que o LYNX não varre; Opções > Assistente de configuração):"
 "Samples found in another folder than the project says (FL Studio's folders or next to the project): {0}" = "Samples encontrados em outra pasta que a indicada no projeto (pastas do FL Studio ou junto ao projeto): {0}"
-"Finding this project's plugins..." = "Procurando os plugins deste projeto..."
-"Looking in the plugin folders..." = "Olhando as pastas de plugins..."
 "Welcome to LYNX" = "Bem-vindo ao LYNX"
 "A few things to get started. Everything here can be changed later (Options > Setup wizard)." = "Algumas coisas para começar. Tudo aqui pode ser mudado depois (Opções > Assistente de configuração)."
 "{0} found. Its plugin database lists {1} plugin file(s); .flp projects use the same plugin files FL Studio uses, and their samples are looked for in FL Studio's folders." = "{0} encontrado. O banco de plugins dele lista {1} arquivo(s) de plugin; projetos .flp usam os mesmos arquivos de plugin que o FL Studio usa, e os samples são procurados nas pastas do FL Studio."
@@ -2585,3 +2583,14 @@ countries: br
 "The last session ended without closing normally. Last step: {0}. Backup copies of your project are in LYNX's autosave folder; details in crash-history.log." = "A última sessão terminou sem fechar normalmente. Último passo: {0}. As cópias de segurança do seu projeto ficam na pasta autosave do LYNX; detalhes em crash-history.log."
 "The plugin \"{0}\" crashed and was switched off, so LYNX and your project kept running (the effect is bypassed, an instrument stays silent). Save your project; the plugin loads again the next time you open it." = "O plugin \"{0}\" travou e foi desligado, então o LYNX e o seu projeto continuaram funcionando (o efeito fica em bypass, um instrumento fica em silêncio). Salve o projeto; o plugin carrega de novo na próxima vez que você abri-lo."
 "This plugin crashed and was switched off. Save the project and open it again to reload it." = "Este plugin travou e foi desligado. Salve o projeto e abra-o de novo para recarregá-lo."
+
+# --- opening a project (round 112)
+"Opening {0}" = "Abrindo {0}"
+"Reading the project..." = "Lendo o projeto..."
+"Looking for this project's plugins..." = "Procurando os plugins deste projeto..."
+"Checking {0}... {1}/{2}" = "Verificando {0}... {1}/{2}"
+"Reading the samples..." = "Lendo os samples..."
+"Reading {0}... {1}/{2}" = "Lendo {0}... {1}/{2}"
+"Loading plugins..." = "Carregando plugins..."
+"Loading {0}... {1}/{2}" = "Carregando {0}... {1}/{2}"
+"Building the mixer..." = "Montando o mixer..."

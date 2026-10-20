@@ -100,65 +100,7 @@ private:
     AudioEngine& engine;
     std::function<void (int)> onDone;
 };
-class ProjectPluginScan final : public juce::ThreadWithProgressWindow
-{
-public:
-    ProjectPluginScan (AudioEngine& e, std::vector<FlpPluginUse> u, std::function<void()> done)
-        : juce::ThreadWithProgressWindow (tr ("Finding this project's plugins..."), true, true),
-          engine (e),
-          uses (std::move (u)),
-          onDone (std::move (done))
-    {
-    }
-
-    void run() override
-    {
-        auto& host = engine.getPluginHost();
-        setStatusMessage (tr ("Looking in the plugin folders..."));
-        const auto files = host.filesToScanFor (uses);
-        host.scanFiles (files, [this] (float progress, const juce::String& file) {
-            setProgress (progress);
-            setStatusMessage (juce::File::createFileWithoutCheckingPath (file).getFileName());
-            return ! threadShouldExit();
-        });
-    }
-
-    void threadComplete (bool) override
-    {
-        if (resumeBackground)
-            engine.getPluginHost().startBackgroundScan();
-        if (onDone)
-            onDone();
-        juce::MessageManager::callAsync ([this] { delete this; });
-    }
-
-    bool resumeBackground = false;
-
-private:
-    AudioEngine& engine;
-    std::vector<FlpPluginUse> uses;
-    std::function<void()> onDone;
-};
 } // namespace
-
-void findProjectPlugins (AudioEngine& engine, std::vector<FlpPluginUse> uses, std::function<void()> then)
-{
-    auto& host = engine.getPluginHost();
-    // quick check on the UI thread: everything already known (from the cache or FL's database) → nothing to scan
-    const auto unknown = std::any_of (uses.begin(), uses.end(), [&host] (const FlpPluginUse& u) { return ! host.findForeign (u.plugin, u.instrument); });
-    if (! unknown)
-    {
-        then();
-        return;
-    }
-    auto* scan = new ProjectPluginScan (engine, std::move (uses), std::move (then)); // deletes itself when done
-    if (host.backgroundScan().running)
-    {
-        host.cancelBackgroundScan(); // the targeted scan goes first; the full one resumes afterwards
-        scan->resumeBackground = true;
-    }
-    scan->launchThread();
-}
 
 namespace PluginWindows
 {
