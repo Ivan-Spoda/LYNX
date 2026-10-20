@@ -156,6 +156,7 @@ private:
     std::array<float, 128> bands {};       // spectrum: smoothed level per band, 0..1
     float peak = 0.0f, held = 0.0f;
     int holdFrames = 0, clipFrames = 0;
+    int silentFrames = 0; // updates in a row with a silent output: once everything has decayed, no more repaints
 };
 
 // "Customize toolbar": the groups in toolbar order, each with a check box (shown / hidden), Move up / Move

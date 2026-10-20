@@ -537,6 +537,16 @@ void OutputMonitor::update()
     else if (clipFrames > 0)
         --clipFrames;
 
+    // silence after everything has fallen to zero (meter, hold, clip, the long view's history, the spectrum bands)
+    // looks the same frame after frame: stop repainting at 30 Hz while nothing plays (REA round 116, idle CPU)
+    silentFrames = now > 0.0f ? 0 : juce::jmin (silentFrames + 1, 1 << 20);
+    if (silentFrames > (int) history.size() + 90)
+    {
+        peak = held = 0.0f;
+        bands.fill (0.0f);
+        return;
+    }
+
     // long view: the level scrolls from right to left
     std::rotate (history.begin(), history.begin() + 1, history.end());
     history.back() = now;
