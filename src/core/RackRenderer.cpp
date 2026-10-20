@@ -1,4 +1,5 @@
 #include "core/RackRenderer.h"
+#include "core/LoadTrace.h"
 #include "core/DynamicsSuite.h"
 #include "core/MixSuite.h"
 
@@ -166,6 +167,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
         // multi-sample sampler: one zone per sample (DirectWave, FPC layers...)
         if (kind == InstrumentKind::sampler && ! channel.zones.empty())
         {
+            const loadtrace::Scope timing ("rack_zoned");
             std::vector<LoadedZone> zones;
 
             for (const auto& z : channel.zones)
@@ -196,6 +198,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                 sample = std::move (stretched);
         }
 
+        const loadtrace::Scope timing ("rack_instruments");
         std::shared_ptr<Instrument> instrument = makeInstrument (kind, std::move (sample));
         instrument->prepare (sampleRate);
         instrument->configure (channel, song.bpm);
@@ -246,6 +249,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
             }
             else
             {
+                const loadtrace::Scope timing ("rack_builtin_fx"); // (round 112: what the open spends on LYNX's own effects)
                 effect = makeEffect (slots[i]);
                 effect->prepare (sampleRate);
             }
@@ -255,6 +259,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
     }
 
     state->song = std::move (song);
+    const auto tailStarted = std::chrono::steady_clock::now();
 
     // scheduling: notes sorted by start (order among notes on the same tick is preserved)
     for (auto& p : state->song.patterns)
@@ -262,7 +267,10 @@ std::unique_ptr<const RackState> RackState::build (Song song,
     state->schedule = makeScheduleIndex (state->song);
     state->sampleRate = sampleRate;
     state->buildAutomationTables();
-    state->buildPdc (previous);
+    {
+        const loadtrace::Scope timing ("pdc");
+        state->buildPdc (previous);
+    }
     state->buildMixerGraph();
 
     const auto& channels = state->song.channels;
@@ -285,6 +293,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                 }
     const auto audible = state->song.soloAudible();
     state->mixerAudible.assign (audible.begin(), audible.end());
+    loadtrace::add ("rack_schedule_graph", loadtrace::msSince (tailStarted));
     return state;
 }
 
@@ -1133,7 +1142,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
                     times->effectMeters[at + (std::size_t) o].store (0.0f, std::memory_order_relaxed);
         };
 
-        if (! slots[i].enabled || wet <= 0.0f)
+        if (! state.song.slotActive (slots[i]) || wet <= 0.0f)
         {
             if (hasLiveMeters (slots[i].kind))
                 clearMeters();

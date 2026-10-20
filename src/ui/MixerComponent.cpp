@@ -2222,9 +2222,10 @@ void EffectsPanel::paint (juce::Graphics& g)
             if (substitute)
             {
                 const auto badge = text.removeFromRight (34).withSizeKeepingCentre (32, 14).toFloat();
-                g.setColour (colour::info.withAlpha (slot.enabled ? 0.25f : 0.12f));
+                const auto playing = engine.getSong().slotActive (slot); // off while the project's substitutes are bypassed
+                g.setColour (colour::info.withAlpha (playing ? 0.25f : 0.12f));
                 g.fillRoundedRectangle (badge, 3.0f);
-                g.setColour (slot.enabled ? colour::info : colour::textDisabled);
+                g.setColour (playing ? colour::info : colour::textDisabled);
                 const auto keep = g.getCurrentFont();
                 g.setFont (font (type::caption, true));
                 g.drawText ("LYNX", badge, juce::Justification::centred);
@@ -2345,7 +2346,9 @@ void EffectsPanel::paint (juce::Graphics& g)
         const auto titleWidth = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), juce::String::fromUTF8 (info.name));
         g.setColour (colour::info);
         g.setFont (font (type::caption));
-        g.drawText (tr ("LYNX substitute for {0}", { juce::String::fromUTF8 (substituteOriginalName (slot).c_str()) }), 10 + titleWidth + 10, titleY,
+        const auto original = juce::String::fromUTF8 (substituteOriginalName (slot).c_str());
+        g.drawText (engine.getSong().substitutesBypassed ? tr ("LYNX substitute for {0} (bypassed)", { original }) : tr ("LYNX substitute for {0}", { original }),
+                    10 + titleWidth + 10, titleY,
                     juce::jmax (0, titleRight - 20 - titleWidth), 20, juce::Justification::centredLeft, true);
     }
 
@@ -3417,6 +3420,11 @@ void EffectsPanel::showSlotMenu (int slot)
         ab.addItem (tr ("Forget B"), hasSpare, false, [this, key] { spare.erase (key); });
         menu.addSubMenu (hasSpare ? tr ("A/B compare (B stored)") : tr ("A/B compare"), ab);
     }
+    if ((*slots())[(std::size_t) slot].isSubstitute()) // A/B of every substitute of the project at once (round 113)
+        menu.addItem (tr ("Bypass all LYNX substitutes of this project"), true, engine.getSong().substitutesBypassed, [this] {
+            engine.editSong ([] (Song& song) { song.substitutesBypassed = ! song.substitutesBypassed; });
+            repaint();
+        });
     menu.addItem (tr ("Move up"), slot > 0, false, [this, slot] {
         engine.editSong ([t = track, slot] (Song& song) { song.swapEffectSlots (t, slot, slot - 1); });
         selectedSlot = slot - 1;

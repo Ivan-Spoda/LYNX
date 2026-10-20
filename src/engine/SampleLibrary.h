@@ -2,6 +2,7 @@
 
 #include <map>
 #include <memory>
+#include <mutex>
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
@@ -9,8 +10,8 @@
 
 namespace lynx
 {
-// Decodes audio files into SampleData, cached by path.
-// UI thread (decoding allocates and does I/O).
+// Decodes audio files into SampleData, cached by path (one cache for the whole process).
+// Any thread except the audio thread.
 class SampleLibrary
 {
 public:
@@ -34,10 +35,9 @@ public:
 private:
     std::unique_ptr<juce::AudioFormatReader> createReader (const juce::File& file);
     std::shared_ptr<const SampleData> loadStreamed (const juce::File& file, juce::AudioFormatReader& reader);
+    std::shared_ptr<const SampleData> decode (const juce::String& path);
 
     juce::AudioFormatManager formats;
-    std::map<juce::String, std::weak_ptr<const SampleData>> cache;
-    std::map<juce::String, std::shared_ptr<const SampleData>> stretchedCache; // keeps the latest one per path
 };
 // Brings in from disk the range [from, to) (seconds) of a mapped sample. Any thread except the audio thread.
 void prefetchSample (const SampleData& data, double fromSeconds, double toSeconds);
