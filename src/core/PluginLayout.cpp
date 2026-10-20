@@ -1876,6 +1876,18 @@ LayoutItem choiceMenu (float x, float y, float w, float h, const char* param, co
 // The reverbs keep the reference plugins' layout logic (REA round 100, screenshots of the official demos in
 // tmp/valh100/ref): the same control groups in the same order — mix and pre-delay first, the decay as the largest
 // control, then grouped boxes, the algorithm / mode menu along the bottom — drawn in LYNX's own style.
+// round 114: the reference reverbs / delays write each knob's name above it and its value under it
+Layout captionsAbove (Layout l)
+{
+    for (auto& i : l.items)
+        if (i.type == Item::knob && (i.style & showValue) != 0 && (i.style & noCaption) == 0)
+        {
+            i.style = (std::uint16_t) (i.style | captionAbove);
+            i.y -= 14.0f;
+        }
+    return l;
+}
+
 Layout epochVerbLayout()
 {
     // Mix / Predelay · big Decay · Damping (2 × 2) · Shape · Diffusion · Modulation · EQ; Mode and Color menus below
@@ -2400,17 +2412,17 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::hushDeEsser: l = hushDeEsser(); break;
         case EffectKind::aether: l = aetherLayout(); break;
         case EffectKind::ember: l = emberLayout(); break;
-        case EffectKind::epochVerb: l = epochVerbLayout(); break;
-        case EffectKind::atrium: l = atriumLayout(); break;
-        case EffectKind::foilPlate: l = foilPlateLayout(); break;
-        case EffectKind::nebula: l = nebulaLayout(); break;
-        case EffectKind::halo: l = haloLayout(); break;
-        case EffectKind::horizon: l = horizonLayout(); break;
+        case EffectKind::epochVerb: l = captionsAbove (epochVerbLayout()); break;
+        case EffectKind::atrium: l = captionsAbove (atriumLayout()); break;
+        case EffectKind::foilPlate: l = captionsAbove (foilPlateLayout()); break;
+        case EffectKind::nebula: l = captionsAbove (nebulaLayout()); break;
+        case EffectKind::halo: l = captionsAbove (haloLayout()); break;
+        case EffectKind::horizon: l = captionsAbove (horizonLayout()); break;
         case EffectKind::lynxTune: l = lynxTune(); break;
-        case EffectKind::echoform: l = echoformLayout(); break;
-        case EffectKind::spiralEcho: l = spiralLayout(); break;
-        case EffectKind::orbit: l = orbitLayout(); break;
-        case EffectKind::latticeMod: l = latticeLayout(); break;
+        case EffectKind::echoform: l = captionsAbove (echoformLayout()); break;
+        case EffectKind::spiralEcho: l = captionsAbove (spiralLayout()); break;
+        case EffectKind::orbit: l = captionsAbove (orbitLayout()); break;
+        case EffectKind::latticeMod: l = captionsAbove (latticeLayout()); break;
         case EffectKind::fruitySend: l = fruitySend(); break;
         case EffectKind::crestCompressor: l = crestCompressor(); break;
         case EffectKind::prismMultiband: l = prismMultiband(); break;

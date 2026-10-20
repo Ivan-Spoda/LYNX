@@ -143,6 +143,13 @@ public:
         return fx != nullptr && plugui::isShown (kind, item, page, fx->params, &fx->state);
     }
 
+    // wide option menus of LYNX's own panels get step arrows at both ends (round 114)
+    bool hasStepArrows (const LayoutItem& item) const
+    {
+        return item.type == Item::menu && item.w >= 110.0f && kind != EffectKind::parametricEq && kind != EffectKind::fruitySend
+               && std::find (plugui::ownLayoutKinds().begin(), plugui::ownLayoutKinds().end(), kind) != plugui::ownLayoutKinds().end();
+    }
+
     // the knob's circle inside its cell (the caption takes the rest)
     juce::Rectangle<float> knobCircle (const LayoutItem& item) const
     {
@@ -150,7 +157,12 @@ public:
         const auto s = scale();
         if (hasStyle (item, plugui::valueAbove))
             r.removeFromTop (16.0f * s);
-        if (! hasStyle (item, plugui::noCaption))
+        if (hasStyle (item, plugui::captionAbove))
+        {
+            r.removeFromTop (14.0f * s);
+            r.removeFromBottom (13.0f * s);
+        }
+        else if (! hasStyle (item, plugui::noCaption))
             r.removeFromBottom ((hasStyle (item, plugui::showValue) ? 26.0f : 14.0f) * s);
         const auto d = juce::jmin (r.getWidth(), r.getHeight());
         return r.withSizeKeepingCentre (d, d).withY (r.getY());
@@ -473,7 +485,14 @@ public:
                     g.setFont (font (juce::jmax (8.0f, 9.0f * s)));
                     g.drawFittedText (valueText (param, value), box.toNearestInt(), juce::Justification::centred, 1, 0.6f);
                 }
-                if (! hasStyle (item, plugui::noCaption))
+                if (hasStyle (item, plugui::captionAbove))
+                {
+                    caption (g, item, r.withHeight (13.0f * s).expanded (10.0f * s, 0.0f));
+                    g.setColour (hot ? colour::accent : colour::textPrimary);
+                    g.setFont (font (juce::jmax (8.0f, 10.5f * s)));
+                    g.drawFittedText (valueText (param, value), below.withHeight (13.0f * s).expanded (10.0f * s, 0.0f).toNearestInt(), juce::Justification::centred, 1, 0.7f);
+                }
+                else if (! hasStyle (item, plugui::noCaption))
                 {
                     caption (g, item, below.withHeight (12.0f * s));
                     if (hasStyle (item, plugui::showValue))
@@ -686,10 +705,29 @@ public:
                     drawBandShape (g, r.reduced (2.0f * s, 4.0f * s), chosen);
                 else
                 {
-                    g.setFont (font (juce::jmax (8.0f, 9.0f * s), true));
+                    // round 114: readable mode names (light on the control, bigger), arrows to step on wide menus
                     const auto labels = plugui::optionLabels (item);
+                    auto textArea = r;
+                    if (hasStepArrows (item))
+                    {
+                        const auto edge = 18.0f * s;
+                        for (const auto left : { true, false })
+                        {
+                            const auto a = left ? r.withWidth (edge) : r.withLeft (r.getRight() - edge);
+                            const auto c0 = a.getCentre();
+                            juce::Path tri;
+                            const auto h = 4.0f * s;
+                            if (left) tri.addTriangle (c0.x + h * 0.7f, c0.y - h, c0.x + h * 0.7f, c0.y + h, c0.x - h * 0.7f, c0.y);
+                            else tri.addTriangle (c0.x - h * 0.7f, c0.y - h, c0.x - h * 0.7f, c0.y + h, c0.x + h * 0.7f, c0.y);
+                            g.setColour (a.contains (mouseAt) ? colour::textPrimary : colour::textSecondary);
+                            g.fillPath (tri);
+                        }
+                        textArea = r.reduced (edge, 0.0f);
+                    }
+                    g.setColour (colour::textPrimary);
+                    g.setFont (font (juce::jmax (9.0f, juce::jmin (12.0f * s, r.getHeight() * 0.55f)), true));
                     if (chosen < (int) labels.size())
-                        g.drawFittedText (tr (juce::String::fromUTF8 (labels[(std::size_t) chosen].c_str())), r.toNearestInt(), juce::Justification::centred, 1, 0.6f);
+                        g.drawFittedText (tr (juce::String::fromUTF8 (labels[(std::size_t) chosen].c_str())), textArea.toNearestInt(), juce::Justification::centred, 1, 0.6f);
                 }
                 break;
             }
@@ -1790,6 +1828,11 @@ public:
         const auto p = e.position;
         const auto h = headerItemAt (p);
         const auto i = h == 0 ? itemAt (p) : -1;
+        if (i >= 0 && hasStepArrows (activeLayout().items[(std::size_t) i]))
+        {
+            mouseAt = p; // the menu's arrows light under the mouse
+            repaint();
+        }
         if (h != hoverHeader || i != hoverItem)
         {
             hoverHeader = h;
@@ -1803,6 +1846,7 @@ public:
     {
         hoverHeader = 0;
         hoverItem = -1;
+        mouseAt = { -1.0f, -1.0f };
         repaint();
     }
 
@@ -1921,9 +1965,23 @@ public:
                 menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (r.toNearestInt())));
                 return;
             }
-            juce::PopupMenu menu;
             const auto labels = plugui::optionLabels (item);
             const auto chosen = plugui::optionAt (item, valueOf (param));
+            // round 114: wide mode menus step with the arrows at their ends (the reference reverbs' ◀ ▶), the middle opens the list
+            if (hasStepArrows (item) && ! labels.empty())
+            {
+                const auto edge = 18.0f * scale();
+                const auto dir = e.position.x < r.getX() + edge ? -1 : e.position.x > r.getRight() - edge ? 1 : 0;
+                if (dir != 0)
+                {
+                    const auto n = (int) labels.size();
+                    const auto next = (chosen + dir + n) % n;
+                    setValue (param, plugui::optionValue (item, next));
+                    ui::flashValueTip (*this, r.toNearestInt(), optionTexts (item)[(std::size_t) next]);
+                    return;
+                }
+            }
+            juce::PopupMenu menu;
             for (int o = 0; o < (int) labels.size(); ++o)
                 menu.addItem (optionTexts (item)[(std::size_t) o], true, o == chosen,
                               [this, param, v = plugui::optionValue (item, o)] { setValue (param, v); });
@@ -2318,6 +2376,7 @@ private:
     dynui::History dynHistory; // the dynamics suite's scrolling gain-reduction graph
     int crossoverDrag = -1;    // the crossover parameter being dragged on a band display
     float vuNeedle = 0.0f;     // the VU display's needle (dB of gain reduction, with inertia)
+    juce::Point<float> mouseAt { -1.0f, -1.0f };
 };
 
 // --- the window ------------------------------------------------------------------------------------
