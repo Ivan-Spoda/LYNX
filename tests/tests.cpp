@@ -113,6 +113,7 @@
 #include "core/TimeStretch.h"
 #include "core/WorkerPool.h"
 #include "core/RtStats.h"
+#include "core/FixedBlock.h"
 #include "core/ParametricEqLinear.h"
 #include "core/Song.h"
 #include "core/NoteEdit.h"
@@ -15639,4 +15640,5 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Substitutes113Tests.inc"
 #include "EchoSuiteTests101.inc"
 #include "FruitySendTests105.inc"
+#include "FixedBlockTests118.inc"
 #include "LoadTraceTests112.inc"

@@ -45,6 +45,13 @@ public:
         }
     }
 
+    // FL's "%d underruns" in the CPU panel: the driver's own count when it reports one (>= 0), else LYNX's estimate
+    // (blocks over the deadline + late calls).
+    static std::uint64_t underrunCount (std::uint64_t overBudget, std::uint64_t lateCalls, int deviceXruns) noexcept
+    {
+        return deviceXruns >= 0 ? (std::uint64_t) deviceXruns : overBudget + lateCalls;
+    }
+
     // A pause in the calls that is not a glitch (device restarted, stopped): forget the previous start.
     void deviceRestarted() noexcept { lastStartMs.store (0.0, std::memory_order_relaxed); }
 

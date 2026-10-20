@@ -238,6 +238,10 @@ juce::var pluginToVar (const PluginRef& p)
     // an .flp plugin reference not resolved here (kept by a LYNX substitute): every field, the state byte for byte
     if (p.foreign.format != ForeignPlugin::Format::none)
         o->setProperty ("foreign", str (foreignToText (p.foreign)));
+    if (p.fixedBuffers)
+        o->setProperty ("fixedBuffers", true);
+    if (p.separateProcess)
+        o->setProperty ("separateProcess", true);
     return juce::var (o.release());
 }
 
@@ -249,6 +253,8 @@ PluginRef pluginFromVar (const juce::var& v)
     p.state = v["state"].toString().toStdString();
     if (v.hasProperty ("foreign") && ! foreignFromText (v["foreign"].toString().toStdString(), p.foreign))
         p.foreign = {};
+    p.fixedBuffers = (bool) v.getProperty ("fixedBuffers", false);
+    p.separateProcess = (bool) v.getProperty ("separateProcess", false);
     return p;
 }
 

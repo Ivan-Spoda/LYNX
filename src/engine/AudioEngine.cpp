@@ -1985,6 +1985,7 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
     rtStats.deviceRestarted();
     transport.sampleRate.store (device->getCurrentSampleRate());
+    setFixedPluginBlock (device->getCurrentBufferSizeSamples()); // FL's fixed size buffers = the device buffer
 
     // the callback gets the open input channels only, in order: map device channel -> callback index
     const auto active = device->getActiveInputChannels();
