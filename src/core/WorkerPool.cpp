@@ -80,6 +80,11 @@ bool WorkerPool::hasWork() const noexcept
     return (t & mask) < ((t >> indexBits) & mask);
 }
 
+bool WorkerPool::isParked() const noexcept
+{
+    return (ticket.load (std::memory_order_acquire) >> (2 * indexBits)) == parkedGeneration.load (std::memory_order_acquire);
+}
+
 void WorkerPool::workerLoop (std::function<void()> onStart)
 {
     const ScopedFlushDenormals noDenormals;
@@ -109,6 +114,8 @@ void WorkerPool::workerLoop (std::function<void()> onStart)
             {
                 if (quit.load (std::memory_order_relaxed))
                     return;
+                if (isParked()) // the block is over: sleep now
+                    break;
                 if (clock::now() - spinStart > std::chrono::microseconds (spinMicros))
                     break;
             }
