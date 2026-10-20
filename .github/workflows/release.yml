@@ -256,7 +256,7 @@ jobs:
 
       - name: Package
         run: |
-          sudo apt-get install -y -q libfuse2t64 || true
+          sudo apt-get install -y -q desktop-file-utils libfuse2t64
           ./scripts/package-linux.sh build/LYNX_artefacts/Release/LYNX "$LABEL" dist Demo.lynx
 
       - name: Upload package
