@@ -323,6 +323,11 @@ bool pluginFileMatches (const std::string& file, const ForeignPlugin& plugin, co
     const auto key = pluginNameKey (stem (file));
     if (key.empty())
         return false;
+    // a Waves sub-plugin lives in whichever WaveShell version is installed (a project saved with the 15.5 shell opens
+    // with the 16.0 one): every shell file is worth describing (round 113)
+    auto shell = [] (const std::string& k) { return k.rfind ("waveshell", 0) == 0; };
+    if (shell (key) && (shell (pluginNameKey (plugin.name)) || shell (pluginNameKey (stem (plugin.path)))))
+        return true;
     return key == pluginNameKey (plugin.name) || key == pluginNameKey (stem (plugin.path))
            || (entry != nullptr && (key == pluginNameKey (entry->name) || key == pluginNameKey (stem (entry->path))));
 }

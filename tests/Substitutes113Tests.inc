@@ -207,3 +207,19 @@ TEST (substitutes_can_be_bypassed_per_project_round113)
     const auto off = computePdc (song, channels, slots);
     CHECK (on.outLat.size() > 1 && on.outLat[1] - off.outLat[1] == 1200);
 }
+
+TEST (waves_shell_uses_scan_every_installed_shell_round113)
+{
+    // her projects were saved with the 15.5 shell; the laptop has 16.0 (and 16.3): those files must be described
+    lynx::ForeignPlugin p;
+    p.format = lynx::ForeignPlugin::Format::vst3;
+    p.name = "WaveShell1-VST3 15.5_x64";
+    p.path = "C:\\Program Files\\Common Files\\VST3\\WaveShell1-VST3 15.5_x64.vst3";
+    CHECK (lynx::pluginFileMatches ("C:\\Program Files\\Common Files\\VST3\\WaveShell1-VST3 16.0_x64.vst3", p, nullptr));
+    CHECK (lynx::pluginFileMatches ("C:\\Program Files\\Common Files\\VST3\\WaveShell1-VST3 16.3_x64.vst3", p, nullptr));
+    CHECK (! lynx::pluginFileMatches ("C:\\Program Files\\Common Files\\VST3\\Auto-Tune Pro.vst3", p, nullptr));
+    lynx::ForeignPlugin other;
+    other.format = lynx::ForeignPlugin::Format::vst3;
+    other.name = "Fresh Air";
+    CHECK (! lynx::pluginFileMatches ("C:\\Program Files\\Common Files\\VST3\\WaveShell1-VST3 16.0_x64.vst3", other, nullptr));
+}
