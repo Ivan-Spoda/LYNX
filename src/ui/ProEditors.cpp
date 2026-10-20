@@ -1754,9 +1754,9 @@ private:
     {
         const auto a = panel();
         const auto cy = a.getY() + 12.0f;
-        out.push_back (knob ({ 110.0f, cy, 180.0f, 214.0f }, pMid(), tr ("Mid air"), 2));
-        out.push_back (knob ({ 430.0f, cy, 180.0f, 214.0f }, pHigh(), tr ("High air"), 2));
-        out.push_back (button ({ 332.0f, cy + 76.0f, 56.0f, 28.0f }, idLink, tr ("Link"), linked,
+        out.push_back (knob ({ 125.0f, cy + 10.0f, 150.0f, 184.0f }, pMid(), tr ("Mid air"), 2));
+        out.push_back (knob ({ 445.0f, cy + 10.0f, 150.0f, 184.0f }, pHigh(), tr ("High air"), 2));
+        out.push_back (button ({ 330.0f, cy + 70.0f, 60.0f, 28.0f }, idLink, tr ("Link"), linked,
                                tr ("Link: move both knobs together (keeps their difference)")));
         out.push_back (custom ({ 28.0f, a.getBottom() - 70.0f, 48.0f, 48.0f }, idPower, -1, tr ("Power: switch the effect on or off")));
         out.push_back (knob ({ 626.0f, a.getBottom() - 92.0f, 72.0f, 86.0f }, P ("Output"), tr ("Trim"), 0, true));
@@ -1889,10 +1889,11 @@ private:
         g.drawHorizontalLine ((int) a.getY(), 0.0f, a.getRight());
         g.setColour (colour::textDisabled);
         g.setFont (font (type::caption));
-        g.drawText ("0", juce::Rectangle<float> (80.0f, a.getY() + 160.0f, 30.0f, 14.0f), juce::Justification::centredRight, false);
-        g.drawText ("100", juce::Rectangle<float> (290.0f, a.getY() + 160.0f, 30.0f, 14.0f), juce::Justification::centredLeft, false);
-        g.drawText ("0", juce::Rectangle<float> (400.0f, a.getY() + 160.0f, 30.0f, 14.0f), juce::Justification::centredRight, false);
-        g.drawText ("15", juce::Rectangle<float> (610.0f, a.getY() + 160.0f, 30.0f, 14.0f), juce::Justification::centredLeft, false);
+        const auto ly = a.getY() + 150.0f;
+        g.drawText ("0", juce::Rectangle<float> (104.0f, ly, 30.0f, 14.0f), juce::Justification::centredRight, false);
+        g.drawText ("100", juce::Rectangle<float> (268.0f, ly, 30.0f, 14.0f), juce::Justification::centredLeft, false);
+        g.drawText ("0", juce::Rectangle<float> (424.0f, ly, 30.0f, 14.0f), juce::Justification::centredRight, false);
+        g.drawText ("15 dB", juce::Rectangle<float> (588.0f, ly, 40.0f, 14.0f), juce::Justification::centredLeft, false);
     }
 };
 

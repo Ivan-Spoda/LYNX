@@ -53,3 +53,23 @@ TEST (look114_reverb_panels_write_captions_above_their_knobs)
     for (const auto& item : plugui::layoutFor (EffectKind::glowLeveler).items)
         CHECK ((item.style & plugui::captionAbove) == 0);
 }
+
+TEST (look114_ridge_strip_reads_top_to_bottom_like_a_channel_strip)
+{
+    using namespace lynx;
+    const auto& l = plugui::layoutFor (EffectKind::ridgeStrip);
+    const auto at = [&l] (const char* param) -> const plugui::LayoutItem* {
+        for (const auto& item : l.items)
+            if (item.param != nullptr && std::string (item.param) == param) return &item;
+        return nullptr;
+    };
+    for (const auto* p : { "HPF", "HF gain", "HMF gain", "LMF gain", "LF gain", "Comp. threshold", "Gate threshold", "Input", "Output" })
+        CHECK (at (p) != nullptr);
+    if (at ("HPF") == nullptr || at ("Output") == nullptr) return;
+    // left column: filters, then HF above HMF above LMF above LF; right column: compressor above gate above gain
+    CHECK (at ("HPF")->y < at ("HF gain")->y);
+    CHECK (at ("HF gain")->y < at ("HMF gain")->y && at ("HMF gain")->y < at ("LMF gain")->y && at ("LMF gain")->y < at ("LF gain")->y);
+    CHECK (at ("Comp. threshold")->y < at ("Gate threshold")->y && at ("Gate threshold")->y < at ("Output")->y);
+    CHECK (at ("LF gain")->x < l.width * 0.5f && at ("Comp. threshold")->x > l.width * 0.5f);
+    CHECK (l.height > l.width); // a strip: taller than wide
+}

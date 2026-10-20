@@ -1297,8 +1297,11 @@ public:
         }
         else if (id == "vumeter") // round 114: an analog-style VU needle showing the gain reduction (the optical leveler)
         {
-            const auto gr = juce::jlimit (0.0f, 1.0f, liveMeter (item.steps)) * 30.0f;
-            vuNeedle += (gr - vuNeedle) * 0.35f; // a meter's inertia (~300 ms at the 30 Hz refresh)
+            // gain reduction (needle down from 0 VU) or the output level (0 VU = −18 dBFS), like the reference's selector
+            const auto out = liveMeter (3);
+            const auto target = vuOutput ? -juce::jlimit (-3.0f, 30.0f, -(20.0f * std::log10 (juce::jmax (1e-6f, out)) + 18.0f))
+                                         : -juce::jlimit (0.0f, 1.0f, liveMeter (item.steps)) * 30.0f;
+            vuNeedle += (-target - vuNeedle) * 0.35f; // a meter's inertia (~300 ms at the 30 Hz refresh)
             const auto face = r.reduced (2.0f * s);
             g.setColour (juce::Colour (0xffd9cfb4).withAlpha (fx.enabled ? 1.0f : 0.5f));
             g.fillRoundedRectangle (face, radius::lg * s);
@@ -1310,7 +1313,7 @@ public:
                 const auto lo = std::pow (10.0f, -1.0f), hi = std::pow (10.0f, 3.0f / 20.0f);
                 return juce::jlimit (0.0f, 1.0f, (std::pow (10.0f, db / 20.0f) - lo) / (hi - lo));
             };
-            const auto angleOf = [&] (float db) { return juce::MathConstants<float>::pi * (-0.32f + 0.64f * fracOf (db)); };
+            const auto angleOf = [&] (float db) { return juce::MathConstants<float>::pi * (-0.27f + 0.54f * fracOf (db)); };
             g.setFont (font (juce::jmax (7.0f, 9.0f * s), true));
             for (const auto db : { -20.0f, -10.0f, -7.0f, -5.0f, -3.0f, -2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f })
             {
@@ -1330,7 +1333,7 @@ public:
             g.setFont (font (juce::jmax (8.0f, 11.0f * s), true));
             g.drawText ("VU", face.withTop (face.getY() + face.getHeight() * 0.5f).withHeight (16.0f * s).toNearestInt(), juce::Justification::centred, false);
             g.setFont (font (juce::jmax (7.0f, 8.5f * s)));
-            g.drawText (tr ("Gain reduction") + "  " + juce::String (-vuNeedle, 1) + " dB", face.withTop (face.getBottom() - 16.0f * s).toNearestInt(), juce::Justification::centred, false);
+            g.drawText ((vuOutput ? tr ("Output") : tr ("Gain reduction")) + "  " + juce::String (-vuNeedle, 1) + (vuOutput ? " VU" : " dB"), face.withTop (face.getBottom() - 16.0f * s).toNearestInt(), juce::Justification::centred, false);
             // the needle
             const auto a = angleOf (-vuNeedle);
             const juce::Point<float> dir { std::sin (a), -std::cos (a) };
@@ -1885,6 +1888,12 @@ public:
             return;
         }
 
+        if (item.type == Item::display && juce::String (item.display) == "vumeter") // the VU's selector: gain reduction / output
+        {
+            vuOutput = ! vuOutput;
+            repaint();
+            return;
+        }
         if (item.type == Item::display && juce::String (item.display) == "sgpresets")
         {
             const auto r = rectOf (item);
@@ -2199,6 +2208,8 @@ public:
             return { tr ("Amount: drag up or down (Ctrl: fine)"), juce::String (soundgoodizerAmount() * 100.0f, 0) + "%", false, false };
         if (item.type == Item::display && juce::String (item.display) == "sgpresets")
             return { tr ("Soundgoodizer preset A to D (read from your FL installation)"), {}, false, false };
+        if (item.type == Item::display && juce::String (item.display) == "vumeter")
+            return { tr ("VU meter: click to show the gain reduction or the output level"), vuOutput ? tr ("Output") : tr ("Gain reduction"), false, false };
         if (item.type == Item::display && juce::String (item.display) == "xy")
             return { tr ("Drag the point: both values at once"), {}, false, false };
         if (item.type == Item::display)
@@ -2375,7 +2386,8 @@ private:
     juce::Point<float> eqDragOffset;
     dynui::History dynHistory; // the dynamics suite's scrolling gain-reduction graph
     int crossoverDrag = -1;    // the crossover parameter being dragged on a band display
-    float vuNeedle = 0.0f;     // the VU display's needle (dB of gain reduction, with inertia)
+    float vuNeedle = 0.0f;     // the VU display's needle (dB below 0 VU, with inertia)
+    bool vuOutput = false;     // the VU shows the output level instead of the gain reduction
     juce::Point<float> mouseAt { -1.0f, -1.0f };
 };
 

@@ -1516,61 +1516,63 @@ LayoutItem meter (float x, float y, float w, float h, int output, const char* ca
 
 Layout ridgeStrip()
 {
+    // round 114: the classic console channel strip's layout (the role: Waves SSL E-Channel, measured on the official
+    // trial): two columns read top to bottom. Left: FILTERS, then the four EQ bands HF, HMF, LMF, LF (gain on the
+    // left, frequency in the middle, Q / bell on the right), the EQ curve under them. Right: DYNAMICS (the
+    // compressor, then the expander / gate, their gain-reduction meters), the routing (EQ and dynamics in, order,
+    // filters to the side chain), and the GAIN block (input, phase, output) at the bottom.
     Layout l;
-    l.width = 700;
-    l.height = 360;
+    l.width = 560;
+    l.height = 716;
     auto& v = l.items;
-    // filters
-    v.push_back (section (4, 4, 104, 352, TR_NOOP ("Filters")));
-    v.push_back (dial (56, 62, 40, "HPF", TR_NOOP ("High-pass")));
-    v.push_back (dial (56, 150, 40, "LPF", TR_NOOP ("Low-pass")));
-    v.push_back (toggle (12, 214, 92, 20, "Filters to SC", TR_NOOP ("To sidechain")));
-
-    // equalizer: the curve on top, one column per band (LF … HF, low to high as on the graph)
-    v.push_back (section (112, 4, 340, 352, TR_NOOP ("Equalizer")));
-    v.push_back (display (118, 24, 328, 96, "ridgeeq"));
-    const char* bands[] = { TR_NOOP ("LF"), TR_NOOP ("LMF"), TR_NOOP ("HMF"), TR_NOOP ("HF") };
-    const char* gains[] = { "LF gain", "LMF gain", "HMF gain", "HF gain" };
-    const char* freqs[] = { "LF freq.", "LMF freq.", "HMF freq.", "HF freq." };
+    // --- left column: filters and EQ
+    v.push_back (section (4, 4, 276, 104, TR_NOOP ("Filters")));
+    v.push_back (dial (54, 50, 36, "HPF", TR_NOOP ("High-pass")));
+    v.push_back (dial (140, 50, 36, "LPF", TR_NOOP ("Low-pass")));
+    v.push_back (toggle (186, 40, 88, 20, "Filters to SC", TR_NOOP ("To sidechain")));
+    const char* names[] = { TR_NOOP ("HF"), TR_NOOP ("HMF"), TR_NOOP ("LMF"), TR_NOOP ("LF") };
+    const char* gains[] = { "HF gain", "HMF gain", "LMF gain", "LF gain" };
+    const char* freqs[] = { "HF freq.", "HMF freq.", "LMF freq.", "LF freq." };
+    const char* extra[] = { "HF bell", "HMF Q", "LMF Q", "LF bell" };
     for (int b = 0; b < 4; ++b)
     {
-        const auto cx = 158.0f + 82.0f * (float) b;
-        v.push_back (label (cx - 36.0f, 124, 72, 14, bands[b], boxed));
-        v.push_back (dial (cx, 162, 38, gains[b], TR_NOOP ("Gain"), bipolar));
-        v.push_back (dial (cx, 230, 32, freqs[b], TR_NOOP ("Freq")));
+        const auto y = 112.0f + 102.0f * (float) b;
+        v.push_back (section (4, y, 276, 98, names[b]));
+        v.push_back (dial (54, y + 44.0f, 36, gains[b], TR_NOOP ("Gain"), bipolar));
+        v.push_back (dial (140, y + 44.0f, 36, freqs[b], TR_NOOP ("Freq")));
         if (b == 1 || b == 2)
-            v.push_back (dial (cx, 290, 28, b == 1 ? "LMF Q" : "HMF Q", TR_NOOP ("Q")));
+            v.push_back (dial (226, y + 44.0f, 30, extra[b], TR_NOOP ("Q")));
         else
-            v.push_back (toggle (cx - 30.0f, 282, 62, 20, b == 0 ? "LF bell" : "HF bell", TR_NOOP ("Bell")));
+            v.push_back (toggle (194, y + 34.0f, 72, 20, extra[b], TR_NOOP ("Bell")));
     }
-    v.push_back (tabs (118, 330, 130, 20, "EQ curve", TR_NOOP ("Brown|Black")));
-    v.push_back (toggle (360, 330, 88, 20, "EQ on", TR_NOOP ("EQ in")));
+    v.push_back (section (4, 520, 276, 192, TR_NOOP ("Equalizer")));
+    v.push_back (display (10, 540, 264, 118, "ridgeeq"));
+    v.push_back (tabs (10, 664, 150, 20, "EQ curve", TR_NOOP ("Brown|Black")));
+    v.push_back (toggle (170, 664, 104, 20, "EQ on", TR_NOOP ("EQ in")));
 
-    // dynamics: static curve, the two gain-reduction meters, compressor and gate
-    v.push_back (section (456, 4, 160, 352, TR_NOOP ("Dynamics")));
-    v.push_back (display (462, 24, 148, 66, "ridgecomp"));
-    v.push_back (meter (462, 94, 148, 10, 0, TR_NOOP ("Comp")));
-    v.push_back (meter (462, 108, 148, 10, 1, TR_NOOP ("Gate")));
-    v.push_back (label (462, 122, 148, 14, TR_NOOP ("Compressor"), boxed));
-    v.push_back (dial (488, 158, 30, "Ratio", TR_NOOP ("Ratio")));
-    v.push_back (dial (536, 158, 30, "Comp. threshold", TR_NOOP ("Thres")));
-    v.push_back (dial (584, 158, 30, "Comp. release", TR_NOOP ("Release")));
-    v.push_back (dial (488, 214, 24, "Comp. mix", TR_NOOP ("Mix")));
-    v.push_back (toggle (512, 208, 100, 20, "Fast attack", TR_NOOP ("Fast attack")));
-    v.push_back (label (462, 252, 148, 14, TR_NOOP ("Gate / expander"), boxed));
-    v.push_back (dial (488, 286, 30, "Gate range", TR_NOOP ("Range")));
-    v.push_back (dial (536, 286, 30, "Gate threshold", TR_NOOP ("Thres")));
-    v.push_back (dial (584, 286, 30, "Gate release", TR_NOOP ("Release")));
-    v.push_back (toggle (462, 334, 70, 20, "Gate fast", TR_NOOP ("Fast")));
-    v.push_back (toggle (536, 334, 76, 20, "Expander", TR_NOOP ("Expand")));
-
-    // master: trims, order, phase, dynamics in
-    v.push_back (section (620, 4, 76, 352, TR_NOOP ("Master")));
-    v.push_back (dial (658, 58, 34, "Input", TR_NOOP ("Input"), bipolar));
-    v.push_back (dial (658, 134, 34, "Output", TR_NOOP ("Output"), bipolar));
-    v.push_back (tabs (628, 190, 60, 76, "Order", TR_NOOP ("EQ>Dyn|Dyn>EQ")));
-    v.push_back (toggle (626, 278, 68, 20, "Dynamics on", TR_NOOP ("Dyn in")));
-    v.push_back (toggle (626, 306, 68, 20, "Phase", TR_NOOP ("Phase")));
+    // --- right column: dynamics, routing, gain
+    v.push_back (section (284, 4, 272, 236, TR_NOOP ("Compressor")));
+    v.push_back (display (290, 24, 120, 70, "ridgecomp"));
+    v.push_back (dial (480, 62, 46, "Comp. threshold", TR_NOOP ("Threshold"), big));
+    v.push_back (dial (330, 150, 32, "Ratio", TR_NOOP ("Ratio")));
+    v.push_back (dial (410, 150, 32, "Comp. release", TR_NOOP ("Release")));
+    v.push_back (dial (490, 150, 28, "Comp. mix", TR_NOOP ("Mix")));
+    v.push_back (toggle (296, 206, 110, 20, "Fast attack", TR_NOOP ("Fast attack")));
+    v.push_back (section (284, 244, 272, 196, TR_NOOP ("Expander / gate")));
+    v.push_back (dial (480, 296, 46, "Gate threshold", TR_NOOP ("Threshold"), big));
+    v.push_back (dial (330, 290, 32, "Gate range", TR_NOOP ("Range")));
+    v.push_back (dial (330, 370, 32, "Gate release", TR_NOOP ("Release")));
+    v.push_back (toggle (396, 380, 70, 20, "Gate fast", TR_NOOP ("Fast")));
+    v.push_back (tabs (396, 408, 154, 20, "Expander", TR_NOOP ("Gate|Expand")));
+    v.push_back (section (284, 444, 272, 132, TR_NOOP ("Dynamics")));
+    v.push_back (meter (292, 466, 256, 12, 0, TR_NOOP ("Comp")));
+    v.push_back (meter (292, 484, 256, 12, 1, TR_NOOP ("Gate")));
+    v.push_back (toggle (292, 508, 84, 20, "Dynamics on", TR_NOOP ("Dyn in")));
+    v.push_back (tabs (384, 508, 164, 20, "Order", TR_NOOP ("EQ>Dyn|Dyn>EQ")));
+    v.push_back (section (284, 580, 272, 132, TR_NOOP ("Gain")));
+    v.push_back (dial (340, 636, 40, "Input", TR_NOOP ("Input"), bipolar));
+    v.push_back (toggle (390, 626, 60, 20, "Phase", TR_NOOP ("Phase")));
+    v.push_back (dial (496, 636, 40, "Output", TR_NOOP ("Output"), bipolar));
     return l;
 }
 
