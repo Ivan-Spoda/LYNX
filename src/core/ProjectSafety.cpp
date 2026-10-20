@@ -27,7 +27,7 @@ std::size_t versionSuffix (const std::string& s)
     auto i = s.size();
     while (i > 0 && std::isdigit ((unsigned char) s[i - 1]))
         --i;
-    if (i == s.size() || i == 0 || s[i - 1] != '_')
+    if (i == s.size() || i < 2 || s[i - 1] != '_')
         return std::string::npos;
     return i - 1;
 }
