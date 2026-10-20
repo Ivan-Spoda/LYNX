@@ -111,10 +111,10 @@ The stretched copies are now shared by every engine of the process (the export e
 
 With her consent all 48 saved projects (12 GB) were copied to this PC (tmp only). Each project folder was copied to
 C: (fresh modification times, so LYNX's disk stream cache is cold, as on a first open) and exported headless with
-this round's build; this PC has no SoundToys/UAD/Waves, but Pro-Q 4 (trial) is installed. Of 38 finished so far,
+this round's build; this PC has no SoundToys/UAD/Waves, but Pro-Q 4 (trial) is installed. Of the 44 copied by then (4 were still copying),
 the slowest opens are: FALA PRA MIM! 10.6 s (samples: 28 s of decoding spread over threads, 10 s wall), twin swag
 7.0 s (36.6 s → 6.3 s wall), luisa sonsa 6.1 s (Pro-Q 4 4.4 s), AIAIAIAUIUI 6.0 s, WIU 4.9 s, a 4.6 s, OIOIOI
-4.5 s; median ≈ 1.9 s. On projects with many long takes the **first** open is dominated by decoding the takes into
+4.5 s; median 1.8 s. On projects with many long takes the **first** open is dominated by decoding the takes into
 the disk stream cache (`%TEMP%\LYNX-cache`, reused afterwards); on her laptop, by creating the hosted plugins.
 
 Old vs new on the largest one (JÃO, 100 samples, 516 MB), copied to C:: 0.1.7 cold open 5.5 s + export prepare
