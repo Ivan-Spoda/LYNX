@@ -527,6 +527,8 @@ juce::String toJson (const Song& song)
     }
     if (song.masterPitch != 0.0f)
         root->setProperty ("masterPitch", (double) song.masterPitch);
+    if (song.substitutesBypassed)
+        root->setProperty ("substitutesBypassed", true);
     if (! song.info.empty())
     {
         auto info = std::make_unique<juce::DynamicObject>();
@@ -991,6 +993,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
         for (const auto& name : *groups)
             song.channelGroups.push_back (name.toString().toStdString());
     song.masterPitch = juce::jlimit (-1200.0f, 1200.0f, (float) (double) root.getProperty ("masterPitch", 0.0));
+    song.substitutesBypassed = (bool) root.getProperty ("substitutesBypassed", false);
     if (const auto info = root.getProperty ("info", {}); info.isObject())
     {
         auto get = [&info] (const char* key) { return info.getProperty (key, {}).toString().toStdString(); };
