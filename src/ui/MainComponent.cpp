@@ -1,4 +1,5 @@
 #include "ui/MainComponent.h"
+#include "platform/Paths.h"
 #include "ui/SetupWizard.h"
 #include "core/FlPluginDb.h"
 
@@ -2678,7 +2679,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         menu.addSeparator();
         menu.addItem (tr ("Export audio...") + shortcutText ("file.export"), [this] { exportAudio(); });
         menu.addItem (tr ("Open autosave folder"), [] {
-            juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/autosave").startAsProcess();
+            lynx::platform::settingsFile ("autosave").startAsProcess();
         });
         menu.addSeparator();
         menu.addItem (tr ("Exit"), [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); });

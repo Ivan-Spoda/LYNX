@@ -2578,3 +2578,9 @@ countries: br
 "Band 1|Band 2|Band 3|Band 4" = "Banda 1|Banda 2|Banda 3|Banda 4"
 "Compress|Expand" = "Comprimir|Expandir"
 "GR" = "GR"
+
+# --- macOS and Linux (round 117)
+"JACK / PipeWire" = "JACK / PipeWire"
+"macOS's own audio system: low latency with any device, shared with other programs." = "O sistema de áudio do próprio macOS: latência baixa com qualquer dispositivo, compartilhado com outros programas."
+"Talks to the sound card directly. Choose \"default\" or \"pipewire\" to share the device with other programs; a \"hw:\" device gives the lowest latency but takes the card for LYNX alone." = "Fala direto com a placa de som. Escolha \"default\" ou \"pipewire\" para dividir o dispositivo com outros programas; um dispositivo \"hw:\" dá a menor latência, mas deixa a placa só para o LYNX."
+"Low latency, shared with other programs and routable. On current distributions PipeWire answers as JACK (package pipewire-jack); otherwise start a JACK server first." = "Latência baixa, compartilhado com outros programas e roteável. Nas distribuições atuais o PipeWire responde como JACK (pacote pipewire-jack); senão, inicie um servidor JACK antes."

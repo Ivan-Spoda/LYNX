@@ -146,6 +146,12 @@ DriverKind driverKind (const std::string& typeName)
         return DriverKind::asio;
     if (typeName == "LYNX ASIO")
         return DriverKind::lynxAsio;
+    if (typeName == "CoreAudio")
+        return DriverKind::coreAudio;
+    if (typeName == "ALSA")
+        return DriverKind::alsa;
+    if (typeName == "JACK")
+        return DriverKind::jack;
     return DriverKind::other;
 }
 

@@ -1,14 +1,18 @@
-# Release build of LYNX for Windows.
+# Release build of LYNX for Windows, macOS and Linux.
 #
-# Every published LYNX.exe comes from this workflow, built from the tagged source on GitHub-hosted
+# Every published binary comes from this workflow, built from the tagged source on GitHub-hosted
 # runners, so anyone can trace a binary back to the commit and the run that produced it
 # (a requirement of the SignPath Foundation code signing program; see docs/CODE_SIGNING.md).
 #
+#   version  (ubuntu)   reads the version (CMakeLists.txt) and the package label
 #   build    (ubuntu)   cross-compiles LYNX.exe with Zig 0.14.1 + JUCE 8.0.4 (scripts/build-windows-zig.sh)
 #   sign     (ubuntu)   SignPath signing request; skipped until the repository variable SIGNPATH_ENABLED is 'true'
-#   package  (windows)  runs the self-test on the (signed) exe, builds Demo.lynx, the portable zip, the per-user
-#                       installer (NSIS, resources/installer/LYNX.nsi) and SHA256SUMS,
-#                       and on a tag push attaches them to the GitHub release
+#   package  (windows)  runs the self-test on the (signed) exe, builds Demo.lynx, the portable zip and the per-user
+#                       installer (NSIS, resources/installer/LYNX.nsi)
+#   linux    (ubuntu)   CMake + GCC build, self-test, AppImage and .tar.gz (scripts/package-linux.sh)
+#   macos    (macos)    CMake universal (arm64 + x86_64) build, self-test, ad-hoc signature (no Apple Developer ID,
+#                       not notarized), .dmg (scripts/package-macos.sh)
+#   publish  (ubuntu)   SHA256SUMS.txt over every file; on a tag push attaches everything to the (draft) GitHub release
 name: Release
 
 on:
@@ -30,13 +34,12 @@ env:
   JUCE_SHA256: 0effe9823a6fd8a4f98e5c08be7d308350e417b2d15dcf34011e778fefbbf005
 
 jobs:
-  build:
-    name: Build LYNX.exe
+  version:
+    name: Version
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
       label: ${{ steps.version.outputs.label }}
-      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@v5
 
@@ -56,6 +59,16 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "label=$label" >> "$GITHUB_OUTPUT"
           echo "LYNX $version (package label $label)"
+
+  build:
+    name: Build LYNX.exe
+    needs: version
+    runs-on: ubuntu-24.04
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v5
+
 
       # Only the downloaded toolchain is cached (checksums verified on download); the app is always built from scratch.
       - name: Cache toolchain
@@ -138,14 +151,12 @@ jobs:
 
   package:
     name: Self-test and package
-    needs: [build, sign]
+    needs: [version, build, sign]
     if: ${{ !cancelled() && needs.build.result == 'success' && (needs.sign.result == 'success' || needs.sign.result == 'skipped') }}
     runs-on: windows-latest
-    permissions:
-      contents: write   # attach the files to the release on a tag push
     env:
-      LABEL: ${{ needs.build.outputs.label }}
-      VERSION: ${{ needs.build.outputs.version }}
+      LABEL: ${{ needs.version.outputs.label }}
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v5
 
@@ -200,11 +211,6 @@ jobs:
           if (-not (Test-Path "$inst\LYNX.exe")) { throw "installer did not install LYNX.exe" }
           Start-Process "$inst\Uninstall.exe" -ArgumentList '/S', "_?=$inst" -Wait
           if (Test-Path "$inst\LYNX.exe") { throw "uninstaller left LYNX.exe" }
-          Push-Location dist
-          Get-ChildItem -File | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.Name -Algorithm SHA256).Hash.ToLower(), $_.Name } | Set-Content -Encoding ascii SHA256SUMS.txt
-          Get-Content SHA256SUMS.txt
-          Pop-Location
-
       - name: Upload package
         uses: actions/upload-artifact@v7
         with:
@@ -212,11 +218,135 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  linux:
+    name: Linux (AppImage, tar.gz)
+    needs: version
+    runs-on: ubuntu-24.04
+    env:
+      LABEL: ${{ needs.version.outputs.label }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q ninja-build pkg-config xvfb libasound2-dev libjack-jackd2-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxext-dev libxcomposite-dev libfreetype-dev libfontconfig1-dev libgl-dev
+
+      - name: JUCE (checksum verified)
+        run: |
+          curl -fsSL -o juce.tar.gz "https://github.com/juce-framework/JUCE/archive/refs/tags/$JUCE_VERSION.tar.gz"
+          echo "$JUCE_SHA256  juce.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/juce" && tar xzf juce.tar.gz -C "$RUNNER_TEMP/juce" --strip-components 1 && rm juce.tar.gz
+
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_SOURCE_DIR_JUCE="$RUNNER_TEMP/juce"
+          cmake --build build --target LYNX
+          sha256sum build/LYNX_artefacts/Release/LYNX
+
+      - name: Self-test and demo project
+        run: |
+          bin=build/LYNX_artefacts/Release/LYNX
+          xvfb-run -a "$bin" --selftest "$PWD/selftest.txt" "$PWD/selftest-demo.lynx" || true
+          cat selftest.txt
+          grep -q '^result=OK' selftest.txt
+          xvfb-run -a "$bin" --showcase "$PWD/Demo.lynx" || true
+          test -s Demo.lynx
+
+      - name: Package
+        run: |
+          sudo apt-get install -y -q libfuse2t64 || true
+          ./scripts/package-linux.sh build/LYNX_artefacts/Release/LYNX "$LABEL" dist Demo.lynx
+
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: LYNX-${{ env.LABEL }}-linux-x86_64
+          path: dist/*
+          if-no-files-found: error
+
+  macos:
+    name: macOS (universal dmg)
+    needs: version
+    runs-on: macos-14
+    env:
+      LABEL: ${{ needs.version.outputs.label }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build dependencies
+        run: brew list ninja > /dev/null 2>&1 || brew install ninja
+
+      - name: JUCE (checksum verified)
+        run: |
+          curl -fsSL -o juce.tar.gz "https://github.com/juce-framework/JUCE/archive/refs/tags/$JUCE_VERSION.tar.gz"
+          echo "$JUCE_SHA256  juce.tar.gz" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/juce" && tar xzf juce.tar.gz -C "$RUNNER_TEMP/juce" --strip-components 1 && rm juce.tar.gz
+
+      - name: Build (universal)
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_SOURCE_DIR_JUCE="$RUNNER_TEMP/juce" \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          cmake --build build --target LYNX
+          lipo -info build/LYNX_artefacts/Release/LYNX.app/Contents/MacOS/LYNX
+
+      - name: Self-test and demo project
+        run: |
+          bin=build/LYNX_artefacts/Release/LYNX.app/Contents/MacOS/LYNX
+          "$bin" --selftest "$PWD/selftest.txt" "$PWD/selftest-demo.lynx" || true
+          cat selftest.txt
+          grep -q '^result=OK' selftest.txt
+          "$bin" --showcase "$PWD/Demo.lynx" || true
+          test -s Demo.lynx
+
+      - name: Package
+        run: ./scripts/package-macos.sh build/LYNX_artefacts/Release/LYNX.app "$LABEL" dist Demo.lynx
+
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: LYNX-${{ env.LABEL }}-macos-universal
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Checksums and release
+    needs: [version, package, linux, macos]
+    if: ${{ !cancelled() && needs.package.result == 'success' && needs.linux.result == 'success' && needs.macos.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # attach the files to the release on a tag push
+    env:
+      LABEL: ${{ needs.version.outputs.label }}
+    steps:
+      - name: Download the packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: LYNX-${{ env.LABEL }}-*
+          path: dist
+          merge-multiple: true
+
+      - name: SHA256SUMS
+        run: |
+          cd dist
+          rm -f SHA256SUMS.txt
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload all files
+        uses: actions/upload-artifact@v7
+        with:
+          name: LYNX-${{ env.LABEL }}-all
+          path: dist/*
+          if-no-files-found: error
+
       - name: Attach to the GitHub release
         if: github.ref_type == 'tag'
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           tag="$GITHUB_REF_NAME"
           if ! gh release view "$tag" > /dev/null 2>&1; then

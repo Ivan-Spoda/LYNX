@@ -1,4 +1,5 @@
 #include <juce_gui_basics/juce_gui_basics.h>
+#include "platform/Paths.h"
 
 #include "core/Effects.h"
 #include "core/FlEffects.h"
@@ -58,7 +59,7 @@ lynx::AudioEngine* crashEngine = nullptr;
 // Crashed: try to save the project and write the backtrace (like FL's "emergency save").
 void onCrash (void*)
 {
-    const auto folder = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/autosave");
+    const auto folder = lynx::platform::settingsFile ("autosave");
     folder.createDirectory();
     const auto stamp = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S");
     folder.getChildFile ("crash " + stamp + ".txt").replaceWithText (juce::SystemStats::getStackBacktrace());

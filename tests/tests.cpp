@@ -7767,7 +7767,10 @@ TEST (driver_kind_and_shared_mode_buffer_sizes)
     CHECK (lynx::prefs::driverKind ("ASIO") == DriverKind::asio);
     CHECK (lynx::prefs::driverKind ("LYNX ASIO") == DriverKind::lynxAsio);
     CHECK (lynx::prefs::driverKind ("DirectSound") == DriverKind::directSound);
-    CHECK (lynx::prefs::driverKind ("ALSA") == DriverKind::other);
+    CHECK (lynx::prefs::driverKind ("ALSA") == DriverKind::alsa);
+    CHECK (lynx::prefs::driverKind ("JACK") == DriverKind::jack);
+    CHECK (lynx::prefs::driverKind ("CoreAudio") == DriverKind::coreAudio);
+    CHECK (lynx::prefs::driverKind ("Some Other Driver") == DriverKind::other);
     const std::vector<int> offered { 144, 192, 256, 480, 512, 1024 };
     CHECK ((lynx::prefs::usableBufferSizes (DriverKind::wasapiShared, offered, 480) == std::vector<int> { 480, 512, 1024 }));
     CHECK (lynx::prefs::usableBufferSizes (DriverKind::wasapiExclusive, offered, 480) == offered);   // the device's real periods

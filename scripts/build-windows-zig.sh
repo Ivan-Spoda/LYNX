@@ -85,7 +85,7 @@ APP_SOURCES=(src/Main.cpp
 # workflow shell: core (key map, workspace layout, rack operations) and UI (workspace desktop, control contract)
 APP_SOURCES+=(src/core/KeyMap.cpp src/core/Workspace.cpp src/core/RackOps.cpp src/ui/Workspace.cpp src/ui/ValueControl.cpp src/ui/Dialogs.cpp)
 # Windows file association (.lynx) and its icon
-APP_SOURCES+=(src/platform/FileTypes.cpp)
+APP_SOURCES+=(src/platform/FileTypes.cpp src/platform/Paths.cpp src/platform/NativeEmbed.cpp)
 # workflow P2: core (note tools, mixer operations, history labels, browser search)
 APP_SOURCES+=(src/core/NoteTools.cpp src/core/PianoRollTools.cpp src/core/EventEdit.cpp src/core/AudioEdit.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp)
 # workflow P2: UI (note tool dialogs, tool windows, undo history, quick-add palette)

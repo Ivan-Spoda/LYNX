@@ -7,7 +7,7 @@
 //
 // Waking the workers (REA round 87): a worker that just finished spins for a short while (the next parallelFor of
 // the same block — the next mixer layer, the next chunk — comes microseconds later), then sleeps on an OS
-// semaphore (a Win32 semaphore on Windows, a futex-backed one elsewhere). std::counting_semaphore is NOT used:
+// semaphore (a Win32 semaphore on Windows, a libdispatch one on macOS, a futex-backed POSIX one on Linux). std::counting_semaphore is NOT used:
 // the Windows libc++ build has no platform wait and falls back to Sleep() polling with growing intervals, so an
 // idle worker woke 1–8 ms late — later than a whole audio block — and the audio thread ended up doing all the
 // work alone.

@@ -2,20 +2,74 @@ name: Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'wip/**']
   pull_request:
+
+env:
+  JUCE_VERSION: 8.0.4
+  JUCE_SHA256: 0effe9823a6fd8a4f98e5c08be7d308350e417b2d15dcf34011e778fefbbf005
 
 jobs:
   core:
-    name: Core (${{ matrix.compiler }})
-    runs-on: ubuntu-24.04
+    name: Core (${{ matrix.os }}, ${{ matrix.compiler }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        compiler: [g++, clang++]
+        include:
+          - { os: ubuntu-24.04, compiler: g++ }
+          - { os: ubuntu-24.04, compiler: clang++ }
+          - { os: macos-14, compiler: clang++ }
     steps:
       - uses: actions/checkout@v5
       - name: Build and test the core (no JUCE)
         env:
           CXX: ${{ matrix.compiler }}
         run: ./scripts/build-local.sh
+
+  # The whole app (JUCE) on Linux and macOS: it must build and pass its self-test. Windows is built by release.yml.
+  app:
+    name: App (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q ninja-build pkg-config xvfb libasound2-dev libjack-jackd2-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxext-dev libxcomposite-dev libfreetype-dev libfontconfig1-dev libgl-dev
+
+      - name: macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew list ninja > /dev/null 2>&1 || brew install ninja
+
+      - name: JUCE (checksum verified)
+        shell: bash
+        run: |
+          curl -fsSL -o juce.tar.gz "https://github.com/juce-framework/JUCE/archive/refs/tags/$JUCE_VERSION.tar.gz"
+          echo "$JUCE_SHA256  juce.tar.gz" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/juce" && tar xzf juce.tar.gz -C "$RUNNER_TEMP/juce" --strip-components 1 && rm juce.tar.gz
+
+      - name: Build
+        shell: bash
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_SOURCE_DIR_JUCE="$RUNNER_TEMP/juce"
+          cmake --build build --target LYNX
+
+      - name: Self-test
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            bin=build/LYNX_artefacts/Release/LYNX; run=(xvfb-run -a)
+          else
+            bin=build/LYNX_artefacts/Release/LYNX.app/Contents/MacOS/LYNX; run=()
+          fi
+          "${run[@]}" "$bin" --selftest "$PWD/selftest.txt" "$PWD/selftest-demo.lynx" || true
+          cat selftest.txt
+          grep -q '^result=OK' selftest.txt
