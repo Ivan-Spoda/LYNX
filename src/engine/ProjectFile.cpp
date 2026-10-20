@@ -4,6 +4,7 @@
 
 #include "core/Effects.h"
 #include "core/PluginSubstitutes.h"
+#include "core/ProjectSafety.h"
 #include "engine/Text.h"
 
 namespace lynx::ProjectFile
@@ -1466,6 +1467,14 @@ std::optional<Song> load (const juce::File& file, juce::String& error)
         return std::nullopt;
     }
 
-    return fromJson (file.loadFileAsString(), error);
+    auto song = fromJson (file.loadFileAsString(), error);
+
+    // samples saved relative to the project (a package) or moved along with it are found next to it (REA round 118)
+    if (song)
+        safety::resolveProjectSamples (*song, file.getParentDirectory().getFullPathName().toStdString(), [] (const std::string& path) {
+            return juce::File::isAbsolutePath (juce::String::fromUTF8 (path.c_str())) && juce::File (juce::String::fromUTF8 (path.c_str())).existsAsFile();
+        });
+
+    return song;
 }
 } // namespace lynx::ProjectFile

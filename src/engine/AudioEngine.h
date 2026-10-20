@@ -69,6 +69,8 @@ public:
 
     // Copies the plugins' current state into the Song (before saving).
     void capturePluginStates();
+    // Offline render mode for the hosted plugins (setNonRealtime), around renderOffline.
+    void setPluginsRenderMode (bool offline);
 
     void play() noexcept;
     void stop() noexcept; // also cancels a count-in or a wait for the first note
@@ -202,6 +204,7 @@ public:
     // Changes since the last save/open (for the "*" in the title and the "save changes?" prompt).
     bool isModified() const noexcept { return modified; }
     void markSaved() noexcept { modified = false; sendChangeMessage(); }
+    void markModified() noexcept { modified = true; sendChangeMessage(); } // e.g. a backup was opened in place of the project
 
     bool canUndo() const noexcept { return ! undoStack.empty(); }
     bool canRedo() const noexcept { return ! redoStack.empty(); }
