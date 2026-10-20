@@ -49,8 +49,11 @@ out-of-process plugin sandbox. macOS adds Audio Units, Linux LV2; drivers Core A
   selected channel, user folders.
 - **Window menus:** each window's title-bar menu carries its own items (Playlist ripple/zoom, Channel Rack graph
   lanes/rotate/sort, Piano Roll tools/zoom/scale snap, Mixer move/link, Browser search/add folder).
-- **Project safety:** "*" in the title, "save changes?", autosave every 2 minutes and an emergency save on crash
-  (`%APPDATA%\LYNX\autosave`).
+- **Project safety:** "*" in the title, "save changes?", atomic saves, autosave every 2 minutes as "Song (autosaved on
+  2026-10-20 at 14h19)" and the replaced file kept as "Song (overwritten on …)" (rotation by time), an emergency save on
+  crash and a "did not close properly — open the newest backup?" prompt at the next start, File › Save new version
+  (Song_2, Song_3…), Revert to last backup, Export project with samples (.zip, opened back by Open), Collect project
+  samples into a folder; samples are found next to a moved project (REA round 118; `%APPDATA%\LYNX\autosave`).
 - **Opening FL projects** behind a progress panel (round 112): samples decoded in parallel off the UI thread, hosted
   plugins created one by one with their names shown ("Loading Auto-Tune Pro... 3/12"), no repeated plugin searches,
   missing drives probed once; phase times in `%APPDATA%\LYNX\load.log` and in the `--export` report.

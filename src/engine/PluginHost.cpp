@@ -41,6 +41,15 @@ void preparePlugin (juce::AudioPluginInstance& plugin, double sampleRate, int bl
     plugin.prepareToPlay (sampleRate, blockSize);
 }
 
+void setPluginRenderMode (juce::AudioPluginInstance& plugin, bool offline, int blockSize)
+{
+    if (plugin.isNonRealtime() == offline)
+        return;
+    plugin.setNonRealtime (offline);
+    if (plugin.getSampleRate() > 0.0)
+        plugin.prepareToPlay (plugin.getSampleRate(), blockSize); // VST3 reads the process mode in its setup
+}
+
 namespace
 {
 void setPluginParameter (juce::AudioPluginInstance& plugin, int index, float value) noexcept
@@ -393,7 +402,7 @@ bool scanResultComplete (const juce::File& result)
 // why a plugin file was not described (%APPDATA%\LYNX\scan-failures.log), so a "missing" plugin can be explained
 void logScanFailure (const juce::String& file, const juce::String& why, juce::uint32 elapsedMs)
 {
-    const auto log = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX").getChildFile ("scan-failures.log");
+    const auto log = lynx::platform::settingsFile ("scan-failures.log");
     if (log.getSize() > 256 * 1024)
         log.deleteFile();
     log.appendText (juce::Time::getCurrentTime().toISO8601 (true) + " | " + file + " | " + why + " | " + juce::String (elapsedMs / 1000.0, 1) + " s\n");
