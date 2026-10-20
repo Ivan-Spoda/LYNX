@@ -24,6 +24,7 @@ namespace lynx
 {
 class MainComponent final : public juce::Component,
                             public juce::DragAndDropContainer,
+                            public ui::HintSource,
                             private juce::MenuBarModel,
                             private juce::Timer,
                             private juce::ChangeListener
@@ -39,6 +40,7 @@ public:
     void mouseDown (const juce::MouseEvent& e) override; // right-click on the toolbar: the toolbar menu
     bool keyPressed (const juce::KeyPress& key) override;
     bool keyStateChanged (bool isKeyDown) override;
+    ui::Hint hintAt (juce::Point<int> position) override; // the toolbar's background: how to edit it
 
     // Opens .lynx or .flp (also used by the command line).
     void openFile (const juce::File& file);
@@ -78,6 +80,8 @@ public:
     // --snapshot: a toolbar layout (icon size, hidden/reordered groups) without saving it
     void setToolbarLayoutForSnapshot (const toolbarlayout::Layout& layout) { setToolbarLayout (layout, false); }
     juce::PopupMenu getToolbarMenuForSnapshot() { return makeToolbarMenu(); }
+    void setToolbarEditingForSnapshot (bool editing) { setToolbarEditing (editing); }
+    int getToolbarAndTrayHeightForSnapshot() const { return toolbarHeight + (toolbarEditor != nullptr ? toolbar::EditOverlay::trayHeight : 0); }
     juce::Rectangle<int> getToolStripAreaForSnapshot (bool playlistStrip);
     void setMetersForSnapshot (double cpu, std::int64_t memory, int polyphony) { perfMeter.setValues (cpu, memory, polyphony); }
     static std::unique_ptr<juce::Component> makeHelpContent();
@@ -188,6 +192,12 @@ private:
     juce::PopupMenu makeToolbarMenu();
     void showToolbarMenu();
     void showCustomizeToolbar();
+    // The toolbar's edit mode (drag panels to move, add or remove them; toolbar::EditOverlay)
+    void setToolbarEditing (bool editing);
+    void undoRedo (bool redo); // with "Undone: ..." and the undo level in the hint bar
+    std::unique_ptr<toolbar::EditOverlay> toolbarEditor;
+    toolbar::EditOverlay::Bounds panelBounds {}; // each shown toolbar panel (for the edit mode)
+    juce::Rectangle<int> fixedToolbarArea;       // the menu and the hint bar
     void newProject (bool askAlways = false); // File › New: the New project window unless turned off
     void startNewProject (Song song, const juce::File& file);
     void saveAsTemplate();

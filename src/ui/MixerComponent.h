@@ -171,6 +171,7 @@ public:
         selectedSlot = slot;
         repaint();
     }
+    void openSlotEditor (int slot) { openEditor (slot); }
 
     void paint (juce::Graphics& g) override;
     void mouseDown (const juce::MouseEvent& e) override;
@@ -270,6 +271,13 @@ public:
     void selectFirstTrackWithEffects();
     void selectTrack (int track); // also scrolls the strip into view
     void selectSlot (int slot) { effects.selectSlot (slot); }
+    // Selects the insert and slot and opens the effect's editor (the Browser's "Current project > Effects")
+    void openSlotEditor (int track, int slot)
+    {
+        selectTrack (track);
+        effects.selectSlot (slot);
+        effects.openSlotEditor (slot);
+    }
 
     // The key map's mixer.* actions.
     bool runAction (const std::string& id);

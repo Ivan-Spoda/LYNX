@@ -886,6 +886,446 @@ bool CustomizePanel::keyPressed (const juce::KeyPress& key)
     }
     return true;
 }
+
+// --- edit mode ---------------------------------------------------------------------------------------
+
+Icon EditOverlay::groupIcon (toolbarlayout::Group g)
+{
+    using toolbarlayout::Group;
+    switch (g)
+    {
+        case Group::transport: return Icon::play;
+        case Group::master: return Icon::tuningFork;
+        case Group::record: return Icon::metronome;
+        case Group::snap: return Icon::magnet;
+        case Group::windows: return Icon::playlist;
+        case Group::file: return Icon::save;
+        case Group::meters: return Icon::settings;
+        case Group::output: return Icon::listen;
+        case Group::count_: break;
+    }
+    return Icon::none;
+}
+
+EditOverlay::EditOverlay (Host h, int height) : host (std::move (h)), toolbarHeight (height)
+{
+    setWantsKeyboardFocus (true);
+    setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+
+    for (int p = 0; p < toolbarlayout::presetCount; ++p)
+        presetBox.addItem (tr (toolbarlayout::presetName ((toolbarlayout::Preset) p)), p + 1);
+    presetBox.setTextWhenNothingSelected (tr ("Custom"));
+    presetBox.onChange = [this] {
+        const auto id = presetBox.getSelectedId();
+        if (id > 0)
+            apply (toolbarlayout::applyPreset (host.layout(), (toolbarlayout::Preset) (id - 1)));
+    };
+    ui::setHint (presetBox, tr ("Toolbar presets: which panels show (LYNX's own layouts)"), false);
+    resetButton.setButtonText (tr ("Reset"));
+    resetButton.onClick = [this] {
+        auto l = toolbarlayout::Layout::makeDefault();
+        const auto now = host.layout();
+        l.iconSize = now.iconSize;
+        l.uiScale = now.uiScale;
+        apply (l);
+    };
+    ui::setHint (resetButton, tr ("Every panel back, in the default order"));
+    doneButton.setButtonText (tr ("Done"));
+    doneButton.onClick = [this] {
+        if (host.done)
+            host.done();
+    };
+    ui::setHint (doneButton, tr ("Leave the toolbar's edit mode  [Esc]"));
+
+    for (auto* c : std::initializer_list<juce::Component*> { &presetBox, &resetButton, &doneButton })
+    {
+        c->setMouseCursor (juce::MouseCursor::NormalCursor);
+        addAndMakeVisible (c);
+    }
+    layoutChanged();
+}
+
+void EditOverlay::setToolbarHeight (int height)
+{
+    toolbarHeight = height;
+    resized();
+    repaint();
+}
+
+void EditOverlay::layoutChanged()
+{
+    const auto p = toolbarlayout::matchingPreset (host.layout());
+    presetBox.setSelectedId (p < toolbarlayout::presetCount ? p + 1 : 0, juce::dontSendNotification);
+    repaint();
+}
+
+void EditOverlay::resized()
+{
+    auto row = trayArea().reduced (12, 0).removeFromBottom (40).withSizeKeepingCentre (getWidth() - 24, 28);
+    doneButton.setBounds (row.removeFromRight (90));
+    row.removeFromRight (8);
+    resetButton.setBounds (row.removeFromRight (90));
+    row.removeFromRight (8);
+    presetBox.setBounds (row.removeFromRight (190));
+}
+
+juce::Rectangle<int> EditOverlay::chipArea() const
+{
+    auto area = trayArea().reduced (12, 0);
+    area.removeFromTop (22);
+    area.removeFromBottom (6);
+    return area.withTrimmedRight (390 + 12).withHeight (juce::jmin (area.getHeight(), 60));
+}
+
+juce::Rectangle<int> EditOverlay::chipBounds (int index) const
+{
+    const auto area = chipArea();
+    const auto w = juce::jlimit (60, 132, area.getWidth() / toolbarlayout::groupCount);
+    return { area.getX() + index * w, area.getY(), w - 6, area.getHeight() };
+}
+
+int EditOverlay::panelAt (juce::Point<int> p) const
+{
+    if (p.y >= toolbarHeight)
+        return -1;
+    const auto panels = host.panels();
+    for (int g = 0; g < toolbarlayout::groupCount; ++g)
+        if (panels[(std::size_t) g].contains (p))
+            return g;
+    return -1;
+}
+
+int EditOverlay::chipAt (juce::Point<int> p) const
+{
+    for (int g = 0; g < toolbarlayout::groupCount; ++g)
+        if (chipBounds (g).contains (p))
+            return g;
+    return -1;
+}
+
+int EditOverlay::dropX() const
+{
+    if (! dragging || pressedGroup < 0 || dragPos.y >= toolbarHeight || dragPos.y < 0)
+        return -1;
+    const auto panels = host.panels();
+    const auto layout = host.layout();
+    std::vector<std::pair<toolbarlayout::Group, int>> shown;
+    int lastRight = -1;
+    for (const auto& e : layout.entries)
+        if (const auto& r = panels[(std::size_t) e.group]; ! r.isEmpty())
+        {
+            shown.push_back ({ e.group, r.getCentreX() });
+            if (e.group != (toolbarlayout::Group) pressedGroup)
+                lastRight = juce::jmax (lastRight, r.getRight());
+        }
+    const auto before = toolbarlayout::dropBefore (shown, (toolbarlayout::Group) pressedGroup, dragPos.x);
+    if (before >= toolbarlayout::groupCount)
+        return lastRight >= 0 ? lastRight + 4 : host.fixedArea().getRight() + 8;
+    return panels[(std::size_t) before].getX() - 5;
+}
+
+void EditOverlay::apply (toolbarlayout::Layout layout)
+{
+    if (host.setLayout)
+        host.setLayout (layout);
+    layoutChanged();
+}
+
+void EditOverlay::move (toolbarlayout::Group g, int delta)
+{
+    // among the panels on the toolbar: before the previous one, or before the one after the next
+    auto layout = host.layout();
+    std::vector<toolbarlayout::Group> shown;
+    for (const auto& e : layout.entries)
+        if (e.shown)
+            shown.push_back (e.group);
+    const auto at = (int) (std::find (shown.begin(), shown.end(), g) - shown.begin());
+    if (at >= (int) shown.size())
+        return;
+    if (delta < 0 && at > 0)
+        layout.placeBefore (g, &shown[(std::size_t) at - 1]);
+    else if (delta > 0 && at + 1 < (int) shown.size())
+    {
+        if (at + 2 < (int) shown.size())
+            layout.placeBefore (g, &shown[(std::size_t) at + 2]);
+        else
+            layout.placeBefore (g, nullptr);
+    }
+    apply (layout);
+}
+
+void EditOverlay::showPanelMenu (toolbarlayout::Group g, bool inTray)
+{
+    const auto layout = host.layout();
+    const auto shown = layout.isShown (g);
+    juce::PopupMenu menu;
+    menu.addSectionHeader (tr (toolbarlayout::groupName (g)));
+    if (shown)
+    {
+        menu.addItem (tr ("Remove from the toolbar"), [this, g] {
+            auto l = host.layout();
+            l.setShown (g, false);
+            apply (l);
+        });
+        menu.addItem (tr ("Move left"), ! inTray, false, [this, g] { move (g, -1); });
+        menu.addItem (tr ("Move right"), ! inTray, false, [this, g] { move (g, 1); });
+    }
+    else
+        menu.addItem (tr ("Add to the toolbar"), [this, g] {
+            auto l = host.layout();
+            l.setShown (g, true);
+            apply (l);
+        });
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+}
+
+void EditOverlay::paint (juce::Graphics& g)
+{
+    using namespace theme;
+    const auto layout = host.layout();
+    const auto panels = host.panels();
+
+    // the toolbar: a wash over it, each panel outlined with its name
+    g.setColour (colour::bg0.withAlpha (0.45f));
+    g.fillRect (0, 0, getWidth(), toolbarHeight);
+
+    if (const auto fixed = host.fixedArea(); ! fixed.isEmpty())
+    {
+        g.setColour (colour::bg0.withAlpha (0.35f));
+        g.fillRoundedRectangle (fixed.toFloat().reduced (1.0f), radius::md);
+    }
+
+    for (int i = 0; i < toolbarlayout::groupCount; ++i)
+    {
+        const auto r = panels[(std::size_t) i].toFloat().reduced (1.5f, 3.0f);
+        if (r.isEmpty())
+            continue;
+        const auto isDragged = dragging && ! pressedInTray && pressedGroup == i;
+        const auto hot = hoverPanel == i && ! dragging;
+        g.setColour (isDragged ? colour::accent.withAlpha (0.10f) : colour::bg4.withAlpha (hot ? 0.35f : 0.15f));
+        g.fillRoundedRectangle (r, radius::md);
+        g.setColour (isDragged || hot ? colour::accent : colour::borderStrong);
+        g.drawRoundedRectangle (r, radius::md, isDragged ? 1.5f : 1.0f);
+
+        // the name, on a small tab at the top left
+        const auto name = tr (toolbarlayout::groupName ((toolbarlayout::Group) i));
+        const juce::Font f (font (type::caption - 1.0f, true));
+        const auto w = juce::jmin ((int) r.getWidth() - 6, juce::GlyphArrangement::getStringWidthInt (f, name) + 10);
+        const auto tab = juce::Rectangle<float> (r.getX() + 3.0f, r.getY() + 2.0f, (float) w, 13.0f);
+        g.setColour (hot || isDragged ? colour::accent : colour::bg6);
+        g.fillRoundedRectangle (tab, 3.0f);
+        g.setColour (colour::onAccent);
+        g.setFont (f);
+        g.drawText (name, tab, juce::Justification::centred, true);
+    }
+
+    // where a dragged panel lands
+    if (const auto x = dropX(); x >= 0)
+    {
+        g.setColour (colour::accent);
+        g.fillRoundedRectangle ((float) x - 1.5f, 4.0f, 3.0f, (float) toolbarHeight - 8.0f, 1.5f);
+    }
+
+    // the tray
+    const auto tray = trayArea();
+    const auto overTray = dragging && ! pressedInTray && tray.contains (dragPos);
+    g.setColour (colour::bg2);
+    g.fillRect (tray);
+    g.setColour (overTray ? colour::accent : colour::border);
+    g.fillRect (tray.withHeight (overTray ? 2 : 1));
+
+    g.setFont (font (type::small, true));
+    g.setColour (overTray ? colour::accentHover : colour::textSecondary);
+    g.drawText (overTray ? tr ("Release to remove this panel from the toolbar")
+                         : tr ("Edit toolbar: drag panels to move them, drag a panel here to remove it, drag one from here onto the toolbar to add it"),
+                tray.reduced (12, 0).withHeight (22), juce::Justification::centredLeft, true);
+
+    for (int i = 0; i < toolbarlayout::groupCount; ++i)
+    {
+        const auto group = (toolbarlayout::Group) i;
+        const auto shown = layout.isShown (group);
+        const auto r = chipBounds (i).toFloat();
+        const auto hot = hoverChip == i && ! dragging;
+        g.setColour (shown ? colour::bg3 : colour::bg4);
+        g.fillRoundedRectangle (r, radius::md);
+        g.setColour (hot ? colour::accent : shown ? colour::border : colour::borderStrong);
+        g.drawRoundedRectangle (r.reduced (0.5f), radius::md, 1.0f);
+
+        auto inner = r.reduced (6.0f, 5.0f);
+        const auto iconColour = shown ? colour::textDisabled : colour::textPrimary;
+        icons::draw (g, groupIcon (group), inner.removeFromTop (18.0f).withSizeKeepingCentre (18.0f, 18.0f), iconColour);
+        g.setFont (font (type::caption - 1.0f));
+        g.setColour (shown ? colour::textDisabled : colour::textPrimary);
+        g.drawFittedText (tr (toolbarlayout::groupName (group)), inner.toNearestInt(), juce::Justification::centred, 2, 0.85f);
+        if (shown) // a tick: it is on the toolbar
+        {
+            g.setColour (colour::ledOn.withAlpha (0.8f));
+            icons::draw (g, Icon::check, { r.getRight() - 15.0f, r.getY() + 3.0f, 12.0f, 12.0f }, colour::ledOn.withAlpha (0.8f));
+        }
+    }
+
+    // the dragged panel follows the mouse
+    if (dragging && dragImage.isValid())
+    {
+        g.setOpacity (0.85f);
+        g.drawImageAt (dragImage, dragPos.x - grabOffset.x, dragPos.y - grabOffset.y);
+    }
+}
+
+void EditOverlay::mouseMove (const juce::MouseEvent& e)
+{
+    const auto p = panelAt (e.getPosition()), c = chipAt (e.getPosition());
+    if (p != hoverPanel || c != hoverChip)
+    {
+        hoverPanel = p;
+        hoverChip = c;
+        repaint();
+    }
+}
+
+void EditOverlay::mouseExit (const juce::MouseEvent&)
+{
+    hoverPanel = hoverChip = -1;
+    repaint();
+}
+
+void EditOverlay::mouseDown (const juce::MouseEvent& e)
+{
+    dragging = false;
+    pressedGroup = panelAt (e.getPosition());
+    pressedInTray = false;
+    if (pressedGroup < 0)
+    {
+        pressedGroup = chipAt (e.getPosition());
+        pressedInTray = pressedGroup >= 0;
+    }
+
+    if (pressedGroup >= 0 && e.mods.isPopupMenu())
+    {
+        showPanelMenu ((toolbarlayout::Group) pressedGroup, pressedInTray);
+        pressedGroup = -1;
+    }
+}
+
+void EditOverlay::mouseDrag (const juce::MouseEvent& e)
+{
+    if (pressedGroup < 0 || ! e.mods.isLeftButtonDown())
+        return;
+
+    if (! dragging && e.getDistanceFromDragStart() > 4)
+    {
+        dragging = true;
+        const auto from = pressedInTray ? chipBounds (pressedGroup) : host.panels()[(std::size_t) pressedGroup];
+        grabOffset = e.getMouseDownPosition() - from.getPosition();
+        dragImage = ! pressedInTray && host.snapshot ? host.snapshot (from) : juce::Image();
+        if (! dragImage.isValid()) // a chip: its own picture
+        {
+            dragImage = juce::Image (juce::Image::ARGB, from.getWidth(), from.getHeight(), true);
+            juce::Graphics ig (dragImage);
+            ig.setColour (theme::colour::bg4);
+            ig.fillRoundedRectangle (dragImage.getBounds().toFloat(), theme::radius::md);
+            ig.setColour (theme::colour::accent);
+            ig.drawRoundedRectangle (dragImage.getBounds().toFloat().reduced (0.5f), theme::radius::md, 1.0f);
+            icons::draw (ig, groupIcon ((toolbarlayout::Group) pressedGroup), { 6.0f, 5.0f, 18.0f, 18.0f }, theme::colour::textPrimary);
+            ig.setFont (theme::font (theme::type::caption));
+            ig.setColour (theme::colour::textPrimary);
+            ig.drawFittedText (tr (toolbarlayout::groupName ((toolbarlayout::Group) pressedGroup)), dragImage.getBounds().reduced (6).withTrimmedTop (18),
+                               juce::Justification::centred, 2);
+        }
+    }
+
+    if (dragging)
+    {
+        dragPos = e.getPosition();
+        repaint();
+    }
+}
+
+void EditOverlay::mouseUp (const juce::MouseEvent& e)
+{
+    if (! dragging || pressedGroup < 0)
+    {
+        pressedGroup = -1;
+        dragging = false;
+        return;
+    }
+
+    const auto group = (toolbarlayout::Group) pressedGroup;
+    const auto at = e.getPosition();
+    auto layout = host.layout();
+
+    if (at.y >= 0 && at.y < toolbarHeight) // onto the toolbar: shown, before the panel right of the drop point
+    {
+        const auto panels = host.panels();
+        std::vector<std::pair<toolbarlayout::Group, int>> shown;
+        for (const auto& entry : layout.entries)
+            if (! panels[(std::size_t) entry.group].isEmpty())
+                shown.push_back ({ entry.group, panels[(std::size_t) entry.group].getCentreX() });
+        const auto before = toolbarlayout::dropBefore (shown, group, at.x);
+        layout.setShown (group, true);
+        if (before >= toolbarlayout::groupCount)
+            layout.placeBefore (group, nullptr);
+        else
+        {
+            const auto target = (toolbarlayout::Group) before;
+            layout.placeBefore (group, &target);
+        }
+    }
+    else if (! pressedInTray && trayArea().contains (at)) // into the tray: removed
+        layout.setShown (group, false);
+
+    dragging = false;
+    pressedGroup = -1;
+    dragImage = {};
+    apply (layout);
+    repaint();
+}
+
+void EditOverlay::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (const auto c = chipAt (e.getPosition()); c >= 0)
+    {
+        auto layout = host.layout();
+        layout.setShown ((toolbarlayout::Group) c, ! layout.isShown ((toolbarlayout::Group) c));
+        apply (layout);
+    }
+}
+
+bool EditOverlay::keyPressed (const juce::KeyPress& key)
+{
+    if (key == juce::KeyPress::escapeKey || key == juce::KeyPress::returnKey)
+    {
+        if (host.done)
+            host.done();
+        return true;
+    }
+    return false;
+}
+
+ui::Hint EditOverlay::hintAt (juce::Point<int> p)
+{
+    ui::Hint h;
+    h.hasMenu = true;
+    if (const auto panel = panelAt (p); panel >= 0)
+    {
+        h.text = tr (toolbarlayout::groupName ((toolbarlayout::Group) panel)) + ": "
+                 + tr ("[LMB] drag to move it  drag it into the tray to remove it  [RMB] menu");
+        return h;
+    }
+    if (const auto chip = chipAt (p); chip >= 0)
+    {
+        const auto shown = host.layout().isShown ((toolbarlayout::Group) chip);
+        h.text = tr (toolbarlayout::groupName ((toolbarlayout::Group) chip)) + ": "
+                 + (shown ? tr ("on the toolbar  [2xLMB] remove it  [RMB] menu") : tr ("drag it onto the toolbar to add it there  [2xLMB] add it at the end  [RMB] menu"));
+        return h;
+    }
+    if (p.y < toolbarHeight)
+        h.text = tr ("Edit toolbar: the menu and the hint bar stay first  [Esc] done");
+    else
+        h.text = tr ("Edit toolbar: drag panels to and from the toolbar  [Esc] done");
+    h.hasMenu = false;
+    return h;
+}
 } // namespace lynx::toolbar
 
 // The process memory comes from the OS; its headers go last (windows.h defines macros such as `small`).

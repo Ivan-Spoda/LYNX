@@ -45,8 +45,14 @@ out-of-process plugin sandbox. macOS adds Audio Units, Linux LV2; drivers Core A
   (RMS body + peak outline, smooth at any zoom) coloured by frequency content: warm = bass, lime = mids, cool =
   treble. Analysed in the background and cached on disk; Options → Waveforms switches to the classic one-colour
   look and to stereo lanes.
-- **Browser:** search (Ctrl+F: wildcards, AND/OR/NOT), Up/Down audition, Shift+Up/Down and Enter load into the
+- **Browser:** tabs ALL / PROJECT; "Current project" lists the history, patterns, effects, generators, automation,
+  the project folder and the audio files the project uses, each in the colour of what it belongs to, with details
+  (insert, "2x", "missing"), hints, menus and drag into the Playlist; every top-level folder has its own colour;
+  search (Ctrl+F: wildcards, AND/OR/NOT), Up/Down audition, Shift+Up/Down and Enter load into the
   selected channel, user folders.
+- **Toolbar editing:** right-click the toolbar > Edit toolbar: drag panels to move them, into the tray to remove them,
+  from the tray to add them; presets, separators, Ctrl+F11 hides the panels. Context menus of mixer tracks, channels,
+  Playlist tracks/clips and patterns open with a title band in the item's colour; undo says what it undid.
 - **Window menus:** each window's title-bar menu carries its own items (Playlist ripple/zoom, Channel Rack graph
   lanes/rotate/sort, Piano Roll tools/zoom/scale snap, Mixer move/link, Browser search/add folder).
 - **Project safety:** "*" in the title, "save changes?", atomic saves, autosave every 2 minutes as "Song (autosaved on
