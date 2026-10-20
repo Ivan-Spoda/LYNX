@@ -7,6 +7,9 @@
 
 #include <juce_core/juce_core.h>
 
+#include <map>
+#include <string>
+
 #include "core/Song.h"
 
 namespace lynx::ProjectPackage
@@ -20,9 +23,10 @@ struct Result
 // Writes `zip` (replaced only once complete) with "<projectName>.lynx" and its samples.
 bool exportZip (const Song& song, const juce::String& projectName, const juce::File& zip, Result& result, juce::String& error);
 
-// Copies the project's samples into `folder` (names made unique, existing files are never overwritten) and, when
-// `relink` is given, points that song's samples at the copies. FL's "collect project data files".
-bool collectSamples (const Song& song, const juce::File& folder, Song* relink, Result& result, juce::String& error);
+// Copies the project's samples into `folder` (names made unique, existing files are never overwritten); `relink`
+// receives original path -> copy (for applyRelocations). FL's "collect project data files".
+bool collectSamples (const Song& song, const juce::File& folder, std::map<std::string, std::string>& relink, Result& result,
+                     juce::String& error);
 
 // Extracts a package into a new folder under `destinationRoot` (named after the zip, made unique) and returns the
 // project file inside (the first .lynx, else the first .flp); an invalid file on failure.

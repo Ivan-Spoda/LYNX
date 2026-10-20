@@ -197,6 +197,17 @@ private:
     void refreshToolbar();
     void updateTitle();
     void autosave();
+    // project safety (REA round 118, FL's backup folder / save new version / project data files interpreted)
+    void saveNewVersion();
+    void revertToLastBackup();
+    void exportPackage();
+    void collectSamples();
+    void keepOverwrittenCopy (const juce::File& file); // the previous file of a save, kept in the backup folder
+    void rotateBackups (const juce::String& stem);
+    void startSession();                              // crash detection: a marker that a clean exit removes
+    void checkPreviousSession (juce::Time sessionStart);
+    std::unique_ptr<juce::InterProcessLock> sessionLock;
+    juce::File sessionMarker;
     int autosaveTicks = 0;
     int autosaveMinutes = 2, autosaveKeep = 10; // Settings › General › Backup
     bool lastModified = false;

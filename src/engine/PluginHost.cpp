@@ -33,6 +33,15 @@ void preparePlugin (juce::AudioPluginInstance& plugin, double sampleRate, int bl
     plugin.prepareToPlay (sampleRate, blockSize);
 }
 
+void setPluginRenderMode (juce::AudioPluginInstance& plugin, bool offline, int blockSize)
+{
+    if (plugin.isNonRealtime() == offline)
+        return;
+    plugin.setNonRealtime (offline);
+    if (plugin.getSampleRate() > 0.0)
+        plugin.prepareToPlay (plugin.getSampleRate(), blockSize); // VST3 reads the process mode in its setup
+}
+
 namespace
 {
 void setPluginParameter (juce::AudioPluginInstance& plugin, int index, float value) noexcept

@@ -62,16 +62,17 @@ bool exportZip (const Song& song, const juce::String& projectName, const juce::F
     return true;
 }
 
-bool collectSamples (const Song& song, const juce::File& folder, Song* relinkSong, Result& result, juce::String& error)
+bool collectSamples (const Song& song, const juce::File& folder, std::map<std::string, std::string>& relink, Result& result,
+                     juce::String& error)
 {
     result = {};
+    relink.clear();
     if (! folder.createDirectory())
     {
         error = "could not create " + folder.getFullPathName();
         return false;
     }
 
-    std::map<std::string, std::string> relink;
     for (const auto& original : safety::referencedSamples (song))
     {
         const auto source = fileFor (original);
@@ -97,9 +98,6 @@ bool collectSamples (const Song& song, const juce::File& folder, Song* relinkSon
         relink[original] = target.getFullPathName().toStdString();
         ++result.files;
     }
-
-    if (relinkSong != nullptr)
-        applyRelocations (*relinkSong, relink);
     return true;
 }
 

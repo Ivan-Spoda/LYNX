@@ -25,6 +25,9 @@
 #include "ui/TouchKeyboard.h"
 #include "engine/MidiFileIo.h"
 #include "engine/ProjectFile.h"
+#include "engine/ProjectPackage.h"
+#include "core/ProjectSafety.h"
+#include "core/MissingFiles.h"
 #include "ui/AutomationUi.h"
 #include "ui/ChannelSettings.h"
 #include "ui/Dialogs.h"
@@ -91,6 +94,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     {
         loadUiSettings();
         loadKeyMap();
+        startSession();
     }
 
     newButton.setTooltip (tr ("New project") + " (Ctrl+N)");
@@ -389,6 +393,8 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
 
 MainComponent::~MainComponent()
 {
+    if (sessionLock != nullptr) // a clean exit: no "LYNX did not close properly" next time
+        sessionMarker.deleteFile();
     mixerinput::openAudioSettings = nullptr;
     saveUiSettings();
     workspace.saveState();
@@ -872,6 +878,7 @@ bool MainComponent::runAction (const std::string& id)
     else if (is ("file.open")) chooseFileToOpen();
     else if (is ("file.save")) save (false);
     else if (is ("file.saveAs")) save (true);
+    else if (is ("file.saveNewVersion")) saveNewVersion();
     else if (is ("file.export")) exportAudio();
     else if (is ("edit.undo")) engine.undo();
     else if (is ("edit.redo")) engine.redo();
@@ -2061,7 +2068,8 @@ void MainComponent::timerCallback()
     }
 
     // a backup copy every few minutes (Settings › General) when there are changes
-    if (autosaveMinutes > 0 && ++autosaveTicks >= 30 * 60 * autosaveMinutes)
+    // (not in the middle of a recording: FL also postpones the timed backup until the transport is free)
+    if (autosaveMinutes > 0 && ++autosaveTicks >= 30 * 60 * autosaveMinutes && ! engine.isRecording())
     {
         autosaveTicks = 0;
 
@@ -2190,26 +2198,258 @@ void MainComponent::confirmDiscard (std::function<void()> then)
                              true);
 }
 
+namespace
+{
+juce::String projectStem (const juce::String& projectName)
+{
+    return projectName.isNotEmpty() ? juce::File::createLegalFileName (projectName) : juce::String ("untitled");
+}
+
+// the backup folder's projects with their modification times (for rotation and "revert to last backup")
+std::vector<safety::BackupFile> backupFiles (const juce::File& folder)
+{
+    std::vector<safety::BackupFile> files;
+    for (const auto& f : folder.findChildFiles (juce::File::findFiles, false, juce::String ("*") + ProjectFile::extension))
+        files.push_back ({ f.getFileNameWithoutExtension().toStdString(), f.getLastModificationTime().toMilliseconds() });
+    return files;
+}
+
+// "Song (autosaved on 2026-10-20 at 14h19)" in `folder`, "_2"... when that minute is taken (FL's naming, REA round 118)
+juce::File newBackupFile (const juce::File& folder, const juce::String& stem, safety::BackupKind kind)
+{
+    const auto now = juce::Time::getCurrentTime();
+    const auto name = safety::backupName (stem.toStdString(), kind, now.getYear(), now.getMonth() + 1, now.getDayOfMonth(), now.getHours(), now.getMinutes());
+    const auto unique = safety::uniqueName (name, [&folder] (const std::string& n) {
+        return folder.getChildFile (juce::String::fromUTF8 (n.c_str()) + ProjectFile::extension).exists();
+    });
+    return folder.getChildFile (juce::String::fromUTF8 (unique.c_str()) + ProjectFile::extension);
+}
+} // namespace
+
 void MainComponent::autosave()
 {
-    // backup copy of the open project, so work isn't lost if something crashes
-    // (one file per save, "Name (date time).lynx"; only the newest few of each project are kept)
+    // backup copy of the open project, so work isn't lost if something crashes ("Song (autosaved on 2026-10-20 at
+    // 14h19).lynx" in the backup folder, like FL's Backup folder); only the newest few of each project are kept
     const auto folder = autosaveFolder();
     folder.createDirectory();
-    const auto name = projectName.isNotEmpty() ? juce::File::createLegalFileName (projectName) : juce::String ("untitled");
-    const auto now = juce::Time::getCurrentTime();
-    const auto stem = juce::String::fromUTF8 (prefs::backupName (name.toStdString(), now.getYear(), now.getMonth() + 1, now.getDayOfMonth(),
-                                                                 now.getHours(), now.getMinutes(), now.getSeconds()).c_str());
+    const auto stem = projectStem (projectName);
     juce::String error;
     engine.capturePluginStates();
-    if (! ProjectFile::save (engine.getSong(), folder.getChildFile (stem + ProjectFile::extension), error))
+    if (! ProjectFile::save (engine.getSong(), newBackupFile (folder, stem, safety::BackupKind::autosaved), error))
+    {
+        ui::postHint ({ tr ("Autosave failed: {0}", { error }), {}, false, false }, 6000);
         return;
+    }
+    rotateBackups (stem);
+}
 
-    std::vector<std::string> names;
-    for (const auto& f : folder.findChildFiles (juce::File::findFiles, false, juce::String ("*") + ProjectFile::extension))
-        names.push_back (f.getFileNameWithoutExtension().toStdString());
-    for (const auto& old : prefs::backupsToRemove (names, name.toStdString(), autosaveKeep))
-        folder.getChildFile (juce::String::fromUTF8 (old.c_str()) + ProjectFile::extension).deleteFile();
+void MainComponent::rotateBackups (const juce::String& stem)
+{
+    const auto folder = autosaveFolder();
+    for (const auto& old : safety::backupsToRemove (backupFiles (folder), stem.toStdString(), autosaveKeep))
+    {
+        const auto f = folder.getChildFile (juce::String::fromUTF8 (old.c_str()) + ProjectFile::extension);
+        f.setReadOnly (false); // (FL clears the read-only flag before deleting an old backup too)
+        f.deleteFile();
+    }
+}
+
+void MainComponent::keepOverwrittenCopy (const juce::File& file)
+{
+    // FL moves the file a save replaces into its Backup folder as "Song (overwritten on ... at ...)"; LYNX copies it
+    // (the save itself still goes through a temporary file and a rename)
+    const auto folder = autosaveFolder();
+    if (! file.existsAsFile() || file.isAChildOf (folder))
+        return;
+    folder.createDirectory();
+    const auto stem = projectStem (file.getFileNameWithoutExtension());
+    if (file.copyFileTo (newBackupFile (folder, stem, safety::BackupKind::overwritten)))
+        rotateBackups (stem);
+}
+
+void MainComponent::saveNewVersion()
+{
+    // FL's "Save new version": Song.flp -> Song_2.flp -> Song_3.flp, next to the current file
+    if (currentFile == juce::File())
+    {
+        save (true);
+        return;
+    }
+    const auto folder = currentFile.getParentDirectory();
+    const auto name = safety::nextVersionName (currentFile.getFileNameWithoutExtension().toStdString(), [&folder] (const std::string& n) {
+        return folder.getChildFile (juce::String::fromUTF8 (n.c_str()) + ProjectFile::extension).exists();
+    });
+    const auto file = folder.getChildFile (juce::String::fromUTF8 (name.c_str()) + ProjectFile::extension);
+    juce::String error;
+    engine.capturePluginStates();
+    if (! ProjectFile::save (engine.getSong(), file, error))
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not save"), error);
+        return;
+    }
+    engine.markSaved();
+    rememberRecent (file);
+    currentFile = file;
+    projectName = file.getFileNameWithoutExtension();
+    importedSuffix = {};
+    updateTitle();
+    ui::postHint ({ tr ("Saved as a new version: {0}", { file.getFileName() }), {}, false, false }, 5000);
+}
+
+void MainComponent::revertToLastBackup()
+{
+    const auto stem = projectStem (projectName);
+    const auto name = safety::newestBackup (backupFiles (autosaveFolder()), stem.toStdString());
+    if (name.empty())
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Revert to last backup"),
+                                                tr ("There is no backup of this project yet."));
+        return;
+    }
+    const auto backup = autosaveFolder().getChildFile (juce::String::fromUTF8 (name.c_str()) + ProjectFile::extension);
+    const auto when = backup.getLastModificationTime().formatted ("%Y-%m-%d %H:%M");
+
+    auto* w = new juce::AlertWindow (tr ("Revert to last backup"),
+                                     tr ("Replace the open project with its backup from {0}?\n{1}\n\nThe project file itself only changes when you save.",
+                                         { when, backup.getFileName() }),
+                                     juce::MessageBoxIconType::QuestionIcon);
+    w->addButton (tr ("Revert"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([safe = juce::Component::SafePointer<MainComponent> (this), backup] (int result) {
+                            if (safe == nullptr || result != 1)
+                                return;
+                            juce::String error;
+                            auto song = ProjectFile::load (backup, error);
+                            if (! song)
+                            {
+                                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not open"), error);
+                                return;
+                            }
+                            safe->engine.getPluginHost().applySubstitutes (*song);
+                            safe->engine.stop();
+                            safe->engine.rewind();
+                            safe->engine.setSong (std::move (*song));
+                            safe->engine.markModified(); // Save writes it back to the project's own file
+                            safe->updateTitle();
+                            safe->playlist.showSongAfterOpen();
+                        }),
+                        true);
+}
+
+void MainComponent::exportPackage()
+{
+    // FL's zipped loop package: the project and every sample it uses in one .zip
+    const auto stem = projectStem (projectName);
+    const auto start = (currentFile != juce::File() ? currentFile.getParentDirectory()
+                                                     : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory))
+                           .getChildFile (stem + ".zip");
+    fileChooser = std::make_unique<juce::FileChooser> (tr ("Export project with samples"), start, "*.zip");
+    fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
+                              [safe = juce::Component::SafePointer<MainComponent> (this), stem] (const juce::FileChooser& chooser) {
+                                  auto zip = chooser.getResult();
+                                  if (safe == nullptr || zip == juce::File())
+                                      return;
+                                  zip = zip.withFileExtension (".zip");
+                                  safe->engine.capturePluginStates();
+                                  ProjectPackage::Result result;
+                                  juce::String error;
+                                  if (! ProjectPackage::exportZip (safe->engine.getSong(), stem, zip, result, error))
+                                  {
+                                      juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not save"), error);
+                                      return;
+                                  }
+                                  auto text = tr ("{0} saved with {1} samples.", { zip.getFileName(), juce::String (result.files) });
+                                  if (! result.missing.isEmpty())
+                                      text << "\n\n" << tr ("Not on this PC (left out):") << "\n" << result.missing.joinIntoString ("\n");
+                                  juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Export project with samples"), text);
+                              });
+}
+
+void MainComponent::collectSamples()
+{
+    // FL's "Export project data files": copy the samples the project uses into one folder (and use the copies)
+    fileChooser = std::make_unique<juce::FileChooser> (tr ("Copy the project's samples to..."),
+                                                       currentFile != juce::File() ? currentFile.getParentDirectory()
+                                                                                   : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory));
+    fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                              [safe = juce::Component::SafePointer<MainComponent> (this)] (const juce::FileChooser& chooser) {
+                                  const auto folder = chooser.getResult();
+                                  if (safe == nullptr || folder == juce::File())
+                                      return;
+                                  std::map<std::string, std::string> relink;
+                                  ProjectPackage::Result result;
+                                  juce::String error;
+                                  if (! ProjectPackage::collectSamples (safe->engine.getSong(), folder, relink, result, error))
+                                  {
+                                      juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not copy"), error);
+                                      return;
+                                  }
+                                  safe->engine.editSong ([&relink] (Song& song) { applyRelocations (song, relink); });
+                                  auto text = tr ("{0} samples copied to {1}. The project now uses the copies.", { juce::String (result.files), folder.getFullPathName() });
+                                  if (! result.missing.isEmpty())
+                                      text << "\n\n" << tr ("Not on this PC (left out):") << "\n" << result.missing.joinIntoString ("\n");
+                                  juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Collect project samples"), text);
+                              });
+}
+
+void MainComponent::startSession()
+{
+    // Like FL's backup on crash: a marker exists while LYNX runs; finding one at start means the last session
+    // ended without closing (crash, power loss), so the newest backup written during it is offered.
+    sessionLock = std::make_unique<juce::InterProcessLock> ("LYNX-ui-session");
+    if (! sessionLock->enter (0))
+    {
+        sessionLock.reset(); // another LYNX window is running: it owns the marker
+        return;
+    }
+    sessionMarker = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/session-running.txt");
+    if (sessionMarker.existsAsFile())
+    {
+        const auto previousStart = juce::Time (sessionMarker.loadFileAsString().trim().getLargeIntValue());
+        juce::Timer::callAfterDelay (2500, [safe = juce::Component::SafePointer<MainComponent> (this), previousStart] {
+            if (safe != nullptr)
+                safe->checkPreviousSession (previousStart);
+        });
+    }
+    sessionMarker.getParentDirectory().createDirectory();
+    sessionMarker.replaceWithText (juce::String (juce::Time::getCurrentTime().toMilliseconds()));
+}
+
+void MainComponent::checkPreviousSession (juce::Time sessionStart)
+{
+    if (juce::Component::getCurrentlyModalComponent() != nullptr) // the setup wizard or another dialog: ask later
+    {
+        juce::Timer::callAfterDelay (2000, [safe = juce::Component::SafePointer<MainComponent> (this), sessionStart] {
+            if (safe != nullptr)
+                safe->checkPreviousSession (sessionStart);
+        });
+        return;
+    }
+    const auto folder = autosaveFolder();
+    const auto name = safety::crashRecoveryCandidate (backupFiles (folder), sessionStart.toMilliseconds());
+    if (name.empty())
+        return; // nothing was saved in that session
+    const auto backup = folder.getChildFile (juce::String::fromUTF8 (name.c_str()) + ProjectFile::extension);
+
+    auto* w = new juce::AlertWindow (tr ("LYNX did not close properly"),
+                                     tr ("The last session ended unexpectedly. Open the newest backup it saved?\n{0}  ({1})",
+                                         { backup.getFileName(), backup.getLastModificationTime().formatted ("%Y-%m-%d %H:%M") }),
+                                     juce::MessageBoxIconType::WarningIcon);
+    w->addButton (tr ("Open backup"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+    w->addButton (tr ("Open backup folder"), 2);
+    w->addButton (tr ("Ignore"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([safe = juce::Component::SafePointer<MainComponent> (this), backup, folder] (int result) {
+                            if (safe == nullptr)
+                                return;
+                            if (result == 1)
+                                safe->confirmDiscard ([safe, backup] {
+                                    if (safe != nullptr)
+                                        safe->openLynxProject (backup);
+                                });
+                            else if (result == 2)
+                                folder.startAsProcess();
+                        }),
+                        true);
 }
 
 void MainComponent::newProject (bool askAlways)
@@ -2278,7 +2518,7 @@ void MainComponent::chooseFileToOpen()
 void MainComponent::chooseFileToOpenNow()
 {
     fileChooser = std::make_unique<juce::FileChooser> (tr ("Open project"), currentFile.getParentDirectory(),
-                                                       juce::String ("*") + ProjectFile::extension + ";*.dawproj;*.flp;*.mid;*.midi");
+                                                       juce::String ("*") + ProjectFile::extension + ";*.dawproj;*.flp;*.zip;*.mid;*.midi");
 
     fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                               [this] (const juce::FileChooser& chooser) {
@@ -2290,6 +2530,20 @@ void MainComponent::chooseFileToOpenNow()
 void MainComponent::openFile (const juce::File& file)
 {
     juce::String error;
+
+    if (file.hasFileExtension ("zip"))
+    {
+        // a project package (File › Export project with samples, or FL's zipped loop package): extracted into a
+        // folder of its own, then the project inside is opened (its samples are found next to it)
+        const auto project = ProjectPackage::extractZip (file, ProjectPackage::defaultExtractRoot(), error);
+        if (project == juce::File())
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not open"), error);
+            return;
+        }
+        openFile (project);
+        return;
+    }
 
     if (file.hasFileExtension ("mid;midi"))
     {
@@ -2600,6 +2854,7 @@ void MainComponent::save (bool askForFile)
 
         juce::String error;
         engine.capturePluginStates(); // plugin state lives in the plugins; copy it before saving
+        keepOverwrittenCopy (file);   // the version this save replaces goes to the backup folder (like FL)
 
         if (ProjectFile::save (engine.getSong(), file, error))
         {
@@ -2614,19 +2869,40 @@ void MainComponent::save (bool askForFile)
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not save"), error);
     };
 
-    if (! askForFile && currentFile != juce::File())
+    // a project opened from the backup folder is saved somewhere else (old backups there are deleted)
+    if (! askForFile && currentFile != juce::File() && ! currentFile.isAChildOf (autosaveFolder()))
     {
         write (currentFile);
         return;
     }
 
-    fileChooser = std::make_unique<juce::FileChooser> (tr ("Save project"), currentFile.getParentDirectory(),
-                                                       juce::String ("*") + ProjectFile::extension);
+    const auto startFolder = currentFile.isAChildOf (autosaveFolder()) ? juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+                                                                       : currentFile.getParentDirectory();
+    fileChooser = std::make_unique<juce::FileChooser> (tr ("Save project"), startFolder, juce::String ("*") + ProjectFile::extension);
 
     fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
                               [write] (const juce::FileChooser& chooser) {
-                                  if (chooser.getResult() != juce::File())
-                                      write (chooser.getResult());
+                                  const auto file = chooser.getResult();
+                                  if (file == juce::File())
+                                      return;
+                                  if (! file.isAChildOf (autosaveFolder()))
+                                  {
+                                      write (file);
+                                      return;
+                                  }
+                                  // FL warns the same way: the backup folder is cleaned up as new backups arrive
+                                  auto* w = new juce::AlertWindow (tr ("Save in the backup folder?"),
+                                                                   tr ("This folder keeps LYNX's automatic backups and old ones are deleted as new "
+                                                                       "ones arrive, so a project saved here can be lost. If you opened a backup, save it "
+                                                                       "somewhere else."),
+                                                                   juce::MessageBoxIconType::WarningIcon);
+                                  w->addButton (tr ("Save anyway"), 1);
+                                  w->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                                  w->enterModalState (true, juce::ModalCallbackFunction::create ([write, file] (int r) {
+                                                          if (r == 1)
+                                                              write (file);
+                                                      }),
+                                                      true);
                               });
 }
 
@@ -2674,11 +2950,16 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
 
         menu.addItem (tr ("Save") + shortcutText ("file.save"), [this] { save (false); });
         menu.addItem (tr ("Save as...") + shortcutText ("file.saveAs"), [this] { save (true); });
+        menu.addItem (tr ("Save new version") + shortcutText ("file.saveNewVersion"), [this] { saveNewVersion(); });
         menu.addItem (tr ("Save as template..."), [this] { saveAsTemplate(); });
+        menu.addItem (tr ("Revert to last backup..."), [this] { revertToLastBackup(); });
         menu.addSeparator();
         menu.addItem (tr ("Export audio...") + shortcutText ("file.export"), [this] { exportAudio(); });
+        menu.addItem (tr ("Export project with samples (.zip)..."), [this] { exportPackage(); });
+        menu.addItem (tr ("Collect project samples into a folder..."), [this] { collectSamples(); });
         menu.addItem (tr ("Open autosave folder"), [] {
-            juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/autosave").startAsProcess();
+            autosaveFolder().createDirectory();
+            autosaveFolder().startAsProcess();
         });
         menu.addSeparator();
         menu.addItem (tr ("Exit"), [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); });
