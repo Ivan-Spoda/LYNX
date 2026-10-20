@@ -1,8 +1,5 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
-#include <chrono>
-#include <cstdlib>
-
 #include "core/Effects.h"
 #include "core/FlEffects.h"
 #include "core/FlpImport.h"
@@ -53,6 +50,9 @@
 #include "ui/Theme.h"
 #include "ui/WaveformView.h"
 #include "ui/WindowOwner.h"
+
+#include <chrono>
+#include <cstdlib>
 
 namespace
 {
