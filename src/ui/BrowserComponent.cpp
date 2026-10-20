@@ -1,11 +1,13 @@
 #include "ui/BrowserComponent.h"
 
 #include "core/FlpImport.h"
+#include "core/ProjectContents.h"
 #include "core/SearchQuery.h"
 #include "engine/PluginHost.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
 #include "ui/Icons.h"
+#include "ui/PlaylistComponent.h"
 #include "ui/Theme.h"
 #include "ui/ValueControl.h"
 #include "ui/WaveformView.h"
@@ -27,30 +29,32 @@ bool isListed (const juce::File& f)
 
 constexpr int maxResults = 500;
 
-juce::Array<juce::File> searchFiles (const juce::File& root, const juce::String& query, bool& truncated, const std::function<bool()>& shouldStop)
+juce::Array<juce::File> searchFiles (const juce::Array<juce::File>& roots, const juce::String& query, bool& truncated,
+                                     const std::function<bool()>& shouldStop)
 {
     const auto parsed = search::parse (query.toStdString());
     juce::Array<juce::File> found;
     truncated = false;
 
-    for (const auto& entry : juce::RangedDirectoryIterator (root, true, "*", juce::File::findFiles))
-    {
-        if (shouldStop())
-            break;
-
-        const auto file = entry.getFile();
-
-        if (! isListed (file) || ! search::matches (parsed, file.getFileName().toStdString()))
-            continue;
-
-        found.add (file);
-
-        if (found.size() >= maxResults)
+    for (const auto& root : roots)
+        for (const auto& entry : juce::RangedDirectoryIterator (root, true, "*", juce::File::findFiles))
         {
-            truncated = true;
-            break;
+            if (shouldStop())
+                return found;
+
+            const auto file = entry.getFile();
+
+            if (! isListed (file) || ! search::matches (parsed, file.getFileName().toStdString()))
+                continue;
+
+            found.addIfNotAlreadyThere (file);
+
+            if (found.size() >= maxResults)
+            {
+                truncated = true;
+                return found;
+            }
         }
-    }
 
     return found;
 }
@@ -86,15 +90,86 @@ juce::String rowHint (const juce::File& f, bool folder, bool expanded)
         return tr ("Preset: [2xLMB] new channel with it (FL synth presets)  drag onto a mixer insert: effect preset");
     return {};
 }
+
+// A user / channel colour made readable as text and icons on the Browser's dark rows.
+juce::Colour readable (juce::Colour c)
+{
+    return c.withMultipliedSaturation (0.8f).withBrightness (juce::jlimit (0.72f, 0.92f, c.getBrightness() + 0.15f));
+}
+
+// The Current project's sections, in FL's order (REA_rodada115).
+enum class Category
+{
+    history,
+    patterns,
+    effects,
+    generators,
+    automation,
+    samples
+};
+
+constexpr Category categories[] = { Category::history, Category::patterns, Category::effects, Category::generators,
+                                     Category::automation, Category::samples };
+
+juce::String categoryName (Category c)
+{
+    switch (c)
+    {
+        case Category::history: return tr ("History");
+        case Category::patterns: return tr ("Patterns");
+        case Category::effects: return tr ("Effects");
+        case Category::generators: return tr ("Generators");
+        case Category::automation: return tr ("Automation");
+        case Category::samples: return tr ("Audio files");
+    }
+    return {};
+}
+
+juce::String categoryHint (Category c)
+{
+    switch (c)
+    {
+        case Category::history: return tr ("Undo history of this project: [LMB] go back to that step");
+        case Category::patterns: return tr ("Patterns of this project, in their colours");
+        case Category::effects: return tr ("Effects in use, with the insert they sit on");
+        case Category::generators: return tr ("Generators in use (the Channel Rack's channels), with the insert they play into");
+        case Category::automation: return tr ("Automation clips of this project");
+        case Category::samples: return tr ("Audio files used by this project (samples, audio clips), in the colour of the channel that plays them");
+    }
+    return {};
+}
+
+Icon categoryIcon (Category c)
+{
+    switch (c)
+    {
+        case Category::history: return Icon::undo;
+        case Category::patterns: return Icon::pattern;
+        case Category::effects: return Icon::mixer;
+        case Category::generators: return Icon::keyboard;
+        case Category::automation: return Icon::automate;
+        case Category::samples: return Icon::audioFile;
+    }
+    return Icon::folder;
+}
+
+// Each top-level folder has its own colour (FL colours its Browser's folders by kind; LYNX uses its own set).
+juce::Colour rootColour (int index)
+{
+    static const juce::Colour colours[] = { juce::Colour (0xff6ea8fe), juce::Colour (0xff3ddc84), juce::Colour (0xffe58fd0),
+                                            juce::Colour (0xffb39ddb), juce::Colour (0xffb39ddb), juce::Colour (0xfff5b942),
+                                            juce::Colour (0xff4cc9c0), juce::Colour (0xfff2a65a), juce::Colour (0xff9fb7d0) };
+    return index >= 0 && index < (int) std::size (colours) ? colours[index] : juce::Colour (0xff8fd18c);
+}
 } // namespace
 
-// --- search: a background walk of the current folder ------------------------------------------------
+// --- search: a background walk of the folders --------------------------------------------------------
 
 class BrowserComponent::SearchJob final : public juce::Thread
 {
 public:
-    SearchJob (juce::File r, juce::String q, std::function<void (juce::Array<juce::File>, bool)> d)
-        : juce::Thread ("LYNX browser search"), root (std::move (r)), query (std::move (q)), done (std::move (d))
+    SearchJob (juce::Array<juce::File> r, juce::String q, std::function<void (juce::Array<juce::File>, bool)> d)
+        : juce::Thread ("LYNX browser search"), roots (std::move (r)), query (std::move (q)), done (std::move (d))
     {
     }
 
@@ -103,7 +178,7 @@ public:
     void run() override
     {
         bool truncated = false;
-        const auto found = searchFiles (root, query, truncated, [this] { return threadShouldExit(); });
+        const auto found = searchFiles (roots, query, truncated, [this] { return threadShouldExit(); });
 
         if (threadShouldExit())
             return;
@@ -112,7 +187,7 @@ public:
     }
 
 private:
-    juce::File root;
+    juce::Array<juce::File> roots;
     juce::String query;
     std::function<void (juce::Array<juce::File>, bool)> done;
 };
@@ -131,31 +206,78 @@ public:
         setMouseClickGrabsKeyboardFocus (false);
     }
 
+    enum class Kind
+    {
+        fsFolder, // a folder on disk (top-level ones carry their own name and colour)
+        file,     // a file on disk
+        project,  // "Current project"
+        category, // one of its sections
+        item      // something of the project (pattern, sample, generator, effect, automation clip, undo step)
+    };
+
     struct Node
     {
+        Kind kind = Kind::file;
         juce::File file;
         bool folder = false, expanded = false, loaded = false;
         int depth = 0;
         Node* parent = nullptr;
         std::vector<std::unique_ptr<Node>> children;
+
+        juce::String label, detail; // display name (empty: the file's) and the dimmed detail after it
+        juce::Colour colour;        // transparent: the default
+        Icon icon = Icon::none;     // none: by file type
+        Category category = Category::samples;
+        projectcontents::Item item; // kind == item (history: item.index = the step)
+        bool history = false, missing = false, current = false;
     };
 
-    // tree mode: the contents of `folder`
-    void setRoot (const juce::File& folder)
+    // tree mode: the given top-level nodes
+    void setTopLevel (std::vector<std::unique_ptr<Node>> nodes)
     {
         root = std::make_unique<Node>();
-        root->file = folder;
-        root->folder = root->expanded = true;
+        root->kind = Kind::fsFolder;
+        root->folder = root->expanded = root->loaded = true;
         root->depth = -1;
-        load (*root);
+        for (auto& n : nodes)
+        {
+            n->parent = root.get();
+            n->depth = 0;
+            if (n->expanded)
+                load (*n);
+            root->children.push_back (std::move (n));
+        }
         selected = hovered = -1;
         rebuild();
     }
 
-    // flat mode: a list of files with their path relative to `base`
-    void setFiles (const juce::Array<juce::File>& files, const juce::File& newBase, const juce::String& newStatus)
+    static std::unique_ptr<Node> makeFolder (const juce::File& folder, const juce::String& label, juce::Colour colour)
     {
-        base = newBase;
+        auto n = std::make_unique<Node>();
+        n->kind = Kind::fsFolder;
+        n->file = folder;
+        n->folder = true;
+        n->label = label;
+        n->colour = colour;
+        return n;
+    }
+
+    static std::unique_ptr<Node> makeProject (bool open)
+    {
+        auto n = std::make_unique<Node>();
+        n->kind = Kind::project;
+        n->folder = true;
+        n->expanded = open;
+        n->label = tr ("Current project");
+        n->icon = Icon::project;
+        n->colour = theme::colour::accent;
+        return n;
+    }
+
+    // flat mode: a list of files with their path relative to the folder searched that holds them
+    void setFiles (const juce::Array<juce::File>& files, const juce::Array<juce::File>& newBases, const juce::String& newStatus)
+    {
+        bases = newBases;
         status = newStatus;
         flatNodes.clear();
         for (const auto& f : files)
@@ -164,6 +286,16 @@ public:
             n->file = f;
             flatNodes.push_back (std::move (n));
         }
+        selected = hovered = -1;
+        rebuild();
+    }
+
+    // flat mode: project items (the PROJECT tab's search)
+    void setNodes (std::vector<std::unique_ptr<Node>> nodes, const juce::String& newStatus)
+    {
+        bases.clear();
+        status = newStatus;
+        flatNodes = std::move (nodes);
         selected = hovered = -1;
         rebuild();
     }
@@ -177,6 +309,17 @@ public:
     juce::File selectedFile() const
     {
         return juce::isPositiveAndBelow (selected, (int) rows.size()) ? rows[(std::size_t) selected]->file : juce::File();
+    }
+
+    // the top-level folder on disk that holds the selection (none: the selection is not a file)
+    juce::File selectedRoot() const
+    {
+        if (! juce::isPositiveAndBelow (selected, (int) rows.size()))
+            return {};
+        for (auto* n = rows[(std::size_t) selected]; n != nullptr; n = n->parent)
+            if (n->kind == Kind::fsFolder && n->depth == 0)
+                return n->file;
+        return {};
     }
 
     bool selectedIsFolder() const { return juce::isPositiveAndBelow (selected, (int) rows.size()) && rows[(std::size_t) selected]->folder; }
@@ -235,6 +378,17 @@ public:
         rebuild();
     }
 
+    void expandAll (Node& n)
+    {
+        n.expanded = true;
+        load (n);
+        if (n.kind == Kind::project || n.kind == Kind::category)
+            for (auto& c : n.children)
+                if (c->folder && c->kind != Kind::fsFolder)
+                    expandAll (*c);
+        rebuild();
+    }
+
     void rebuild()
     {
         rows.clear();
@@ -259,6 +413,58 @@ public:
         }
     }
 
+    // The project changed: the open sections are listed again (only those whose items changed), keeping what is
+    // open and selected.
+    void refreshProject()
+    {
+        if (root == nullptr)
+            return;
+
+        bool changed = false;
+        const auto key = selectionKey();
+        std::function<void (Node&)> visit = [&] (Node& n) {
+            if (n.kind == Kind::category)
+            {
+                Node fresh;
+                fresh.kind = Kind::category;
+                fresh.category = n.category;
+                fresh.depth = n.depth;
+                listCategory (fresh, browser.engine.getSong(), &browser.engine);
+                if (n.detail != fresh.detail)
+                {
+                    n.detail = fresh.detail;
+                    changed = true;
+                }
+                if (! n.loaded)
+                    return;
+                if (signature (fresh) != signature (n))
+                {
+                    n.children = std::move (fresh.children);
+                    for (auto& c : n.children)
+                        c->parent = &n;
+                    changed = true;
+                }
+                else
+                    for (std::size_t i = 0; i < n.children.size(); ++i) // the same items: only the "current" marks
+                        n.children[i]->current = fresh.children[i]->current;
+                return;
+            }
+            for (auto& c : n.children)
+                if (c->kind == Kind::project || c->kind == Kind::category)
+                    visit (*c);
+        };
+        visit (*root);
+        pendingKey = key;
+
+        if (changed)
+        {
+            rebuild();
+            restoreSelection (pendingKey);
+        }
+        else
+            repaint();
+    }
+
     void paint (juce::Graphics& g) override
     {
         using namespace theme::colour;
@@ -271,6 +477,13 @@ public:
         {
             const auto& n = *rows[(std::size_t) i];
             auto r = juce::Rectangle<int> (0, i * rowHeight, getWidth(), rowHeight);
+
+            // an open project section sits on a slightly raised band (FL draws its open folders on a band)
+            if ((n.kind == Kind::project || n.kind == Kind::category) && n.expanded)
+            {
+                g.setColour (bg3);
+                g.fillRect (r);
+            }
 
             if (i == selected)
             {
@@ -299,28 +512,59 @@ public:
                 g.setColour (i == hovered || i == selected ? textPrimary : textSecondary);
                 g.fillPath (p);
             }
-            x += 12.0f;
+            if (! flat || n.kind != Kind::item)
+                x += 12.0f;
 
-            const auto playing = ! n.folder && n.file == previewing;
-            icons::draw (g, iconFor (n.file, n.folder), juce::Rectangle<float> (x, (float) r.getY() + 3.0f, 16.0f, 16.0f),
-                         playing ? accent : n.folder ? warning.withAlpha (0.85f) : textSecondary);
+            const auto playing = ! n.folder && n.file != juce::File() && n.file == previewing;
+            const auto hasColour = ! n.colour.isTransparent();
+            auto iconColour = playing ? accent : hasColour ? readable (n.colour) : n.folder ? warning.withAlpha (0.85f) : textSecondary;
+            if (n.missing)
+                iconColour = meterClip;
+            const auto icon = n.icon != Icon::none ? n.icon : iconFor (n.file, n.folder);
+            icons::draw (g, icon, juce::Rectangle<float> (x, (float) r.getY() + 3.0f, 16.0f, 16.0f), iconColour);
             x += 21.0f;
 
             auto text = r.withLeft ((int) x).withTrimmedRight (6);
 
-            if (flat) // the folder it lives in, on the right
+            if (flat && n.kind == Kind::file) // the folder it lives in, on the right
             {
-                const auto where = n.file.getParentDirectory().getRelativePathFrom (base);
+                const auto where = n.file.getParentDirectory().getRelativePathFrom (baseOf (n.file));
                 g.setFont (theme::font (theme::type::caption));
                 g.setColour (textDisabled);
                 const auto w = juce::jmin (text.getWidth() / 2, juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), where) + 4);
                 g.drawText (where, text.removeFromRight (w), juce::Justification::centredRight, true);
             }
 
-            g.setFont (theme::font (theme::type::body, n.folder && n.expanded));
-            g.setColour (playing ? accentHover : n.folder || i == hovered || i == selected ? textPrimary : textPrimary.withAlpha (0.86f));
-            g.drawText (n.folder || ! isAudio (n.file) ? n.file.getFileName() : n.file.getFileNameWithoutExtension(), text,
-                        juce::Justification::centredLeft, true);
+            const auto name = n.label.isNotEmpty() ? n.label
+                              : n.folder || ! isAudio (n.file) ? n.file.getFileName()
+                                                               : n.file.getFileNameWithoutExtension();
+            const auto bold = (n.folder && n.expanded) || n.current || n.kind == Kind::project;
+            const juce::Font font (theme::font (theme::type::body, bold));
+            g.setFont (font);
+
+            auto nameColour = playing ? accentHover : n.folder || i == hovered || i == selected ? textPrimary : textPrimary.withAlpha (0.86f);
+            if (n.kind == Kind::item && hasColour && n.item.kind == projectcontents::Kind::pattern)
+                nameColour = readable (n.colour); // FL writes the patterns in their colours
+            if (n.missing)
+                nameColour = meterClip.withAlpha (0.9f);
+            if (n.kind == Kind::item && n.history && ! n.current && n.item.index > browser.engine.getHistoryPosition())
+                nameColour = textDisabled; // undone steps (redo)
+            g.setColour (nameColour);
+
+            const auto nameWidth = juce::GlyphArrangement::getStringWidthInt (font, name);
+            g.drawText (name, text, juce::Justification::centredLeft, true);
+
+            // the detail after the name, dimmed: "(insert)", "3x", "missing", a section's count
+            if (n.detail.isNotEmpty() && nameWidth + 12 < text.getWidth())
+            {
+                g.setFont (theme::font (theme::type::small));
+                g.setColour (n.missing ? meterClip.withAlpha (0.7f) : textDisabled);
+                const auto shown = n.kind == Kind::category || n.kind == Kind::project ? n.detail : "(" + n.detail + ")";
+                if (n.kind == Kind::category) // the count on the right
+                    g.drawText (shown, text, juce::Justification::centredRight, true);
+                else
+                    g.drawText (shown, text.withTrimmedLeft (nameWidth + 6), juce::Justification::centredLeft, true);
+            }
         }
 
         if (rows.empty() && status.isNotEmpty())
@@ -354,10 +598,7 @@ public:
         if (e.mods.isPopupMenu())
         {
             select (row, false);
-            if (n.folder)
-                browser.showFolderMenu (n.file);
-            else
-                browser.showFileMenu (n.file);
+            showMenu (n);
             return;
         }
 
@@ -366,6 +607,13 @@ public:
             select (row, false);
             if (e.getNumberOfClicks() == 1) // a click opens / closes it (the second click of a double click does not undo it)
                 toggle (n);
+            return;
+        }
+
+        if (n.kind == Kind::item)
+        {
+            select (row, n.item.kind == projectcontents::Kind::sample && ! n.missing);
+            itemClicked (n);
             return;
         }
 
@@ -379,14 +627,23 @@ public:
             return;
 
         const auto& n = *rows[(std::size_t) pressedRow];
+        auto* container = juce::DragAndDropContainer::findParentDragContainerFor (this);
 
-        if (n.folder)
+        if (n.folder || container == nullptr)
             return;
 
-        if (auto* container = juce::DragAndDropContainer::findParentDragContainerFor (this))
+        if (n.kind == Kind::item && n.item.kind == projectcontents::Kind::pattern) // a pattern onto the Playlist
         {
             dragStarted = true;
-            container->startDragging (juce::String (dragDescription) + "|" + n.file.getFullPathName(), this, juce::ScaledImage (dragImage (n.file)),
+            container->startDragging (juce::String (patternDragDescription) + "|" + juce::String (n.item.index), this,
+                                      juce::ScaledImage (dragImage (n)), true);
+            return;
+        }
+
+        if (n.file.existsAsFile())
+        {
+            dragStarted = true;
+            container->startDragging (juce::String (dragDescription) + "|" + n.file.getFullPathName(), this, juce::ScaledImage (dragImage (n)),
                                       true);
         }
     }
@@ -395,8 +652,40 @@ public:
     {
         const auto row = rowAt (e.y);
 
-        if (row >= 0 && ! rows[(std::size_t) row]->folder && e.mods.isLeftButtonDown())
-            browser.openFile (rows[(std::size_t) row]->file);
+        if (row < 0 || rows[(std::size_t) row]->folder || ! e.mods.isLeftButtonDown())
+            return;
+
+        const auto& n = *rows[(std::size_t) row];
+        if (n.kind != Kind::item)
+        {
+            browser.openFile (n.file);
+            return;
+        }
+
+        const auto& item = n.item;
+        switch (item.kind)
+        {
+            case projectcontents::Kind::pattern:
+                if (browser.onOpenPattern)
+                    browser.onOpenPattern (item.index);
+                break;
+            case projectcontents::Kind::sample:
+                if (! n.missing)
+                    browser.openFile (n.file);
+                break;
+            case projectcontents::Kind::generator:
+                if (browser.onOpenChannel)
+                    browser.onOpenChannel (item.index);
+                break;
+            case projectcontents::Kind::effect:
+                if (browser.onOpenEffect)
+                    browser.onOpenEffect (item.index, item.slot);
+                break;
+            case projectcontents::Kind::automation:
+                if (! n.history && browser.onOpenAutomation)
+                    browser.onOpenAutomation (item.index);
+                break;
+        }
     }
 
     ui::Hint hintAt (juce::Point<int> p) override
@@ -411,28 +700,67 @@ public:
         }
 
         const auto& n = *rows[(std::size_t) row];
+        h.hasMenu = true;
+
+        switch (n.kind)
+        {
+            case Kind::project:
+                h.text = tr ("Current project: what this project uses (patterns, effects, generators, automation, audio files)  [LMB] open  [RMB] expand / collapse all");
+                return h;
+            case Kind::category:
+                h.text = categoryHint (n.category) + "  " + (n.expanded ? tr ("[LMB] close") : tr ("[LMB] open"));
+                h.value = n.detail;
+                return h;
+            case Kind::fsFolder:
+                if (n.depth == 0 || (n.parent != nullptr && n.parent->kind == Kind::project))
+                {
+                    h.text = n.label + ": " + n.file.getFullPathName() + "  " + (n.expanded ? tr ("[LMB] close") : tr ("[LMB] open")) + "  " + tr ("[RMB] menu");
+                    return h;
+                }
+                break;
+            case Kind::item:
+                return itemHint (n);
+            case Kind::file:
+                break;
+        }
+
         h.text = rowHint (n.file, n.folder, n.expanded);
         h.value = n.folder ? juce::String() : n.file.getFileExtension().substring (1).toUpperCase();
-        h.hasMenu = true;
         return h;
     }
 
-    // for snapshots: the first audio file under the first folders (opening them)
+    // for snapshots: the first audio file under the first folders on disk (opening them)
     int firstAudioRow()
     {
         for (int pass = 0; pass < 3; ++pass)
         {
             for (int i = 0; i < (int) rows.size(); ++i)
-                if (! rows[(std::size_t) i]->folder && isAudio (rows[(std::size_t) i]->file))
+                if (rows[(std::size_t) i]->kind == Kind::file && isAudio (rows[(std::size_t) i]->file))
                     return i;
 
             for (auto* n : rows)
-                if (n->folder && ! n->expanded)
+                if (n->kind == Kind::fsFolder && ! n->expanded)
                 {
                     toggle (*n);
                     break;
                 }
         }
+        return -1;
+    }
+
+    // for snapshots: opens these project sections; returns the first row of a sample item
+    int openProjectSections (std::initializer_list<Category> open)
+    {
+        for (auto* n : std::vector<Node*> (rows))
+            if (n->kind == Kind::category && std::find (open.begin(), open.end(), n->category) != open.end() && ! n->expanded)
+            {
+                n->expanded = true;
+                load (*n);
+            }
+        rebuild();
+        for (int i = 0; i < (int) rows.size(); ++i)
+            if (rows[(std::size_t) i]->kind == Kind::item && rows[(std::size_t) i]->item.kind == projectcontents::Kind::sample)
+                return i;
         return -1;
     }
 
@@ -446,12 +774,77 @@ public:
         }
     }
 
+    // flat mode, PROJECT tab search: every project item whose name matches
+    static std::vector<std::unique_ptr<Node>> projectMatches (const Song& song, const juce::String& query)
+    {
+        const auto parsed = search::parse (query.toStdString());
+        std::vector<std::unique_ptr<Node>> found;
+        for (auto c : categories)
+        {
+            if (c == Category::history)
+                continue;
+            Node section;
+            section.kind = Kind::category;
+            section.category = c;
+            listCategory (section, song, {});
+            for (auto& child : section.children)
+                if (search::matches (parsed, child->label.toStdString()))
+                {
+                    child->parent = nullptr;
+                    found.push_back (std::move (child));
+                }
+        }
+        return found;
+    }
+
 private:
+    juce::File baseOf (const juce::File& f) const
+    {
+        for (const auto& b : bases)
+            if (f.isAChildOf (b))
+                return b;
+        return f.getParentDirectory();
+    }
+
     void load (Node& n)
     {
         if (n.loaded)
             return;
         n.loaded = true;
+
+        if (n.kind == Kind::project)
+        {
+            for (auto c : categories)
+            {
+                auto child = std::make_unique<Node>();
+                child->kind = Kind::category;
+                child->folder = true;
+                child->category = c;
+                child->label = categoryName (c);
+                child->icon = categoryIcon (c);
+                child->depth = n.depth + 1;
+                child->parent = &n;
+                loadCategory (*child); // the counts show while closed
+                child->loaded = false;
+                child->children.clear();
+                n.children.push_back (std::move (child));
+                if (c == Category::automation && browser.projectFile.existsAsFile()) // then the project's folder (FL's "Project data")
+                {
+                    auto folder = makeFolder (browser.projectFile.getParentDirectory(), tr ("Project folder"), juce::Colour());
+                    folder->icon = Icon::folder;
+                    folder->depth = n.depth + 1;
+                    folder->parent = &n;
+                    n.children.push_back (std::move (folder));
+                }
+            }
+            return;
+        }
+
+        if (n.kind == Kind::category)
+        {
+            loadCategory (n);
+            return;
+        }
 
         auto folders = n.file.findChildFiles (juce::File::findDirectories, false, "*", juce::File::FollowSymlinks::noCycles);
         auto files = n.file.findChildFiles (juce::File::findFiles, false, "*", juce::File::FollowSymlinks::noCycles);
@@ -464,6 +857,7 @@ private:
             if (f.isHidden() || f.getFileName().startsWithChar ('.'))
                 continue;
             auto c = std::make_unique<Node>();
+            c->kind = Kind::fsFolder;
             c->file = f;
             c->folder = true;
             c->depth = n.depth + 1;
@@ -482,6 +876,320 @@ private:
             }
     }
 
+    void loadCategory (Node& n)
+    {
+        n.loaded = true;
+        n.children.clear();
+        listCategory (n, browser.engine.getSong(), &browser.engine);
+    }
+
+    // The items of one project section (history needs the engine; the PROJECT search passes none).
+    static void listCategory (Node& n, const Song& song, AudioEngine* engine)
+    {
+        auto add = [&n] (projectcontents::Item item, Icon icon, juce::Colour colour) -> Node& {
+            auto c = std::make_unique<Node>();
+            c->kind = Kind::item;
+            c->label = juce::String::fromUTF8 (item.name.c_str());
+            c->detail = juce::String::fromUTF8 (item.detail.c_str());
+            c->colour = colour;
+            c->icon = icon;
+            c->depth = n.depth + 1;
+            c->parent = &n;
+            c->item = std::move (item);
+            n.children.push_back (std::move (c));
+            return *n.children.back();
+        };
+
+        switch (n.category)
+        {
+            case Category::history:
+                if (engine != nullptr)
+                {
+                    const auto size = engine->getHistorySize(), at = engine->getHistoryPosition();
+                    for (int i = size - 1; i >= juce::jmax (0, size - 100); --i) // newest first, as FL lists it
+                    {
+                        const auto l = engine->getHistoryLabel (i);
+                        projectcontents::Item item;
+                        item.kind = projectcontents::Kind::automation; // (unused for history rows)
+                        item.index = i;
+                        item.name = tr (l.text, { juce::String::fromUTF8 (l.arg.c_str()) }).toStdString();
+                        auto& node = add (std::move (item), Icon::undo, juce::Colour());
+                        node.history = true;
+                        node.current = i == at;
+                    }
+                    n.detail = juce::String (size);
+                }
+                break;
+            case Category::patterns:
+                for (auto& item : projectcontents::patterns (song))
+                {
+                    const auto colour = PlaylistComponent::patternColour (song, item.index);
+                    const auto current = item.index == song.currentPattern;
+                    if (item.uses == 0)
+                        item.detail = tr ("not in the Playlist").toStdString();
+                    add (std::move (item), Icon::pattern, colour).current = current;
+                }
+                break;
+            case Category::effects:
+                for (auto& item : projectcontents::effects (song))
+                    add (item, item.plugin ? Icon::plugin : Icon::mixer, item.colour != 0 ? juce::Colour (item.colour) : juce::Colour());
+                break;
+            case Category::generators:
+                for (auto& item : projectcontents::generators (song))
+                {
+                    const auto& channel = song.channels[(std::size_t) item.index];
+                    const auto icon = item.plugin ? Icon::plugin
+                                      : projectcontents::playsSampleFile (channel.instrument) ? Icon::audioFile
+                                                                                               : Icon::keyboard;
+                    const auto colour = channel.instrument == InstrumentKind::audioClip ? PlaylistComponent::audioClipColour (channel)
+                                        : item.colour != 0                               ? juce::Colour (item.colour)
+                                                                                         : juce::Colour();
+                    const auto selected = engine != nullptr && engine->getSelectedChannel() == item.index;
+                    add (std::move (item), icon, colour).current = selected;
+                }
+                break;
+            case Category::automation:
+                for (auto& item : projectcontents::automations (song))
+                    add (item, Icon::automate, item.colour != 0 ? juce::Colour (item.colour) : theme::colour::automation);
+                break;
+            case Category::samples:
+                for (auto& item : projectcontents::samples (song))
+                {
+                    const juce::String path = juce::String::fromUTF8 (item.path.c_str());
+                    const juce::File file (juce::File::isAbsolutePath (path) ? path : juce::String());
+                    auto colour = item.colour != 0 ? juce::Colour (item.colour) : theme::colour::audioClip;
+                    if (item.index >= 0 && song.channels[(std::size_t) item.index].instrument == InstrumentKind::audioClip)
+                        colour = PlaylistComponent::audioClipColour (song.channels[(std::size_t) item.index]);
+                    auto& node = add (std::move (item), Icon::audioFile, colour);
+                    node.file = file;
+                    node.missing = ! file.existsAsFile();
+                    if (node.missing)
+                        node.detail = tr ("missing");
+                }
+                break;
+        }
+
+        if (n.category != Category::history)
+            n.detail = juce::String ((int) n.children.size());
+    }
+
+    static juce::String signature (const Node& n)
+    {
+        juce::String s;
+        for (const auto& c : n.children)
+            s << c->label << '|' << c->detail << '|' << (int) c->colour.getARGB() << '|' << (int) c->missing << '|' << c->item.index << '|'
+              << c->item.slot << '\n';
+        return s;
+    }
+
+    juce::String selectionKey() const
+    {
+        if (! juce::isPositiveAndBelow (selected, (int) rows.size()))
+            return {};
+        const auto& n = *rows[(std::size_t) selected];
+        if (n.kind != Kind::item)
+            return "f:" + n.file.getFullPathName() + n.label;
+        return "i:" + juce::String ((int) n.item.kind) + ":" + juce::String (n.item.index) + ":" + juce::String (n.item.slot) + ":"
+               + juce::String::fromUTF8 (n.item.path.c_str()) + (n.history ? "h" : "");
+    }
+
+    void restoreSelection (const juce::String& key)
+    {
+        if (key.isEmpty())
+            return;
+        const auto keep = selected;
+        selected = -1;
+        for (int i = 0; i < (int) rows.size(); ++i)
+        {
+            selected = i;
+            if (selectionKey() == key)
+                return;
+        }
+        selected = -1;
+        juce::ignoreUnused (keep);
+    }
+
+    void itemClicked (Node& n)
+    {
+        auto& engine = browser.engine;
+        const auto& item = n.item;
+
+        if (n.history)
+        {
+            engine.jumpToHistory (item.index);
+            return;
+        }
+
+        switch (item.kind)
+        {
+            case projectcontents::Kind::pattern: // FL: clicking a pattern makes it the current one
+                if (item.index != engine.getSong().currentPattern && item.index < (int) engine.getSong().patterns.size())
+                    engine.editSong ([index = item.index] (Song& s) { s.currentPattern = index; }, false);
+                break;
+            case projectcontents::Kind::generator:
+                if (item.index < (int) engine.getSong().channels.size())
+                    engine.setSelectedChannel (item.index);
+                break;
+            case projectcontents::Kind::sample:
+            case projectcontents::Kind::effect:
+            case projectcontents::Kind::automation:
+                break;
+        }
+    }
+
+    ui::Hint itemHint (const Node& n) const
+    {
+        ui::Hint h;
+        h.hasMenu = true;
+        const auto& item = n.item;
+
+        if (n.history)
+        {
+            h.text = tr ("Undo history: [LMB] go back to this step");
+            h.value = tr ("Level {0}/{1}", { juce::String (item.index + 1), juce::String (browser.engine.getHistorySize()) });
+            return h;
+        }
+
+        switch (item.kind)
+        {
+            case projectcontents::Kind::pattern:
+                h.text = n.label + ": " + tr ("[LMB] make it the current pattern  [2xLMB] open in the Piano Roll  drag into the Playlist  [RMB] pattern menu");
+                h.value = item.uses == 0 ? tr ("not in the Playlist") : tr ("{0} clips", { juce::String (item.uses) });
+                break;
+            case projectcontents::Kind::sample:
+                h.text = juce::String::fromUTF8 (item.path.c_str()) + "  "
+                         + (n.missing ? tr ("(missing: File > Missing files... finds it)")
+                                      : tr ("[LMB] preview  [2xLMB] new channel  drag to the Playlist or the Channel Rack  [RMB] menu"));
+                h.value = tr ("used {0}x", { juce::String (item.uses) });
+                break;
+            case projectcontents::Kind::generator:
+                h.text = n.label + (n.detail.isNotEmpty() ? " (" + n.detail + ")" : juce::String()) + ": "
+                         + tr ("[LMB] select the channel  [2xLMB] open its settings  [RMB] menu");
+                break;
+            case projectcontents::Kind::effect:
+                h.text = n.label + " (" + n.detail + "): " + tr ("[2xLMB] open its editor  [RMB] menu");
+                h.value = tr ("slot {0}", { juce::String (item.slot + 1) });
+                break;
+            case projectcontents::Kind::automation:
+                h.text = n.label + ": " + tr ("[2xLMB] open the automation editor");
+                h.value = item.uses == 0 ? tr ("not in the Playlist") : tr ("{0} clips", { juce::String (item.uses) });
+                break;
+        }
+        return h;
+    }
+
+    void showMenu (Node& n)
+    {
+        auto& engine = browser.engine;
+        juce::PopupMenu menu;
+        auto safe = juce::Component::SafePointer<FileTree> (this);
+        auto expandItems = [&menu, safe, &n] {
+            Node* target = &n;
+            while (target != nullptr && target->kind == Kind::item)
+                target = target->parent;
+            menu.addItem (tr ("Expand all"), [safe, target] {
+                if (safe != nullptr && target != nullptr)
+                    safe->expandAll (*target);
+            });
+            menu.addItem (tr ("Collapse all"), [safe] {
+                if (safe != nullptr)
+                    safe->collapseAll();
+            });
+        };
+
+        if (n.kind == Kind::project || n.kind == Kind::category)
+        {
+            menu.addSectionHeader (n.label);
+            expandItems();
+            menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+            return;
+        }
+
+        if (n.kind != Kind::item)
+        {
+            if (n.folder)
+                browser.showFolderMenu (n.file);
+            else
+                browser.showFileMenu (n.file);
+            return;
+        }
+
+        const auto item = n.item;
+        if (n.history)
+            return;
+
+        switch (item.kind)
+        {
+            case projectcontents::Kind::pattern: // FL: the right-click makes it the current pattern, then its menu
+                itemClicked (n);
+                if (browser.onPatternMenu)
+                    browser.onPatternMenu (item.index);
+                return;
+            case projectcontents::Kind::sample:
+            {
+                const auto file = n.file;
+                const auto ok = ! n.missing;
+                menu.addSectionHeader (n.label);
+                menu.addItem (tr ("Send to the selected channel"), ok && browser.onLoadIntoChannel != nullptr, false, [safe, file] {
+                    if (safe != nullptr && safe->browser.onLoadIntoChannel)
+                        safe->browser.onLoadIntoChannel (file);
+                });
+                menu.addItem (tr ("Open in a new channel"), ok, false, [safe, file] {
+                    if (safe != nullptr)
+                        safe->browser.openFile (file);
+                });
+                menu.addItem (tr ("Send to the Playlist as an audio clip"), ok && browser.onSendToPlaylist != nullptr, false, [safe, file] {
+                    if (safe != nullptr && safe->browser.onSendToPlaylist)
+                        safe->browser.onSendToPlaylist (file);
+                });
+                menu.addSeparator();
+                menu.addItem (tr ("Edit in the audio editor..."), ok, false, [&engine, file] { openAudioEditor (engine, file); });
+                if (item.index >= 0)
+                    menu.addItem (tr ("Show its channel"), [safe, channel = item.index] {
+                        if (safe != nullptr && channel < (int) safe->browser.engine.getSong().channels.size())
+                            safe->browser.engine.setSelectedChannel (channel);
+                    });
+                menu.addSeparator();
+                menu.addItem (tr ("Show in the file manager"), ok, false, [file] { file.revealToUser(); });
+                break;
+            }
+            case projectcontents::Kind::generator:
+                menu.addSectionHeader (n.label);
+                menu.addItem (tr ("Open settings"), [safe, channel = item.index] {
+                    if (safe != nullptr && safe->browser.onOpenChannel)
+                        safe->browser.onOpenChannel (channel);
+                });
+                if (engine.getSong().channels[(std::size_t) item.index].mixerTrack > 0)
+                    menu.addItem (tr ("Show its mixer insert"), [safe, track = engine.getSong().channels[(std::size_t) item.index].mixerTrack] {
+                        if (safe != nullptr && safe->browser.onShowInsert)
+                            safe->browser.onShowInsert (track);
+                    });
+                break;
+            case projectcontents::Kind::effect:
+                menu.addSectionHeader (n.label + " (" + n.detail + ")");
+                menu.addItem (tr ("View editor"), [safe, track = item.index, slot = item.slot] {
+                    if (safe != nullptr && safe->browser.onOpenEffect)
+                        safe->browser.onOpenEffect (track, slot);
+                });
+                menu.addItem (tr ("Show its mixer insert"), [safe, track = item.index] {
+                    if (safe != nullptr && safe->browser.onShowInsert)
+                        safe->browser.onShowInsert (track);
+                });
+                break;
+            case projectcontents::Kind::automation:
+                menu.addSectionHeader (n.label);
+                menu.addItem (tr ("Open the automation editor"), [safe, index = item.index] {
+                    if (safe != nullptr && safe->browser.onOpenAutomation)
+                        safe->browser.onOpenAutomation (index);
+                });
+                break;
+        }
+
+        menu.addSeparator();
+        expandItems();
+        menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+    }
+
     void addRows (Node& n)
     {
         for (auto& c : n.children)
@@ -494,15 +1202,12 @@ private:
 
     void toggle (Node& n)
     {
-        const auto keep = selectedFile();
+        const auto keep = selectionKey();
         n.expanded = ! n.expanded;
         if (n.expanded)
             load (n);
         rebuild();
-
-        for (int i = 0; i < (int) rows.size(); ++i)
-            if (rows[(std::size_t) i]->file == keep)
-                selected = i;
+        restoreSelection (keep);
 
         if (n.expanded) // show what opened
             for (int i = 0; i < (int) rows.size(); ++i)
@@ -531,18 +1236,19 @@ private:
             repaint (0, row * rowHeight, getWidth(), rowHeight);
     }
 
-    juce::Image dragImage (const juce::File& f) const
+    juce::Image dragImage (const Node& n) const
     {
-        const auto name = f.getFileNameWithoutExtension();
+        const auto name = n.label.isNotEmpty() ? n.label : n.file.getFileNameWithoutExtension();
         const auto font = juce::Font (theme::font (theme::type::body));
         const auto width = juce::jlimit (80, 260, juce::GlyphArrangement::getStringWidthInt (font, name) + 36);
+        const auto colour = n.colour.isTransparent() ? theme::colour::accent : readable (n.colour);
         juce::Image image (juce::Image::ARGB, width, 24, true);
         juce::Graphics g (image);
         g.setColour (theme::colour::bg4.withAlpha (0.92f));
         g.fillRoundedRectangle (0.5f, 0.5f, (float) width - 1.0f, 23.0f, 5.0f);
-        g.setColour (theme::colour::accent);
+        g.setColour (colour);
         g.drawRoundedRectangle (0.5f, 0.5f, (float) width - 1.0f, 23.0f, 5.0f, 1.0f);
-        icons::draw (g, iconFor (f, false), { 6.0f, 4.0f, 16.0f, 16.0f }, theme::colour::accent);
+        icons::draw (g, n.icon != Icon::none ? n.icon : iconFor (n.file, false), { 6.0f, 4.0f, 16.0f, 16.0f }, colour);
         g.setColour (theme::colour::textPrimary);
         g.setFont (font);
         g.drawText (name, 28, 0, width - 32, 24, juce::Justification::centredLeft, true);
@@ -554,10 +1260,69 @@ private:
     std::unique_ptr<Node> root;
     std::vector<std::unique_ptr<Node>> flatNodes;
     std::vector<Node*> rows;
-    juce::File base;
-    juce::String status;
+    juce::Array<juce::File> bases;
+    juce::String status, pendingKey;
     int selected = -1, hovered = -1, pressedRow = -1;
     bool dragStarted = false;
+};
+
+// --- the tabs: ALL / PROJECT ------------------------------------------------------------------------
+
+class BrowserComponent::TabBar final : public juce::Component,
+                                       public ui::HintSource
+{
+public:
+    explicit TabBar (BrowserComponent& b) : browser (b) { setRepaintsOnMouseActivity (true); }
+
+    juce::Rectangle<int> tabBounds (int t) const
+    {
+        const auto w = getWidth() / tabCount;
+        return { t * w, 0, t == tabCount - 1 ? getWidth() - t * w : w, getHeight() };
+    }
+
+    static juce::String name (int t) { return t == allTab ? tr ("ALL") : tr ("PROJECT"); }
+
+    void paint (juce::Graphics& g) override
+    {
+        using namespace theme;
+        const auto mouse = isMouseOver() ? getMouseXYRelative() : juce::Point<int> (-1, -1);
+        for (int t = 0; t < tabCount; ++t)
+        {
+            const auto r = tabBounds (t);
+            const auto on = browser.tab == t;
+            if (on || r.contains (mouse))
+            {
+                g.setColour (on ? colour::bg4 : colour::bg3);
+                g.fillRoundedRectangle (r.reduced (2, 2).toFloat(), radius::md);
+            }
+            if (on)
+            {
+                g.setColour (colour::accent);
+                g.fillRoundedRectangle (r.reduced (10, 0).removeFromBottom (2).toFloat(), 1.0f);
+            }
+            g.setColour (on ? colour::textPrimary : colour::textSecondary);
+            g.setFont (font (type::caption, true));
+            g.drawText (name (t), r, juce::Justification::centred, false);
+        }
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        for (int t = 0; t < tabCount; ++t)
+            if (tabBounds (t).contains (e.getPosition()))
+                browser.setTab (t);
+    }
+
+    ui::Hint hintAt (juce::Point<int> p) override
+    {
+        ui::Hint h;
+        h.text = p.x < getWidth() / 2 ? tr ("Browser: ALL - the current project and every sample folder")
+                                       : tr ("Browser: PROJECT - only what the current project uses (patterns, effects, generators, audio files...)");
+        return h;
+    }
+
+private:
+    BrowserComponent& browser;
 };
 
 // --- the preview strip: waveform of the selected sample ----------------------------------------------
@@ -766,32 +1531,14 @@ bool BrowserComponent::isPreviewPlaying() const
 BrowserComponent::BrowserComponent (AudioEngine& e)
     : engine (e)
 {
-    rebuildRoots();
-
-    rootBox.onChange = [this] {
-        const auto id = rootBox.getSelectedId();
-        if (id == addFolderId)
-        {
-            rootBox.setSelectedId (currentRoot + 1, juce::dontSendNotification);
-            addUserFolder();
-            return;
-        }
-        setRoot (id - 1);
-        if (searchBox.getText().isNotEmpty())
-            runSearch();
-    };
-    rootBox.setWantsKeyboardFocus (false);
-    rootBox.setMouseClickGrabsKeyboardFocus (false);
-    rootBox.setScrollWheelEnabled (true);
-    ui::setHint (rootBox, tr ("Folder shown in the Browser: FL Studio's folders, your Documents, Music, Desktop, Downloads and the folders you add  "
-                              "[LMB] choose  [Wheel] step"),
-                 true);
-    addAndMakeVisible (rootBox);
+    tabs = std::make_unique<TabBar> (*this);
+    addAndMakeVisible (*tabs);
 
     searchBox.setTextToShowWhenEmpty (tr ("Search (Ctrl+F): kick -loop, snare OR clap, hat*.wav"), theme::colour::textDisabled);
     searchBox.addListener (this);
     searchBox.setEscapeAndReturnKeysConsumed (true);
-    ui::setHint (searchBox, tr ("Search this folder and below: words must all match; OR, -word (not), \"exact phrase\", * and ? wildcards  [Esc] clear"));
+    ui::setHint (searchBox, tr ("Search the selected folder (or every folder) and below; in PROJECT, the project's items: words must all match; "
+                                "OR, -word (not), \"exact phrase\", * and ? wildcards  [Esc] clear"));
     addAndMakeVisible (searchBox);
 
     tree = std::make_unique<FileTree> (*this, false);
@@ -812,11 +1559,8 @@ BrowserComponent::BrowserComponent (AudioEngine& e)
     strip = std::make_unique<PreviewStrip> (*this);
     addAndMakeVisible (*strip);
 
-    if (! roots.isEmpty())
-    {
-        rootBox.setSelectedId (1, juce::dontSendNotification);
-        setRoot (0);
-    }
+    rebuildRoots();
+    engine.addChangeListener (this);
 }
 
 juce::File BrowserComponent::userFoldersFile()
@@ -827,7 +1571,7 @@ juce::File BrowserComponent::userFoldersFile()
 void BrowserComponent::rebuildRoots()
 {
     roots.clear();
-    rootBox.clear (juce::dontSendNotification);
+    rootNames.clear();
 
     // FL folders (if installed) and user folders
     const auto programs = juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory);
@@ -838,10 +1582,10 @@ void BrowserComponent::rebuildRoots()
             fl = dir;
 
     auto add = [this] (const juce::String& name, const juce::File& folder) {
-        if (folder.isDirectory())
+        if (folder.isDirectory() && ! roots.contains (folder))
         {
             roots.add (folder);
-            rootBox.addItem (name, roots.size());
+            rootNames.add (name);
         }
     };
 
@@ -860,8 +1604,52 @@ void BrowserComponent::rebuildRoots()
         if (line.trim().isNotEmpty())
             add (juce::File (line.trim()).getFileName(), juce::File (line.trim()));
 
-    rootBox.addSeparator();
-    rootBox.addItem (tr ("Add folder..."), addFolderId);
+    rebuildTree();
+}
+
+void BrowserComponent::rebuildTree()
+{
+    std::vector<std::unique_ptr<FileTree::Node>> top;
+    top.push_back (FileTree::makeProject (tab == projectTab));
+
+    if (tab == allTab)
+        for (int i = 0; i < roots.size(); ++i)
+        {
+            // the FL folders keep their colour by position; the user's own folders share one
+            auto colour = rootColour (i < 9 ? i : 99);
+            top.push_back (FileTree::makeFolder (roots[i], rootNames[i], colour));
+        }
+
+    tree->setTopLevel (std::move (top));
+    treeView->setViewPosition (0, 0);
+}
+
+void BrowserComponent::setTab (int newTab)
+{
+    newTab = juce::jlimit (0, tabCount - 1, newTab);
+    if (newTab == tab)
+        return;
+    tab = newTab;
+    rebuildTree();
+    tabs->repaint();
+    if (searchBox.getText().isNotEmpty())
+        runSearch();
+}
+
+void BrowserComponent::setProjectFile (const juce::File& file)
+{
+    if (file == projectFile)
+        return;
+    projectFile = file;
+    rebuildTree(); // the "Project folder" entry follows the project
+}
+
+void BrowserComponent::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    // the project changed: its sections are listed again a moment later (not on every knob step)
+    projectDirty = true;
+    if (! isTimerRunning())
+        startTimer (300);
 }
 
 void BrowserComponent::addUserFolder()
@@ -876,31 +1664,16 @@ void BrowserComponent::addUserFolder()
         lines.removeEmptyStrings();
         lines.addIfNotAlreadyThere (folder.getFullPathName());
         userFoldersFile().replaceWithText (lines.joinIntoString ("\n"));
+        setTab (allTab);
         rebuildRoots();
-
-        for (int i = 0; i < roots.size(); ++i)
-            if (roots[i] == folder)
-            {
-                rootBox.setSelectedId (i + 1, juce::dontSendNotification);
-                setRoot (i);
-            }
     });
 }
 
 BrowserComponent::~BrowserComponent()
 {
+    engine.removeChangeListener (this);
     job.reset();
     engine.previewFile ({});
-}
-
-void BrowserComponent::setRoot (int index)
-{
-    if (juce::isPositiveAndBelow (index, roots.size()))
-    {
-        currentRoot = index;
-        tree->setRoot (roots[index]);
-        treeView->setViewPosition (0, 0);
-    }
 }
 
 void BrowserComponent::waitForListing (int)
@@ -911,7 +1684,7 @@ void BrowserComponent::waitForListing (int)
 void BrowserComponent::resized()
 {
     auto area = getLocalBounds().reduced (4);
-    rootBox.setBounds (area.removeFromTop (26));
+    tabs->setBounds (area.removeFromTop (26));
     area.removeFromTop (4);
     searchBox.setBounds (area.removeFromTop (24));
     area.removeFromTop (4);
@@ -942,7 +1715,7 @@ void BrowserComponent::fileSelected (const juce::File& file, bool preview)
     if (! isAudio (file))
         return;
 
-    if (preview)
+    if (preview && file.existsAsFile())
     {
         engine.previewFile (file);
         previewedFile = file;
@@ -962,6 +1735,10 @@ void BrowserComponent::showFileMenu (const juce::File& file)
     }
     juce::PopupMenu menu;
     menu.addSectionHeader (file.getFileName());
+    menu.addItem (tr ("Send to the selected channel"), onLoadIntoChannel != nullptr, false, [this, file] { onLoadIntoChannel (file); });
+    menu.addItem (tr ("Open in a new channel"), [this, file] { openFile (file); });
+    menu.addItem (tr ("Send to the Playlist as an audio clip"), onSendToPlaylist != nullptr, false, [this, file] { onSendToPlaylist (file); });
+    menu.addSeparator();
     menu.addItem (tr ("Edit in the audio editor..."), [this, file] { openAudioEditor (engine, file); });
     menu.addItem (tr ("Show in the file manager"), [file] { file.revealToUser(); });
     menu.addSeparator();
@@ -994,6 +1771,14 @@ void BrowserComponent::focusSearch()
     searchBox.selectAll();
 }
 
+juce::Array<juce::File> BrowserComponent::searchRoots() const
+{
+    // the top-level folder holding the selection; nothing selected there: every folder
+    if (const auto root = tree->selectedRoot(); root.isDirectory())
+        return { root };
+    return roots;
+}
+
 void BrowserComponent::setSearchForSnapshot (const juce::String& text)
 {
     // synchronous: the snapshot is drawn before any message is dispatched
@@ -1002,12 +1787,13 @@ void BrowserComponent::setSearchForSnapshot (const juce::String& text)
     resultsView->setVisible (text.isNotEmpty());
     treeView->setVisible (text.isEmpty());
 
-    if (text.isEmpty() || ! juce::isPositiveAndBelow (currentRoot, roots.size()))
+    if (text.isEmpty() || roots.isEmpty())
         return;
 
     bool truncated = false;
-    const auto found = searchFiles (roots[currentRoot], text, truncated, [] { return false; });
-    results->setFiles (found, roots[currentRoot], found.isEmpty() ? tr ("Nothing found for \"{0}\".", { text }) : juce::String());
+    const juce::Array<juce::File> scope { roots[0] }; // the FL samples: the same results on every machine with FL
+    const auto found = searchFiles (scope, text, truncated, [] { return false; });
+    results->setFiles (found, scope, found.isEmpty() ? tr ("Nothing found for \"{0}\".", { text }) : juce::String());
     if (! found.isEmpty())
         results->select (0, false);
 }
@@ -1022,8 +1808,20 @@ void BrowserComponent::selectFirstSampleForSnapshot()
     }
 }
 
+void BrowserComponent::showProjectForSnapshot()
+{
+    setTab (projectTab);
+    if (const auto row = tree->openProjectSections ({ Category::patterns, Category::generators, Category::samples }); row >= 0)
+    {
+        tree->select (row, false);
+        strip->show (tree->selectedFile(), false);
+        tree->setHovered (row + 1 < tree->numRows() ? row + 1 : -1);
+    }
+}
+
 void BrowserComponent::textEditorTextChanged (juce::TextEditor&)
 {
+    searchPending = true;
     startTimer (250); // search once typing pauses
 }
 
@@ -1035,14 +1833,23 @@ void BrowserComponent::textEditorEscapeKeyPressed (juce::TextEditor&)
 
 void BrowserComponent::textEditorReturnKeyPressed (juce::TextEditor&)
 {
-    stopTimer();
+    searchPending = false;
     runSearch();
 }
 
 void BrowserComponent::timerCallback()
 {
     stopTimer();
-    runSearch();
+
+    if (std::exchange (searchPending, false))
+        runSearch();
+
+    if (std::exchange (projectDirty, false))
+    {
+        tree->refreshProject();
+        if (tab == projectTab && resultsView->isVisible())
+            runSearch();
+    }
 }
 
 void BrowserComponent::runSearch()
@@ -1052,18 +1859,30 @@ void BrowserComponent::runSearch()
     resultsView->setVisible (query.isNotEmpty());
     treeView->setVisible (query.isEmpty());
 
-    if (query.isEmpty() || ! juce::isPositiveAndBelow (currentRoot, roots.size()))
+    if (query.isEmpty())
         return;
 
-    results->setFiles ({}, roots[currentRoot], tr ("Searching {0}...", { roots[currentRoot].getFullPathName() }));
+    if (tab == projectTab) // the project's own items, at once
+    {
+        auto found = FileTree::projectMatches (engine.getSong(), query);
+        const auto none = found.empty();
+        results->setNodes (std::move (found), none ? tr ("Nothing found for \"{0}\".", { query }) : juce::String());
+        return;
+    }
+
+    const auto scope = searchRoots();
+    if (scope.isEmpty())
+        return;
+
+    results->setFiles ({}, scope, tr ("Searching {0}...", { scope.size() == 1 ? scope[0].getFullPathName() : tr ("every folder") }));
     resultsView->setViewPosition (0, 0);
 
-    job = std::make_unique<SearchJob> (roots[currentRoot], query, [safe = juce::Component::SafePointer<BrowserComponent> (this), query,
-                                                                   root = roots[currentRoot]] (juce::Array<juce::File> found, bool truncated) {
+    job = std::make_unique<SearchJob> (scope, query, [safe = juce::Component::SafePointer<BrowserComponent> (this), query,
+                                                      scope] (juce::Array<juce::File> found, bool truncated) {
         if (safe == nullptr || safe->searchBox.getText().trim() != query)
             return;
 
-        safe->results->setFiles (found, root, found.isEmpty() ? tr ("Nothing found for \"{0}\".", { query }) : juce::String());
+        safe->results->setFiles (found, scope, found.isEmpty() ? tr ("Nothing found for \"{0}\".", { query }) : juce::String());
 
         if (truncated)
             safe->results->setStatus (tr ("Showing the first {0} results.", { juce::String (maxResults) }));
@@ -1143,6 +1962,14 @@ juce::File BrowserComponent::draggedFile (const juce::DragAndDropTarget::SourceD
         return juce::File (text.fromFirstOccurrenceOf ("|", false, false));
 
     return {};
+}
+
+int BrowserComponent::draggedPattern (const juce::DragAndDropTarget::SourceDetails& details)
+{
+    const auto text = details.description.toString();
+    if (text.startsWith (juce::String (patternDragDescription) + "|"))
+        return text.fromFirstOccurrenceOf ("|", false, false).getIntValue();
+    return -1;
 }
 
 void BrowserComponent::openFile (const juce::File& file)

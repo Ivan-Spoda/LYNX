@@ -101,6 +101,9 @@ public:
     // files dragged from the LYNX browser
     bool isInterestedInDragSource (const SourceDetails& details) override;
     void itemDropped (const SourceDetails& details) override;
+    // The Browser's "Send to the Playlist as an audio clip": at the playhead (song mode) or the start, on the
+    // first track that is free there; an audio-clip channel of the same file is reused.
+    void addAudioClipAtPlayhead (const juce::File& file);
 
     // For snapshots: the tool in use and a time selection over [fromBar, toBar).
     void setToolForSnapshot (EditTool tool) { tools.setTool (tool); }

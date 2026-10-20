@@ -87,6 +87,32 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     heldKeys.setSender ([this] (int channel, int key, float velocity, bool on) { engine.sendLiveNote (channel, key, velocity, on, true); });
     browser.onOpenProject = [this] (const juce::File& file) { confirmDiscard ([this, file] { openFile (file); }); };
     browser.onLoadIntoChannel = [this] (const juce::File& file) { return rack.loadSampleIntoSelected (file); };
+    // the Browser's "Current project" items (REA_rodada115)
+    browser.onOpenPattern = [this] (int pattern) {
+        selectPattern (pattern);
+        openPianoRoll();
+    };
+    browser.onPatternMenu = [this] (int pattern) {
+        selectPattern (pattern);
+        makePatternMenu().showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+    };
+    browser.onOpenChannel = [this] (int channel) {
+        engine.setSelectedChannel (channel);
+        rack.toggleEditor (channel, true);
+    };
+    browser.onOpenEffect = [this] (int track, int slot) {
+        showPanel (Panel::mixer);
+        mixer.openSlotEditor (track, slot);
+    };
+    browser.onShowInsert = [this] (int track) {
+        showPanel (Panel::mixer);
+        mixer.selectTrack (track);
+    };
+    browser.onOpenAutomation = [this] (int automation) { openAutomationEditor (engine, automation); };
+    browser.onSendToPlaylist = [this] (const juce::File& file) {
+        playlist.addAudioClipAtPlayhead (file);
+        showPanel (Panel::playlist);
+    };
     if (persistent)
     {
         loadUiSettings();
@@ -980,6 +1006,10 @@ void MainComponent::loadUiSettings()
             toolbarLayout.orderFromString (line.fromFirstOccurrenceOf ("=", false, false).trim().toStdString());
         else if (key == "toolbarIcons")
             toolbarLayout.iconSize = toolbarlayout::Layout::iconSizeFromString (line.fromFirstOccurrenceOf ("=", false, false).trim().toStdString());
+        else if (key == "toolbarSeparators")
+            toolbarLayout.separators = on;
+        else if (key == "toolbarVisible")
+            toolbarLayout.visible = on;
         else if (key == "uiScale")
             toolbarLayout.uiScale = toolbarlayout::clampScale (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
         else if (key == "editPatternsIn")
@@ -1017,6 +1047,8 @@ void MainComponent::saveUiSettings()
                                       + "\ntoolbarGroups=" + juce::String (toolbarLayout.orderToString())
                                       + "\ntoolbarIcons=" + toolbarlayout::Layout::iconSizeId (toolbarLayout.iconSize)
                                       + "\nuiScale=" + juce::String (toolbarLayout.uiScale)
+                                      + "\ntoolbarSeparators=" + juce::String (toolbarLayout.separators ? 1 : 0)
+                                      + "\ntoolbarVisible=" + juce::String (toolbarLayout.visible ? 1 : 0)
                                       + "\nautosaveMinutes=" + juce::String (autosaveMinutes) + "\nautosaveKeep=" + juce::String (autosaveKeep)
                                       + "\nundoLevels=" + juce::String (engine.getUndoLevels())
                                       + "\naskWhatToRecord=" + juce::String (engine.getRecordOptions().askWhatToRecord ? 1 : 0)
@@ -2059,6 +2091,9 @@ void MainComponent::timerCallback()
         lastModified = engine.isModified();
         updateTitle();
     }
+
+    // the Browser's "Project folder" follows the project's file (.lynx, or the .flp it was imported from)
+    browser.setProjectFile (currentFile != juce::File() ? currentFile : importedFlpFile);
 
     // a backup copy every few minutes (Settings › General) when there are changes
     if (autosaveMinutes > 0 && ++autosaveTicks >= 30 * 60 * autosaveMinutes)

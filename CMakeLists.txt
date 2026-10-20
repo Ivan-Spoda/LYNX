@@ -140,6 +140,7 @@ target_sources(lynx_core PRIVATE
     src/core/ExportOptions.cpp
     src/core/Mp3Encoder.cpp
     src/core/PluginMonitor.cpp
+    src/core/ProjectContents.cpp
     src/core/PlaylistOps.cpp)
 
 # LAME's libmp3lame (LGPL; third_party/lame, encoder only, configured by third_party/lame/src/config.h)
