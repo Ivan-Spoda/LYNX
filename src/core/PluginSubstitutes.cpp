@@ -365,13 +365,12 @@ names = FabFilter Pro-L; FabFilter Pro-L 2; Pro-L; Pro-L 2
 product = Renaissance Compressor
 vendor = Waves
 lynx = Compressor
-# [DATA] class ID (stereo component) and <PluginName> from real projects; its RealWorld values are readable but
-# their meaning is not confirmed, so the default preset is used, with auto gain: the substitute shapes the dynamics
-# but keeps the level (its makeup gain is unknown; round 107: without it her vocals came out 4 dB quieter)
+# [DATA] class ID (stereo component) and <PluginName> from real projects
 vst3 = 5554535643527253636f6d7072657373
 waves = RComp
-# round 113: a gentle default (2:1 above -15 dBFS): her vocal takes through the old -18 dB 4:1 lost the most low/high
-# balance of any substitute but the de-esser (docs/analise/REA_rodada113.md §3)
+# round 113: its RealWorld list is translated (threshold, ratio, attack, release, gain; measured on the official
+# trial, docs/analise/REA_rodada113.md §3c). Without a readable state: a gentle default (2:1 above -15 dBFS, auto gain)
+translate = waves-rcomp
 preset = Threshold=0.75; Ratio=0.0526; Auto gain=1
 
 [waves-cla-2a]
@@ -381,9 +380,10 @@ lynx = Glow Leveler
 # [DATA] class ID (stereo component) and <PluginName> from real projects
 vst3 = 4c545356324163536c612d3261207374
 waves = CLA-2A
-# LYNX's optical leveler (round 96); its state is not translated: light leveling (−2 dB into the cell, +2 dB gain;
-# round 113: was +7 dB / +3 dB)
+# LYNX's optical leveler (round 96). Round 113: gain, peak reduction and comp / limit are translated from the
+# RealWorld list (measured on the official trial, REA_rodada113 §3c); without a readable state light leveling
 preset = Peak reduction=0.30; Gain=0.067
+translate = waves-cla-2a
 
 [waves-compressors]
 product = Waves compressor (CLA-76 / CLA-3A / C1 / SSLComp / API-2500)
@@ -457,10 +457,10 @@ product = DeEsser
 vendor = Waves
 lynx = Hush De-esser
 waves = DeEsser; DeEsser Stereo
-# round 113: a gentle default (5.5 kHz, -20 dBFS, at most 4 dB): the old one (6 kHz, -30 dBFS, 12 dB) took 4-5 dB off
-# her vocals above 8 kHz. [model] value 0 of the RealWorld list is the only one in Hz (5506 in every state surveyed):
-# the frequency
-map = waves:0 -> Frequency | curve 2000:0 2828:0.1667 4000:0.3333 5657:0.5 8000:0.6667 11314:0.8333 16000:1
+# round 113: frequency, threshold, split / wideband, side-chain filter and monitor are translated from the RealWorld
+# list (measured on the official trial, REA_rodada113 §3c); without a readable state a gentle default (5.5 kHz,
+# -20 dBFS, at most 4 dB)
+translate = waves-deesser
 preset = Frequency=0.487; Threshold=0.667; Range=0.167
 
 [fabfilter-pro-ds]
@@ -938,12 +938,106 @@ int translateFreshAir (const std::vector<std::uint8_t>& state, EffectSlot& slot)
     return 2;
 }
 
+// --- Waves RealWorld lists (round 113). [EXEC] Black-box measurement of the official trials (WaveShell 17.1, tools/
+// fxmeasure, headless): each control was moved alone and the value of the list that followed it (and its text) was
+// recorded; then the plugin at her projects' states and LYNX's substitute were run on the same sine stairs (1 and
+// 6 kHz, -60 .. 0 dBFS) and vocal takes and the substitute fitted (docs/analise/REA_rodada113.md §3c).
+// The value at `i`, or nothing when the list is shorter / holds "*"
+std::optional<double> wavesValue (const std::vector<double>& rw, std::size_t i)
+{
+    if (i < rw.size() && std::isfinite (rw[i]))
+        return rw[i];
+    return std::nullopt;
+}
+
+float logNorm (double v, double lo, double hi) { return (float) std::clamp (std::log (v / lo) / std::log (hi / lo), 0.0, 1.0); }
+float linNorm (double v, double lo, double hi) { return (float) std::clamp ((v - lo) / (hi - lo), 0.0, 1.0); }
+
+// Renaissance Compressor (28 values): 0 release ms, 1 threshold dB, 2 gain dB, 8 attack ms, 9 ratio, 17 ARC (0) /
+// manual. Her state (-15 dB, 2.95:1, 0.5 ms, ARC, gain 0) is matched by LYNX's peak compressor at 5 dB lower threshold
+// (RComp's soft knee / RMS detector), the same ratio, 300 ms release (ARC), no auto gain (RComp at gain 0 does not make
+// up: -9.6 dB on her take), within 0.5 dB on the stairs. Warm / Smooth and Electro / Opto are not translated.
+int translateWavesRComp (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    const auto rw = wavesRealWorldParams (state);
+    const auto threshold = wavesValue (rw, 1), ratio = wavesValue (rw, 9);
+    if (slot.kind != EffectKind::compressor || ! threshold || ! ratio)
+        return 0;
+    slot.params[0] = linNorm (*threshold - 5.0, -60.0, 0.0);
+    slot.params[1] = linNorm (*ratio, 1.0, 20.0);
+    slot.params[2] = logNorm (wavesValue (rw, 8).value_or (0.5), 0.1, 100.0);
+    const bool arc = wavesValue (rw, 17).value_or (0.0) < 0.5;
+    slot.params[3] = logNorm (arc ? 300.0 : wavesValue (rw, 0).value_or (300.0), 10.0, 1000.0);
+    slot.params[4] = linNorm (wavesValue (rw, 2).value_or (0.0), 0.0, 24.0);
+    slot.params[5] = 0.0f;
+    return 5;
+}
+
+// DeEsser (15 values): 0 frequency Hz, 2 threshold dB, 10 monitor (1 = side chain), 13 side chain (1 = high pass,
+// 2 = band pass), 14 audio (0 = split, 1 = wideband). Her state (5506 Hz, -24.2 dB, high pass, split) is matched by
+// Hush at 0.81 x the frequency, threshold +5 dB, 12 dB range, within 0.9 dB on the 6 kHz stairs (1 kHz untouched in
+// both); the range is not a control of the original (its curve flattens about 10 dB down at full scale).
+int translateWavesDeEsser (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    namespace h = mixsuite::hush;
+    const auto rw = wavesRealWorldParams (state);
+    const auto hz = wavesValue (rw, 0);
+    if (slot.kind != EffectKind::hushDeEsser || ! hz)
+        return 0;
+    int n = 1;
+    slot.params[h::frequency] = logNorm (*hz * 0.81, 2000.0, 16000.0);
+    if (const auto t = wavesValue (rw, 2))
+    {
+        slot.params[h::threshold] = linNorm (*t + 5.0, -60.0, 0.0);
+        slot.params[h::range] = linNorm (12.0, 0.0, 24.0);
+        ++n;
+    }
+    if (const auto m = wavesValue (rw, 14))
+        slot.params[h::mode] = *m >= 0.5 ? 1.0f : 0.0f, ++n;
+    if (const auto d = wavesValue (rw, 13))
+        slot.params[h::detector] = *d >= 1.5 ? 1.0f : 0.0f, ++n;
+    if (const auto l = wavesValue (rw, 10))
+        slot.params[h::listen] = *l >= 0.5 ? 1.0f : 0.0f, ++n;
+    return n;
+}
+
+// CLA-2A (208 values): 38 gain, 74 peak reduction, 112 comp (0) / limit. [EXEC] The gain knob's level below the
+// cell's threshold (noise at -70 dBFS): 20 -> -18.5 dB, 30 -> -3.0, 40 -> +8.0, 48.96 -> +15.5, 60 -> +24.2,
+// 70 -> +29.2, 80 -> +31.8. On her take after RComp (peak -12 dBFS) Glow Leveler's 50 ms level envelope follows the
+// original within 0.3-1.4 dB with peak reduction 0.40 + 0.021 x (knob - 40) and the gain above + 1.5 dB.
+int translateWavesCla2a (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    namespace g = mixsuite::glow;
+    const auto rw = wavesRealWorldParams (state);
+    const auto gain = wavesValue (rw, 38), reduction = wavesValue (rw, 74);
+    if (slot.kind != EffectKind::glowLeveler || ! gain || ! reduction)
+        return 0;
+    static constexpr double knob[] = { 0.0, 20.0, 30.0, 40.0, 48.96, 60.0, 70.0, 80.0, 100.0 };
+    static constexpr double db[] = { -60.0, -18.5, -3.0, 8.0, 15.5, 24.2, 29.2, 31.8, 34.0 };
+    const auto k = std::clamp (*gain, 0.0, 100.0);
+    std::size_t i = 1;
+    while (i < std::size (knob) - 1 && knob[i] < k)
+        ++i;
+    const auto levelDb = db[i - 1] + (db[i] - db[i - 1]) * (k - knob[i - 1]) / (knob[i] - knob[i - 1]);
+    slot.params[g::gain] = linNorm (levelDb + 1.5, 0.0, 30.0);
+    slot.params[g::peakReduction] = (float) std::clamp (0.40 + 0.021 * (*reduction - 40.0), 0.0, 1.0);
+    slot.params[g::mode] = wavesValue (rw, 112).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
+    slot.params[g::emphasis] = 0.0f;
+    return 3;
+}
+
 RawTranslator rawTranslatorNamed (std::string_view name)
 {
     if (name == "auto-tune-pro")
         return translateAutoTunePro;
     if (name == "fresh-air")
         return translateFreshAir;
+    if (name == "waves-rcomp")
+        return translateWavesRComp;
+    if (name == "waves-deesser")
+        return translateWavesDeEsser;
+    if (name == "waves-cla-2a")
+        return translateWavesCla2a;
     return nullptr;
 }
 

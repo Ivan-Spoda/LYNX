@@ -126,6 +126,41 @@ for her settings (up to 1.6 dB for High alone at 100 %, which she never uses). H
 is +6.6 dB from 6.8 kHz. Fresh Air may be level-dependent ("dynamic"); only −20 dBFS was measured (not confirmed at
 other levels). Scripts: tmp/r113/py/fafit.py, renders in C:\Users\kauan\lynx-test\r113\fa.
 
+## 3c. The Waves vocal plugins measured (official trials on this PC)
+
+[EXEC] Waves V17 trials (WaveShell1-VST3 17.1) in tools/fxmeasure, headless (`load <shell> 48000 512 <name>`;
+`loadcomponent` puts a project's raw VST3 component state in). RealWorld layout: every control moved alone, the list
+value that followed it (and its text) recorded (tmp/r113/wv/*_probe.txt, *_map.txt; py/wvmap.py, wvprobe.py). Her
+states read back through the plugins (the same in every project of her corpus):
+
+| Plugin (values) | Layout confirmed | Her state |
+|---|---|---|
+| RComp (28) | 0 release ms, 1 threshold dB, 2 gain dB, 8 attack ms, 9 ratio, 16 warm/smooth, 17 ARC/manual, 22 electro/opto, 27 trim | -15 dB, 2.95:1, 0.5 ms, 160 ms ARC, gain 0, warm, electro |
+| DeEsser (15) | 0 freq Hz, 2 threshold dB, 10 monitor, 13 side chain (1 high pass, 2 band pass), 14 audio (0 split, 1 wideband) | 5506 Hz, -24.2 dB, high pass, split |
+| CLA-2A (208) | 38 gain, 74 peak reduction, 112 comp/limit, 140 analog, 153 hi freq, 206 trim, 207 auto makeup | gain 48.96, peak reduction 62.6, comp |
+| SSL E-Channel (57) | 0-3 comp thresh/ratio/fast/release, 5-9 expander, 11 dyn bypass, 13-24 EQ (LF/LMF/HMF/HF type, gain, freq, Q), 25 EQ bypass, 27/28 HP/LP, 29 filter split, 30 gain, 39 phase, 40 input | comp -1.3 dB 1.8:1 fast 0.35; HP 116 Hz; LF -6 dB 60 Hz shelf; HMF +3 dB 3.5 kHz Q 1.5; HF +4.8 dB 10.16 kHz shelf |
+
+[EXEC] Each plugin at her state on sine stairs (1 and 6 kHz, -60 .. 0 dBFS peak, 3 dB steps) and her raw take
+(py/wvmeas.py, stairtab.py); gain in dB at -60 / -24 / -18 / -12 / -6 / 0 dBFS:
+
+    RComp      1k    0.0  -0.4  -1.8  -4.6  -8.5 -12.8    take -9.6 dB (no make-up at gain 0)
+    DeEsser    6k    0.0  -0.0  -1.4  -5.6  -8.6 -10.2    1 kHz untouched
+    CLA-2A     1k   16.0  12.4   7.9   3.3  -1.2  -5.8    6 kHz: 14.3 at -60 (its tone)
+    SSL (EQ off) 1k  0.9   0.9   0.4  -0.7  -2.2  -4.0    +0.9 dB below the threshold
+
+Substitutes fitted (grid search, LYNX's effect run on the same signals through tmp/r113/fxl/fxlynx; py/fitdyn.py):
+- RComp -> Compressor: threshold - 5 dB, same ratio, attack, release 300 ms for ARC, gain as make-up, no auto gain:
+  0.53 dB RMS on the stairs, take level -9.48 vs -9.56 dB.
+- DeEsser -> Hush (split, high-pass detector): 0.81 x the frequency, threshold + 5 dB, 12 dB range (fixed; the
+  original flattens about 10 dB down): 0.84 dB RMS (6 kHz weighted x3).
+- CLA-2A -> Glow Leveler: gain knob -> level below the threshold (noise at -70 dBFS: 20 -> -18.5, 30 -> -3.0,
+  40 -> +8.0, 48.96 -> +15.5, 60 -> +24.2, 70 -> +29.2, 80 -> +31.8 dB) + 1.5 dB; peak reduction
+  0.40 + 0.021 x (knob - 40) (fitted on her take after RComp at peak reduction 40 / 62.6 / 75 / 85: 50 ms level
+  envelope within 0.3-1.4 dB; Glow saturates above 75). On the stairs Glow's knee is softer (3 dB RMS), the take's
+  envelope is what is matched.
+Before (gentle defaults) these three moved her take by -0.2 / -0.1 / +1.0 dB where the originals do -9.6 / -0.05 /
++6.3 dB (CLA-2A after RComp): the defaults kept the level, the originals do not.
+
 ## 4. Whole vocal path: substitutes vs bypassed vs FL
 
 [EXEC] Vocal-only variants (other channels at volume 0, playlist tracks unmuted), renderwav without normalisation
