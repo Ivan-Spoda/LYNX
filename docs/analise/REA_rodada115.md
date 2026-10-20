@@ -158,6 +158,7 @@ captures stay outside the repository (`tmp/flui115/flref`).
     (the following inserts move left, a blank one takes the end; channels on it go to the Master, sends to it and
     sidechains from it are removed); default names "Insert n" follow their new number
     (`mixerops::insertTrack` / `deleteTrack`, test `flui115_mixer_insert_one_and_delete`).
+- Verified after merging main (tech118, a71ae5f): build-local with the FL Data dir 1 308 799 checks, 0 failures.
 - Next candidates (table above, "to do"): hover star and tags, PLUGINS tab, thumbnails of LYNX's own editors in
   Effects/Generators, per-button toolbar items and spacers, a single-line toolbar preset, the rest of FL's mixer track
   menu (insert multiple, groups, icons, gradient colour).
