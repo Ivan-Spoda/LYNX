@@ -2581,5 +2581,7 @@ countries: br
 "Compress|Expand" = "Comprimir|Expandir"
 "GR" = "GR"
 "Plugin crashed" = "O plugin travou"
+"LYNX closed unexpectedly" = "O LYNX fechou inesperadamente"
+"The last session ended without closing normally. Last step: {0}. Backup copies of your project are in LYNX's autosave folder; details in crash-history.log." = "A última sessão terminou sem fechar normalmente. Último passo: {0}. As cópias de segurança do seu projeto ficam na pasta autosave do LYNX; detalhes em crash-history.log."
 "The plugin \"{0}\" crashed and was switched off, so LYNX and your project kept running (the effect is bypassed, an instrument stays silent). Save your project; the plugin loads again the next time you open it." = "O plugin \"{0}\" travou e foi desligado, então o LYNX e o seu projeto continuaram funcionando (o efeito fica em bypass, um instrumento fica em silêncio). Salve o projeto; o plugin carrega de novo na próxima vez que você abri-lo."
 "This plugin crashed and was switched off. Save the project and open it again to reload it." = "Este plugin travou e foi desligado. Salve o projeto e abra-o de novo para recarregá-lo."

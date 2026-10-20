@@ -9,6 +9,7 @@
 // PluginInstrument switch to bypass / silence and report it, engine/PluginHost.h).
 
 #include <cstdint>
+#include <string>
 #include <type_traits>
 
 namespace lynx::crashguard
@@ -31,6 +32,20 @@ void quietCrashReports() noexcept;
 // (a Waves shell, round 111) crash in their own teardown at exit (DllMain / atexit calling into the GPU driver).
 // Only after every file the process writes is closed.
 [[noreturn]] void exitNow (int code) noexcept;
+
+// Session breadcrumb (round 111). A fail-fast (0xC0000409, e.g. a GPU driver aborting inside a plugin's editor) ends
+// the process without running any crash handler, so nothing tells what happened. While the UI runs, a small file
+// (%APPDATA%\LYNX\sessions\session-<pid>.txt) holds a header and the last few steps (plugin being loaded, editor being
+// opened, project being opened...). A clean exit removes it; the next start finds the file of a session whose process
+// is gone and reports it (Main.cpp). Steps are written synchronously (the file survives the process dying right after);
+// never call note() from the audio thread.
+void beginSession (const std::string& fileUtf8, const std::string& header) noexcept;
+void note (const std::string& step) noexcept; // no-op without a session
+void endSession() noexcept;                   // removes the file
+std::uint32_t processId() noexcept;
+std::uint64_t processStartTime() noexcept; // Windows: creation FILETIME; 0 elsewhere
+// The process `pid` still runs and (where known) started at `startTime`: not a reused id.
+bool processRunning (std::uint32_t pid, std::uint64_t startTime) noexcept;
 
 // Short English description of an exception code ("access violation", ...), or "exception".
 const char* describe (std::uint32_t code) noexcept;

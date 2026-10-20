@@ -5,6 +5,7 @@
 #include <map>
 
 #include "engine/Text.h"
+#include "platform/CrashGuard.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
 
@@ -22,10 +23,12 @@ public:
     {
         setUsingNativeTitleBar (true);
 
+        crashguard::note (("opening the editor of " + plugin.getName()).toStdString()); // session breadcrumb (round 111)
         if (auto* editor = plugin.createEditorIfNeeded())
             setContentOwned (editor, true);
         else
             setContentOwned (new juce::GenericAudioProcessorEditor (plugin), true); // plugin without a UI
+        crashguard::note (("editor open: " + plugin.getName()).toStdString());
 
         if (auto* editor = dynamic_cast<juce::AudioProcessorEditor*> (getContentComponent()))
             setResizable (editor->isResizable(), false);
@@ -36,6 +39,7 @@ public:
 
     ~PluginWindow() override
     {
+        crashguard::note (("closing the editor of " + plugin.getName()).toStdString());
         // the UI must be destroyed before the plugin (which may die together with `owner`)
         clearContentComponent();
     }

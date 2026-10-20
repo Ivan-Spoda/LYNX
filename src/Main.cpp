@@ -64,12 +64,53 @@ void onCrash (void*)
     folder.createDirectory();
     const auto stamp = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S");
     folder.getChildFile ("crash " + stamp + ".txt").replaceWithText (juce::SystemStats::getStackBacktrace());
+    lynx::crashguard::note (("crashed: backtrace in autosave\\crash " + stamp + ".txt").toStdString());
 
     if (crashEngine != nullptr)
     {
         juce::String error;
         lynx::ProjectFile::save (crashEngine->getSong(), folder.getChildFile ("recovered " + stamp + lynx::ProjectFile::extension), error);
     }
+}
+juce::File sessionsFolder()
+{
+    return lynx::PluginHost::settingsFolder().getChildFile ("sessions");
+}
+
+// Sessions of earlier runs whose process is gone without closing (a fail-fast, a crash, a forced end): each is appended
+// to %APPDATA%\LYNX\crash-history.log and its file removed. Returns the last step of the newest one ("" when none).
+juce::String collectUncleanSessions()
+{
+    juce::String lastStep;
+    juce::Time newest;
+    for (const auto& file : sessionsFolder().findChildFiles (juce::File::findFiles, false, "session-*.txt"))
+    {
+        const auto text = file.loadFileAsString();
+        juce::StringPairArray values;
+        juce::StringArray steps;
+        for (const auto& line : juce::StringArray::fromLines (text))
+        {
+            if (line.startsWith ("step="))
+                steps.add (line.fromFirstOccurrenceOf ("=", false, false));
+            else if (line.contains ("="))
+                values.set (line.upToFirstOccurrenceOf ("=", false, false), line.fromFirstOccurrenceOf ("=", false, false));
+        }
+        const auto pid = (std::uint32_t) values["pid"].getLargeIntValue();
+        const auto start = (std::uint64_t) values["start"].getLargeIntValue();
+        if (pid == lynx::crashguard::processId() || lynx::crashguard::processRunning (pid, start))
+            continue; // this run, or another LYNX window still open
+
+        lynx::PluginHost::settingsFolder().getChildFile ("crash-history.log")
+            .appendText (juce::Time::getCurrentTime().toISO8601 (true) + "  previous session ended without closing\n" + text + "\n");
+        file.deleteFile();
+
+        if (const auto modified = file.getLastModificationTime(); lastStep.isEmpty() || modified > newest)
+        {
+            newest = modified;
+            lastStep = steps.isEmpty() ? juce::String ("start-up") : steps[steps.size() - 1].fromFirstOccurrenceOf (" ", false, false);
+        }
+    }
+    return lastStep;
 }
 } // namespace
 
@@ -396,7 +437,9 @@ public:
         if (args.contains ("--plugintest"))
         {
             const auto i = args.indexOf ("--plugintest");
-            runPluginTest (args[i + 1].unquoted(), args[i + 2].unquoted());
+            // optional 3rd argument: the plugin's name inside a shell (e.g. "CLA-2A Stereo" in a WaveShell)
+            const auto only = i + 3 < args.size() && ! args[i + 3].startsWith ("--") ? args[i + 3].unquoted() : juce::String();
+            runPluginTest (args[i + 1].unquoted(), args[i + 2].unquoted(), only);
             return;
         }
 
@@ -488,6 +531,15 @@ public:
             return;
         }
 
+        // session breadcrumb: a fail-fast (no crash handler runs) still leaves the last steps behind (round 111)
+        uncleanLastStep = collectUncleanSessions();
+        sessionsFolder().createDirectory();
+        lynx::crashguard::beginSession (
+            sessionsFolder().getChildFile ("session-" + juce::String (lynx::crashguard::processId()) + ".txt").getFullPathName().toStdString(),
+            ("LYNX session\nversion=" + getApplicationVersion() + "\npid=" + juce::String (lynx::crashguard::processId())
+             + "\nstart=" + juce::String ((juce::int64) lynx::crashguard::processStartTime())
+             + "\nstarted=" + juce::Time::getCurrentTime().toISO8601 (true) + "\n").toStdString());
+
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         startupOptions = lynx::StartupOptions::load();
         lynx::registerFileTypes();
@@ -500,6 +552,7 @@ public:
             startEngine();
             createMainWindow();
             mainWindow->reveal();
+            showUncleanNotice();
             openStartupFile();
             return;
         }
@@ -532,6 +585,7 @@ public:
                     mainWindow->reveal();
                     splash->toFront (false);
                     splash->finish ([this] { splash = nullptr; });
+                    showUncleanNotice();
                     openStartupFile();
                     // first run: language, audio, plugin folders (FL Studio's included) and a background scan
                     if (! lynx::setupWizardDone())
@@ -557,6 +611,19 @@ public:
         lynx::setMainWindowForOwnership (mainWindow.get());
     }
 
+    // the previous run ended without closing (see collectUncleanSessions): say so once, with its last step
+    void showUncleanNotice()
+    {
+        if (uncleanLastStep.isEmpty())
+            return;
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::InfoIcon, lynx::tr ("LYNX closed unexpectedly"),
+            lynx::tr ("The last session ended without closing normally. Last step: {0}. Backup copies of your project are in "
+                      "LYNX's autosave folder; details in crash-history.log.",
+                      { uncleanLastStep }));
+        uncleanLastStep.clear();
+    }
+
     void openStartupFile()
     {
         if (fileToOpen != juce::File() && mainWindow != nullptr)
@@ -565,12 +632,14 @@ public:
 
     void shutdown() override
     {
+        lynx::crashguard::note ("closing");
         lynx::shutdownPluginSandboxWorker();
         splash = nullptr;
         mainWindow = nullptr; // the UI goes before the engine
         crashEngine = nullptr;
         engine = nullptr;
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        lynx::crashguard::endSession(); // a clean exit: no breadcrumb left behind
 
         // everything is saved and closed: a process that loaded third-party plugins ends here, before the DLLs' own
         // teardown runs (some crash in it at exit, round 111)
@@ -588,6 +657,7 @@ public:
 
 private:
     bool sandboxChild = false;
+    juce::String uncleanLastStep; // last step of a previous run that ended without closing
 
     // LYNX.exe --selftest report.txt: renders 2 s without a sound card and writes the result.
     // Exit code 0 = audio came out, 1 = silence.
@@ -943,9 +1013,9 @@ private:
         return allFinite;
     }
 
-    // LYNX.exe --plugintest plugin.vst3 report.txt: loads the plugin, plays notes if it is an
+    // LYNX.exe --plugintest plugin.vst3 report.txt ["name"]: loads the plugin (or the one named in a shell), plays notes if it is an
     // instrument (and runs audio through it if it is an effect) and measures the audio.
-    void runPluginTest (const juce::String& pluginPath, const juce::String& reportPath)
+    void runPluginTest (const juce::String& pluginPath, const juce::String& reportPath, const juce::String& only = {})
     {
         juce::String report;
         bool ok = false;
@@ -960,7 +1030,8 @@ private:
 
             for (const auto& type : host.getKnownPlugins().getTypes())
             {
-                if (juce::File (type.fileOrIdentifier).getFileName() != juce::File (pluginPath).getFileName())
+                if (juce::File (type.fileOrIdentifier).getFileName() != juce::File (pluginPath).getFileName()
+                    || (only.isNotEmpty() && type.name != only))
                     continue;
 
                 report << "  " << (type.isInstrument ? "instrument: " : "effect: ") << type.name << " (" << type.manufacturerName

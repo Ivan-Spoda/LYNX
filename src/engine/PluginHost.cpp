@@ -1193,7 +1193,10 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::instantiate (const Plugin
         return nullptr;
     }
 
+    crashguard::note (("loading plugin " + description->name + " (" + description->pluginFormatName + ", "
+                       + juce::File (description->fileOrIdentifier).getFileName() + ")").toStdString());
     auto instance = formats.createPluginInstance (*description, sampleRate, maxBlockSize, message);
+    crashguard::note (("loaded plugin " + description->name + (instance == nullptr ? juce::String (" (failed)") : juce::String())).toStdString());
 
     if (instance == nullptr)
     {

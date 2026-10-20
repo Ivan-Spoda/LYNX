@@ -2311,6 +2311,7 @@ void MainComponent::chooseFileToOpenNow()
 void MainComponent::openFile (const juce::File& file)
 {
     juce::String error;
+    crashguard::note (("opening project " + file.getFileName()).toStdString()); // session breadcrumb (round 111)
 
     if (file.hasFileExtension ("mid;midi"))
     {
