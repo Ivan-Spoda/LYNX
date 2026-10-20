@@ -1004,11 +1004,10 @@ private:
 
             const auto peak = offline.renderOffline (3.0, 48000.0);
             report << "peak=" << peak << "\n";
-            // a plugin that crashed inside a call was caught and switched off (round 111)
-            if (auto* e = dynamic_cast<lynx::PluginEffect*> (offline.getEffect (0, 0).get()); e != nullptr && e->hasCrashed())
-                report << "effect_crashed_and_switched_off=yes\n";
-            if (auto* c = dynamic_cast<lynx::PluginInstrument*> (offline.getChannelInstrument (4).get()); c != nullptr && c->hasCrashed())
-                report << "instrument_crashed_and_switched_off=yes\n";
+            // plugins that crashed inside a call, were caught and switched off (round 111)
+            report << "plugin_crashes=" << lynx::pluginCrashCount() << "\n";
+            for (const auto& c : lynx::pluginCrashes())
+                report << "  crashed: " << c.plugin << " (" << lynx::crashguard::describe (c.code) << ")\n";
 
             offline.capturePluginStates();
             const auto stateSize = hasInstrument ? offline.getSong().channels[4].plugin.state.size() : (size_t) 0;
