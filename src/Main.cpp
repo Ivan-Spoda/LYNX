@@ -1067,14 +1067,17 @@ private:
                 song.mixer[0].effects.push_back (slot);
             }
 
+            const auto effectSlot = (int) song.mixer[0].effects.size() - 1; // (the default master may hold effects already)
             offline.setSong (song);
 
+            // after a render: the rack (and its plugins) is built when the engine is prepared
+            const auto peak = offline.renderOffline (3.0, 48000.0);
             const auto* loadedInstrument = dynamic_cast<lynx::PluginInstrument*> (offline.getChannelInstrument (4).get());
-            const auto* loadedEffect = dynamic_cast<lynx::PluginEffect*> (offline.getEffect (0, 0).get());
+            const auto* loadedEffect = dynamic_cast<lynx::PluginEffect*> (offline.getEffect (0, effectSlot).get());
             report << "instrument_loaded=" << (loadedInstrument != nullptr ? "yes" : "no") << "\n"
                    << "effect_loaded=" << (loadedEffect != nullptr ? "yes" : "no") << "\n";
-
-            const auto peak = offline.renderOffline (3.0, 48000.0);
+            if (host.getLoadFailures().size() > 0) // why: the host's own message (license, missing file, load failure)
+                report << "load_failures=" << host.getLoadFailures().joinIntoString (" | ") << "\n";
             report << "peak=" << peak << "\n";
             // plugins that crashed inside a call, were caught and switched off (round 111)
             report << "plugin_crashes=" << lynx::pluginCrashCount() << "\n";
