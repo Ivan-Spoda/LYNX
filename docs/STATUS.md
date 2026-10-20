@@ -61,7 +61,9 @@ exports the 30 demo projects shipped with FL Studio 2026.
   envelope, auto-pan, Linkwitz-Riley crossover, pitch shift, frequency shifter, utility and a nestable
   parallel container.
 - **Plugins:** VST3 and CLAP (own CLAP host on top of JUCE); scanning always runs in separate processes with a
-  blacklist; optionally every plugin runs in a separate process (*Options → Run plugins in a separate process*).
+  blacklist; optionally every plugin runs in a separate process (*Options → Run plugins in a separate process*). A hosted plugin
+  that crashes inside an audio / parameter / state call is caught, switched off (bypassed / silent) and reported, and
+  LYNX keeps running; scan children end without unloading plugins whose teardown crashes (REA round 111).
 - **Missing plugins:** a project effect whose third-party plugin isn't installed plays a LYNX substitute (reverb →
   Reeverb 2/LuxeVerb, delay → Delay 3, limiter, compressor, EQ…) from a data-driven table, translating settings when
   the saved state is readable; the original reference is kept byte for byte and comes back once the plugin is
