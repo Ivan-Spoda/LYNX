@@ -29,6 +29,7 @@ add_library(lynx_core STATIC
     src/core/FlWrapper.cpp
     src/core/FlPluginDb.cpp
     src/core/MissingFiles.cpp
+    src/core/ProjectSafety.cpp
     src/core/PluginSubstitutes.cpp
     src/core/Preferences.cpp
     src/core/PluginLayout.cpp
@@ -211,6 +212,7 @@ if(LYNX_BUILD_APP)
         src/engine/SampleLibrary.cpp
     src/engine/WavPackFormat.cpp
         src/engine/ProjectFile.cpp
+        src/engine/ProjectPackage.cpp
         src/engine/PluginHost.cpp
         src/engine/FlStudio.cpp
         src/engine/PluginSandbox.cpp

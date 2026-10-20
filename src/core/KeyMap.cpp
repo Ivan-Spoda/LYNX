@@ -81,6 +81,7 @@ std::vector<Action> makeActions()
         { "file.open", TR_NOOP ("Open project"), Context::global, { chord ('O', ctrl) } },
         { "file.save", TR_NOOP ("Save project"), Context::global, { chord ('S', ctrl) } },
         { "file.saveAs", TR_NOOP ("Save project as"), Context::global, { chord ('S', ctrl | shift) } },
+        { "file.saveNewVersion", TR_NOOP ("Save new version (Song_2, Song_3...)"), Context::global, { chord ('S', ctrl | alt) } },
         { "file.export", TR_NOOP ("Export audio"), Context::global, { chord ('R', ctrl) } },
         { "edit.undo", TR_NOOP ("Undo"), Context::global, { chord ('Z', ctrl) } },
         { "edit.redo", TR_NOOP ("Redo"), Context::global, { chord ('Y', ctrl), chord ('Z', ctrl | shift) } },
