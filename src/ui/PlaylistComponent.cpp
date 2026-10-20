@@ -2335,7 +2335,8 @@ void PlaylistComponent::showTrackMenu (int track)
     const auto count = numTracks();
     const auto info = track < (int) song.playlistTracks.size() ? song.playlistTracks[(std::size_t) track] : PlaylistTrack {};
     juce::PopupMenu menu;
-    menu.addSectionHeader (! info.name.empty() ? juce::String::fromUTF8 (info.name.c_str()) : tr ("Track {0}", { juce::String (track + 1) }));
+    ui::addItemHeader (menu, tr ("Playlist track"), ! info.name.empty() ? juce::String::fromUTF8 (info.name.c_str()) : tr ("Track {0}", { juce::String (track + 1) }),
+                       info.colour != 0 ? juce::Colour (info.colour) : juce::Colour());
     menu.addItem (tr ("Rename and color..."), [this, track] { renameTrack (track); });
     {
         juce::PopupMenu colours;
@@ -2633,7 +2634,22 @@ juce::PopupMenu PlaylistComponent::buildClipMenu (int index, int mouseX)
         sourceName = juce::String::fromUTF8 (song.channels[(std::size_t) clip.channel].name.c_str());
     else if (clip.kind == ClipKind::automation && clip.automation >= 0 && clip.automation < (int) song.automations.size())
         sourceName = juce::String::fromUTF8 (song.automations[(std::size_t) clip.automation].name.c_str());
-    menu.addSectionHeader (sourceName);
+    {
+        // the title band in the clip's colour
+        auto colour = theme::colour::automation;
+        auto kind = tr ("Automation clip");
+        if (clip.kind == ClipKind::pattern)
+        {
+            colour = patternColour (song, clip.pattern);
+            kind = tr ("Pattern clip");
+        }
+        else if (clip.kind == ClipKind::audio && clip.channel >= 0 && clip.channel < (int) song.channels.size())
+        {
+            colour = audioClipColour (song.channels[(std::size_t) clip.channel]);
+            kind = tr ("Audio clip");
+        }
+        ui::addItemHeader (menu, many ? kind + " (" + juce::String ((int) targets.size()) + ")" : kind, sourceName, colour);
+    }
     menu.addItem (tr ("Properties..."), [this, index, targets] {
         showClipProperties (engine, index, targets, [safe = juce::Component::SafePointer<PlaylistComponent> (this)] {
             if (safe != nullptr)
@@ -3526,49 +3542,83 @@ bool PlaylistComponent::isInterestedInFileDrag (const juce::StringArray& files)
     return false;
 }
 
-void PlaylistComponent::filesDropped (const juce::StringArray& files, int x, int y)
+namespace
 {
-    auto start = juce::jmax<std::int64_t> (0, snap (xToTick (x), true));
-    auto track = yToTrack (y);
+// An audio clip of `file` at `start` on `track` (one undo step); `reuse`: an existing audio-clip channel of the same
+// file plays it instead of a new one. False when the file can't be read.
+bool addAudioClip (AudioEngine& engine, const juce::File& file, std::int64_t start, int track, bool reuse)
+{
+    if (! file.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3;wv"))
+        return false;
 
-    for (const auto& f : files)
-    {
-        const juce::File file (f);
+    const auto data = engine.getSampleLibrary().load (file.getFullPathName());
 
-        if (! file.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
-            continue;
+    if (data == nullptr)
+        return false;
 
-        const auto data = engine.getSampleLibrary().load (file.getFullPathName());
+    // audio length converted to ticks at the current BPM
+    const auto seconds = (double) data->frames() / data->sampleRate;
+    const auto length = juce::jmax<std::int64_t> (ppq / 4, (std::int64_t) (seconds * engine.getSong().bpm / 60.0 * ppq));
+    const auto path = file.getFullPathName().toStdString();
+    const auto name = file.getFileNameWithoutExtension().toStdString();
 
-        if (data == nullptr)
-            continue;
+    engine.editSong ([=] (Song& s) {
+        int channel = -1;
+        if (reuse)
+            for (int c = 0; c < (int) s.channels.size(); ++c)
+                if (s.channels[(std::size_t) c].instrument == InstrumentKind::audioClip && s.channels[(std::size_t) c].samplePath == path)
+                    channel = c;
 
-        // audio length converted to ticks at the current BPM
-        const auto seconds = (double) data->frames() / data->sampleRate;
-        const auto length = juce::jmax<std::int64_t> (ppq / 4, (std::int64_t) (seconds * engine.getSong().bpm / 60.0 * ppq));
-        const auto path = file.getFullPathName().toStdString();
-        const auto name = file.getFileNameWithoutExtension().toStdString();
-
-        engine.editSong ([=] (Song& s) {
+        if (channel < 0)
+        {
             ChannelDef c;
             c.name = name;
             c.instrument = InstrumentKind::audioClip;
             c.samplePath = path;
             c.mixerTrack = s.nextFreeInsert();
             s.channels.push_back (c);
+            channel = (int) s.channels.size() - 1;
+        }
 
-            Clip clip;
-            clip.kind = ClipKind::audio;
-            clip.channel = (int) s.channels.size() - 1;
-            clip.track = track;
-            clip.start = start;
-            clip.length = length;
-            s.playlist.push_back (clip);
-            s.mode = PlayMode::song;
+        Clip clip;
+        clip.kind = ClipKind::audio;
+        clip.channel = channel;
+        clip.track = track;
+        clip.start = start;
+        clip.length = length;
+        s.playlist.push_back (clip);
+        s.mode = PlayMode::song;
+    });
+    return true;
+}
+} // namespace
+
+void PlaylistComponent::filesDropped (const juce::StringArray& files, int x, int y)
+{
+    auto start = juce::jmax<std::int64_t> (0, snap (xToTick (x), true));
+    auto track = yToTrack (y);
+
+    for (const auto& f : files)
+        if (addAudioClip (engine, juce::File (f), start, track, false))
+            ++track; // multiple files: one below the other
+}
+
+void PlaylistComponent::addAudioClipAtPlayhead (const juce::File& file)
+{
+    const auto& song = engine.getSong();
+    const auto start = song.mode == PlayMode::song ? juce::jmax<std::int64_t> (0, snap ((std::int64_t) engine.getTransport().positionTicks.load(), false))
+                                                   : std::int64_t (0);
+    // the first track with nothing at the start
+    int track = 0;
+    for (;; ++track)
+    {
+        const auto busy = std::any_of (song.playlist.begin(), song.playlist.end(), [&] (const Clip& c) {
+            return c.track == track && c.start <= start && c.end() > start;
         });
-
-        ++track; // multiple files: one below the other
+        if (! busy)
+            break;
     }
+    addAudioClip (engine, file, start, track, true);
 }
 
 void PlaylistComponent::glideBy (double ticks, double pixels)
@@ -3746,11 +3796,29 @@ void PlaylistComponent::timerCallback()
 
 bool PlaylistComponent::isInterestedInDragSource (const SourceDetails& details)
 {
-    return BrowserComponent::isBrowserDrag (details);
+    return BrowserComponent::isBrowserDrag (details) || BrowserComponent::draggedPattern (details) >= 0;
 }
 
 void PlaylistComponent::itemDropped (const SourceDetails& details)
 {
+    // a pattern from the Browser's "Current project": a clip of it where it is dropped
+    if (const auto pattern = BrowserComponent::draggedPattern (details); pattern >= 0 && pattern < (int) engine.getSong().patterns.size())
+    {
+        const auto start = juce::jmax<std::int64_t> (0, snap (xToTick (details.localPosition.x), true));
+        const auto track = juce::jmax (0, yToTrack (details.localPosition.y));
+        engine.editSong ([=] (Song& s) {
+            Clip clip;
+            clip.kind = ClipKind::pattern;
+            clip.pattern = pattern;
+            clip.track = track;
+            clip.start = start;
+            clip.length = juce::jmax<std::int64_t> (ppq, s.patterns[(std::size_t) pattern].effectiveLength (s.beatsPerBar));
+            s.playlist.push_back (clip);
+            s.mode = PlayMode::song;
+        });
+        return;
+    }
+
     if (const auto file = BrowserComponent::draggedFile (details); file.existsAsFile())
         filesDropped ({ file.getFullPathName() }, details.localPosition.x, details.localPosition.y);
 }

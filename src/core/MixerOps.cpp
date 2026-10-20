@@ -94,6 +94,67 @@ bool moveTracks (Song& song, std::vector<int>& selection, int delta)
     return true;
 }
 
+namespace
+{
+// default names follow their insert's number (after an insert or a delete moved them)
+void renumberDefaultNames (Song& song, int from, int delta)
+{
+    for (int t = std::max (1, from); t < (int) song.mixer.size(); ++t)
+    {
+        auto& name = song.mixer[(std::size_t) t].name;
+        const auto old = t - delta;
+        if (old >= 1 && name == "Insert " + std::to_string (old))
+            name = "Insert " + std::to_string (t);
+    }
+}
+} // namespace
+
+bool insertTrack (Song& song, int at)
+{
+    const auto count = (int) song.mixer.size();
+    if (at < 1 || at > count || count >= maxMixerTracks)
+        return false;
+
+    song.mixer.emplace_back().name = "Insert " + std::to_string (at);
+    for (int t = count; t > at; --t)
+        swapTracks (song, t, t - 1);
+    renumberDefaultNames (song, at + 1, 1);
+    return true;
+}
+
+bool deleteTrack (Song& song, int t)
+{
+    const auto count = (int) song.mixer.size();
+    if (t < 1 || t >= count)
+        return false;
+
+    for (auto& c : song.channels)
+        if (c.mixerTrack == t)
+            c.mixerTrack = 0;
+
+    for (auto& track : song.mixer)
+    {
+        track.sends.erase (std::remove_if (track.sends.begin(), track.sends.end(), [t] (const MixerSend& s) { return s.target == t; }), track.sends.end());
+        forEachSlot (track.effects, [t] (EffectSlot& slot) {
+            if (slot.sidechain == t)
+                slot.sidechain = 0;
+            if (slot.sidechain2 == t)
+                slot.sidechain2 = 0;
+        });
+    }
+
+    for (auto& automation : song.automations)
+        if (automation.source.track == t)
+            automation.source.track = -1; // no longer live
+
+    song.mixer[(std::size_t) t] = MixerTrack {};
+    for (int i = t; i + 1 < count; ++i)
+        swapTracks (song, i, i + 1);
+    renumberDefaultNames (song, t, -1);
+    song.mixer.back().name = "Insert " + std::to_string (count - 1);
+    return true;
+}
+
 std::vector<int> linkChannels (Song& song, const std::vector<int>& channels, int track, bool startingHere)
 {
     std::vector<int> result;

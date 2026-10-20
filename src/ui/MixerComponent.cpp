@@ -4,6 +4,7 @@
 #include "core/FruityVocoder.h"
 #include "core/LiveInput.h"
 #include "core/MixerOps.h"
+#include "core/RackOps.h"
 #include "ui/AutomationUi.h"
 #include "ui/BrowserComponent.h"
 #include "ui/ExportDialog.h"
@@ -25,6 +26,7 @@
 #include "ui/ValueControl.h"
 #include "ui/Theme.h"
 #include "ui/AudioEditor.h"
+#include "ui/Dialogs.h"
 
 namespace lynx
 {
@@ -1265,7 +1267,60 @@ void MixerStrips::showMenu (int t)
     const auto& song = engine.getSong();
     const auto channel = engine.getSelectedChannel();
     juce::PopupMenu menu;
-    menu.addSectionHeader (juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()));
+    // the title band in the insert's colour (FL tints the whole menu)
+    ui::addItemHeader (menu, t == 0 ? tr ("Master") : tr ("Mixer track {0}", { juce::String (t) }), juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()),
+                       song.mixer[(std::size_t) t].colour != 0 ? juce::Colour (song.mixer[(std::size_t) t].colour) : juce::Colour());
+
+    // FL's first section: name and colour (REA_rodada115)
+    menu.addItem (tr ("Rename and color..."), [this, t] {
+        const auto& track = engine.getSong().mixer[(std::size_t) t];
+        showNameAndColourDialog (tr ("Rename track"), juce::String::fromUTF8 (track.name.c_str()), track.colour,
+                                 [this, t] (const juce::String& name, std::uint32_t colour) {
+                                     if (t < (int) engine.getSong().mixer.size())
+                                         engine.editSong ([t, n = name.trim().toStdString(), colour] (Song& s) {
+                                             if (! n.empty())
+                                                 s.mixer[(std::size_t) t].name = n;
+                                             s.mixer[(std::size_t) t].colour = colour;
+                                         });
+                                 });
+    });
+    {
+        juce::PopupMenu colours;
+        colours.addItem (tr ("Default"), true, song.mixer[(std::size_t) t].colour == 0,
+                         [this, t] { engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].colour = 0; }); });
+        for (auto colour : lynxPalette())
+        {
+            juce::Image swatch (juce::Image::ARGB, 16, 16, true);
+            juce::Graphics (swatch).fillAll (juce::Colour (colour));
+            juce::PopupMenu::Item item;
+            item.text = "#" + juce::String::toHexString ((juce::int64) (colour & 0xFFFFFF)).paddedLeft ('0', 6).toUpperCase();
+            item.image = std::make_unique<juce::DrawableImage> (swatch);
+            item.isTicked = song.mixer[(std::size_t) t].colour == colour;
+            item.action = [this, t, colour] { engine.editSong ([t, colour] (Song& s) { s.mixer[(std::size_t) t].colour = colour; }); };
+            colours.addItem (std::move (item));
+        }
+        menu.addSubMenu (tr ("Change color"), colours);
+    }
+    menu.addItem (tr ("Random color"), [this, t] {
+        const auto& palette = lynxPalette();
+        const auto colour = palette[(std::size_t) juce::Random::getSystemRandom().nextInt ((int) palette.size())];
+        engine.editSong ([t, colour] (Song& s) { s.mixer[(std::size_t) t].colour = colour; });
+    });
+    menu.addSeparator();
+
+    // FL's second section: insert a blank track here, delete this one (REA_rodada115)
+    if (t > 0)
+    {
+        menu.addItem (tr ("Insert one"), (int) song.mixer.size() < maxMixerTracks, false, [this, t] {
+            engine.editSong ([t] (Song& s) { mixerops::insertTrack (s, t); });
+            setSelection ({ t }, t);
+        });
+        menu.addItem (tr ("Delete"), [this, t] {
+            engine.editSong ([t] (Song& s) { mixerops::deleteTrack (s, t); });
+            setSelection ({ t }, t);
+        });
+        menu.addSeparator();
+    }
 
     if (t > 0)
     {

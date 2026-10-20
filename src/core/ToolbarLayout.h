@@ -93,6 +93,8 @@ struct Layout
     std::vector<Entry> entries; // every group exactly once, in toolbar order
     IconSize iconSize = IconSize::medium;
     int uiScale = 100; // percent
+    bool separators = true; // hairlines between the panels (FL's "Separators")
+    bool visible = true;    // the whole toolbar (Ctrl+F11 hides it, as in FL)
 
     static Layout makeDefault()
     {
@@ -140,10 +142,31 @@ struct Layout
         return true;
     }
 
+    // Moves `g` so that it sits just before `before` (nullptr: at the end). Returns true if the order changed.
+    // Used by the toolbar's edit mode, where a panel is dropped between two others.
+    bool placeBefore (Group g, const Group* before)
+    {
+        const auto from = indexOf (g);
+        if (from < 0 || (before != nullptr && *before == g))
+            return false;
+        const auto old = entries;
+        const auto e = entries[(std::size_t) from];
+        entries.erase (entries.begin() + from);
+        auto to = before != nullptr ? indexOf (*before) : -1;
+        if (to < 0)
+            entries.push_back (e);
+        else
+            entries.insert (entries.begin() + to, e);
+        for (std::size_t i = 0; i < entries.size(); ++i)
+            if (entries[i].group != old[i].group)
+                return true;
+        return false;
+    }
+
     bool isDefault() const
     {
         const auto d = makeDefault();
-        if (iconSize != d.iconSize || uiScale != d.uiScale)
+        if (iconSize != d.iconSize || uiScale != d.uiScale || separators != d.separators || visible != d.visible)
             return false;
         for (std::size_t i = 0; i < entries.size(); ++i)
             if (entries[i].group != d.entries[i].group || ! entries[i].shown)
@@ -225,6 +248,65 @@ struct Layout
         return IconSize::medium;
     }
 };
+
+// Where a panel dragged in the toolbar's edit mode lands: `shown` lists the panels on the toolbar, left to right,
+// with the x of their centres; the dragged panel goes before the first other panel whose centre is right of `x`
+// (none: at the end). Returns that panel, or groupCount for "at the end".
+inline int dropBefore (const std::vector<std::pair<Group, int>>& shown, Group dragged, int x)
+{
+    for (const auto& [group, centre] : shown)
+        if (group != dragged && centre > x)
+            return (int) group;
+    return groupCount;
+}
+
+// Ready-made layouts (LYNX's own, like FL's toolbar presets): which groups show, in the default order.
+enum class Preset
+{
+    standard, // every group
+    compact,  // transport, master, snap and pattern, windows
+    minimal,  // transport and windows
+    mixing,   // transport, master, windows, meters, output
+    count_
+};
+
+constexpr int presetCount = (int) Preset::count_;
+
+inline const char* presetName (Preset p)
+{
+    static constexpr std::array<const char*, presetCount> names { TR_NOOP ("Default (everything)"), TR_NOOP ("Compact"),
+                                                                  TR_NOOP ("Minimal"), TR_NOOP ("Mixing") };
+    return names[(std::size_t) p];
+}
+
+// The preset applied to `from` (icon size, UI scale and the other options are kept).
+inline Layout applyPreset (Layout from, Preset p)
+{
+    const auto d = Layout::makeDefault();
+    from.entries = d.entries;
+    auto show = [&from] (std::initializer_list<Group> groups) {
+        for (auto& e : from.entries)
+            e.shown = std::find (groups.begin(), groups.end(), e.group) != groups.end();
+    };
+    switch (p)
+    {
+        case Preset::compact: show ({ Group::transport, Group::master, Group::snap, Group::windows }); break;
+        case Preset::minimal: show ({ Group::transport, Group::windows }); break;
+        case Preset::mixing: show ({ Group::transport, Group::master, Group::windows, Group::meters, Group::output }); break;
+        case Preset::standard:
+        case Preset::count_: break;
+    }
+    return from;
+}
+
+// The preset the layout's groups match, or presetCount (a custom layout).
+inline int matchingPreset (const Layout& l)
+{
+    for (int p = 0; p < presetCount; ++p)
+        if (applyPreset (l, (Preset) p).orderToString() == l.orderToString())
+            return p;
+    return presetCount;
+}
 
 // Decides which groups are visible for `room` px: every shown group needs widths[group] (+ `gap`); while
 // they don't fit with `minFlexible` px left for the hint column, the shown group with the lowest priority

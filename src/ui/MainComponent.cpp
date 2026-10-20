@@ -93,6 +93,32 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     heldKeys.setSender ([this] (int channel, int key, float velocity, bool on) { engine.sendLiveNote (channel, key, velocity, on, true); });
     browser.onOpenProject = [this] (const juce::File& file) { confirmDiscard ([this, file] { openFile (file); }); };
     browser.onLoadIntoChannel = [this] (const juce::File& file) { return rack.loadSampleIntoSelected (file); };
+    // the Browser's "Current project" items (REA_rodada115)
+    browser.onOpenPattern = [this] (int pattern) {
+        selectPattern (pattern);
+        openPianoRoll();
+    };
+    browser.onPatternMenu = [this] (int pattern) {
+        selectPattern (pattern);
+        makePatternMenu().showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+    };
+    browser.onOpenChannel = [this] (int channel) {
+        engine.setSelectedChannel (channel);
+        rack.toggleEditor (channel, true);
+    };
+    browser.onOpenEffect = [this] (int track, int slot) {
+        showPanel (Panel::mixer);
+        mixer.openSlotEditor (track, slot);
+    };
+    browser.onShowInsert = [this] (int track) {
+        showPanel (Panel::mixer);
+        mixer.selectTrack (track);
+    };
+    browser.onOpenAutomation = [this] (int automation) { openAutomationEditor (engine, automation); };
+    browser.onSendToPlaylist = [this] (const juce::File& file) {
+        playlist.addAudioClipAtPlayhead (file);
+        showPanel (Panel::playlist);
+    };
     if (persistent)
     {
         loadUiSettings();
@@ -113,10 +139,10 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         return key.isEmpty() ? text : text + " (" + key + ")";
     };
     undoButton.setTooltip (withKey (tr ("Undo"), "edit.undo"));
-    undoButton.onClick = [this] { engine.undo(); };
+    undoButton.onClick = [this] { undoRedo (false); };
     undoButton.onRightClick = [this] { showHistory(); };
     redoButton.setTooltip (withKey (tr ("Redo"), "edit.redo"));
-    redoButton.onClick = [this] { engine.redo(); };
+    redoButton.onClick = [this] { undoRedo (true); };
     redoButton.onRightClick = [this] { showHistory(); };
     pluginPickerButton.setTooltip (withKey (tr ("Plugin picker: add an instrument or plugin as a new channel"), "panel.quickAdd"));
     pluginPickerButton.onClick = [this] { showQuickAdd(); };
@@ -425,8 +451,9 @@ void MainComponent::paint (juce::Graphics& g)
     g.fillRect (bar.withHeight (1).withY (bar.getBottom() - 1));
 
     g.setColour (colour::border.brighter (0.08f));
-    for (auto x : dividers)
-        g.fillRect (x, bar.getY() + 12, 1, bar.getHeight() - 24);
+    if (toolbarLayout.separators) // (the toolbar menu's "Separators")
+        for (auto x : dividers)
+            g.fillRect (x, bar.getY() + 12, 1, bar.getHeight() - 24);
 
     // play, stop and record share one quiet well
     if (! transportArea.isEmpty())
@@ -495,7 +522,10 @@ void MainComponent::resized()
 
     const auto room = toolbar.getWidth();
     const auto minHint = juce::jmax (menuWidth + 8, 320), maxHint = 620; // room for most hints on two lines
-    const auto visible = toolbarlayout::fit (toolbarLayout, widths, gap, room, minHint);
+    auto visible = toolbarlayout::fit (toolbarLayout, widths, gap, room, minHint);
+    if (! toolbarLayout.visible) // Ctrl+F11: only the menu and the hint bar, on one row
+        visible.fill (false);
+    panelBounds = {};
     int used = 0;
     for (int i = 0; i < toolbarlayout::groupCount; ++i)
         used += visible[(std::size_t) i] ? widths[(std::size_t) i] + gap : 0;
@@ -533,6 +563,16 @@ void MainComponent::resized()
     };
 
     // 1. the menu (and the project name beside it) over the hint bar; always first
+    if (! toolbarLayout.visible)
+    {
+        const auto row = toolbar.withHeight (h);
+        const auto menu = row.withWidth (juce::jmin (menuWidth + 8, row.getWidth()));
+        put (menuBar, menu);
+        titleArea = {};
+        put (hintBar, row.withTrimmedLeft (menu.getWidth() + 12).withWidth (juce::jmin (900, row.getWidth() - menu.getWidth() - 12)).reduced (0, 1));
+        fixedToolbarArea = bar;
+    }
+    else
     {
         auto column = take (hintWidth);
         const auto menu = column.withY (row1).withHeight (h).removeFromLeft (juce::jmin (menuWidth + 8, column.getWidth()));
@@ -541,6 +581,7 @@ void MainComponent::resized()
         if (titleArea.getWidth() < 60)
             titleArea = {};
         put (hintBar, column.withY (row2).withHeight (h).reduced (0, 1));
+        fixedToolbarArea = juce::Rectangle<int> (column.getX() - 4, 0, column.getWidth() + 8, toolbarHeight);
     }
 
     snapLabelArea = patternLabelArea = transportArea = {};
@@ -580,6 +621,7 @@ void MainComponent::resized()
 
         divide();
         auto panel = take (widths[(std::size_t) group]);
+        panelBounds[(std::size_t) group] = juce::Rectangle<int> (panel.getX() - 5, 0, panel.getWidth() + 10, toolbarHeight);
 
         switch (group)
         {
@@ -640,7 +682,15 @@ void MainComponent::resized()
         }
     }
 
-    workspace.setBounds (getLocalBounds().withTrimmedTop (toolbarHeight));
+    // the toolbar's edit mode: its overlay over the toolbar, and its tray between the toolbar and the windows
+    const auto tray = toolbarEditor != nullptr ? toolbar::EditOverlay::trayHeight : 0;
+    if (toolbarEditor != nullptr)
+    {
+        toolbarEditor->setBounds (0, 0, getWidth(), toolbarHeight + tray);
+        toolbarEditor->setToolbarHeight (toolbarHeight);
+        toolbarEditor->toFront (false);
+    }
+    workspace.setBounds (getLocalBounds().withTrimmedTop (toolbarHeight + tray));
 }
 
 // --- toolbar layout ------------------------------------------------------------------------------
@@ -651,7 +701,7 @@ void MainComponent::setToolbarLayout (const toolbarlayout::Layout& layout, bool 
     toolbarLayout = layout;
     const auto size = toolbarLayout.iconSize;
     rowHeight = toolbarlayout::rowHeight (size);
-    toolbarHeight = 2 * rowHeight + 8;
+    toolbarHeight = toolbarLayout.visible ? 2 * rowHeight + 8 : rowHeight + 6;
 
     const auto fraction = toolbarlayout::iconFraction (size), maxPx = toolbarlayout::iconMaxPx (size);
     for (auto* b : { &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton, &recordMenuButton, &newPatternButton,
@@ -671,6 +721,8 @@ void MainComponent::setToolbarLayout (const toolbarlayout::Layout& layout, bool 
 
     resized();
     repaint();
+    if (toolbarEditor != nullptr)
+        toolbarEditor->layoutChanged();
 
     if (save)
         saveUiSettings();
@@ -680,14 +732,39 @@ juce::PopupMenu MainComponent::makeToolbarMenu()
 {
     using toolbarlayout::Group;
     juce::PopupMenu menu;
+    // FL's toolbar menu (Edit, Separators, Hide, Presets), then LYNX's direct switches per panel
     menu.addSectionHeader (tr ("Toolbar"));
+    menu.addItem (tr ("Edit toolbar (drag panels to move, add or remove them)"), true, toolbarEditor != nullptr,
+                  [this] { setToolbarEditing (toolbarEditor == nullptr); });
+    menu.addItem (tr ("Separators"), true, toolbarLayout.separators, [this] {
+        auto layout = toolbarLayout;
+        layout.separators = ! layout.separators;
+        setToolbarLayout (layout);
+    });
+    menu.addItem (tr ("Hide the toolbar panels") + shortcutText ("view.toolbar"), true, ! toolbarLayout.visible, [this] {
+        auto layout = toolbarLayout;
+        layout.visible = ! layout.visible;
+        setToolbarLayout (layout);
+    });
 
+    juce::PopupMenu presets;
+    const auto current = toolbarlayout::matchingPreset (toolbarLayout);
+    for (int p = 0; p < toolbarlayout::presetCount; ++p)
+        presets.addItem (tr (toolbarlayout::presetName ((toolbarlayout::Preset) p)), true, current == p, [this, p] {
+            auto layout = toolbarlayout::applyPreset (toolbarLayout, (toolbarlayout::Preset) p);
+            layout.visible = true;
+            setToolbarLayout (layout);
+        });
+    menu.addSubMenu (tr ("Presets"), presets);
+
+    menu.addSectionHeader (tr ("Panels"));
     for (const auto& entry : toolbarLayout.entries)
     {
         const auto group = entry.group;
         menu.addItem (tr (toolbarlayout::groupName (group)), true, entry.shown, [this, group] {
             auto layout = toolbarLayout;
             layout.setShown (group, ! layout.isShown (group));
+            layout.visible = true;
             setToolbarLayout (layout);
         });
     }
@@ -718,6 +795,84 @@ juce::PopupMenu MainComponent::makeToolbarMenu()
         setToolbarLayout (toolbarlayout::Layout::makeDefault());
     });
     return menu;
+}
+
+void MainComponent::setToolbarEditing (bool editing)
+{
+    if (editing == (toolbarEditor != nullptr))
+        return;
+
+    if (! editing)
+    {
+        removeChildComponent (toolbarEditor.get());
+        toolbarEditor.reset();
+        resized();
+        repaint();
+        return;
+    }
+
+    if (! toolbarLayout.visible) // editing shows the panels
+    {
+        auto layout = toolbarLayout;
+        layout.visible = true;
+        setToolbarLayout (layout);
+    }
+
+    toolbar::EditOverlay::Host host;
+    host.layout = [this] { return toolbarLayout; };
+    host.setLayout = [this] (const toolbarlayout::Layout& layout) { setToolbarLayout (layout); };
+    host.panels = [this] { return panelBounds; };
+    host.fixedArea = [this] { return fixedToolbarArea; };
+    host.snapshot = [this] (juce::Rectangle<int> area) {
+        // the panel as it looks, without the edit overlay on it
+        if (toolbarEditor != nullptr)
+            toolbarEditor->setVisible (false);
+        auto image = createComponentSnapshot (area, true);
+        if (toolbarEditor != nullptr)
+            toolbarEditor->setVisible (true);
+        return image;
+    };
+    host.done = [safe = juce::Component::SafePointer<MainComponent> (this)] {
+        // after the click that asked for it
+        juce::MessageManager::callAsync ([safe] {
+            if (safe != nullptr)
+                safe->setToolbarEditing (false);
+        });
+    };
+    toolbarEditor = std::make_unique<toolbar::EditOverlay> (std::move (host), toolbarHeight);
+    addAndMakeVisible (*toolbarEditor);
+    resized();
+    repaint();
+    if (isShowing())
+        toolbarEditor->grabKeyboardFocus();
+}
+
+void MainComponent::undoRedo (bool redo)
+{
+    // FL says in the hint bar what was undone and the undo level ("Undone: ...  Level 2/3")
+    if (redo ? ! engine.canRedo() : ! engine.canUndo())
+        return;
+    const auto label = engine.getHistoryLabel (engine.getHistoryPosition() + (redo ? 1 : 0));
+    if (redo)
+        engine.redo();
+    else
+        engine.undo();
+    ui::Hint h;
+    h.text = (redo ? tr ("Redone: {0}", { tr (label.text, { juce::String::fromUTF8 (label.arg.c_str()) }) })
+                   : tr ("Undone: {0}", { tr (label.text, { juce::String::fromUTF8 (label.arg.c_str()) }) }));
+    h.value = tr ("Level {0}/{1}", { juce::String (engine.getHistoryPosition() + 1), juce::String (engine.getHistorySize()) });
+    ui::postHint (h, 2500);
+}
+
+ui::Hint MainComponent::hintAt (juce::Point<int> p)
+{
+    ui::Hint h;
+    if (p.y < toolbarHeight)
+    {
+        h.text = tr ("Toolbar: [RMB] toolbar menu (edit the panels: move, add, remove; presets; hide with Ctrl+F11)");
+        h.hasMenu = true;
+    }
+    return h;
 }
 
 void MainComponent::showToolbarMenu()
@@ -813,6 +968,12 @@ bool MainComponent::runAction (const std::string& id)
     else if (is ("transport.pause")) playPause();
     else if (is ("transport.toggleMode")) toggleMode();
     else if (is ("view.typingPiano")) setTypingPiano (! typingPiano);
+    else if (is ("view.toolbar"))
+    {
+        auto layout = toolbarLayout;
+        layout.visible = ! layout.visible;
+        setToolbarLayout (layout);
+    }
     else if (is ("panel.playlist")) togglePanel (Panel::playlist);
     else if (is ("panel.channelRack")) togglePanel (Panel::channelRack);
     else if (is ("panel.pianoRoll"))
@@ -884,8 +1045,8 @@ bool MainComponent::runAction (const std::string& id)
     else if (is ("file.saveAs")) save (true);
     else if (is ("file.saveNewVersion")) saveNewVersion();
     else if (is ("file.export")) exportAudio();
-    else if (is ("edit.undo")) engine.undo();
-    else if (is ("edit.redo")) engine.redo();
+    else if (is ("edit.undo")) undoRedo (false);
+    else if (is ("edit.redo")) undoRedo (true);
     else if (is ("help.shortcuts")) showHelp();
     else if (is ("rack.selectPrevious")) rack.selectRelative (-1, false);
     else if (is ("rack.selectNext")) rack.selectRelative (1, false);
@@ -991,6 +1152,10 @@ void MainComponent::loadUiSettings()
             toolbarLayout.orderFromString (line.fromFirstOccurrenceOf ("=", false, false).trim().toStdString());
         else if (key == "toolbarIcons")
             toolbarLayout.iconSize = toolbarlayout::Layout::iconSizeFromString (line.fromFirstOccurrenceOf ("=", false, false).trim().toStdString());
+        else if (key == "toolbarSeparators")
+            toolbarLayout.separators = on;
+        else if (key == "toolbarVisible")
+            toolbarLayout.visible = on;
         else if (key == "uiScale")
             toolbarLayout.uiScale = toolbarlayout::clampScale (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
         else if (key == "editPatternsIn")
@@ -1028,6 +1193,8 @@ void MainComponent::saveUiSettings()
                                       + "\ntoolbarGroups=" + juce::String (toolbarLayout.orderToString())
                                       + "\ntoolbarIcons=" + toolbarlayout::Layout::iconSizeId (toolbarLayout.iconSize)
                                       + "\nuiScale=" + juce::String (toolbarLayout.uiScale)
+                                      + "\ntoolbarSeparators=" + juce::String (toolbarLayout.separators ? 1 : 0)
+                                      + "\ntoolbarVisible=" + juce::String (toolbarLayout.visible ? 1 : 0)
                                       + "\nautosaveMinutes=" + juce::String (autosaveMinutes) + "\nautosaveKeep=" + juce::String (autosaveKeep)
                                       + "\nundoLevels=" + juce::String (engine.getUndoLevels())
                                       + "\naskWhatToRecord=" + juce::String (engine.getRecordOptions().askWhatToRecord ? 1 : 0)
@@ -1619,7 +1786,7 @@ juce::PopupMenu MainComponent::makePatternMenu()
     }
 
     juce::PopupMenu menu;
-    menu.addSectionHeader (juce::String::fromUTF8 (pattern.name.c_str()));
+    ui::addItemHeader (menu, tr ("Pattern"), juce::String::fromUTF8 (pattern.name.c_str()), PlaylistComponent::patternColour (song, index));
     menu.addItem (tr ("Next pattern") + shortcutText ("pattern.next"), index + 1 < (int) song.patterns.size(), false,
                   [this] { selectPattern (stepPattern (engine.getSong(), 1)); });
     menu.addItem (tr ("Previous pattern") + shortcutText ("pattern.previous"), index > 0, false,
@@ -2070,6 +2237,9 @@ void MainComponent::timerCallback()
         lastModified = engine.isModified();
         updateTitle();
     }
+
+    // the Browser's "Project folder" follows the project's file (.lynx, or the .flp it was imported from)
+    browser.setProjectFile (currentFile != juce::File() ? currentFile : importedFlpFile);
 
     // a backup copy every few minutes (Settings › General) when there are changes
     // (not in the middle of a recording: FL also postpones the timed backup until the transport is free)
@@ -2996,8 +3166,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
     }
     else if (index == 1)
     {
-        menu.addItem (tr ("Undo") + shortcutText ("edit.undo"), engine.canUndo(), false, [this] { engine.undo(); });
-        menu.addItem (tr ("Redo") + shortcutText ("edit.redo"), engine.canRedo(), false, [this] { engine.redo(); });
+        menu.addItem (tr ("Undo") + shortcutText ("edit.undo"), engine.canUndo(), false, [this] { undoRedo (false); });
+        menu.addItem (tr ("Redo") + shortcutText ("edit.redo"), engine.canRedo(), false, [this] { undoRedo (true); });
         menu.addItem (tr ("Undo history...") + shortcutText ("edit.history"), [this] { showHistory(); });
         menu.addItem (tr ("Audio editor..."), [this] { openAudioEditor (engine); });
         menu.addSeparator();
