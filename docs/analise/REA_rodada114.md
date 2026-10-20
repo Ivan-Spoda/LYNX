@@ -135,6 +135,9 @@ parameter placed once, nothing overlapping, the leveler's meter) run on the chan
 ## 7. Where I stopped / next steps
 - Done: §1–§6, §5b (Aether display-first editor from Fresh Air, Ridge Strip channel-strip layout from SSL E-Channel,
   Glow's VU selector).
+- Checked 2026-10-20 after the power loss: Auto-Tune Pro still has no .vst3 (only Antares Central / Auto-Tune Central)
+  and the Soundtoys 5.5 installer was downloaded but never run, so LYNX Tune / Ember's Decapitator role stay for a
+  follow-up round.
 - Still needs the user: install the Auto-Tune Pro trial (from Auto-Tune Central) and Soundtoys 5 (Decapitator) for
   LYNX Tune and Ember's second role; CLA-2A's shell entry opens Q10 in our JUCE host — check in Waves Central that
   the CLA-2A trial is activated (or open it once in FL) so it can be captured.
