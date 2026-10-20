@@ -12,10 +12,10 @@
 #include <cstring>
 #include <functional>
 
-#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__) || defined(__aarch64__) || defined(_M_ARM64) // x86 SSE, or ARM64 through core/Simd.h (sse2neon)
 #include "core/Simd.h"
 #define LYNX_CHORUS_MXCSR 1
-#if defined(__GNUC__) || defined(__clang__)
+#if (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__))
 #include <cpuid.h>
 #include "core/Simd.h"
 #endif
@@ -879,7 +879,7 @@ namespace vintagechorusfx
 namespace
 {
 // fused multiply-add: the engine's library runs its FMA variant on processors that have FMA (§3.7)
-#if defined(LYNX_CHORUS_MXCSR) && (defined(__GNUC__) || defined(__clang__))
+#if defined(LYNX_CHORUS_MXCSR) && (defined(__GNUC__) || defined(__clang__)) && (defined(__x86_64__) || defined(__i386__))
 __attribute__ ((target ("fma"))) double fmaHw (double a, double b, double c) noexcept
 {
     return _mm_cvtsd_f64 (_mm_fmadd_sd (_mm_set_sd (a), _mm_set_sd (b), _mm_set_sd (c)));

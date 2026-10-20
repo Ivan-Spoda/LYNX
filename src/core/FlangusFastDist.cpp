@@ -50,11 +50,18 @@ inline long long x87Int (long double v) noexcept
     return r;
 }
 #else
+// no x87 (ARM64): conversions follow the kernel's rounding direction (arithmetic stays round-to-nearest; precision
+// is the platform's long double)
+inline thread_local bool x87Truncate = false;
 struct X87Mode
 {
-    explicit X87Mode (bool) noexcept {}
+    bool saved;
+    explicit X87Mode (bool truncate) noexcept : saved (x87Truncate) { x87Truncate = truncate; }
+    ~X87Mode() { x87Truncate = saved; }
+    X87Mode (const X87Mode&) = delete;
+    X87Mode& operator= (const X87Mode&) = delete;
 };
-inline long long x87Int (long double v) noexcept { return (long long) std::nearbyint (v); }
+inline long long x87Int (long double v) noexcept { return x87Truncate ? (long long) std::trunc (v) : (long long) std::nearbyint (v); }
 #endif
 
 inline std::int32_t i32At (const std::vector<std::uint8_t>& d, std::size_t o) noexcept

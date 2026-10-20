@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cmath>
 
-#if defined(__SSE2__) || defined(_M_X64) || defined(__x86_64__)
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__) || defined(__aarch64__) || defined(_M_ARM64) // x86 SSE2, or ARM64 through core/Simd.h (sse2neon)
  #include "core/Simd.h"
  #define LYNX_BIQUAD_SSE2 1
 #endif
