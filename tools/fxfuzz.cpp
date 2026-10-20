@@ -9,7 +9,8 @@
 //   - every effect slot of every .flp under a directory (importFlp)
 // Reports non-finite output (NaN / inf) and, built with -fsanitize=address,undefined, any memory error.
 //
-// Usage: fxfuzz [--seed n] [--rounds n] [--kinds] [--dir <folder with .flp / .fst>]... [--only <kind index>]
+// Usage: fxfuzz [--seed n] [--rounds n] [--no-kinds] [--dir <folder with .flp / .fst>]... [--only <kind index>] [--verbose]
+//              [--low-rates] [--replay <kind> <rate> "[i]=v ..."]
 // Exit code: 0 = clean, 1 = non-finite output found (crashes abort on their own).
 
 #include <cmath>
@@ -36,6 +37,7 @@ int nonFinite = 0, slotsTested = 0;
 std::mt19937 rng { 111 };
 int rounds = 6;
 bool verbose = false;
+bool lowRates = false;
 
 float uni() { return std::uniform_real_distribution<float> (0.0f, 1.0f) (rng); }
 
@@ -151,6 +153,8 @@ void fuzzSlot (lynx::EffectSlot slot, const std::string& name)
 
     for (const double sr : { 44100.0, 48000.0, 96000.0, 192000.0, 22050.0 })
     {
+        if (sr < 44100.0 && ! lowRates) // (FL's exact engines are defined from 44.1 kHz; --low-rates adds 22.05 kHz)
+            continue;
         auto fx = makeEffect (slot);
         if (fx == nullptr)
             continue;
@@ -205,9 +209,12 @@ void fuzzSlot (lynx::EffectSlot slot, const std::string& name)
         // automated plugin parameters
         for (int p = 0; p < np + 2; ++p)
             fx->setParameter (p, uni());
-        run (*fx, slot.params, 2, 2048, "setParameter", name);
+        char label[64];
+        std::snprintf (label, sizeof (label), "sr %.0f, setParameter", sr);
+        run (*fx, slot.params, 2, 2048, label, name);
         fx->reset();
-        run (*fx, slot.params, 2, 2048, "after reset", name);
+        std::snprintf (label, sizeof (label), "sr %.0f, after reset", sr);
+        run (*fx, slot.params, 2, 2048, label, name);
     }
 
     // controls kept in the slot's state (EQUO bands, Delay Bank banks, Convolver knobs, Maximus bands...)
@@ -237,7 +244,7 @@ void fuzzSlot (lynx::EffectSlot slot, const std::string& name)
                 fx = makeEffect (copy);
                 fx->prepare (48000.0);
             }
-            run (*fx, slot.params, 3, 2048, "state controls", name);
+            run (*fx, slot.params, 3, 2048, "state controls (48 kHz)", name);
         }
     }
 }
@@ -299,6 +306,7 @@ int main (int argc, char** argv)
         else if (a == "--dir" && i + 1 < argc) dirs.push_back (argv[++i]);
         else if (a == "--no-kinds") kinds = false;
         else if (a == "--verbose") verbose = true;
+        else if (a == "--low-rates") lowRates = true;
         else if (a == "--only" && i + 1 < argc) only = std::atoi (argv[++i]);
     }
 

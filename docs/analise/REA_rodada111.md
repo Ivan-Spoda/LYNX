@@ -83,7 +83,11 @@ editors' read-outs (formatEffectParam, parameter names, layouts, the parametric 
 2. **Multiband Delay below 44.1 kHz: heap overflow** (`designCrossover`: the linear-phase mask index ran past its 1025
    bins when the upper crossovers lie above Nyquist). Clamped.
 3. **Fruity Vocoder above 107 kHz: signed overflow** (`rate * 20000` in int). Computed in double (same value below).
-4. **Last line of defence in the renderer** (core/RackRenderer.cpp): after each insert effect, a vectorised finite
+4. **Fruity Limiter: NaN** with Gain at −inf (0), a negative knee and the compressor threshold at its bottom: the
+   knee curve overflows to inf and inf · 0 = NaN (core/FruityDynamics.cpp `compressorGain`). A non-finite gain now
+   becomes 0 at gain 0 (the largest float otherwise, then clipped by the ceiling as before); finite values unchanged.
+   Found by the core test below (zig build), not by the ASan run: the input decides whether the curve overflows.
+5. **Last line of defence in the renderer** (core/RackRenderer.cpp): after each insert effect, a vectorised finite
    check; a block with NaN / inf is muted and that effect is `reset()`, so one bad setting never poisons the rest of
    the mix (`RackRenderer::nonFiniteEffectBlocks()` counts them; the selftest fails when any occurs).
 
@@ -91,7 +95,7 @@ Remaining non-finite outputs found only at 22.05 kHz (Vintage Phaser with all co
 Compressor, Frequency Splitter): FL's exact engines are only defined for 44.1 kHz and up; caught by the renderer's
 guard, left as they are (not confirmed what FL does at that rate).
 
-`LYNX.exe --fxfuzz report.txt [rounds]` runs every native editor with the engine: random / extreme parameters, mouse
+`LYNX.exe --fxfuzz report.txt [rounds]` runs every native editor with the engine: random / extreme parameters, (with `--drags`) mouse
 drags over a grid of points on each editor page (plain left button), the editor painted, audio rendered at 44.1, 48
 and 96 kHz. A short run of it is part of `--selftest` (`effects=OK`), so CI fails if an editor or engine crashes or
 outputs NaN. tests/CrashFuzzTests111.inc: every effect at 44.1/48/96 kHz with extreme parameters, the shelf case, the

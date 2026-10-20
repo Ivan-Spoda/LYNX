@@ -411,11 +411,12 @@ public:
 
         if (args.contains ("--fxfuzz"))
         {
-            // LYNX.exe --fxfuzz report.txt [rounds]: every built-in effect in its editor, parameters swept and dragged
-            // with the mouse, audio rendered at several rates; a crash ends the process (round 111)
+            // LYNX.exe --fxfuzz report.txt [rounds] [--drags]: every built-in effect in its editor, parameters swept (and
+            // dragged with the mouse), audio rendered at several rates; a crash ends the process (round 111)
             const auto i = args.indexOf ("--fxfuzz");
             const auto rounds = args.size() > i + 2 ? juce::jmax (1, args[i + 2].getIntValue()) : 6;
-            const auto ok = runEffectFuzz (rounds, args[i + 1].unquoted());
+            // --drags: also mouse drags over the editors (their menus may flash on screen: not for the selftest)
+            const auto ok = runEffectFuzz (rounds, args[i + 1].unquoted(), args.contains ("--drags"));
             setApplicationReturnValue (ok ? 0 : 1);
             quit();
             return;
@@ -801,8 +802,8 @@ private:
             }
         }
 
-        // every built-in effect's editor and engine with extreme settings and mouse drags (round 111): a crash fails here
-        const auto effectsOk = runEffectFuzz (4, {});
+        // every built-in effect's editor and engine with extreme settings (round 111): a crash or NaN output fails here
+        const auto effectsOk = runEffectFuzz (4, {}); // (no mouse drags: nothing may open on screen)
 
         const auto ok = audioOk && projectOk && richOk && substituteOk && undoOk && recordOk && recordUndoOk && midiOk && wavpack != "ERROR"
                         && effectsOk;
@@ -830,7 +831,7 @@ private:
     // Every built-in effect in its native editor: random / extreme parameters, mouse drags over the editor, the editor
     // painted, audio rendered at 44.1 / 48 / 96 kHz. Returns false when an effect output NaN / inf (muted by the
     // renderer's guard). The report lists each effect. Used by --fxfuzz and (a short run) by --selftest.
-    bool runEffectFuzz (int rounds, const juce::String& reportPath)
+    bool runEffectFuzz (int rounds, const juce::String& reportPath, bool drags = false)
     {
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         lynx::setNativeEditorDemo (true);
@@ -849,6 +850,7 @@ private:
                 const auto before = lynx::RackRenderer::nonFiniteEffectBlocks();
                 const auto& info = lynx::effectInfo (kind);
                 auto fx = lynx::makeEffectSlot (kind);
+                int dragged = 0; // parameter changes made by the mouse drags
 
                 for (int round = 0; round < rounds; ++round)
                 {
@@ -880,9 +882,9 @@ private:
                         paint();
 
                         // drags from a grid of points, as a user moving every control (plain left button)
-                        if (round >= 3)
+                        if (round >= 3 && drags)
                         {
-                            auto& source = juce::Desktop::getInstance().getMainMouseSource();
+                            const auto source = juce::Desktop::getInstance().getMainMouseSource();
                             const auto step = juce::jmax (12, juce::jmin (editor->getWidth(), editor->getHeight()) / 8);
                             for (int y = step / 2; y < editor->getHeight(); y += step)
                                 for (int x = step / 2; x < editor->getWidth(); x += step)
@@ -915,13 +917,20 @@ private:
                     for (const auto rate : { 44100.0, 48000.0, 96000.0 })
                         offline.renderOffline (0.05, rate);
                     if (round == 0 || round >= 3) // keep what the drags set for the next round
-                        if (! offline.getSong().mixer.empty() && offline.getSong().mixer.size() > 1 && ! offline.getSong().mixer[1].effects.empty())
-                            fx = offline.getSong().mixer[1].effects[0];
+                        if (offline.getSong().mixer.size() > 1 && ! offline.getSong().mixer[1].effects.empty())
+                        {
+                            const auto& now = offline.getSong().mixer[1].effects[0];
+                            for (std::size_t p = 0; p < fx.params.size(); ++p)
+                                dragged += now.params[p] != fx.params[p] ? 1 : 0;
+                            dragged += now.state != fx.state ? 1 : 0;
+                            fx = now;
+                        }
                 }
 
                 const auto broken = lynx::RackRenderer::nonFiniteEffectBlocks() - before;
                 allFinite = allFinite && broken == 0;
-                report << info.name << ": " << (broken == 0 ? juce::String ("OK") : "non-finite output in " + juce::String ((juce::int64) broken) + " blocks") << "\n";
+                report << info.name << ": " << (broken == 0 ? juce::String ("OK") : "non-finite output in " + juce::String ((juce::int64) broken) + " blocks")
+                       << " (" << dragged << " changes by mouse)\n";
                 if (reportPath.isNotEmpty())
                     juce::File (reportPath).replaceWithText (report + "(running)\n"); // what was reached, if it crashes
             }
@@ -995,6 +1004,11 @@ private:
 
             const auto peak = offline.renderOffline (3.0, 48000.0);
             report << "peak=" << peak << "\n";
+            // a plugin that crashed inside a call was caught and switched off (round 111)
+            if (auto* e = dynamic_cast<lynx::PluginEffect*> (offline.getEffect (0, 0).get()); e != nullptr && e->hasCrashed())
+                report << "effect_crashed_and_switched_off=yes\n";
+            if (auto* c = dynamic_cast<lynx::PluginInstrument*> (offline.getChannelInstrument (4).get()); c != nullptr && c->hasCrashed())
+                report << "instrument_crashed_and_switched_off=yes\n";
 
             offline.capturePluginStates();
             const auto stateSize = hasInstrument ? offline.getSong().channels[4].plugin.state.size() : (size_t) 0;
