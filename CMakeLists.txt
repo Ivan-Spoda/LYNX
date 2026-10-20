@@ -121,7 +121,7 @@ add_library(lynx_core STATIC
     src/core/Sawer.cpp
     src/core/Inflate.cpp
     src/core/WavPack.cpp)
-target_include_directories(lynx_core PUBLIC src)
+target_include_directories(lynx_core PUBLIC src third_party/sse2neon)
 
 # workflow shell (key map, workspace layout, rack operations)
 target_sources(lynx_core PRIVATE

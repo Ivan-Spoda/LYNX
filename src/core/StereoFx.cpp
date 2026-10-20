@@ -7,7 +7,7 @@
 #include <cstring>
 
 #if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
- #include <xmmintrin.h>
+ #include "core/Simd.h"
 #endif
 
 // Clean-room implementation of docs/analise/REA_rodada54.md. Comments name the behaviour, not FL's code.

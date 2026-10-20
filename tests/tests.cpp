@@ -22,7 +22,7 @@
 #include <vector>
 
 #if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
-#include <xmmintrin.h>
+#include "core/Simd.h"
 #endif
 
 #include "core/Dither.h"

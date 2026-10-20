@@ -13,11 +13,11 @@
 #include <functional>
 
 #if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
-#include <xmmintrin.h>
+#include "core/Simd.h"
 #define LYNX_CHORUS_MXCSR 1
 #if defined(__GNUC__) || defined(__clang__)
 #include <cpuid.h>
-#include <immintrin.h>
+#include "core/Simd.h"
 #endif
 #endif
 

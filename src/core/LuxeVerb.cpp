@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <immintrin.h>
+#include "core/Simd.h"
 
 #include "core/IldspMath.h"
 

@@ -11,7 +11,7 @@
 #include <limits>
 
 #if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
-    #include <xmmintrin.h>
+    #include "core/Simd.h"
     #define LYNX_GB_SSE 1
 #endif
 

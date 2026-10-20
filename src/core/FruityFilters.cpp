@@ -11,7 +11,7 @@
 #include <cstring>
 
 #if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
-#include <xmmintrin.h>
+#include "core/Simd.h"
 #endif
 
 #if defined(__clang__)

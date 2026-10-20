@@ -4,7 +4,7 @@
 // filters and delays decay into denormal numbers, which on x86 cost tens of times more
 // per operation; zeroing them changes nothing audible.
 #if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
- #include <xmmintrin.h>
+ #include "core/Simd.h"
 #endif
 
 namespace lynx

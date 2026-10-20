@@ -17,7 +17,7 @@
 #include "core/Song.h"
 
 #if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
-#include <xmmintrin.h>
+#include "core/Simd.h"
 #define LYNX_TBASS_MXCSR 1
 #endif
 

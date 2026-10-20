@@ -15,8 +15,10 @@
 #include <cstring>
 #include <optional>
 
-#include <cpuid.h>
-#include <immintrin.h>
+#include "core/Simd.h"
+#if LYNX_X86
+ #include <cpuid.h>
+#endif
 
 #if defined(__clang__)
 #pragma clang fp contract(off)
@@ -895,6 +897,7 @@ std::unique_ptr<PedalFx> makePedal (int type)
 
 // ------------------------------------------------------------------------------------------------ cabinet
 // acc[j] += x·h[j] (a product then a sum, as the plug-in's SSE loop: any vector width gives the same floats)
+#if LYNX_X86
 bool cpuHasAvx()
 {
     static const bool f = [] {
@@ -918,13 +921,16 @@ __attribute__ ((target ("avx"))) void macAvx (float* acc, const float* h, float 
     for (; j < n; ++j)
         acc[j] = x * h[j] + acc[j];
 }
+#endif
 void mac (float* acc, const float* h, float x, std::size_t n) noexcept
 {
+#if LYNX_X86
     if (cpuHasAvx())
     {
         macAvx (acc, h, x, n);
         return;
     }
+#endif
     for (std::size_t j = 0; j < n; ++j)
         acc[j] = x * h[j] + acc[j];
 }

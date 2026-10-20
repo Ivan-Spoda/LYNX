@@ -19,7 +19,7 @@
 #endif
 
 #if defined(__SSE2__) || defined(_M_X64) || defined(__x86_64__)
- #include <immintrin.h>
+ #include "core/Simd.h"
 #endif
 
 namespace lynx

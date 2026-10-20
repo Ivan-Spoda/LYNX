@@ -20,7 +20,7 @@
 #include "core/Inflate.h"
 
 #if defined(__SSE2__) || defined(_M_X64)
- #include <emmintrin.h>
+ #include "core/Simd.h"
 #endif
 
 // the DLL rounds every float32 product and sum separately: no fused multiply-adds in this file
