@@ -38,8 +38,6 @@ private:
     std::shared_ptr<const SampleData> decode (const juce::String& path);
 
     juce::AudioFormatManager formats;
-    std::map<juce::String, std::shared_ptr<const SampleData>> stretchedCache; // keeps the latest one per path
-    std::mutex stretchLock; // (an open prepares stretched copies on worker threads)
 };
 // Brings in from disk the range [from, to) (seconds) of a mapped sample. Any thread except the audio thread.
 void prefetchSample (const SampleData& data, double fromSeconds, double toSeconds);

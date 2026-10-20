@@ -1,5 +1,7 @@
 #include "engine/PluginHost.h"
 
+#include <algorithm>
+
 #include "core/Preferences.h"
 #include "core/PluginScanPolicy.h"
 
@@ -723,7 +725,10 @@ juce::String plainName (const juce::String& s)
 
 std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlugin& plugin, bool instrument, juce::String* how)
 {
-    const auto types = known.getTypes(); // a copy: a background scan may add types meanwhile
+    auto types = known.getTypes(); // a copy: a background scan may add types meanwhile
+    // entries whose file is gone (a plugin moved to another folder by its installer keeps a stale entry until the next
+    // full scan) go last: the same class ID found at the old path would load nothing ("no compatible plug-in format")
+    std::stable_partition (types.begin(), types.end(), [this] (const juce::PluginDescription& d) { return fileStillThere (d.fileOrIdentifier); });
     auto found = [how] (const juce::PluginDescription& d, const char* reason) {
         if (how != nullptr)
             *how = reason;
@@ -804,6 +809,16 @@ std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlu
     if (byName && how != nullptr)
         *how = TR_NOOP ("same name, other format");
     return byName;
+}
+
+bool PluginHost::fileStillThere (const juce::String& file)
+{
+    if (! juce::File::isAbsolutePath (file))
+        return true;
+    const std::scoped_lock lock (existsLock);
+    if (const auto it = existsCache.find (file); it != existsCache.end())
+        return it->second;
+    return existsCache[file] = juce::File (file).exists();
 }
 
 juce::StringArray PluginHost::filesToScanFor (const std::vector<FlpPluginUse>& uses)
@@ -1106,6 +1121,10 @@ void PluginHost::preload (const PluginRef& ref, int wanted)
 
 void PluginHost::clearPreloaded()
 {
+    {
+        const std::scoped_lock lock (existsLock);
+        existsCache.clear(); // (asked again on the next open)
+    }
     std::map<std::string, std::vector<Preloaded>> old;
     {
         const std::scoped_lock lock (preloadLock);

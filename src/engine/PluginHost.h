@@ -204,6 +204,9 @@ private:
     mutable std::mutex preloadLock;
     double preloadRate = 44100.0;
     bool emptyScanIsCurrent (const juce::String& file);
+    bool fileStillThere (const juce::String& file); // cached until clearPreloaded (one check per file per open)
+    std::map<juce::String, bool> existsCache;
+    std::mutex existsLock;
     void rememberEmptyScan (const juce::String& file);
     void save();
     bool scanOne (juce::AudioPluginFormat& format, const juce::String& file);
