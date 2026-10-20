@@ -141,6 +141,10 @@ tried. Read-only check: no LYNX crash events since the two of 2026-10-18 (§1).
 
 - Done: §1–§5 in feature/crash111 (also two fuzz fixes: Fruity Delay Bank time product in 64-bit at 192 kHz; Maximus
   saturation table index guarded against NaN / inf).
+- 2026-10-20 ~20:00 (after the second power loss): merged main (tech118: project packages, ProjectSafety) — conflicts
+  in Main.cpp (selftest now needs package AND effects), PluginHost.h (setRenderMode skips a crashed plugin) and the
+  generated I18nData.h (regenerated). The tester's laptop was unreachable over Tailscale (ssh timeout), so the GUI
+  reproduction below is still open; it needs 0.1.8 installed there anyway.
 - Next: GUI reproduction on the tester's laptop with 0.1.8 when she is not using it (open a Waves editor, close LYNX,
   check the event log / crash-history.log); after 0.1.8 is installed there, confirm the Waves shell is rescanned
   (scan-retry 2) and her vocal projects load the real Waves plugins instead of substitutes.
