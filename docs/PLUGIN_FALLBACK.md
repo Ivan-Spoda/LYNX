@@ -141,7 +141,7 @@ matches by name).
 | FabFilter Pro-Q | Facet EQ (flat, round 99) | names | — |
 | Waves DeEsser | Hush De-esser (5.5 kHz, −20 dBFS, 4 dB; round 113) | Waves name | frequency (RealWorld value 0, the only one in Hz) [model] |
 | FabFilter Pro-DS, Harrison De-Esser | Hush De-esser (default; round 96) | names | — |
-| Slate Digital Fresh Air | Aether (neutral without a state; round 96) | name | mid / high air amounts → exciter / air shelf (at most +6 dB, a conservative reading) [DATA layout, model gain] (round 113) |
+| Slate Digital Fresh Air | Aether (neutral without a state; round 96) | name | Mid / High Air → Aether's air shelf gain and frequency, laws measured on the official trial (within 0.5 dB RMS for her settings) [EXEC] (round 113) |
 | Soundtoys Decapitator, FabFilter Saturn | Ember Saturator (drive +1.4 dB, auto gain; round 113) | names | Saturn 2: multiband mode — bands, crossovers, style family, drive, mix, level (round 108) [EXEC layout] |
 | Soundtoys PanMan | Auto-pan (depth 50 %; round 113) | VST2 ID [DATA], name | — |
 

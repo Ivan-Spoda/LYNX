@@ -480,7 +480,8 @@ product = Fresh Air
 vendor = Slate Digital
 lynx = Aether
 names = Fresh Air; FreshAir
-# round 113: its two air amounts are read from the state (freshAirAmounts) and set a gentle air shelf / exciter
+# round 113: its two air amounts are read from the state (freshAirAmounts) and set Aether's air shelf through laws
+# measured on the official trial
 translate = fresh-air
 
 [soundtoys-decapitator]
@@ -919,15 +920,21 @@ int translateAutoTunePro (const std::vector<std::uint8_t>& state, EffectSlot& sl
     return 2;
 }
 
-// Fresh Air: the high air amount becomes Aether's air shelf (at most +6 dB for a full knob, a conservative reading:
-// the vendor's gain law is not known), the mid air amount a light share of its exciter.
+// Fresh Air: its two air amounts become Aether's air shelf. [EXEC] Black-box measurement of the official trial
+// (fxmeasure, pink noise at -20 dBFS RMS, 48 kHz; docs/analise/REA_rodada113.md §3b): each setting's response above
+// 2 kHz is fitted by one high shelf (RBJ, S = 0.6, Aether's); gain and frequency follow these least-squares laws of
+// (mid, high), within 0.5 dB RMS of the measured curves for the settings her projects use. The exciter stays off.
 int translateFreshAir (const std::vector<std::uint8_t>& state, EffectSlot& slot)
 {
     const auto air = freshAirAmounts (state);
     if (! air || slot.kind != EffectKind::aether)
         return 0;
-    slot.params[mixsuite::aether::air] = std::clamp (air->second * 6.0f / 15.0f, 0.0f, 1.0f);
-    slot.params[mixsuite::aether::harmonics] = std::clamp (air->first * 0.25f, 0.0f, 1.0f);
+    const auto m = (double) air->first, h = (double) air->second;
+    const auto gainDb = std::clamp (10.345 * m + 20.548 * h - 2.32 * m * m - 7.75 * h * h - 11.673 * m * h, 0.0, 15.0);
+    const auto hz = std::clamp (std::exp2 (12.8069 - 0.7108 * m + 0.6746 * h - 0.5369 * m * h), 5000.0, 20000.0);
+    slot.params[mixsuite::aether::air] = (float) (gainDb / 15.0);
+    slot.params[mixsuite::aether::airFreq] = (float) (std::log (hz / 5000.0) / std::log (4.0));
+    slot.params[mixsuite::aether::harmonics] = 0.0f;
     return 2;
 }
 
@@ -983,7 +990,7 @@ std::optional<std::pair<int, int>> autoTuneProKey (const std::vector<std::uint8_
 std::optional<std::pair<float, float>> freshAirAmounts (const std::vector<std::uint8_t>& state)
 {
     // [DATA] the component state of every Fresh Air slot surveyed (round 113): 2530 bytes, u32 1, u32 size − 8, then
-    // two floats 0..1 at 1290 / 1294 (the two air knobs, in the order the vendor's manual lists them: mid, high)
+    // two floats 0..1 at 1290 / 1294; [EXEC] the official trial saves its "Mid Air" / "High Air" parameters there
     if (state.size() != 2530)
         return std::nullopt;
     auto u32 = [&state] (std::size_t at) {

@@ -90,7 +90,7 @@ forcing C major.
 | Renaissance Compressor | Compressor | RealWorld list, not confirmed | 2:1 above −15 dBFS, auto gain (was −18 dB 4:1) |
 | DeEsser | Hush De-esser | RealWorld list; value 0 = 5506 is the only one in Hz | frequency from value 0 [model]; −20 dBFS, 4 dB range (was 6 kHz, −30 dBFS, 12 dB) |
 | CLA-2A | Glow Leveler | RealWorld list (208 values), not confirmed | peak reduction 30 %, +2 dB (was 45 %, +3 dB) |
-| Fresh Air | Aether | 2530-byte state: two floats 0..1 at 1290 / 1294 (0.33–0.60 in her slots) [DATA] | mid → exciter × 0.25, high → air shelf up to +6 dB [model gain] (was neutral) |
+| Fresh Air | Aether | 2530-byte state: two floats 0..1 at 1290 / 1294 = Mid Air / High Air [DATA, EXEC] | air shelf gain + frequency from laws measured on the official trial (§3b; was neutral) |
 | Decapitator / EchoBoy / PanMan | Ember / Fruity Delay 3 / Auto-pan | Soundtoys encoded preset | Ember drive +1.4 dB (was +5.4), Auto-pan depth 50 % (was 75 %), Delay 3 default |
 | H-Delay | Fruity Delay 3 | RealWorld list (BPM, time in ms readable) | default; FL's slot mix is 0–7 % in her projects, so it barely plays |
 
@@ -103,6 +103,28 @@ against no substitutes, level-normalised, 125 Hz … 16 kHz (spread = RMS of the
     Glow Leveler      +2.1 +0.9 -0.1 -0.1 -0.4 +0.2 -0.1 +0.5 (0.85) +0.9 +0.4 -0.1 -0.0 -0.2 +0.0 +0.1 +0.4 (0.39)
     Ember Saturator   +1.1 +1.6 -0.2 -0.2 -0.0 +0.3 +1.5 -0.0 (0.88) +0.2 +1.1 -0.2 -0.1 +0.0 +0.1 +0.6 -0.3 (0.46)
     LYNX Tune         +1.0 +0.0 +0.1 +0.0 -0.3 -0.4 -0.7 -1.1 (0.61) (same: PSOLA)
+
+## 3b. Fresh Air measured (official trial on this PC)
+
+[EXEC] The official Fresh Air trial (v1.1.7, installed here 2026-10-20) in tools/fxmeasure, headless: its parameters
+are "Mid Air", "High Air" (0–100 %), Bypass, Trim; setting Mid 0.3 / High 0.7 and saving the state puts 0.3 / 0.7 at
+offsets 1290 / 1294 of the 2530-byte component state — the layout read from her projects. Pink noise at −20 dBFS RMS,
+48 kHz, gain vs the input (dB):
+
+                 1k    2k    3k    4k    6k    8k   10k   12k   16k   20k
+    Mid 0.25   +0.7  +0.5  +1.0  +1.6  +2.2  +2.5  +2.6  +2.7  +2.7  +2.7
+    Mid 0.5    +0.7  +0.5  +1.5  +2.6  +3.6  +4.0  +4.2  +4.3  +4.4  +4.4
+    Mid 1      -0.0  -0.1  +2.5  +4.6  +6.2  +6.7  +7.0  +7.1  +7.2  +7.2
+    High 0.25  +1.0  +0.9  +0.7  +0.5  +0.2  +1.0  +2.3  +3.3  +4.3  +4.6
+    High 0.5   +1.4  +1.1  +0.7  +0.2  +0.0  +2.2  +4.7  +6.3  +7.5  +7.8
+    High 1     +1.7  +1.2  +0.4  -0.5  +0.3  +4.6  +7.8  +9.5 +10.8 +11.1
+
+Each response above 2 kHz (singles and the seven Mid/High pairs her corpus uses) was fitted by Aether's shelf (RBJ
+high shelf, S = 0.6); least squares over the fits give gain = 10.345 m + 20.548 h − 2.32 m² − 7.75 h² − 11.673 m h dB
+and log2 f = 12.8069 − 0.7108 m + 0.6746 h − 0.5369 m h (5–20 kHz), within 0.43–0.69 dB RMS of the measured curves
+for her settings (up to 1.6 dB for High alone at 100 %, which she never uses). Her most common setting (0.29 / 0.25)
+is +6.6 dB from 6.8 kHz. Fresh Air may be level-dependent ("dynamic"); only −20 dBFS was measured (not confirmed at
+other levels). Scripts: tmp/r113/py/fafit.py, renders in C:\Users\kauan\lynx-test\r113\fa.
 
 ## 4. Whole vocal path: substitutes vs bypassed vs FL
 
@@ -154,7 +176,7 @@ experiments: `LYNX_PARAM="t.k.p=v"`, and the substituted slots are listed with t
   Soundtoys plugins; only RComp and DeEsser (not installed there, FL leaves them empty) are substitutes.
 - Still to verify there: Auto-Tune Pro hosted from the Antares folder; the 16.0 shell described
   (or `scan-failures.log` saying why not) — needs her LYNX run in her own desktop session.
-- Official trials of Auto-Tune Pro, Fresh Air, Waves and Soundtoys are being installed on this PC (2026-10-20): once
-  they load headlessly, measure (fxmeasure) Auto-Tune Pro's scale list (confirms or corrects §2), Fresh Air's gain
-  law, and the Waves RealWorld layouts (RComp, DeEsser, CLA-2A, SSL E-Channel) to translate them instead of the
+- Fresh Air: measured and translated (§3b). Official trials of Auto-Tune Pro, Waves and Soundtoys were still being
+  installed on this PC (2026-10-20): once they load headlessly, measure (fxmeasure) Auto-Tune Pro's scale list
+  (confirms or corrects §2) and the Waves RealWorld layouts (RComp, DeEsser, CLA-2A, SSL E-Channel) to translate them instead of the
   gentle defaults; FL renders with the real plugins as the reference.
