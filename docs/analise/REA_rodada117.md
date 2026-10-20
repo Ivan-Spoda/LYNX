@@ -32,8 +32,25 @@ v0.1.8-alpha ships Windows + macOS + Linux. Platform overview: `docs/PLATFORMS.m
 - Plugin sandbox (separate process): built on Win32 shared memory + events; a POSIX port is possible later.
 - Dark native title bar / owned tool windows: Windows DWM APIs.
 
+## Verification (2026-10-20)
+
+- [EXEC] Linux, GCC 15 native build, full core test suite with the FL Data dir: 1 308 718 checks, 0 failures — after
+  compiling `Slayer.cpp` with `-fno-inline` on GCC/x86: GCC 15 at -O1+ broke FL Slayer's exact x87 engine (some
+  presets silent or NaN against the DLL goldens; Clang and GCC -O0 / -fno-inline exact; root cause not isolated).
+- [EXEC] Exports Linux (GCC) vs Windows (Zig/MinGW) on three FL demo songs: identical export reports (converted /
+  unsupported / chains) and identical lengths; audio differs only at the libm level — SNR of the difference
+  110.7 dB (DEDZII - NIGHT TERROR), 117.5 dB (Ookay - Thief), 132.7 dB (LeriQ - SHINE); max |d| 6.3e-5.
+- [EXEC] `--snapshot` on Linux (WSLg X11, LeriQ - SHINE): every PNG renders (desktop, mixer, dialogs, tools); only
+  the system font differs from Windows.
+- [EXEC] AppImage + .tar.gz built locally with `scripts/package-linux.sh` (needs `desktop-file-validate`); the AppImage
+  self-test is OK; the CI-built AppImage of the Release run 39505326546 also self-tests OK here.
+- [EXEC] CI: Tests (Windows, Linux, macOS) green on wip/port117; Release workflow_dispatch run 39505326546 green:
+  `-setup-x64.exe`, `-windows-x64.zip`, `-macos-universal.dmg`, `-linux-x86_64.AppImage`, `-linux-x86_64.tar.gz`,
+  `LYNX.exe`, `SHA256SUMS.txt`.
+
 ## Where I stopped
 
-- Linux app builds and self-tests locally; CI (tests.yml app jobs, release.yml dispatch on wip/port117) running.
-- Next: export comparison Linux vs Windows on demo projects, `--snapshot` PNGs on Linux, AppImage locally,
-  macOS CI iteration, website/README (in progress), land.
+- Done for 0.1.8: Linux + macOS builds, 3-OS release.yml, README download section, website OS-aware download buttons.
+- Next (not 0.1.8): Linux ARM64 build; POSIX plugin sandbox; Developer ID signing + notarization on macOS (needs an
+  Apple account); isolate the GCC 15 Slayer miscompile (or report it upstream); confirm the macOS FL Studio bundle
+  layout on a real Mac.
