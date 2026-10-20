@@ -32,10 +32,10 @@ Scores judge layout (where things are), control placement, the main display and 
 | Sentry Gate | Pro-G (yes) | 6 | 8 | level history behind the transfer curve, draggable threshold, EXPERT strip |
 | Hush De-esser | Pro-DS (yes) | 2 | 8 | scrolling waveform with the reduction, big THRESHOLD / RANGE, frequency slider, mode buttons, meters |
 | Ember Saturator | Saturn 2 (yes) | 3 | 7 | spectrum with bands (split by double-click, drag drive handles / crossovers), floating band panel |
-| Glow Leveler | CLA-2A (no) | 4 | 6 | GAIN / PEAK REDUCTION around a VU needle, COMPRESS / LIMIT under it |
-| Aether | Fresh Air (no) | 4 | 6 | two big knobs (mid air / high air) with the trim between them |
-| Ridge Strip | SSL E-Channel (no) | 5 | 5 | unchanged (needs the reference) |
-| LYNX Tune | Auto-Tune Pro (no) | 5 | 5 | unchanged (needs the reference) |
+| Glow Leveler | CLA-2A (shell entry opens another plugin, §5b) | 4 | 7 | GAIN / PEAK REDUCTION around a VU needle, COMPRESS / LIMIT under it; the VU switches gain reduction / output |
+| Aether | Fresh Air (yes, §5b) | 4 | 8 | display-first editor: arc output meter on top, two big knobs with LINK, power, small TRIM |
+| Ridge Strip | SSL E-Channel (yes, §5b) | 5 | 8 | the vertical channel strip: filters and HF → LF bands on the left, dynamics, routing and gain on the right |
+| LYNX Tune | Auto-Tune Pro (not installed) | 5 | 5 | unchanged (the trial is not installed, §7) |
 | Epoch Verb | ValhallaVintageVerb (demo) | 7 | 8 | caption above / value under each knob, readable mode menus with ◀ ▶ steps |
 | Atrium | ValhallaRoom (demo) | 7 | 8 | same |
 | Foil Plate | ValhallaPlate (demo) | 7 | 8 | same |
@@ -106,16 +106,38 @@ From the official product pages only (no plugin hosted):
   between them; LYNX's extra settings small underneath.
 - Ridge Strip, LYNX Tune: left as they are until the user installs the official trials (see §7).
 
+## 5b. With the official trials (2026-10-20 evening)
+Captured in the round's host (tmp/look114/host, now `load <shell> … "<name>"` picks one plugin out of a Waves shell):
+- **Fresh Air** (Slate Digital, v1.1.7): the window is a level arc on top (−∞ … 0 dB, red from −6 dB) and a knob
+  panel under it: MID AIR and HIGH AIR big, a link button between them, POWER bottom left, a small TRIM bottom right;
+  parameters Mid Air, High Air (0–100 %), Bypass, Trim (−12 … 0 dB). → **Aether** is now a display-first editor
+  (ui/ProEditors.cpp, AetherEditor): the output peak on an arc meter with a hold dot, MID AIR / HIGH AIR big with
+  LINK (moving one moves the other by the same amount), the power switch (the slot's on / off), TRIM small at the
+  bottom right; LYNX's extra settings (exciter and shelf frequency, even / odd character, mix) in the bottom bar.
+- **SSL E-Channel** (Waves, v17.1, demo mode): a tall strip, two columns. Left: FILTERS (HPF, LPF, split), then HF,
+  HMF, LMF, LF top to bottom (gain, frequency, Q on the mid bands, BELL on HF / LF). Right: DYNAMICS — compressor
+  (ratio, threshold, release, fast attack), expander / gate (range, threshold, release, fast attack, GATE), the
+  gain-reduction LEDs —, routing (EQ to / DYN to), ANALOG, and the GAIN block (input / output VU, output fader,
+  input trim, phase). Its 32 parameters map one to one onto Ridge Strip's. → **Ridge Strip**'s panel
+  (core/PluginLayout.cpp) is now that strip in LYNX's style, plus the EQ curve under the bands and the static
+  compressor curve (round 96's displays). Test: `look114_ridge_strip_reads_top_to_bottom_like_a_channel_strip`.
+- **CLA-2A** (Waves): its shell entries ("CLA-2A Mono / Stereo") instantiate Q10 in a JUCE host here (both names,
+  twice) — no capture. Glow keeps its product-page layout; the VU meter now works like the reference's meter
+  selector: click it to switch gain reduction ↔ output level (0 VU = −18 dBFS).
+- **Auto-Tune Pro**, **Decapitator**: not installed (only Antares Central / Auto-Tune Central; no Soundtoys) —
+  see tmp/look114/ASK_USER.md.
+
 ## 6. Tests (tests/LookTests114.inc)
 Apex's live meters (gain reduction of a +12 dB sine into the ceiling, input and output peaks); every knob of the ten
 reverb / delay panels carries its caption above and stays inside the panel. The existing panel tests (every
 parameter placed once, nothing overlapping, the leveler's meter) run on the changed layouts.
 
 ## 7. Where I stopped / next steps
-- Done: §1–§6.
-- To bring the remaining engines to the bar, the user should install these OFFICIAL trials / free versions on this PC:
-  Slate Digital Fresh Air (free, slatedigital.com), Antares Auto-Tune Pro (14-day trial, antarestech.com), Waves
-  CLA-2A and SSL E-Channel (Waves 7-day trials via Waves Central), optionally Soundtoys Decapitator (20-day trial,
-  soundtoys.com) for Ember's second role.
+- Done: §1–§6, §5b (Aether display-first editor from Fresh Air, Ridge Strip channel-strip layout from SSL E-Channel,
+  Glow's VU selector).
+- Still needs the user: install the Auto-Tune Pro trial (from Auto-Tune Central) and Soundtoys 5 (Decapitator) for
+  LYNX Tune and Ember's second role; CLA-2A's shell entry opens Q10 in our JUCE host — check in Waves Central that
+  the CLA-2A trial is activated (or open it once in FL) so it can be captured.
 - Ideas: per-control description line at the bottom of the reverb panels (the references show one), Prism with free
-  band placement (gaps), Ember per-band solo / mute, analyser freeze, Crest / Sentry side-chain EQ nodes for Sentry.
+  band placement (gaps), Ember per-band solo / mute, analyser freeze, Crest / Sentry side-chain EQ nodes for Sentry,
+  Ridge Strip input / output VU (the reference's GAIN block), Ridge "ANALOG" (noise / saturation) switch.
