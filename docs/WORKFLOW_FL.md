@@ -868,7 +868,14 @@ and out (`IconButton`). The LYNX logo is not drawn inside the window; it stays t
   at once and are saved in `ui-options.txt` (`toolbarGroups`, `toolbarIcons`, `uiScale`).
 - The menu with the hint bar under it always comes first. The spare width goes before the first of the meters or
   the output monitor (LYNX's single "spacer"). When the window is narrow, shown groups still drop by priority;
-  the transport stays. No drag-and-drop edit mode or named presets (yet).
+  the transport stays.
+- **Edit mode** (round 115, docs/analise/REA_rodada115.md; `toolbar::EditOverlay`): the toolbar menu now starts the
+  way FL's does - **Edit toolbar**, **Separators**, **Hide the toolbar panels** (Ctrl+F11: only the menu and the hint
+  bar stay, on one row), **Presets** (LYNX's own: Default, Compact, Minimal, Mixing) - then the per-panel switches.
+  In edit mode the panels are outlined with their names and do not react to clicks; a tray under the toolbar lists
+  every panel. Drag a panel sideways to move it, into the tray to remove it, from the tray onto the toolbar to add it
+  where it is dropped; right-click a panel: remove / move left / move right; Done or Esc leaves. Saved as before,
+  plus `toolbarSeparators` and `toolbarVisible`. Still panel groups, not single buttons or spacers.
 - **Icon size** sets the toolbar row height (24 / **28** / 34 px) and the icon box (14 / **16** / 20 px). Since the
   light-header round (docs/analise/UI_toolbar_study.md) icons use one fine line (`icons::strokeWidth`, about
   1.25-1.5 px at these sizes), every toolbar button is flat (a faint wash on hover, a faint accent wash when on),

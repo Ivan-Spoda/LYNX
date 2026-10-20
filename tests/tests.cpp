@@ -15641,4 +15641,5 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "EchoSuiteTests101.inc"
 #include "FruitySendTests105.inc"
 #include "FixedBlockTests118.inc"
+#include "UiFl115Tests.inc"
 #include "LoadTraceTests112.inc"

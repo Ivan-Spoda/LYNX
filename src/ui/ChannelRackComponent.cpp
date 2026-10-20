@@ -1789,7 +1789,7 @@ void ChannelRackComponent::showChannelMenu (int channel)
     // insert / replace / clone / delete) and its steps on the right (clipboard, fills, rotation); LYNX's own
     // items (settings windows, arpeggiator, organisation) follow in their place
     juce::PopupMenu menu;
-    menu.addSectionHeader (juce::String::fromUTF8 (c.name.c_str()));
+    ui::addItemHeader (menu, tr ("Channel"), juce::String::fromUTF8 (c.name.c_str()), c.colour != 0 ? juce::Colour (c.colour) : juce::Colour());
     const auto selected = (int) engine.getSelectedChannels().size();
     const auto count = (int) engine.getSong().channels.size();
 

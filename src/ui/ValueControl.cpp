@@ -618,4 +618,53 @@ void uninstallSliderContract()
         contract().reset();
     }
 }
+namespace
+{
+class ItemHeader final : public juce::PopupMenu::CustomComponent
+{
+public:
+    ItemHeader (juce::String k, juce::String n, juce::Colour c) : juce::PopupMenu::CustomComponent (false), kind (std::move (k)), name (std::move (n)), colour (c) {}
+
+    void getIdealSize (int& width, int& height) override
+    {
+        const juce::Font big (theme::font (theme::type::body, true)), small (theme::font (theme::type::caption, true));
+        width = juce::jmax (160, juce::jmax (juce::GlyphArrangement::getStringWidthInt (big, name), juce::GlyphArrangement::getStringWidthInt (small, kind)) + 32);
+        height = kind.isNotEmpty() ? 40 : 28;
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        using namespace theme;
+        auto r = getLocalBounds().toFloat().reduced (4.0f, 3.0f);
+        const auto base = colour.isTransparent() ? colour::bg5 : tame (colour);
+        g.setColour (base.withAlpha (0.9f));
+        g.fillRoundedRectangle (r, radius::md);
+        g.setColour (base.brighter (0.25f));
+        g.fillRoundedRectangle (r.removeFromLeft (4.0f), 2.0f);
+        const auto text = base.getPerceivedBrightness() > 0.6f ? colour::bg0 : colour::textPrimary;
+        auto area = getLocalBounds().reduced (14, 4);
+        if (kind.isNotEmpty())
+        {
+            g.setFont (font (type::caption - 1.0f, true));
+            g.setColour (text.withAlpha (0.7f));
+            g.drawText (caps (kind), area.removeFromTop (13), juce::Justification::bottomLeft, true);
+        }
+        g.setFont (font (type::body, true));
+        g.setColour (text);
+        g.drawText (name, area, juce::Justification::centredLeft, true);
+    }
+
+private:
+    juce::String kind, name;
+    juce::Colour colour;
+};
+} // namespace
+
+void addItemHeader (juce::PopupMenu& menu, const juce::String& kind, const juce::String& name, juce::Colour colour)
+{
+    juce::PopupMenu::Item item (name);
+    item.customComponent = new ItemHeader (kind, name, colour);
+    item.isEnabled = false;
+    menu.addItem (std::move (item));
+}
 } // namespace lynx::ui
