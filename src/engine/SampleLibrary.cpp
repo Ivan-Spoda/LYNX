@@ -1,11 +1,38 @@
 #include "engine/SampleLibrary.h"
 
+#include <condition_variable>
+#include <mutex>
+#include <set>
+
 #include "core/OggVorbis.h"
 #include "core/TimeStretch.h"
 #include "engine/WavPackFormat.h"
 
 namespace lynx
 {
+namespace
+{
+// Decoded samples are shared by every SampleLibrary of the process (the export's engine finds what the open project
+// already decoded) and may be loaded from several threads at once (round 112: an open decodes its samples in parallel,
+// off the message thread). A path being decoded is waited for, not decoded twice (its stream cache file is written once).
+struct SharedCache
+{
+    std::mutex lock;
+    std::condition_variable done;
+    std::map<juce::String, std::weak_ptr<const SampleData>> entries;
+    std::set<juce::String> loading;
+    // stretched copies (pitch-preserving tempo follow): the latest length per file, kept (shared like the decoded ones)
+    std::mutex stretchLock;
+    std::map<juce::String, std::shared_ptr<const SampleData>> stretched;
+};
+
+SharedCache& sharedCache()
+{
+    static SharedCache c;
+    return c;
+}
+} // namespace
+
 namespace
 {
 // FL stores many factory samples as WAV whose "data" is an Ogg Vorbis stream
@@ -158,9 +185,13 @@ std::unique_ptr<juce::AudioFormatReader> SampleLibrary::createReader (const juce
 std::shared_ptr<const SampleData> SampleLibrary::loadStretched (const juce::String& path, double ratio)
 {
     const auto key = path + "|" + juce::String (ratio, 4);
+    auto& shared = sharedCache();
 
-    if (auto it = stretchedCache.find (key); it != stretchedCache.end())
-        return it->second;
+    {
+        const std::scoped_lock l (shared.stretchLock);
+        if (auto it = shared.stretched.find (key); it != shared.stretched.end())
+            return it->second;
+    }
 
     auto original = load (path);
 
@@ -170,10 +201,11 @@ std::shared_ptr<const SampleData> SampleLibrary::loadStretched (const juce::Stri
     std::shared_ptr<const SampleData> stretched = timeStretch (*original, ratio);
 
     // only one length per file is kept (changing the BPM replaces the stretched one)
-    for (auto it = stretchedCache.begin(); it != stretchedCache.end();)
-        it = it->first.startsWith (path + "|") ? stretchedCache.erase (it) : std::next (it);
+    const std::scoped_lock l (shared.stretchLock);
+    for (auto it = shared.stretched.begin(); it != shared.stretched.end();)
+        it = it->first.startsWith (path + "|") ? shared.stretched.erase (it) : std::next (it);
 
-    stretchedCache[key] = stretched;
+    shared.stretched[key] = stretched;
     return stretched;
 }
 
@@ -316,16 +348,45 @@ void prefetchSample (const SampleData& data, double fromSeconds, double toSecond
 
 void SampleLibrary::forget (const juce::String& path)
 {
-    cache.erase (path);
-    for (auto it = stretchedCache.begin(); it != stretchedCache.end();)
-        it = it->first.startsWith (path + "|") ? stretchedCache.erase (it) : std::next (it);
+    auto& shared = sharedCache();
+    {
+        const std::scoped_lock l (shared.lock);
+        shared.entries.erase (path);
+    }
+    const std::scoped_lock l (shared.stretchLock);
+    for (auto it = shared.stretched.begin(); it != shared.stretched.end();)
+        it = it->first.startsWith (path + "|") ? shared.stretched.erase (it) : std::next (it);
 }
 
 std::shared_ptr<const SampleData> SampleLibrary::load (const juce::String& path)
 {
-    if (auto cached = cache[path].lock())
-        return cached;
+    auto& shared = sharedCache();
+    {
+        std::unique_lock l (shared.lock);
+        for (;;)
+        {
+            if (const auto it = shared.entries.find (path); it != shared.entries.end())
+                if (auto cached = it->second.lock())
+                    return cached;
+            if (shared.loading.count (path) == 0)
+                break;
+            shared.done.wait (l);
+        }
+        shared.loading.insert (path);
+    }
+    auto data = decode (path);
+    {
+        const std::scoped_lock l (shared.lock);
+        shared.loading.erase (path);
+        if (data != nullptr)
+            shared.entries[path] = data;
+    }
+    shared.done.notify_all();
+    return data;
+}
 
+std::shared_ptr<const SampleData> SampleLibrary::decode (const juce::String& path)
+{
     const juce::File file (path);
 
     if (! file.existsAsFile())
@@ -338,11 +399,7 @@ std::shared_ptr<const SampleData> SampleLibrary::load (const juce::String& path)
 
     if ((double) reader->lengthInSamples > reader->sampleRate * streamAboveSeconds)
         if (auto streamed = loadStreamed (file, *reader))
-        {
-            cache[path] = streamed;
             return streamed;
-        }
-
     // In memory: 10-minute safety limit (long ones go through the disk cache).
     const auto frames = (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 600.0));
     const auto channels = juce::jmin (2, (int) reader->numChannels);
@@ -368,7 +425,6 @@ std::shared_ptr<const SampleData> SampleLibrary::load (const juce::String& path)
     if (channels > 1)
         data->right.assign (buffer.getReadPointer (1), buffer.getReadPointer (1) + frames);
 
-    cache[path] = data;
     return data;
 }
 } // namespace lynx

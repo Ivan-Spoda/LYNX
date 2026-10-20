@@ -230,6 +230,34 @@ public:
     bool importFlpFile (const juce::File& file, juce::String& error, const std::map<std::string, std::string>& relocations = {},
                         bool asEdit = false);
 
+    // The same import in steps, so a window can show progress while it runs (round 112): `prepareFlpImport` reads,
+    // parses and imports the project and decodes its samples in parallel — no plugin is touched, so it may run on any
+    // thread; `preloadPlugins` creates the project's hosted plugins one at a time (message thread; call it until it
+    // returns false); `finishFlpImport` adopts the result as the song (message thread). Phase times go to core/LoadTrace.
+    struct PreparedFlp
+    {
+        bool ok = false;
+        juce::String error;
+        Song song;
+        FlpImportReport report;
+        std::vector<std::shared_ptr<const SampleData>> decoded; // kept alive until the rack is built
+        std::vector<PluginRef> pluginQueue;                     // hosted plugins to create, in rack order
+        std::size_t pluginsDone = 0;
+        bool adopted = false;
+        juce::StringArray missing, matched, withoutState, substituted;
+        struct Use
+        {
+            std::string name, user;
+            bool instrument = false;
+        };
+        std::vector<Use> uses;
+    };
+    static void prepareFlpImport (const juce::File& file, const std::map<std::string, std::string>& relocations, SampleLibrary& library,
+                                  PreparedFlp& out);
+    // one hosted plugin of the queue (message thread); false when the queue is done
+    bool preloadNextPlugin (PreparedFlp& prepared);
+    bool finishFlpImport (PreparedFlp&& prepared, bool asEdit);
+
     // Renders without an audio device. Writes to `output` if not nullptr.
     // After `seconds`, continues for up to `tailSeconds` while there is still sound.
     // `progress(0..1)` returns false to cancel. Returns the peak (used by the self-test),
@@ -342,6 +370,7 @@ private:
     double lastLogMs = 0.0;
     class PreviewPlayer* preview = nullptr; // graph node (owned by the graph)
     void publishSong();
+    void adoptPrepared (PreparedFlp& prepared); // the plugins of a prepared import found / substituted (message thread)
 
     std::unique_ptr<WorkerPool> workers; // extra renderer threads (before the graph, which uses them)
     juce::AudioDeviceManager deviceManager;
