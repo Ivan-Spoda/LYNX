@@ -47,7 +47,7 @@ while she was working in FL Studio, so its absolute times are pessimistic; the s
 | TWIN SWAG | 10 | 4380 | 7366 ms ×20 | 6388 ms | — | — (60 samples missing) |
 | game over | 11 | 7341 | 8669 ms ×22 | 129 ms | 1963 ms ×6 | 2181 / 379 ms ×45 |
 | luisa sonsa | 12 | 7754 | 7858 ms ×24 | 95 ms | — | 636 / 117 ms ×27 |
-| kwe | 2 | 3462 cold / 234 warm | 1 ms | 106 ms | — | 444 / 83 ms ×20 |
+| kwe | 2 | 3462 cold / 234 warm | 1 ms (Auto-Tune did not load, §2b) | 106 ms | — | 444 / 83 ms ×20 |
 
 Everything else is negligible: parse < 1 ms, import ≤ 9 ms, file probes ≤ 2 ms, built-in effects 35–125 ms,
 PDC ≤ 9 ms, schedule/graph ≤ 9 ms. K: was connected during these runs (no missing-root cost); the first, cold
@@ -93,15 +93,43 @@ Tests: `tests/LoadTraceTests112.inc` (progress monotonic across stages, item lab
 and log table, path roots for drives/UNC/relative paths, one probe per root, importer issuing no query under a
 missing root while still listing the files as missing).
 
+### 2b. Second laptop run (final build) and a silent Auto-Tune [EXEC]
+
+Per-plugin lines (both engines of `--export`, Idle priority): Decapitator 2.5–3.9 s, EchoBoy 3.0 s, PanMan
+1.3–2.9 s, Little AlterBoy 1.2–2.0 s, UADx LA-2A 2.2 s, Fresh Air 1.1–1.5 s, Pro-Q 4 1.1 s, UADx Neve 1.1 s,
+Auto-Tune Pro 0.6–0.8 s. The SoundToys VST2 plugins are the slowest to create.
+
+The same run showed **Auto-Tune Pro taking 1–3 ms: it never loaded** ("No compatible plug-in format exists for this
+plug-in" → bypassed, so her vocal chain played without Auto-Tune). Her `plugins.xml` lists Auto-Tune Pro twice with
+the same class ID: `VST3\Antares\Auto-Tune Pro.vst3` (exists) and `VST3\Auto-Tune Pro.vst3` (gone — moved by its
+installer); `findForeign` took the first, stale one. Fix: entries whose file no longer exists sort after the live
+ones (existence cached once per open). With the fix Auto-Tune Pro is found at `Antares\` and loads (625–840 ms).
+The stretched copies are now shared by every engine of the process (the export engine no longer recomputes them:
+`rack_stretch` 1568 → 0 ms on game over).
+
+### 2c. Corpus: her 48 saved projects [EXEC]
+
+With her consent all 48 saved projects (12 GB) were copied to this PC (tmp only). Each project folder was copied to
+C: (fresh modification times, so LYNX's disk stream cache is cold, as on a first open) and exported headless with
+this round's build; this PC has no SoundToys/UAD/Waves, but Pro-Q 4 (trial) is installed. Of 38 finished so far,
+the slowest opens are: FALA PRA MIM! 10.6 s (samples: 28 s of decoding spread over threads, 10 s wall), twin swag
+7.0 s (36.6 s → 6.3 s wall), luisa sonsa 6.1 s (Pro-Q 4 4.4 s), AIAIAIAUIUI 6.0 s, WIU 4.9 s, a 4.6 s, OIOIOI
+4.5 s; median ≈ 1.9 s. On projects with many long takes the **first** open is dominated by decoding the takes into
+the disk stream cache (`%TEMP%\LYNX-cache`, reused afterwards); on her laptop, by creating the hosted plugins.
+
+Old vs new on the largest one (JÃO, 100 samples, 516 MB), copied to C:: 0.1.7 cold open 5.5 s + export prepare
+1.4 s → new 1.9 s + 0.5 s; warm 1.5 s → 0.8 s. Over the slow WSL file share it was 272 s + 191 s (0.1.7, every sample
+decoded twice and serially) → 111 s + 0.4 s.
+
 ## 4. Left / not confirmed
 
 - The laptop could not be driven interactively (she was using it), so the UI open there is not measured; the
   next open there writes `%APPDATA%\LYNX\load.log` — read it to confirm (per-plugin lines show the slowest one).
-- `kwe` reports "Auto-Tune Pro" found but its instantiation takes 1 ms — likely failing to create (only on that
-  project's path `VST3\Antares\Auto-Tune Pro.vst3`); not confirmed, worth a look by the crash round.
+- A full plugin scan on her laptop would also drop the stale entries from `plugins.xml` (not done: her settings).
 - The Waves shell stays blacklisted on her laptop (REA_rodada107 territory); her Waves slots keep their substitutes.
 - A single slow plugin (> 5 s) still blocks the message thread for its own duration (the panel shows its name).
 
 ## Where I stopped
 
-Implementation, local tests and laptop measurements done; landing pending (see the commit log of feature/load112).
+Implementation, tests, laptop and corpus measurements done; the progress panel itself could not be watched on screen
+(GUI pause on this PC, the laptop in use) — check it on the next interactive session. Landing via land.sh.
