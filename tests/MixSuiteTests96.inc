@@ -501,7 +501,7 @@ TEST (mixsuite_stands_in_for_missing_vocal_plugins)
         CHECK (entry != nullptr && entry->effect == kind);
     }
 
-    // CLA-2A by its class ID -> Glow Leveler with the table's preset (peak reduction 0.45, gain 0.1)
+    // CLA-2A by its class ID -> Glow Leveler with the table's preset (peak reduction 0.30, gain 0.067; round 113)
     PluginIdentity cla;
     cla.format = ForeignPlugin::Format::vst3;
     cla.name = "WaveShell1-VST3 16.0_x64";
@@ -515,7 +515,7 @@ TEST (mixsuite_stands_in_for_missing_vocal_plugins)
     {
         const auto slot = makeSubstituteSlot (*entry);
         CHECK (slot.kind == EffectKind::glowLeveler);
-        CHECK (std::abs (slot.params[(std::size_t) mixsuite::glow::peakReduction] - 0.45f) < 1e-6f);
-        CHECK (std::abs (slot.params[(std::size_t) mixsuite::glow::gain] - 0.1f) < 1e-6f);
+        CHECK (std::abs (slot.params[(std::size_t) mixsuite::glow::peakReduction] - 0.30f) < 1e-6f);
+        CHECK (std::abs (slot.params[(std::size_t) mixsuite::glow::gain] - 0.067f) < 1e-6f);
     }
 }

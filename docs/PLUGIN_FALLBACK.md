@@ -7,7 +7,8 @@ What LYNX does with the third-party plugins (VST2, VST3, CLAP) a project uses, w
 
 LYNX looks for the same plugin among the ones it has scanned, in this order (`PluginHost::findForeign`):
 
-1. the same identifier: VST3 class ID, VST2 unique ID, CLAP id;
+1. the same identifier: VST3 class ID, VST2 unique ID, CLAP id (an entry of the plugin list whose file is gone — an
+   uninstalled older version next to the current one — is skipped, round 113);
 2. the file FL Studio's plugin database lists for it on this PC, or the very file the project saved;
 3. the same name (plugin or file name) in the same role, preferring the format the project used — so a project saved
    with a VST2 opens with the VST3 of the same product, and vice versa.
@@ -18,7 +19,12 @@ cross-format match plays with the plugin's default settings (the Missing files w
 
 **Waves**: a Waves project plugin is a WaveShell file holding hundreds of plugins. LYNX finds the sub-plugin by its
 VST3 class ID; failing that, by the `<PluginName>` its saved state carries ("RComp" → "RComp Stereo"), never by the
-shell's file name.
+shell's file name (nor by the file FL's plugin database lists for it: that file holds the whole bundle).
+
+A plugin file the scan could not describe is listed in `%APPDATA%\LYNX\scan-failures.log` with the reason (timeout
+before / while describing, exit code). Since round 113 the scan child ends right after writing its answer (a Waves
+shell's shutdown could hang and get the whole bundle marked as hung), a complete answer is kept even when the child had
+to be stopped, and files marked as failed by earlier versions get one more try.
 
 ## 2. The plugin is NOT installed: a LYNX substitute plays in its place
 
@@ -38,6 +44,14 @@ for a delay — instead of being dropped:
 an `.flp` plugin keeps its whole FL wrapper record (format, IDs, name, path, state, MIDI ports), a LYNX plugin keeps
 its identifier and state. Saving as `.lynx` writes it next to the substitute; opening that project on a machine that
 has the plugin puts the original back with its saved settings. The `.flp` file itself is never written.
+
+**A/B**: right-click a substitute slot › **Bypass all LYNX substitutes of this project** switches every substitute of
+the project off at once (the project's own effects and the hosted plugins keep playing); the slots show "(bypassed)".
+The switch is saved with the project (`substitutesBypassed` in `.lynx`).
+
+**The project's key** (round 113): a pitch corrector whose own key can't be read (Waves Tune, an unreadable state)
+corrects to the key and scale the project's other pitch correctors were saved with; when nothing in the project names
+a key, the substitute corrects gently (chromatic, 50 ms, humanize 50 %) rather than forcing a key.
 
 Instruments are not substituted yet (a missing instrument plugin still becomes a built-in synth chosen by the channel
 name, as before).
@@ -71,7 +85,8 @@ vst2params = 12                         # VST2 parameters per program (to read "
 map = xml:Mix -> mix                    # translation: source -> target [| inLo inHi outLo outHi]
 map = xml:ReverbMode -> Mode | steps 0:0 0.0828:0.0476   # enumerations: breakpoints (round 100)
 map = xml:decay -> Decay | curve 0:0 0.019:0.5 1:1      # other laws: piecewise-linear points
-translate = pro-c3                      # a built-in state translator (round 108): pro-c3, pro-mb, pro-g, saturn2
+translate = pro-c3                      # a built-in state translator: pro-c3, pro-mb, pro-g, saturn2 (round 108),
+                                        # auto-tune-pro, fresh-air (round 113)
 ```
 
 Map sources: `vst2:<n>` (float parameter n of the current program in FL's VST2 state), `xml:<attribute>` (an
@@ -116,20 +131,22 @@ matches by name).
 | ValhallaUberMod | Lattice Mod (round 101) | VST3 class ID [derived], name | all but DelaySync and InputPan (meaning not confirmed) |
 | Waves L1/L2/L3/L4 | Limiter | Waves name | — |
 | FabFilter Pro-L | Apex Limiter (round 99) | names | — |
-| Waves RComp, CLA-76, CLA-3A, C1, SSLComp, API-2500 | Compressor | VST3 class ID [DATA], Waves names | — |
+| Waves RComp, CLA-76, CLA-3A, C1, SSLComp, API-2500 | Compressor (2:1 above −15 dBFS, auto gain; round 113) | VST3 class ID [DATA], Waves names | — |
 | FabFilter Pro-C (2 / 3) | Crest Compressor (round 108) | names | Pro-C 3: style, threshold, ratio, knee, range, attack, release, hold, look-ahead, character, side-chain EQ (3 bands), levels, mix, oversampling [EXEC layout] |
 | FabFilter Pro-MB | Prism Multiband (round 108) | names | enabled bands laid out on Prism's four, threshold, ratio, range, mode, knee, attack / release, level, solo, look-ahead, mix [EXEC layout] |
 | FabFilter Pro-G | Sentry Gate (round 108) | names | every control [EXEC layout] |
-| Waves CLA-2A | Glow Leveler (peak reduction 45 %, gain +3 dB; round 96) | VST3 class ID [DATA], Waves name | — |
+| Waves CLA-2A | Glow Leveler (peak reduction 30 %, gain +2 dB; round 113) | VST3 class ID [DATA], Waves name | — |
 | Waves SSL E-Channel, SSL Native Channel Strip / 4K E / 4K B / Vocalstrip | Ridge Strip (neutral; round 96) | VST3 class ID [DATA], Waves name, names | — |
 | Waves Q10, REQ, SSLEQ | Parametric EQ (flat) | Waves names | — |
 | FabFilter Pro-Q | Facet EQ (flat, round 99) | names | — |
-| Waves DeEsser, FabFilter Pro-DS, Harrison De-Esser | Hush De-esser (default; round 96) | Waves name, names | — |
-| Slate Digital Fresh Air | Aether (neutral; round 96) | name | — |
-| Soundtoys Decapitator, FabFilter Saturn | Ember Saturator (drive +5.4 dB, auto gain; round 96) | names | Saturn 2: multiband mode — bands, crossovers, style family, drive, mix, level (round 108) [EXEC layout] |
-| Soundtoys PanMan | Auto-pan | VST2 ID [DATA], name | — |
+| Waves DeEsser | Hush De-esser (5.5 kHz, −20 dBFS, 4 dB; round 113) | Waves name | frequency (RealWorld value 0, the only one in Hz) [model] |
+| FabFilter Pro-DS, Harrison De-Esser | Hush De-esser (default; round 96) | names | — |
+| Slate Digital Fresh Air | Aether (neutral without a state; round 96) | name | mid / high air amounts → exciter / air shelf (at most +6 dB, a conservative reading) [DATA layout, model gain] (round 113) |
+| Soundtoys Decapitator, FabFilter Saturn | Ember Saturator (drive +1.4 dB, auto gain; round 113) | names | Saturn 2: multiband mode — bands, crossovers, style family, drive, mix, level (round 108) [EXEC layout] |
+| Soundtoys PanMan | Auto-pan (depth 50 %; round 113) | VST2 ID [DATA], name | — |
 
-| Antares Auto-Tune (Pro / Artist / Access / EFX+ / Hybrid), Waves Tune Real-Time | LYNX Tune (defaults: C major, 20 ms retune) | VST3 class ID [DATA] (Auto-Tune Pro), names, Waves name | — |
+| Antares Auto-Tune (Pro / Artist / Access / EFX+ / Hybrid) | LYNX Tune | VST3 class ID [DATA] (Auto-Tune Pro), names | Auto-Tune Pro: key and scale (`<Custom ScaleGivenKey / ScaleGivenScale>` [DATA]; scale list 0 major, 1 minor, 2 chromatic [model, round 113 §2]) with a 20 ms retune; otherwise the project's key or a gentle chromatic correction |
+| Waves Tune Real-Time | LYNX Tune | Waves name, names | — (the project's key, else gentle chromatic) |
 
 Not mapped yet (no LYNX module plays their role): NS1, Doubler, Little AlterBoy, Filterverse, Kickstart,
 Sausage Fattener, Effectrix, Analog Lab (instrument). The mixing suite of round 96 (Ridge Strip, Glow Leveler, Hush
@@ -139,4 +156,5 @@ De-esser, Aether, Ember Saturator) took over the channel strip, CLA-2A, de-esser
 [derived] = Steinberg's VST2-compatible VST3 UID ("VST" + the VST2 ID read from the plugin's own state header + the first nine letters of
 its lower-case name, in FL's byte order); the rule reproduces ValhallaVintageVerb's [DATA] ID exactly.
 Waves states hold readable "RealWorld" parameter lists, but which value is which control is not confirmed, so no
-Waves parameter is translated yet. Soundtoys states are encoded (not translated).
+Waves parameter is translated except DeEsser's frequency (the only value in Hz). Unreadable settings fall back to
+gentle presets (round 113: chosen by rendering her vocal takes, docs/analise/REA_rodada113.md §3). Soundtoys states are encoded (not translated).

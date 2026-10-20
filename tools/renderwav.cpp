@@ -139,11 +139,31 @@ int main (int argc, char** argv)
     // LYNX_SUBSTITUTES=1: third-party effects become their LYNX substitutes, as in the app when none is installed
     // (otherwise they stay unresolved, i.e. silent pass-through); LYNX_DISABLE="t.k t.k": those insert slots off
     if (const char* e = std::getenv ("LYNX_SUBSTITUTES"); e != nullptr && std::atoi (e) != 0)
+    {
+        const auto context = lynx::substituteContextOf (song);
         for (std::size_t t = 0; t < song.mixer.size(); ++t)
-            for (auto& fx : song.mixer[t].effects)
-                if (fx.kind == lynx::EffectKind::plugin && fx.plugin.foreign.format != lynx::ForeignPlugin::Format::none
-                    && lynx::substituteEffectSlot (fx, lynx::pluginIdentity (fx.plugin.foreign)))
-                    std::printf ("insert %d: %s -> %s\n", (int) t, lynx::substituteOriginalName (fx).c_str(), lynx::effectInfo (fx.kind).name);
+            for (std::size_t k = 0; k < song.mixer[t].effects.size(); ++k)
+                if (auto& fx = song.mixer[t].effects[k]; fx.kind == lynx::EffectKind::plugin && fx.plugin.foreign.format != lynx::ForeignPlugin::Format::none
+                    && lynx::substituteEffectSlot (fx, lynx::pluginIdentity (fx.plugin.foreign), context))
+                    std::printf ("insert %d: %s -> %s (slot %d.%d)\n", (int) t, lynx::substituteOriginalName (fx).c_str(), lynx::effectInfo (fx.kind).name, (int) t, (int) k);
+    }
+    // LYNX_SUBSTITUTES_BYPASS=1: the project's "substitutes bypassed" switch on (A/B)
+    if (const char* e = std::getenv ("LYNX_SUBSTITUTES_BYPASS"); e != nullptr && std::atoi (e) != 0)
+        song.substitutesBypassed = true;
+    // LYNX_PARAM="t.k.p=v …": insert t, slot k, parameter p set to the normalised value v (experiments)
+    if (const char* e = std::getenv ("LYNX_PARAM"))
+    {
+        std::istringstream list (e);
+        std::string item;
+        while (list >> item)
+        {
+            int t = -1, k = -1, prm = -1;
+            float v = 0.0f;
+            if (std::sscanf (item.c_str(), "%d.%d.%d=%f", &t, &k, &prm, &v) == 4 && t >= 0 && t < (int) song.mixer.size() && k >= 0
+                && k < (int) song.mixer[(std::size_t) t].effects.size() && prm >= 0 && prm < lynx::maxEffectParams)
+                song.mixer[(std::size_t) t].effects[(std::size_t) k].params[(std::size_t) prm] = v;
+        }
+    }
     if (const char* e = std::getenv ("LYNX_DISABLE"))
     {
         std::istringstream list (e);
