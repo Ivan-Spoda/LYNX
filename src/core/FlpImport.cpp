@@ -1,4 +1,5 @@
 #include "core/FlpImport.h"
+#include <filesystem>
 #include "core/EditorPolish.h"
 #include "core/FruityPhaser.h"
 #include "core/FlPluginDb.h"
@@ -90,6 +91,41 @@ InstrumentKind guessInstrument (const std::string& channelName, flp::ChannelType
     return InstrumentKind::synth;
 }
 
+// `path` as it exists on disk when only the letter case differs (POSIX file systems are case-sensitive; FL's paths
+// come from Windows). Returns `path` unchanged when it exists or no case-insensitive match is found.
+std::string existingPathIgnoringCase (const std::string& path)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    if (path.empty() || path.front() != '/' || fs::exists (path, ec))
+        return path;
+    auto lower = [] (std::string t) {
+        std::transform (t.begin(), t.end(), t.begin(), [] (unsigned char c) { return (char) std::tolower (c); });
+        return t;
+    };
+    fs::path current ("/");
+    for (const auto& part : fs::path (path).relative_path())
+    {
+        if (fs::exists (current / part, ec))
+        {
+            current /= part;
+            continue;
+        }
+        const auto wanted = lower (part.string());
+        bool found = false;
+        for (fs::directory_iterator it (current, ec), end; ! ec && it != end; it.increment (ec))
+            if (lower (it->path().filename().string()) == wanted)
+            {
+                current = it->path();
+                found = true;
+                break;
+            }
+        if (! found)
+            return path;
+    }
+    return current.string();
+}
+
 std::string resolveFlPath (const std::string& flPath, const FlPathRoots& roots)
 {
     const std::pair<const char*, const std::string*> variables[] = {
@@ -103,7 +139,19 @@ std::string resolveFlPath (const std::string& flPath, const FlPathRoots& roots)
         const std::string variable (name);
 
         if (flPath.compare (0, variable.size(), variable) == 0)
-            return root->empty() ? std::string() : *root + flPath.substr (variable.size());
+        {
+            if (root->empty())
+                return {};
+            auto path = *root + flPath.substr (variable.size());
+            // a POSIX root (macOS, Linux, a Wine prefix): FL's backslashes become '/', and FL's file names, written for
+            // a case-insensitive file system, are matched ignoring case when the exact spelling does not exist
+            if (root->front() == '/')
+            {
+                std::replace (path.begin(), path.end(), '\\', '/');
+                path = existingPathIgnoringCase (path);
+            }
+            return path;
+        }
     }
 
     return flPath;

@@ -3185,6 +3185,24 @@ TEST (flp_paths_resolve_and_samplers_import)
     CHECK (lynx::resolveFlPath ("%FLStudioUserData%\\z.wav", roots) == "D:\\User\\z.wav");
     CHECK (lynx::resolveFlPath ("E:\\abs.wav", roots) == "E:\\abs.wav");
     CHECK (lynx::resolveFlPath ("%FLStudioUserData%\\z.wav", {}) == "");
+    {
+        // POSIX roots (macOS, Linux, Wine prefix): backslashes become '/', letter case follows the disk (round 117)
+        namespace fs = std::filesystem;
+        const auto base = fs::temp_directory_path() / "lynx-case-test";
+        fs::remove_all (base);
+        fs::create_directories (base / "Data" / "Patches" / "Packs");
+        { std::ofstream (base / "Data" / "Patches" / "Packs" / "Kick.WAV") << "x"; }
+        lynx::FlPathRoots posix;
+        posix.factoryData = base.string();
+        CHECK (lynx::resolveFlPath ("%FLStudioFactoryData%\\Data\\Patches\\Packs\\Kick.WAV", posix) == (base / "Data/Patches/Packs/Kick.WAV").string());
+        const auto lowerCase = lynx::resolveFlPath ("%FLStudioFactoryData%\\data\\patches\\packs\\kick.wav", posix);
+        if (fs::exists (base / "data")) // case-insensitive file system (macOS): any spelling opens the file
+            CHECK (fs::exists (lowerCase));
+        else
+            CHECK (lowerCase == (base / "Data/Patches/Packs/Kick.WAV").string());
+        CHECK (lynx::resolveFlPath ("%FLStudioFactoryData%\\Data\\missing.wav", posix) == (base / "Data/missing.wav").string());
+        fs::remove_all (base);
+    }
 
     flp::Project p;
     p.channels = { { 0, flp::ChannelType::sampler, "Kick", "", "%FLStudioData%\\k.wav", 1 },
