@@ -51,6 +51,9 @@ exports the 30 demo projects shipped with FL Studio 2026.
   (docs/analise/REA_rodada114.md).
 - **Project safety:** "*" in the title, "save changes?", autosave every 2 minutes and an emergency save on crash
   (`%APPDATA%\LYNX\autosave`).
+- **Opening FL projects** behind a progress panel (round 112): samples decoded in parallel off the UI thread, hosted
+  plugins created one by one with their names shown ("Loading Auto-Tune Pro... 3/12"), no repeated plugin searches,
+  missing drives probed once; phase times in `%APPDATA%\LYNX\load.log` and in the `--export` report.
 
 ### Sound
 - **Built-in synth:** 3 oscillators (sine, triangle, saw, square, noise and a band-limited **harmonics**
