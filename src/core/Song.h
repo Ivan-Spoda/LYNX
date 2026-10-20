@@ -765,6 +765,11 @@ struct Song
     Bar barAt (std::int64_t tick) const;
 
     std::vector<MixerTrack> mixer; // [0] = Master; empty = everything straight to the output
+    // A/B of the LYNX substitutes (round 113): when set, every substitute slot plays as bypassed (the project's own
+    // effects and the hosted plugins still play). Saved with the project.
+    bool substitutesBypassed = false;
+    // whether an effect slot processes: switched on, and not a substitute while the substitutes are bypassed
+    bool slotActive (const EffectSlot& slot) const noexcept { return slot.enabled && ! (substitutesBypassed && slot.isSubstitute()); }
     std::vector<Automation> automations;
     std::vector<PlaylistTrack> playlistTracks; // index = track; tracks past the end use the default
     std::vector<MidiLink> midiLinks;

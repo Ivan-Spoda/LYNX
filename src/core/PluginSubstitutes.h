@@ -119,6 +119,30 @@ EffectSlot makeSubstituteSlot (const SubstituteEntry& entry, const PluginIdentit
 // False (slot unchanged) when no entry matches. `identity` is the original's identity (pluginIdentity for .flp).
 bool substituteEffectSlot (EffectSlot& slot, const PluginIdentity& identity);
 
+// What the whole project says about the settings a substitute can't read from its own original (round 113): the key
+// and scale of the song, taken from the pitch correctors whose saved state is readable (Auto-Tune Pro). A pitch
+// corrector whose own key is unknown (Waves Tune, an unreadable state) then corrects to the project's key instead of
+// guessing one.
+struct SubstituteContext
+{
+    int key = -1;   // 0 = C … 11 = B; −1 = unknown
+    int scale = -1; // LYNX Tune's scale index (vocal::Scale); −1 = unknown
+    bool knowsKey() const noexcept { return key >= 0 && scale >= 0; }
+};
+// The context of a song: every plugin slot (hosted, unresolved or already substituted) whose original state names a
+// key; the most common key / scale wins (ties: the first slot's).
+SubstituteContext substituteContextOf (const Song& song);
+// As above, using `context` for what the original's own state doesn't tell.
+bool substituteEffectSlot (EffectSlot& slot, const PluginIdentity& identity, const SubstituteContext& context);
+
+// The key and scale an Auto-Tune Pro component state was saved with (its <Custom> element's ScaleGivenKey /
+// ScaleGivenScale), as LYNX Tune's key index and scale (vocal::Scale index); nullopt when not readable or a scale
+// LYNX Tune has no equivalent for. Exposed for the tests.
+std::optional<std::pair<int, int>> autoTuneProKey (const std::vector<std::uint8_t>& state);
+// Fresh Air's two "air" amounts (the two floats of its saved state, 0..1: mid and high air); nullopt when the state
+// doesn't have that layout. Exposed for the tests.
+std::optional<std::pair<float, float>> freshAirAmounts (const std::vector<std::uint8_t>& state);
+
 // A substitute slot back to its original plugin (kind = plugin, plugin = substituteFor). False if not a substitute.
 bool restoreOriginalPlugin (EffectSlot& slot);
 

@@ -849,6 +849,8 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::St
         }
     }
 
+    // the song's key etc., for substitutes whose own original doesn't say (round 113)
+    const auto context = substituteContextOf (song);
     // backwards: removing an unmatched slot shifts only the slots after it (their automations follow)
     for (int track = 0; track < (int) song.mixer.size(); ++track)
         for (int slot = (int) song.mixer[(std::size_t) track].effects.size() - 1; slot >= 0; --slot)
@@ -858,7 +860,7 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::St
                 continue;
             const auto foreign = fx.plugin.foreign;
             // not installed: a LYNX substitute plays in its place and keeps the original record for later
-            if (pluginSubstitutesEnabled() && ! findForeign (foreign, false) && substituteEffectSlot (fx, pluginIdentity (foreign)))
+            if (pluginSubstitutesEnabled() && ! findForeign (foreign, false) && substituteEffectSlot (fx, pluginIdentity (foreign), context))
             {
                 if (substituted != nullptr)
                     substituted->addIfNotAlreadyThere (juce::String::fromUTF8 (substituteOriginalName (fx).c_str()) + " -> "
@@ -918,6 +920,7 @@ int PluginHost::applySubstitutes (Song& song, int* restored, int* substituted)
     int back = 0, replaced = 0;
     bool foreignBack = false;
     const auto substitute = pluginSubstitutesEnabled();
+    const auto context = substituteContextOf (song);
     for (auto& track : song.mixer)
         for (auto& fx : track.effects)
         {
@@ -937,7 +940,7 @@ int PluginHost::applySubstitutes (Song& song, int* restored, int* substituted)
             else if (substitute && fx.kind == EffectKind::plugin && fx.plugin.foreign.format == ForeignPlugin::Format::none
                      && ! fx.plugin.id.empty() && find (juce::String::fromUTF8 (fx.plugin.id.c_str())) == nullptr)
             {
-                if (substituteEffectSlot (fx, identityOf (fx.plugin)))
+                if (substituteEffectSlot (fx, identityOf (fx.plugin), context))
                     ++replaced;
             }
         }

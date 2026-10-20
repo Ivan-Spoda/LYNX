@@ -10,6 +10,9 @@
 #include "core/FabFilterStates.h"
 #include "core/FlPluginDb.h"
 #include "core/FlWrapper.h"
+#include "core/LynxTune.h"
+#include "core/MixSuite.h"
+#include "core/VocalPitch.h"
 
 namespace lynx
 {
@@ -367,7 +370,9 @@ lynx = Compressor
 # but keeps the level (its makeup gain is unknown; round 107: without it her vocals came out 4 dB quieter)
 vst3 = 5554535643527253636f6d7072657373
 waves = RComp
-preset = Auto gain=1
+# round 113: a gentle default (2:1 above -15 dBFS): her vocal takes through the old -18 dB 4:1 lost the most low/high
+# balance of any substitute but the de-esser (docs/analise/REA_rodada113.md §3)
+preset = Threshold=0.75; Ratio=0.0526; Auto gain=1
 
 [waves-cla-2a]
 product = CLA-2A
@@ -376,15 +381,16 @@ lynx = Glow Leveler
 # [DATA] class ID (stereo component) and <PluginName> from real projects
 vst3 = 4c545356324163536c612d3261207374
 waves = CLA-2A
-# LYNX's optical leveler (round 96); its state is not translated: moderate leveling (+7 dB into the cell, +3 dB gain)
-preset = Peak reduction=0.45; Gain=0.1
+# LYNX's optical leveler (round 96); its state is not translated: light leveling (−2 dB into the cell, +2 dB gain;
+# round 113: was +7 dB / +3 dB)
+preset = Peak reduction=0.30; Gain=0.067
 
 [waves-compressors]
 product = Waves compressor (CLA-76 / CLA-3A / C1 / SSLComp / API-2500)
 vendor = Waves
 lynx = Compressor
 waves = CLA-76; CLA-3A; C1 comp; C1comp; SSLComp; API-2500
-preset = Auto gain=1
+preset = Threshold=0.75; Ratio=0.0526; Auto gain=1
 
 [fabfilter-pro-c]
 product = FabFilter Pro-C
@@ -451,6 +457,11 @@ product = DeEsser
 vendor = Waves
 lynx = Hush De-esser
 waves = DeEsser; DeEsser Stereo
+# round 113: a gentle default (5.5 kHz, -20 dBFS, at most 4 dB): the old one (6 kHz, -30 dBFS, 12 dB) took 4-5 dB off
+# her vocals above 8 kHz. [model] value 0 of the RealWorld list is the only one in Hz (5506 in every state surveyed):
+# the frequency
+map = waves:0 -> Frequency | curve 2000:0 2828:0.1667 4000:0.3333 5657:0.5 8000:0.6667 11314:0.8333 16000:1
+preset = Frequency=0.487; Threshold=0.667; Range=0.167
 
 [fabfilter-pro-ds]
 product = FabFilter Pro-DS
@@ -469,14 +480,17 @@ product = Fresh Air
 vendor = Slate Digital
 lynx = Aether
 names = Fresh Air; FreshAir
+# round 113: its two air amounts are read from the state (freshAirAmounts) and set a gentle air shelf / exciter
+translate = fresh-air
 
 [soundtoys-decapitator]
 product = Decapitator
 vendor = Soundtoys
 lynx = Ember Saturator
 names = Decapitator
-# a light drive (+5.4 dB, tube) with auto gain, so the slot colours without jumping in level
-preset = Drive=0.15
+# its state is encoded: a light drive (+1.4 dB, tube; round 113, was +5.4 dB) with auto gain, so the slot colours
+# without jumping in level
+preset = Drive=0.04
 
 [fabfilter-saturn]
 product = FabFilter Saturn
@@ -496,15 +510,21 @@ lynx = Auto-pan
 # [DATA] VST2 unique ID from real projects
 vst2 = StPn
 names = PanMan
+# its state is encoded: a moderate sweep (round 113, was 75 %)
+preset = Depth=0.5
 
 # ---------------------------------------------------------------- vocal pitch correction -> LYNX Tune (round 95)
 [antares-auto-tune]
 product = Auto-Tune Pro
 vendor = Antares
 lynx = LYNX Tune
-# [DATA] VST3 class ID from FL wrapper records of real projects (round 98); its settings are not translated
+# [DATA] VST3 class ID from FL wrapper records of real projects (round 98). Round 113: the state's key and scale are
+# read (autoTuneProKey) and set with a 20 ms retune; without them the project's key (another readable pitch corrector)
+# or, failing that, a gentle chromatic correction (50 ms, humanize 50 %) instead of forcing C major
 vst3 = 415453563854413175746f2d54756e65
 names = Auto-Tune Pro; Auto-Tune Pro X; Auto-Tune Artist; Auto-Tune Access; Auto-Tune EFX+; Auto-Tune Hybrid; Auto-Tune
+translate = auto-tune-pro
+preset = Scale=0; Retune=0.3536; Humanize=0.5
 mix = 1
 
 [waves-tune]
@@ -513,6 +533,8 @@ vendor = Waves
 lynx = LYNX Tune
 waves = WavesTune Real-Time; Waves Tune Real-Time; WavesTune
 names = WavesTune Real-Time; Waves Tune Real-Time
+# its settings are not translated: the project's key when another pitch corrector names it, else chromatic, gentle
+preset = Scale=0; Retune=0.3536; Humanize=0.5
 mix = 1
 )TABLE";
 
@@ -879,7 +901,109 @@ struct BinReader
 };
 
 constexpr std::uint32_t foreignTextMagic = 0x31464C4Cu; // "LLF1"
+
+// --- translators of states whose layout is readable without a vendor library (round 113) ------------------------
+using RawTranslator = int (*) (const std::vector<std::uint8_t>& state, EffectSlot& slot);
+
+// Auto-Tune Pro: key and scale (autoTuneProKey); with them the retune speed of the original's own default and of
+// every state of the projects surveyed (20 ms), no humanize. Without them the slot keeps the entry's gentle preset.
+int translateAutoTunePro (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    const auto key = autoTuneProKey (state);
+    if (! key || slot.kind != EffectKind::lynxTune)
+        return 0;
+    slot.params[lynxtune::key] = (float) key->first / 11.0f;
+    slot.params[lynxtune::scale] = (float) key->second / (float) (vocal::scaleCount - 1);
+    slot.params[lynxtune::retune] = 0.2236068f; // 20 ms
+    slot.params[lynxtune::humanize] = 0.0f;
+    return 2;
+}
+
+// Fresh Air: the high air amount becomes Aether's air shelf (at most +6 dB for a full knob, a conservative reading:
+// the vendor's gain law is not known), the mid air amount a light share of its exciter.
+int translateFreshAir (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    const auto air = freshAirAmounts (state);
+    if (! air || slot.kind != EffectKind::aether)
+        return 0;
+    slot.params[mixsuite::aether::air] = std::clamp (air->second * 6.0f / 15.0f, 0.0f, 1.0f);
+    slot.params[mixsuite::aether::harmonics] = std::clamp (air->first * 0.25f, 0.0f, 1.0f);
+    return 2;
+}
+
+RawTranslator rawTranslatorNamed (std::string_view name)
+{
+    if (name == "auto-tune-pro")
+        return translateAutoTunePro;
+    if (name == "fresh-air")
+        return translateFreshAir;
+    return nullptr;
+}
+
+// the value of attribute `name` in the element starting at `from` ("" when absent)
+std::string attributeIn (const std::string& text, std::size_t from, const std::string& name)
+{
+    const auto end = text.find ('>', from);
+    const auto key = " " + name + "=\"";
+    const auto at = text.find (key, from);
+    if (at == std::string::npos || (end != std::string::npos && at > end))
+        return {};
+    const auto start = at + key.size();
+    const auto close = text.find ('"', start);
+    return close == std::string::npos ? std::string() : text.substr (start, close - start);
+}
 } // namespace
+
+std::optional<std::pair<int, int>> autoTuneProKey (const std::vector<std::uint8_t>& state)
+{
+    const auto at = findBytes (state, "<Custom ");
+    if (at == std::string::npos || findBytes (state, "<SessionChunkData") == std::string::npos)
+        return std::nullopt;
+    const std::string text (state.begin() + (std::ptrdiff_t) at, state.begin() + (std::ptrdiff_t) std::min (state.size(), at + 4096));
+    float key = -1, scale = -1;
+    if (! parseFloat (attributeIn (text, 0, "ScaleGivenKey"), key) || ! parseFloat (attributeIn (text, 0, "ScaleGivenScale"), scale))
+        return std::nullopt;
+    if (key < 0 || key > 11 || key != std::floor (key))
+        return std::nullopt;
+    // [model] the scale list's first three entries: 0 = major, 1 = minor, 2 = chromatic. Read from the raw vocal takes
+    // of three of her projects (round 113 §2): the pitch classes sung under "A, 1" and "E, 1" fit the minor scale (the
+    // natural minor's 7th / 3rd / 6th are sung, the major's are not); "C, 2" (C = the default key) fits no scale on C.
+    vocal::Scale lynxScale;
+    if (scale == 0.0f)
+        lynxScale = vocal::Scale::major;
+    else if (scale == 1.0f)
+        lynxScale = vocal::Scale::minor;
+    else if (scale == 2.0f)
+        lynxScale = vocal::Scale::chromatic;
+    else
+        return std::nullopt; // the other scales: not confirmed
+    return std::pair<int, int> { (int) key, (int) lynxScale };
+}
+
+std::optional<std::pair<float, float>> freshAirAmounts (const std::vector<std::uint8_t>& state)
+{
+    // [DATA] the component state of every Fresh Air slot surveyed (round 113): 2530 bytes, u32 1, u32 size − 8, then
+    // two floats 0..1 at 1290 / 1294 (the two air knobs, in the order the vendor's manual lists them: mid, high)
+    if (state.size() != 2530)
+        return std::nullopt;
+    auto u32 = [&state] (std::size_t at) {
+        std::uint32_t v = 0;
+        std::memcpy (&v, state.data() + at, 4);
+        return v;
+    };
+    auto f32 = [&state] (std::size_t at) {
+        float v = 0;
+        std::memcpy (&v, state.data() + at, 4);
+        return v;
+    };
+    if (u32 (0) != 1 || u32 (4) != (std::uint32_t) state.size() - 8)
+        return std::nullopt;
+    const auto mid = f32 (1290), high = f32 (1294);
+    if (! std::isfinite (mid) || ! std::isfinite (high) || mid < 0.0f || mid > 1.0f || high < 0.0f || high > 1.0f)
+        return std::nullopt;
+    return std::pair<float, float> { mid, high };
+}
+
 
 PluginIdentity pluginIdentity (const ForeignPlugin& plugin)
 {
@@ -1048,7 +1172,7 @@ std::vector<SubstituteEntry> parseSubstituteTable (std::string_view text, int* e
             mapItems.push_back (value);
         else if (key == "translate")
         {
-            if (fabfilter::translatorNamed (value) != nullptr)
+            if (fabfilter::translatorNamed (value) != nullptr || rawTranslatorNamed (value) != nullptr)
                 e.translator = value;
             else
                 ++bad;
@@ -1226,6 +1350,9 @@ EffectSlot makeSubstituteSlot (const SubstituteEntry& entry, const PluginIdentit
         }
     }
     if (original != nullptr && ! original->state.empty() && ! entry.translator.empty())
+        if (const auto translate = rawTranslatorNamed (entry.translator))
+            count += translate (original->state, slot);
+    if (original != nullptr && ! original->state.empty() && ! entry.translator.empty())
         if (const auto translate = fabfilter::translatorNamed (entry.translator))
             if (const auto state = fabfilter::parseState (original->state))
                 count += translate (*state, slot);
@@ -1236,12 +1363,25 @@ EffectSlot makeSubstituteSlot (const SubstituteEntry& entry, const PluginIdentit
 
 bool substituteEffectSlot (EffectSlot& slot, const PluginIdentity& identity)
 {
+    return substituteEffectSlot (slot, identity, SubstituteContext {});
+}
+
+bool substituteEffectSlot (EffectSlot& slot, const PluginIdentity& identity, const SubstituteContext& context)
+{
     if (slot.kind != EffectKind::plugin)
         return false;
     const auto* entry = findPluginSubstitute (identity, false);
     if (entry == nullptr)
         return false;
-    auto replacement = makeSubstituteSlot (*entry, &identity);
+    int translated = 0;
+    auto replacement = makeSubstituteSlot (*entry, &identity, &translated);
+    // a pitch corrector whose own key is unknown: the project's key (its other pitch correctors), with the entry's
+    // gentle retune; no key anywhere: the entry's chromatic preset
+    if (replacement.kind == EffectKind::lynxTune && context.knowsKey() && ! autoTuneProKey (identity.state))
+    {
+        replacement.params[lynxtune::key] = (float) context.key / 11.0f;
+        replacement.params[lynxtune::scale] = (float) context.scale / (float) (vocal::scaleCount - 1);
+    }
     replacement.enabled = slot.enabled;
     replacement.mix = std::clamp (slot.mix * replacement.mix, 0.0f, 1.0f); // nested dry/wet crossfades multiply
     replacement.sidechain = slot.sidechain;
@@ -1251,6 +1391,39 @@ bool substituteEffectSlot (EffectSlot& slot, const PluginIdentity& identity)
         replacement.substituteFor.name = identity.name;
     slot = std::move (replacement);
     return true;
+}
+
+SubstituteContext substituteContextOf (const Song& song)
+{
+    std::vector<std::pair<std::pair<int, int>, int>> votes; // (key, scale) -> slots
+    auto look = [&votes] (const ForeignPlugin& plugin) {
+        if (plugin.format == ForeignPlugin::Format::none)
+            return;
+        if (const auto k = autoTuneProKey (pluginIdentity (plugin).state))
+        {
+            auto it = std::find_if (votes.begin(), votes.end(), [&] (const auto& v) { return v.first == *k; });
+            if (it == votes.end())
+                votes.push_back ({ *k, 1 });
+            else
+                ++it->second;
+        }
+    };
+    for (const auto& track : song.mixer)
+        for (const auto& fx : track.effects)
+        {
+            look (fx.plugin.foreign);
+            look (fx.substituteFor.foreign);
+        }
+    SubstituteContext context;
+    int best = 0;
+    for (const auto& [k, n] : votes)
+        if (n > best)
+        {
+            best = n;
+            context.key = k.first;
+            context.scale = k.second;
+        }
+    return context;
 }
 
 bool restoreOriginalPlugin (EffectSlot& slot)
