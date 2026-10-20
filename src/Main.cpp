@@ -1,5 +1,6 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "core/LoadTrace.h"
 #include "core/Effects.h"
 #include "core/FlEffects.h"
 #include "core/FlpImport.h"
@@ -1574,6 +1575,7 @@ private:
         juce::String error, report;
         bool ok = false;
         const auto started = juce::Time::getMillisecondCounterHiRes();
+        lynx::loadtrace::begin (inputPath.toStdString()); // phase times (round 112): report lines + load.log
         {
             lynx::AudioEngine loader (false);
             const juce::File input (inputPath);
@@ -1587,8 +1589,13 @@ private:
                     {
                         const auto uses = lynx::flpForeignPlugins (flp::parseProject ({ static_cast<const std::uint8_t*> (data.getData()), data.getSize() }));
                         auto& host = loader.getPluginHost();
-                        report << "scanned=" << host.filesToScanFor (uses).joinIntoString (";") << "\n";
-                        host.scanFiles (host.filesToScanFor (uses), {});
+                        const auto listed = std::chrono::steady_clock::now();
+                        const auto files = host.filesToScanFor (uses);
+                        lynx::loadtrace::add ("plugin_scan_list", lynx::loadtrace::msSince (listed));
+                        report << "scanned=" << files.joinIntoString (";") << "\n";
+                        const auto scanned = std::chrono::steady_clock::now();
+                        host.scanFiles (files, {});
+                        lynx::loadtrace::add ("plugin_scan", lynx::loadtrace::msSince (scanned), files.size());
                     }
                     catch (const flp::Error&)
                     {
@@ -1633,6 +1640,7 @@ private:
                 }
                 lynx::ExportJob job (insert > 0 ? lynx::makeBounceSong (loader.getSong(), insert) : loader.getSong(), options, output);
                 const auto prepared = juce::Time::getMillisecondCounterHiRes();
+                lynx::loadtrace::end();
                 int lastPercent = -1;
                 ok = job.run ([&lastPercent] (double p) {
                     lastPercent = (int) (p * 100.0);
@@ -1676,6 +1684,8 @@ private:
                         report << "\n";
                     }
                 }
+                report << juce::String (lynx::loadtrace::reportLines());
+                lynx::PluginHost::settingsFolder().getChildFile ("load.log").replaceWithText (juce::String (lynx::loadtrace::table()));
                 report << "open_ms=" << juce::roundToInt (loaded - started) << "\n"
                        << "prepare_ms=" << juce::roundToInt (prepared - loaded) << "\n"
                        << "render_ms=" << juce::roundToInt (juce::Time::getMillisecondCounterHiRes() - prepared) << "\n"
