@@ -125,8 +125,8 @@ captures stay outside the repository (`tmp/flui115/flref`).
 | 1 | Browser | Current project: patterns, samples, effects, generators, history... | same sections (+ automation), live counts, colours, details | done (115) |
 | 2 | Browser | Items in the colour of what they belong to | patterns, audio files, generators, effects, automation coloured | done (115) |
 | 3 | Browser | Top-level folders each with own icon colour | own colour per folder | done (115) |
-| 4 | Browser | Tabs ALL / PROJECT / PLUGINS / PRESETS / SOUNDS / STARRED | ALL and PROJECT | partly: PLUGINS (installed plugins), PRESETS, STARRED to do |
-| 5 | Browser | Hover star = favourite; STARRED tab; tags | none | to do |
+| 4 | Browser | Tabs ALL / PROJECT / PLUGINS / PRESETS / SOUNDS / STARRED | ALL, PROJECT, STARRED | partly: STARRED done (115, landing); PLUGINS (installed plugins), PRESETS to do |
+| 5 | Browser | Hover star = favourite; STARRED tab; tags | right-click > Starred on files and folders; STARRED tab (folders, then files; search looks in the starred folders) | partly (115, landing): hover star and tags to do |
 | 6 | Browser | Effect / generator rows show a thumbnail of the plugin window | icon only | to do (LYNX could draw a mini of its own editors) |
 | 7 | Browser | Sample menu: Send to playlist as audio clip / track, open in sampler, slicer..., pitch corrector, time warper, Locate file | send to channel / new channel / Playlist audio clip, audio editor, file manager | partly (slicer channel, audio track, "Locate file" to do) |
 | 8 | Browser | Remote control / Initialized controls sections | MIDI links and init values not listed | to do |
@@ -137,7 +137,7 @@ captures stay outside the repository (`tmp/flui115/flref`).
 | 13 | Toolbar | Single items (each button) and spacers are draggable | whole panels (groups) only | to do: per-button items, spacers |
 | 14 | Toolbar | Factory presets incl. single-line layouts | 4 LYNX presets, two-row layout only | partly (single-line layout to do) |
 | 15 | Menus | Item menus tinted with the item's colour | coloured title band | done (115) |
-| 16 | Mixer | Track menu: rename/colour/random colour/icon first | rename and colour, change colour, random colour | done (115); icons, gradient colour, insert one / delete / insert multiple, group, dock to: to do |
+| 16 | Mixer | Track menu: rename/colour/random colour/icon first | rename and colour, change colour, random colour, Insert one, Delete | done (115); icons, gradient colour, insert multiple, group, dock to: to do |
 | 17 | Hint bar | Undo says what and the level ("Level 2/3") | "Undone: ...", "Level n/m" | done (115) |
 | 18 | Hint bar | Hovered sample shows its full path | full path in the hint | done (115) |
 | 19 | Playlist | Track icons (0xEE offset 8) | none | to do (round 104 leftover) |
@@ -150,6 +150,14 @@ captures stay outside the repository (`tmp/flui115/flref`).
 - Implemented and committed on `feature/flui115` (pushed to `origin/wip/flui115`): Browser tabs and Current project,
   toolbar edit mode, coloured menu headers, mixer colour items, undo hint. Verification (build-local with the FL Data
   dir, Windows build, snapshots side by side with `tmp/flui115/flref`) - see the landing notes below.
-- Next candidates (table above, "to do"): STARRED / favourites, PLUGINS tab, thumbnails of LYNX's own editors in
+- Landing (2026-10-20): merged origin/main (round 112/113, i18n conflicts kept both sides), then added
+  - **STARRED tab**: right-click a file or folder > Starred (ticked when on); the list is kept in
+    `browser-starred.txt` in the settings folder; the tab lists starred folders (open like ALL's) then files,
+    by name, missing ones left out; a search there looks in the starred folders.
+  - **Mixer track menu, FL's second section**: Insert one (a blank insert here, the others move right) and Delete
+    (the following inserts move left, a blank one takes the end; channels on it go to the Master, sends to it and
+    sidechains from it are removed); default names "Insert n" follow their new number
+    (`mixerops::insertTrack` / `deleteTrack`, test `flui115_mixer_insert_one_and_delete`).
+- Next candidates (table above, "to do"): hover star and tags, PLUGINS tab, thumbnails of LYNX's own editors in
   Effects/Generators, per-button toolbar items and spacers, a single-line toolbar preset, the rest of FL's mixer track
-  menu (insert one, delete, insert multiple, groups).
+  menu (insert multiple, groups, icons, gradient colour).

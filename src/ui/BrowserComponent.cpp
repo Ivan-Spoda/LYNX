@@ -1280,7 +1280,7 @@ public:
         return { t * w, 0, t == tabCount - 1 ? getWidth() - t * w : w, getHeight() };
     }
 
-    static juce::String name (int t) { return t == allTab ? tr ("ALL") : tr ("PROJECT"); }
+    static juce::String name (int t) { return t == allTab ? tr ("ALL") : t == projectTab ? tr ("PROJECT") : tr ("STARRED"); }
 
     void paint (juce::Graphics& g) override
     {
@@ -1316,8 +1316,10 @@ public:
     ui::Hint hintAt (juce::Point<int> p) override
     {
         ui::Hint h;
-        h.text = p.x < getWidth() / 2 ? tr ("Browser: ALL - the current project and every sample folder")
-                                       : tr ("Browser: PROJECT - only what the current project uses (patterns, effects, generators, audio files...)");
+        const auto t = juce::jlimit (0, tabCount - 1, p.x * tabCount / juce::jmax (1, getWidth()));
+        h.text = t == allTab       ? tr ("Browser: ALL - the current project and every sample folder")
+                 : t == projectTab ? tr ("Browser: PROJECT - only what the current project uses (patterns, effects, generators, audio files...)")
+                                   : tr ("Browser: STARRED - the files and folders you starred (right-click > Starred)");
         return h;
     }
 
@@ -1568,6 +1570,26 @@ juce::File BrowserComponent::userFoldersFile()
     return PluginHost::settingsFolder().getChildFile ("browser-folders.txt");
 }
 
+juce::File BrowserComponent::starredFile()
+{
+    return PluginHost::settingsFolder().getChildFile ("browser-starred.txt");
+}
+
+void BrowserComponent::setStarred (const juce::File& file, bool on)
+{
+    const auto path = file.getFullPathName();
+    if (on == starred.contains (path))
+        return;
+    if (on)
+        starred.add (path);
+    else
+        starred.removeString (path);
+    starredFile().getParentDirectory().createDirectory();
+    starredFile().replaceWithText (starred.joinIntoString ("\n") + "\n");
+    if (tab == starredTab)
+        rebuildTree();
+}
+
 void BrowserComponent::rebuildRoots()
 {
     roots.clear();
@@ -1604,12 +1626,41 @@ void BrowserComponent::rebuildRoots()
         if (line.trim().isNotEmpty())
             add (juce::File (line.trim()).getFileName(), juce::File (line.trim()));
 
+    starred.clear();
+    for (const auto& line : juce::StringArray::fromLines (starredFile().loadFileAsString()))
+        if (line.trim().isNotEmpty() && juce::File::isAbsolutePath (line.trim()))
+            starred.addIfNotAlreadyThere (line.trim());
+
     rebuildTree();
 }
 
 void BrowserComponent::rebuildTree()
 {
     std::vector<std::unique_ptr<FileTree::Node>> top;
+    if (tab == starredTab)
+    {
+        // folders first (each opens like the ALL tab's), then files, both by name; missing ones are left out
+        juce::Array<juce::File> folders, files;
+        for (const auto& path : starred)
+            if (const juce::File f (path); f.isDirectory())
+                folders.add (f);
+            else if (f.existsAsFile())
+                files.add (f);
+        const auto byName = [] (const juce::File& a, const juce::File& b) { return a.getFileName().compareNatural (b.getFileName()) < 0; };
+        std::sort (folders.begin(), folders.end(), byName);
+        std::sort (files.begin(), files.end(), byName);
+        for (const auto& f : folders)
+            top.push_back (FileTree::makeFolder (f, f.getFileName(), theme::colour::accent));
+        for (const auto& f : files)
+        {
+            auto n = std::make_unique<FileTree::Node>();
+            n->file = f;
+            top.push_back (std::move (n));
+        }
+        tree->setTopLevel (std::move (top));
+        treeView->setViewPosition (0, 0);
+        return;
+    }
     top.push_back (FileTree::makeProject (tab == projectTab));
 
     if (tab == allTab)
@@ -1741,6 +1792,7 @@ void BrowserComponent::showFileMenu (const juce::File& file)
     menu.addSeparator();
     menu.addItem (tr ("Edit in the audio editor..."), [this, file] { openAudioEditor (engine, file); });
     menu.addItem (tr ("Show in the file manager"), [file] { file.revealToUser(); });
+    menu.addItem (tr ("Starred"), true, isStarred (file), [this, file] { setStarred (file, ! isStarred (file)); });
     menu.addSeparator();
     menu.addItem (tr ("Collapse all folders"), [this] { tree->collapseAll(); });
     menu.addItem (tr ("Add folder..."), [this] { addUserFolder(); });
@@ -1753,6 +1805,7 @@ void BrowserComponent::showFolderMenu (const juce::File& folder)
     menu.addSectionHeader (folder.getFileName());
     menu.addItem (tr ("Collapse all folders"), [this] { tree->collapseAll(); });
     menu.addItem (tr ("Show in the file manager"), [folder] { folder.revealToUser(); });
+    menu.addItem (tr ("Starred"), folder.isDirectory(), isStarred (folder), [this, folder] { setStarred (folder, ! isStarred (folder)); });
     menu.addSeparator();
     menu.addItem (tr ("Add folder..."), [this] { addUserFolder(); });
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
@@ -1776,6 +1829,14 @@ juce::Array<juce::File> BrowserComponent::searchRoots() const
     // the top-level folder holding the selection; nothing selected there: every folder
     if (const auto root = tree->selectedRoot(); root.isDirectory())
         return { root };
+    if (tab == starredTab) // the starred folders
+    {
+        juce::Array<juce::File> folders;
+        for (const auto& path : starred)
+            if (const juce::File f (path); f.isDirectory())
+                folders.add (f);
+        return folders;
+    }
     return roots;
 }
 

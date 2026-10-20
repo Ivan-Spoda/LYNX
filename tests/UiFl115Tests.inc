@@ -144,3 +144,31 @@ TEST (flui115_toolbar_presets_and_flags)
     d.visible = false;
     CHECK (! d.isDefault());
 }
+
+TEST (flui115_mixer_insert_one_and_delete)
+{
+    auto song = lynx::Song::makeDefault();
+    song.mixer = lynx::Song::defaultMixer (4); // Master + Insert 1..4
+    song.mixer[2].name = "bass";
+    song.channels.resize (2);
+    song.channels[0].mixerTrack = 2;
+    song.channels[1].mixerTrack = 3;
+    song.setRoute (2, 4, true, 0.5f);
+    lynx::EffectSlot comp;
+    comp.kind = lynx::EffectKind::compressor;
+    comp.sidechain = 2;
+    song.mixer[4].effects = { comp };
+
+    CHECK (lynx::mixerops::insertTrack (song, 2) && song.mixer.size() == 6);
+    CHECK (song.mixer[2].name == "Insert 2" && song.mixer[3].name == "bass" && song.mixer[4].name == "Insert 4"); // old Insert 3 renumbered
+    CHECK (song.mixer[1].name == "Insert 1" && song.mixer[5].name == "Insert 5");
+    CHECK (song.channels[0].mixerTrack == 3 && song.channels[1].mixerTrack == 4);
+    CHECK (song.routes (3, 5) && song.mixer[5].effects[0].sidechain == 3);
+    CHECK (! lynx::mixerops::insertTrack (song, 0) && ! lynx::mixerops::insertTrack (song, 7));
+
+    CHECK (lynx::mixerops::deleteTrack (song, 3) && song.mixer.size() == 6); // "bass" goes, a blank takes the end
+    CHECK (song.channels[0].mixerTrack == 0 && song.channels[1].mixerTrack == 3);
+    CHECK (song.mixer[3].name == "Insert 3" && song.mixer[5].name == "Insert 5" && song.mixer[5].effects.empty());
+    CHECK (song.mixer[4].effects.size() == 1 && song.mixer[4].effects[0].sidechain == 0);
+    CHECK (! lynx::mixerops::deleteTrack (song, 0) && ! lynx::mixerops::deleteTrack (song, 6));
+}

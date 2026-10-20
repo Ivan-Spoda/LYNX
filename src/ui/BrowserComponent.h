@@ -8,7 +8,7 @@ namespace lynx
 {
 // File browser (like FL's Browser): drawn by LYNX itself so it can show what the mouse is over and explain it
 // in the hint bar.
-//  - two tabs, as FL's Browser: ALL (the current project, then every sample folder: FL's folders, Documents,
+//  - three tabs, as FL's Browser: STARRED (the files and folders starred from their right-click menu), ALL (the current project, then every sample folder: FL's folders, Documents,
 //    Music, Desktop, Downloads and the user's folders, each with its own colour) and PROJECT (only the current
 //    project, opened)
 //  - "Current project" (REA_rodada115): history, patterns, effects, generators, automation, the project folder
@@ -52,6 +52,7 @@ public:
     {
         allTab,
         projectTab,
+        starredTab, // the files and folders the user starred (FL's STARRED)
         tabCount
     };
     void setTab (int tab);
@@ -94,7 +95,11 @@ public:
 
     class FileTree;     // the folder tree / search results (implementation detail)
     class PreviewStrip; // waveform of the selected sample
-    class TabBar;       // ALL / PROJECT
+    class TabBar;       // ALL / PROJECT / STARRED
+
+    // starred files and folders (one path per line in the settings folder)
+    bool isStarred (const juce::File& file) const { return starred.contains (file.getFullPathName()); }
+    void setStarred (const juce::File& file, bool on);
 
 private:
     void textEditorTextChanged (juce::TextEditor&) override;
@@ -106,6 +111,8 @@ private:
     void rebuildRoots();
     void rebuildTree();
     static juce::File userFoldersFile();
+    static juce::File starredFile();
+    juce::StringArray starred;
     void openFile (const juce::File& file); // what a double-click does
     void fileSelected (const juce::File& file, bool preview);
     void showFolderMenu (const juce::File& folder);

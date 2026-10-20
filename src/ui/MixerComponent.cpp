@@ -1308,6 +1308,20 @@ void MixerStrips::showMenu (int t)
     });
     menu.addSeparator();
 
+    // FL's second section: insert a blank track here, delete this one (REA_rodada115)
+    if (t > 0)
+    {
+        menu.addItem (tr ("Insert one"), (int) song.mixer.size() < maxMixerTracks, false, [this, t] {
+            engine.editSong ([t] (Song& s) { mixerops::insertTrack (s, t); });
+            setSelection ({ t }, t);
+        });
+        menu.addItem (tr ("Delete"), [this, t] {
+            engine.editSong ([t] (Song& s) { mixerops::deleteTrack (s, t); });
+            setSelection ({ t }, t);
+        });
+        menu.addSeparator();
+    }
+
     if (t > 0)
     {
         const auto& mt = song.mixer[(std::size_t) t];
