@@ -43,6 +43,12 @@ exports the 30 demo projects shipped with FL Studio 2026.
   selected channel, user folders.
 - **Window menus:** each window's title-bar menu carries its own items (Playlist ripple/zoom, Channel Rack graph
   lanes/rotate/sort, Piano Roll tools/zoom/scale snap, Mixer move/link, Browser search/add folder).
+- **"Inspired by" editors (round 114):** the LYNX engines that stand in for third-party plugins work like the
+  originals — display-first editors for Apex Limiter, Crest Compressor, Prism Multiband, Sentry Gate, Hush De-esser
+  and Ember Saturator (scrolling level / gain-reduction or spectrum displays edited by dragging: threshold lines,
+  gain slider, ceiling, band nodes, crossovers; knobs floating over the display; settings in a bottom bar), a VU
+  needle on Glow Leveler, the reverb / delay panels with captions above the knobs and stepping mode menus
+  (docs/analise/REA_rodada114.md).
 - **Project safety:** "*" in the title, "save changes?", autosave every 2 minutes and an emergency save on crash
   (`%APPDATA%\LYNX\autosave`).
 

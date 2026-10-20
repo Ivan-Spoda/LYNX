@@ -1724,6 +1724,8 @@ private:
                     for (const auto& [param, value] : { std::pair<const char*, float> { "HPF", 0.3f }, { "LMF gain", 0.35f }, { "HF gain", 0.7f },
                                                         { "Ratio", 0.3f }, { "Comp. threshold", 0.55f } })
                         fx.params[(std::size_t) lynx::plugui::paramIndex (kind, param)] = value;
+                if (kind == lynx::EffectKind::apexLimiter) // round 114: gain into the ceiling, so the display shows reduction
+                    fx.params[0] = 0.33f;
                 if (kind == lynx::EffectKind::ember)
                 {
                     fx.params[(std::size_t) lynx::plugui::paramIndex (kind, "Drive")] = 0.5f;

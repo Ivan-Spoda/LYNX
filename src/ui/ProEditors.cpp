@@ -356,11 +356,10 @@ private:
 class HushEditor final : public ProEditor
 {
 public:
-    HushEditor (AudioEngine& e, int t, int s, bool d) : ProEditor (e, t, s, EffectKind::hushDeEsser, d, 720, 470) { fillDemo(); }
+    HushEditor (AudioEngine& e, int t, int s, bool d) : ProEditor (e, t, s, EffectKind::hushDeEsser, d, 720, 500) { fillDemo(); }
 
 private:
     enum { idThreshold = 1, idFreq, idMeterThreshold };
-    LevelScale meterScale { -24.0f, -60.0f };
 
     juce::String title() const override { return "Hush De-esser"; }
     juce::String gestures() const override { return tr ("Drag the threshold line or the meter's arrow  -  drag the frequency slider") ; }
@@ -369,18 +368,23 @@ private:
 
     int pFreq() const { return P ("Frequency"); }
     int pThr() const { return P ("Threshold"); }
-    juce::Rectangle<float> wave() const { return bodyArea().withTrimmedRight (78.0f).withHeight (190.0f).reduced (0.0f, 4.0f); }
+    juce::Rectangle<float> wave() const { return bodyArea().withTrimmedRight (112.0f).withHeight (190.0f).reduced (0.0f, 4.0f); }
     juce::Rectangle<float> meters() const { return { (float) getWidth() - 70.0f, headerH + 18.0f, 26.0f, bodyArea().getHeight() - 26.0f }; }
     juce::Rectangle<float> freqTrack() const { return { 34.0f, wave().getBottom() + 182.0f, 250.0f, 24.0f }; }
 
     double thresholdDb() const { return mixsuite::hush::thresholdDb (v (pThr())); }
 
-    // mirrored waveform scale: 0 dBFS at the edges, −60 at the centre line
+    // mirrored waveform: the height follows the amplitude (linear), like a waveform view; 0 dBFS at the edges
     float waveY (float db, bool upper) const
     {
         const auto a = wave();
-        const auto f = juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f);
+        const auto f = juce::jlimit (0.0f, 1.0f, std::pow (10.0f, db / 20.0f));
         return upper ? a.getCentreY() - a.getHeight() * 0.48f * f : a.getCentreY() + a.getHeight() * 0.48f * f;
+    }
+    float meterY (float db) const
+    {
+        const auto m = meters();
+        return m.getBottom() - m.getHeight() * juce::jlimit (0.0f, 1.0f, (db + 60.0f) / 60.0f);
     }
 
     Column demoColumn (int i) const override
@@ -401,9 +405,6 @@ private:
         // threshold line on the waveform (both halves)
         out.push_back (custom ({ w.getX(), waveY ((float) thresholdDb(), true) - 5.0f, w.getWidth(), 10.0f }, idThreshold, pThr(), tr ("Threshold: drag up or down")));
         out.push_back (custom ({ w.getX(), waveY ((float) thresholdDb(), false) - 5.0f, w.getWidth(), 10.0f }, idThreshold, pThr(), tr ("Threshold: drag up or down")));
-        auto listen = toggle ({ 6.0f, y0 + 18.0f, 30.0f, 26.0f }, P ("Listen"), {});
-        listen.hint = tr ("Listen: hear only what the de-esser takes away (the detection band)");
-        out.push_back (listen);
         auto thr = knob ({ 44.0f, y0 + 4.0f, 110.0f, 142.0f }, pThr(), tr ("Threshold"), 2);
         thr.colour = colour::warning;
         out.push_back (thr);
@@ -415,15 +416,15 @@ private:
         aud.hint = tr ("Listen: hear only what the de-esser takes away (the detection band)");
         out.push_back (aud);
         // middle: detection and processing modes
-        const auto mx = 314.0f;
+        const auto mx = 304.0f;
         out.push_back (tabs ({ mx, y0 + 30.0f, 190.0f, 28.0f }, P ("Band detector"), "High-pass|Band", { 0.0f, 1.0f }));
         out.push_back (tabs ({ mx, y0 + 88.0f, 190.0f, 28.0f }, P ("Wideband"), "Wide band|Split band", { 1.0f, 0.0f }));
         out.push_back (toggle ({ mx + 30.0f, y0 + 140.0f, 130.0f, 24.0f }, P ("Lookahead"), tr ("Lookahead 2 ms")));
         // right: release and output
-        out.push_back (knob ({ 528.0f, y0 + 14.0f, 92.0f, 104.0f }, P ("Release"), tr ("Release")));
-        out.push_back (knob ({ 528.0f, y0 + 132.0f, 92.0f, 96.0f }, P ("Output"), tr ("Output"), 1, true));
+        out.push_back (knob ({ 508.0f, y0 + 14.0f, 92.0f, 104.0f }, P ("Release"), tr ("Release")));
+        out.push_back (knob ({ 508.0f, y0 + 132.0f, 92.0f, 96.0f }, P ("Output"), tr ("Output"), 1, true));
         // the meter's threshold arrow
-        out.push_back (custom ({ meters().getX() - 12.0f, meterScale.y ((float) thresholdDb(), meters()) - 7.0f, 12.0f, 14.0f }, idMeterThreshold, pThr(), tr ("Threshold: drag up or down")));
+        out.push_back (custom ({ meters().getX() - 12.0f, meterY ((float) thresholdDb()) - 7.0f, 12.0f, 14.0f }, idMeterThreshold, pThr(), tr ("Threshold: drag up or down")));
         const auto b = barArea();
         const auto cy = b.getCentreY();
         out.push_back (barMenu ({ 10.0f, cy - 11.0f, 180.0f, 22.0f }, P ("Band detector"), tr ("Detection"), "High-pass|Band", { 0.0f, 1.0f }));
@@ -453,12 +454,12 @@ private:
             return;
         }
         float db;
-        if (c.id == idMeterThreshold) db = meterScale.db (e.position.y, meters());
+        if (c.id == idMeterThreshold) db = (meters().getBottom() - e.position.y) / meters().getHeight() * 60.0f - 60.0f;
         else
         {
             const auto a = wave();
             const auto f = std::abs (e.position.y - a.getCentreY()) / (a.getHeight() * 0.48f);
-            db = juce::jlimit (0.0f, 1.0f, f) * 60.0f - 60.0f;
+            db = 20.0f * std::log10 (juce::jlimit (0.001f, 1.0f, f));
         }
         set ({ { pThr(), invert ([] (float x) { return mixsuite::hush::thresholdDb (x); }, juce::jlimit (-60.0f, 0.0f, db)) } });
         ui::showValueTip (*this, juce::Rectangle<int> (80, 16).withCentre (e.position.toInt()), tr ("Threshold") + " " + text (pThr()));
@@ -547,8 +548,8 @@ private:
         const auto area = juce::Rectangle<float> (0.0f, w.getBottom() + 4.0f, w.getWidth(), barArea().getY() - w.getBottom() - 8.0f);
         g.setColour (colour::bg2);
         g.fillRoundedRectangle (area.reduced (4.0f, 0.0f), 8.0f);
-        caption (g, { 314.0f, w.getBottom() + 22.0f, 190.0f, 14.0f }, tr ("Detection"));
-        caption (g, { 314.0f, w.getBottom() + 80.0f, 190.0f, 14.0f }, tr ("Processing"));
+        caption (g, { 304.0f, w.getBottom() + 22.0f, 190.0f, 14.0f }, tr ("Detection"));
+        caption (g, { 304.0f, w.getBottom() + 80.0f, 190.0f, 14.0f }, tr ("Processing"));
 
         // meters: input level and reduction, with the dB scale between them
         const auto m = meters();
@@ -562,10 +563,9 @@ private:
         g.setFont (font (type::caption));
         g.setColour (colour::textDisabled);
         for (const auto db : { 0.0f, -6.0f, -12.0f, -24.0f, -36.0f, -48.0f })
-            g.drawText (juce::String ((int) db), juce::Rectangle<float> (m.getRight() + 1.0f, meterScale.y (db, m) - 6.0f, 30.0f, 12.0f), juce::Justification::centredLeft, false);
+            g.drawText (juce::String ((int) db), juce::Rectangle<float> (m.getX() - 34.0f, meterY (db) - 6.0f, 20.0f, 12.0f), juce::Justification::centredRight, false);
         caption (g, { m.getX() - 6.0f, m.getY() - 16.0f, 38.0f, 14.0f }, tr ("In"));
         caption (g, { grR.getX() - 10.0f, m.getY() - 16.0f, 34.0f, 14.0f }, "GR");
-        // the meter uses meterScale for the threshold arrow; the bar itself is linear in dB from −60
     }
 };
 
@@ -625,7 +625,7 @@ private:
         out.push_back (menu ({ 342.0f, by + 90.0f, 80.0f, 20.0f }, character, tr ("Character"), "Off|Warm|Crisp|Bright"));
         out.push_back (knob ({ 446.0f, by, 104.0f, 118.0f }, attack, tr ("Attack"), 2));
         out.push_back (knob ({ 564.0f, by, 104.0f, 118.0f }, release, tr ("Release"), 2));
-        out.push_back (toggle ({ 576.0f, by + 122.0f, 80.0f, 20.0f }, autoRelease, tr ("Auto")));
+        out.push_back (toggle ({ 576.0f, by - 26.0f, 80.0f, 20.0f }, autoRelease, tr ("Auto")));
         out.push_back (knob ({ 680.0f, by - 6.0f, 62.0f, 82.0f }, P ("Output"), tr ("Gain"), 1, true));
         out.push_back (toggle ({ 670.0f, by + 76.0f, 82.0f, 20.0f }, autoGain, tr ("Auto gain")));
         out.push_back (knob ({ 680.0f, by + 100.0f, 62.0f, 82.0f }, mix, tr ("Mix")));
@@ -838,7 +838,7 @@ private:
 class SentryEditor final : public ProEditor
 {
 public:
-    SentryEditor (AudioEngine& e, int t, int s, bool d) : ProEditor (e, t, s, EffectKind::sentryGate, d, 700, 380) { fillDemo(); }
+    SentryEditor (AudioEngine& e, int t, int s, bool d) : ProEditor (e, t, s, EffectKind::sentryGate, d, 730, 380) { fillDemo(); }
 
 private:
     enum { idThreshold = 1, idExpert, idFilters };
@@ -877,13 +877,13 @@ private:
         out.push_back (knob ({ 30.0f, m.getY() + 18.0f, 130.0f, 152.0f }, threshold, tr ("Threshold"), 2));
         out.push_back (knob ({ 10.0f, m.getY() + 182.0f, 84.0f, 104.0f }, ratio, tr ("Ratio")));
         out.push_back (knob ({ 98.0f, m.getY() + 182.0f, 84.0f, 104.0f }, range, tr ("Range")));
-        out.push_back (menu ({ 500.0f, m.getY() + 12.0f, 100.0f, 26.0f }, style, {}, "Classic|Clean|Vocal|Guitar|Upward"));
-        out.push_back (knob ({ 500.0f, m.getY() + 54.0f, 100.0f, 108.0f }, attack, tr ("Attack")));
-        out.push_back (knob ({ 500.0f, m.getY() + 178.0f, 100.0f, 108.0f }, release, tr ("Release")));
-        out.push_back (knob ({ 614.0f, m.getY() + 8.0f, 76.0f, 88.0f }, hold, tr ("Hold"), 0));
-        out.push_back (knob ({ 614.0f, m.getY() + 102.0f, 76.0f, 88.0f }, knee, tr ("Knee"), 0));
-        out.push_back (knob ({ 614.0f, m.getY() + 196.0f, 76.0f, 88.0f }, lookahead, tr ("Lookahead"), 0));
-        out.push_back (toggle ({ 616.0f, m.getY() + 290.0f, 72.0f, 20.0f }, lookaheadOn, tr ("On")));
+        out.push_back (menu ({ 530.0f, m.getY() + 12.0f, 100.0f, 26.0f }, style, {}, "Classic|Clean|Vocal|Guitar|Upward"));
+        out.push_back (knob ({ 530.0f, m.getY() + 54.0f, 100.0f, 108.0f }, attack, tr ("Attack")));
+        out.push_back (knob ({ 530.0f, m.getY() + 178.0f, 100.0f, 108.0f }, release, tr ("Release")));
+        out.push_back (knob ({ 644.0f, m.getY() + 8.0f, 76.0f, 88.0f }, hold, tr ("Hold"), 0));
+        out.push_back (knob ({ 644.0f, m.getY() + 102.0f, 76.0f, 88.0f }, knee, tr ("Knee"), 0));
+        out.push_back (knob ({ 644.0f, m.getY() + 196.0f, 76.0f, 88.0f }, lookahead, tr ("Lookahead"), 0));
+        out.push_back (toggle ({ 646.0f, m.getY() + 290.0f, 72.0f, 20.0f }, lookaheadOn, tr ("On")));
         out.push_back (button ({ d.getCentreX() - 60.0f, m.getBottom() - 30.0f, 120.0f, 24.0f }, idExpert, tr ("Expert"), expertOpen,
                                tr ("Expert: side chain (internal / external), side-chain filters, upward expansion, dry mix, output")));
         if (expertOpen)
@@ -894,8 +894,8 @@ private:
             out.push_back (tabs ({ filterTrack().getCentreX() - 70.0f, e.getY() + 18.0f, 140.0f, 24.0f }, scExternal, "Int|Ext"));
             out.push_back (custom (filterTrack().expanded (8.0f, 6.0f), idFilters, -1, tr ("Side-chain filters: drag the left handle (high pass) or the right one (low pass)")));
             out.push_back (toggle ({ filterTrack().getCentreX() - 50.0f, filterTrack().getBottom() + 14.0f, 100.0f, 22.0f }, scListen, tr ("Audition")));
-            out.push_back (knob ({ 500.0f, e.getY() + 14.0f, 84.0f, 100.0f }, dry, tr ("Dry")));
-            out.push_back (knob ({ 600.0f, e.getY() + 14.0f, 84.0f, 100.0f }, P ("Output"), tr ("Output"), 1, true));
+            out.push_back (knob ({ 530.0f, e.getY() + 14.0f, 84.0f, 100.0f }, dry, tr ("Dry")));
+            out.push_back (knob ({ 630.0f, e.getY() + 14.0f, 84.0f, 100.0f }, P ("Output"), tr ("Output"), 1, true));
         }
         const auto b = barArea();
         const auto cy = b.getCentreY();
@@ -1097,12 +1097,12 @@ private:
     float gainY (double db) const
     {
         const auto p = plot();
-        return p.getY() + p.getHeight() * 0.42f - p.getHeight() * 0.38f * juce::jlimit (-1.1f, 1.1f, (float) (db / rangeView));
+        return p.getY() + p.getHeight() * 0.30f - p.getHeight() * 0.25f * juce::jlimit (-1.15f, 1.15f, (float) (db / rangeView));
     }
     double dbAtY (float y) const
     {
         const auto p = plot();
-        return (p.getY() + p.getHeight() * 0.42f - y) / (p.getHeight() * 0.38f) * rangeView;
+        return (p.getY() + p.getHeight() * 0.30f - y) / (p.getHeight() * 0.25f) * rangeView;
     }
     float specY (float db) const
     {
@@ -1476,7 +1476,7 @@ private:
     float handleY (int b) const
     {
         const auto d = disp();
-        return d.getY() + 40.0f + (d.getHeight() - 230.0f) * (1.0f - v (fp (b, 1)));
+        return d.getY() + 40.0f + (panelArea().getY() - 30.0f - d.getY() - 40.0f) * (1.0f - v (fp (b, 1)));
     }
     juce::Rectangle<float> handle (int b) const { return juce::Rectangle<float> (38.0f, 16.0f).withCentre ({ 0.5f * (edgeX (b) + edgeX (b + 1)), handleY (b) }); }
     int handleAt (juce::Point<float> p) const
@@ -1609,7 +1609,7 @@ private:
         const auto d = disp();
         if (dragHandle >= 0)
         {
-            const auto f = 1.0f - (e.position.y - d.getY() - 40.0f) / (d.getHeight() - 230.0f);
+            const auto f = 1.0f - (e.position.y - d.getY() - 40.0f) / (panelArea().getY() - 30.0f - d.getY() - 40.0f);
             set ({ { fp (dragHandle, 1), juce::jlimit (0.0f, 1.0f, f) } });
             ui::showValueTip (*this, handle (dragHandle).toNearestInt(), tr ("Drive") + " " + text (fp (dragHandle, 1)));
             return;
