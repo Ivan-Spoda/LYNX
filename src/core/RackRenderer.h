@@ -226,6 +226,8 @@ public:
     void setProfiling (bool on) noexcept { profiling.store (on, std::memory_order_relaxed); }
     bool isProfiling() const noexcept { return profiling.load (std::memory_order_relaxed); }
     const UnitTimes& unitTimes() const noexcept { return *units; }
+    // Blocks in which an insert effect output NaN / inf and was muted and reset (all renderers, since start; round 111)
+    static std::uint64_t nonFiniteEffectBlocks() noexcept;
     void resetUnitTimes() noexcept;
 
     // Tempo used in the last block (changes with tempo automation). The transport advances with it.

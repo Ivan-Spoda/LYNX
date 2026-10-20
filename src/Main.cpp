@@ -50,6 +50,7 @@
 #include "ui/Theme.h"
 #include "ui/WaveformView.h"
 #include "ui/WindowOwner.h"
+#include "platform/CrashGuard.h"
 
 namespace
 {
@@ -86,7 +87,11 @@ public:
 
         // child process of a sandboxed plugin: no window or audio of its own
         if (lynx::runPluginSandboxWorker (commandLine))
+        {
+            lynx::crashguard::quietCrashReports();
+            sandboxChild = true;
             return;
+        }
 
         const auto args = juce::StringArray::fromTokens (commandLine, true);
 
@@ -135,10 +140,12 @@ public:
         {
             // child process of the plugin scan (see PluginHost::scan)
             const auto i = args.indexOf ("--scan-one");
+            // no crash dialogs from the plugin being examined; and once the result is written, the process ends without
+            // unloading it: a Waves shell crashed in its own teardown at exit (Intel GPU driver fail-fast, 0xC0000409),
+            // which showed Windows' crash dialog and made the scan reject the whole shell (round 111)
+            lynx::crashguard::quietCrashReports();
             lynx::PluginHost::scanOneFile (args[i + 1].unquoted(), args[i + 2].unquoted(), juce::File (args[i + 3].unquoted()));
-            setApplicationReturnValue (0);
-            quit();
-            return;
+            lynx::crashguard::exitNow (0);
         }
 
         if (args.contains ("--paths"))
@@ -550,6 +557,11 @@ public:
         crashEngine = nullptr;
         engine = nullptr;
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+
+        // everything is saved and closed: a process that loaded third-party plugins ends here, before the DLLs' own
+        // teardown runs (some crash in it at exit, round 111)
+        if (sandboxChild || lynx::PluginHost::pluginsWereLoaded())
+            lynx::crashguard::exitNow (getApplicationReturnValue());
     }
 
     void systemRequestedQuit() override
@@ -561,6 +573,8 @@ public:
     }
 
 private:
+    bool sandboxChild = false;
+
     // LYNX.exe --selftest report.txt: renders 2 s without a sound card and writes the result.
     // Exit code 0 = audio came out, 1 = silence.
     void runSelfTest (const juce::String& reportPath, const juce::String& demoProjectPath)

@@ -86,6 +86,8 @@ APP_SOURCES=(src/Main.cpp
 APP_SOURCES+=(src/core/KeyMap.cpp src/core/Workspace.cpp src/core/RackOps.cpp src/ui/Workspace.cpp src/ui/ValueControl.cpp src/ui/Dialogs.cpp)
 # Windows file association (.lynx) and its icon
 APP_SOURCES+=(src/platform/FileTypes.cpp)
+# SEH guard around calls into hosted plugins (round 111): the only unit built with -fms-extensions (__try / __except)
+APP_SOURCES+=(src/platform/CrashGuard.cpp)
 # workflow P2: core (note tools, mixer operations, history labels, browser search)
 APP_SOURCES+=(src/core/NoteTools.cpp src/core/PianoRollTools.cpp src/core/EventEdit.cpp src/core/AudioEdit.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp)
 # workflow P2: UI (note tool dialogs, tool windows, undo history, quick-add palette)
@@ -156,7 +158,8 @@ done
 echo "Compiling the app..."
 printf '%s\n' "${APP_SOURCES[@]}" | xargs -P "$JOBS" -I{} bash -c '
     src={}; obj="$OUT/app/$(echo "$src" | tr / _).o"
-    $ZIG c++ $COMMON_STR -Wall -Wextra -c "$src" -o "$obj"'
+    extra=""; [[ "$src" == src/platform/CrashGuard.cpp ]] && extra="-fms-extensions"
+    $ZIG c++ $COMMON_STR $extra -Wall -Wextra -c "$src" -o "$obj"'
 
 echo "Resources (manifest, icons, version $VERSION)..."
 OUT_ABS="$(cd "$OUT" && pwd)"

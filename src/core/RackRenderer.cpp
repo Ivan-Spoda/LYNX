@@ -610,6 +610,17 @@ float peakOf (const float* data, int n) noexcept
     return peak;
 }
 
+// No NaN / inf in the block? (x · 0 is 0 for every finite x: one vectorized pass)
+bool finiteBlock (const float* l, const float* r, int n) noexcept
+{
+    float acc = 0.0f;
+    for (int k = 0; k < n; ++k)
+        acc += l[k] * 0.0f + r[k] * 0.0f;
+    return acc == 0.0f;
+}
+
+std::atomic<std::uint64_t> nonFiniteBlocks { 0 };
+
 // Any sample above `level`? Stops at the first: with sound (the common case) it costs almost nothing.
 bool anyAbove (const float* l, const float* r, int n, float level) noexcept
 {
@@ -1234,6 +1245,15 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
             timed (key, [&] { effects[i]->process (l, r, n, slots[i].params, bpm); });
         }
 
+        // an effect that output NaN / inf (an unstable setting): this block of it is muted and its state reset, so the
+        // broken values never reach the rest of the mix (they would stay in every filter and feedback path after it)
+        if (! finiteBlock (l, r, n))
+        {
+            std::memset (l, 0, sizeof (float) * (std::size_t) n);
+            std::memset (r, 0, sizeof (float) * (std::size_t) n);
+            effects[i]->reset();
+            nonFiniteBlocks.fetch_add (1, std::memory_order_relaxed);
+        }
 
         if (partial)
         {
@@ -1269,6 +1289,11 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         if (audible == 1 && key < smartDisable.size())
             smartDisable[key].silentSamples = 0; // tail (reverb, delay): keep processing
     }
+}
+
+std::uint64_t RackRenderer::nonFiniteEffectBlocks() noexcept
+{
+    return nonFiniteBlocks.load (std::memory_order_relaxed);
 }
 
 void RackRenderer::process (const RackState* state,

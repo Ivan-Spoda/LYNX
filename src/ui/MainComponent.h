@@ -114,6 +114,7 @@ private:
     void showPluginManager();
     void showShortcutManager();
     int scansSeen = 0; // background plugin scans already announced in the hint bar
+    int pluginCrashesSeen = 0; // hosted plugins that crashed (engine/PluginHost.h) and were already announced
     void showHelp();
 
     // transport

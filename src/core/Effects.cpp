@@ -2128,7 +2128,9 @@ double responseDb (const EffectParams& params, double sr, double f)
         {
             const auto& c = st[(std::size_t) s];
             const auto h = (c.b0 + c.b1 * z1 + c.b2 * z2) / (1.0 + c.a1 * z1 + c.a2 * z2);
-            total += 20.0 * std::log10 (std::max (std::abs (h), 1.0e-9));
+            const auto magnitude = std::abs (h);
+            if (std::isfinite (magnitude)) // (the editor draws this: never NaN)
+                total += 20.0 * std::log10 (std::max (magnitude, 1.0e-9));
         }
     }
 

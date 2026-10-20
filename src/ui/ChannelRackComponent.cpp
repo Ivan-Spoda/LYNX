@@ -2082,6 +2082,12 @@ void ChannelRackComponent::openPluginWindow (int channel)
 
     if (auto* plugin = dynamic_cast<PluginInstrument*> (instrument.get()))
     {
+        if (plugin->hasCrashed()) // (not called again: its window would call into it)
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Plugin"),
+                                                    tr ("This plugin crashed and was switched off. Save the project and open it again to reload it."));
+            return;
+        }
         PluginWindows::open (instrument, plugin->getInstance(),
                              juce::String::fromUTF8 (engine.getSong().channels[(std::size_t) channel].name.c_str()));
         return;
