@@ -71,6 +71,11 @@ std::optional<double> wheelValue (double value, const juce::MouseEvent& e, const
 // The right-click menu. `set` receives the new value (typed or reset). `engine` may be null when the
 // control cannot be automated.
 void showValueMenu (juce::Component& target, AudioEngine* engine, const ValueSpec& spec, double current, std::function<void (double)> set);
+
+// A context menu's title band in the colour of what it is about (FL tints a mixer track's menu with the track's
+// colour; LYNX draws a band in its own style): `kind` in small caps ("Mixer track"), then `name`. A transparent
+// colour draws a neutral band.
+void addItemHeader (juce::PopupMenu& menu, const juce::String& kind, const juce::String& name, juce::Colour colour);
 void addValueItems (juce::PopupMenu& menu, juce::Component& target, AudioEngine* engine, const ValueSpec& spec, double current,
                     std::function<void (double)> set);
 
