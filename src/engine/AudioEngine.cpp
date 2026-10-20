@@ -19,6 +19,12 @@
 
 #if JUCE_WINDOWS
  #include <windows.h>
+#elif JUCE_MAC
+ #include <pthread.h>
+ #include <sys/qos.h>
+#elif JUCE_LINUX || JUCE_BSD
+ #include <pthread.h>
+ #include <sched.h>
 #endif
 
 namespace lynx
@@ -46,7 +52,8 @@ FlPathRoots findFlStudioRoots()
 
 namespace
 {
-// Audio workers with real-time priority (MMCSS "Pro Audio" on Windows, like the driver).
+// Audio workers with real-time priority (MMCSS "Pro Audio" on Windows, like the driver; QoS class on macOS; SCHED_FIFO
+// on Linux when allowed).
 void raiseAudioThreadPriority()
 {
    #if JUCE_WINDOWS
@@ -72,6 +79,15 @@ void raiseAudioThreadPriority()
     }
     else
         SetThreadPriority (GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+   #elif JUCE_MAC
+    // the highest quality-of-service class: scheduled like the UI's own interactive work, on the performance cores
+    pthread_set_qos_class_self_np (QOS_CLASS_USER_INTERACTIVE, 0);
+   #elif JUCE_LINUX || JUCE_BSD
+    // real-time FIFO scheduling when the user may have it (audio group / rtkit limits, as JACK and PipeWire set up);
+    // below the usual JACK/PipeWire audio thread priorities. Without the permission the thread stays as it is.
+    sched_param param {};
+    param.sched_priority = juce::jlimit (sched_get_priority_min (SCHED_FIFO), sched_get_priority_max (SCHED_FIFO), 70);
+    pthread_setschedparam (pthread_self(), SCHED_FIFO, &param);
    #endif
 }
 

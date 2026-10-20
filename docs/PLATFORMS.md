@@ -1,0 +1,63 @@
+# Platforms
+
+LYNX runs on Windows, macOS and Linux from one code base. The core (`src/core`, `src/flp`) is plain C++20 without
+JUCE and builds anywhere; the app uses JUCE 8.0.4. Everything that differs per OS sits behind a few small helpers in
+`src/platform/`, so the rest of the code never spells out `%APPDATA%` or an `HWND`.
+
+| | Windows | macOS | Linux |
+|---|---|---|---|
+| Builds | Zig cross build from Linux/WSL (`scripts/build-windows-zig.sh`, used for releases) or CMake + MSVC | CMake + Apple clang, universal arm64 + x86_64 | CMake + GCC or Clang |
+| Package | per-user installer (NSIS) + portable .zip | .dmg (ad-hoc signed, **not notarized**) | AppImage + .tar.gz (`install.sh`) |
+| Minimum | Windows 10 x64 | macOS 11 Big Sur | x86_64, glibc 2.39 (Ubuntu 24.04, Debian 13, Fedora 40), X11 or XWayland |
+| Audio drivers | Windows Audio (WASAPI shared / low-latency / exclusive), DirectSound, ASIO, built-in LYNX ASIO | Core Audio | ALSA, JACK (PipeWire through `pipewire-jack`) |
+| Plugin formats | VST3, CLAP, VST2 | VST3, CLAP, Audio Units | VST3, CLAP, LV2 |
+| Plugin sandbox (separate process) | yes (opt-in) | no | no |
+| Settings | `%APPDATA%\LYNX` | `~/Library/Application Support/LYNX` | `$XDG_CONFIG_HOME/LYNX` (`~/.config/LYNX`) |
+| Waveform cache | `%APPDATA%\LYNX\wavecache` | `~/Library/Caches/LYNX/wavecache` | `$XDG_CACHE_HOME/LYNX/wavecache` (`~/.cache/LYNX`) |
+| Crash report + emergency save | `%APPDATA%\LYNX\autosave` | `.../Application Support/LYNX/autosave` | `~/.config/LYNX/autosave` |
+| FL Studio installation (factory samples, plugin database) | registry, else `Program Files\Image-Line\FL Studio*` | `/Applications/FL Studio*.app/Contents/Resources/FL` (layout not confirmed) | a Windows FL Studio under Wine: `$WINEPREFIX` or `~/.wine`, `drive_c/Program Files/Image-Line/FL Studio*` |
+
+`LYNX_FL_INSTALL=<folder>` points LYNX at an FL Studio installation anywhere (the folder that contains `Data`).
+Importing `.flp` projects works everywhere; the installation only adds FL's factory samples and plugin database.
+
+## Platform helpers (`src/platform/`)
+
+- `Paths.h` — `settingsFolder()`, `settingsFile()`, `cacheFolder()`, `standardPluginFolders()` (VST3/VST2/CLAP/AU/LV2
+  folders per OS, scanned by `PluginHost`).
+- `NativeEmbed.h` — the native child view a CLAP or VST2 editor draws into: a child `HWND` (Windows), an `NSView`
+  (macOS), an X11 window through `juce::XEmbedComponent` (Linux), plus the matching CLAP window API.
+- `FileTypes.h` — `.lynx` file association (Windows registry; the Linux packages ship a `.desktop` file and a MIME type,
+  the macOS bundle declares the document types in its Info.plist).
+- `MingwFixes.cpp` — only for the MinGW cross build.
+
+Other per-OS code, kept small and guarded in place:
+
+- `core/WorkerPool.cpp` — the audio worker wake-up semaphore: Win32 semaphore, libdispatch semaphore (macOS), POSIX
+  `sem_t` on a futex (Linux). All wake a sleeping worker at once (std::counting_semaphore is avoided: MinGW's libc++
+  polls with Sleep()).
+- `engine/AudioEngine.cpp` — priority of the audio workers: MMCSS "Pro Audio" (Windows), the user-interactive QoS
+  class (macOS), SCHED_FIFO 70 when the user's limits allow it (Linux; otherwise unchanged).
+- `engine/DllAsioDevice.cpp`, `asio/` — ASIO and the LYNX ASIO driver: Windows only (ASIO is a Windows driver model).
+- `engine/PluginSandbox.cpp` — out-of-process plugins over Win32 shared memory and events: Windows only for now.
+- `engine/Vst2Format.cpp` — VST2 hosting loads Windows DLLs only (VST2 is deprecated and rare on macOS/Linux).
+- `ui/WindowOwner.cpp` — dark native title bar and owned tool windows (Windows); JUCE defaults elsewhere.
+- `ui/Theme.cpp` — Segoe UI on Windows; the system sans-serif elsewhere.
+- `ui/Toolbar.cpp` — process memory (Windows API, `/proc/self/statm` on Linux).
+
+## Floating point
+
+Every build compiles with `-ffp-contract=off` (no fused multiply-add), so the exact FL engines keep the operation
+order of the Windows build on CPUs with FMA (Apple Silicon, newer x86). Results can still differ in the last bits
+between operating systems because each system's maths library (`sin`, `exp`, `pow`...) rounds differently; the
+round 117 notes (`docs/analise/REA_rodada117.md`) list the measured differences.
+
+## Building
+
+- Windows (release): `scripts/build-windows-zig.sh` from Linux/WSL.
+- Linux: see README ("Build from source"); `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build --target LYNX`,
+  then `scripts/package-linux.sh build/LYNX_artefacts/Release/LYNX <label> dist`.
+- macOS: `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" && cmake --build build --target LYNX`,
+  then `scripts/package-macos.sh build/LYNX_artefacts/Release/LYNX.app <label> dist`.
+- CI: `.github/workflows/tests.yml` runs the core tests on Linux (GCC, Clang) and macOS and builds + self-tests the
+  app on Linux and macOS; `release.yml` builds all three platforms on a tag and attaches the packages and
+  `SHA256SUMS.txt` to the draft release.

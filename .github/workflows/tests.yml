@@ -60,7 +60,7 @@ jobs:
         shell: bash
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_SOURCE_DIR_JUCE="$RUNNER_TEMP/juce"
-          cmake --build build --target LYNX
+          cmake --build build --target LYNX -- -k 0
 
       - name: Self-test
         shell: bash

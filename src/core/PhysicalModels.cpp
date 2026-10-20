@@ -1745,7 +1745,8 @@ std::unique_ptr<BooBassTables> loadBooBassTables (const std::string& path)
     auto i32 = [&] (std::uint64_t va) { std::int32_t v = 0; rd (offset (va), v); return v; };
     auto f32 = [&] (std::uint64_t va) { float v = 0; rd (offset (va), v); return v; };
     auto samples = [&] (std::uint64_t descriptor) {
-        const auto data = u64 (descriptor), bytes = (std::size_t) std::max (0, i32 (u64 (descriptor + 8)));
+        const auto data = u64 (descriptor);
+        const auto bytes = (std::size_t) std::max (0, i32 (u64 (descriptor + 8)));
         std::vector<std::int16_t> s (bytes / 2);
         const auto at = offset (data);
         if (at + bytes > b.size() || s.empty())

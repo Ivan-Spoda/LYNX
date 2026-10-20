@@ -242,7 +242,7 @@ jobs:
       - name: Build
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_SOURCE_DIR_JUCE="$RUNNER_TEMP/juce"
-          cmake --build build --target LYNX
+          cmake --build build --target LYNX -- -k 0
           sha256sum build/LYNX_artefacts/Release/LYNX
 
       - name: Self-test and demo project
@@ -289,7 +289,7 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_SOURCE_DIR_JUCE="$RUNNER_TEMP/juce" \
             -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
-          cmake --build build --target LYNX
+          cmake --build build --target LYNX -- -k 0
           lipo -info build/LYNX_artefacts/Release/LYNX.app/Contents/MacOS/LYNX
 
       - name: Self-test and demo project
