@@ -7,6 +7,7 @@
 
 #include "core/ToolbarLayout.h"
 #include "engine/AudioEngine.h"
+#include "ui/Icons.h"
 #include "ui/ValueControl.h"
 
 // Widgets of the main toolbar (docs/WORKFLOW_FL.md section 5.1), each with its own hint: the song position
@@ -183,5 +184,66 @@ private:
     juce::OwnedArray<juce::ToggleButton> checks;
     juce::TextButton upButton, downButton, resetButton;
     juce::ComboBox iconSizeBox, scaleBox;
+};
+// The toolbar's edit mode (FL's toolbar "Edit", interpreted; REA_rodada115): while it is on, the toolbar's panels
+// show their outlines and names and do not react to clicks; a tray under the toolbar lists every panel.
+//  - drag a panel sideways to move it (an accent line shows where it lands)
+//  - drag a panel down into the tray to remove it; drag a panel from the tray onto the toolbar to add it there
+//  - double-click a panel in the tray: add / remove it; right-click a panel: remove, move left / right
+//  - presets (LYNX's own), "Reset" and "Done" (Esc or Enter) on the tray
+class EditOverlay final : public juce::Component,
+                          public ui::HintSource
+{
+public:
+    using Bounds = std::array<juce::Rectangle<int>, toolbarlayout::groupCount>;
+    struct Host
+    {
+        std::function<toolbarlayout::Layout()> layout;
+        std::function<void (const toolbarlayout::Layout&)> setLayout;
+        std::function<Bounds()> panels;                       // each shown panel's area, in this component's coordinates
+        std::function<juce::Rectangle<int>()> fixedArea;      // the menu and the hint bar (cannot move)
+        std::function<juce::Image (juce::Rectangle<int>)> snapshot; // how a panel looks (for the drag image)
+        std::function<void()> done;
+    };
+
+    static constexpr int trayHeight = 92;
+
+    EditOverlay (Host host, int toolbarHeight);
+    void setToolbarHeight (int height);
+    void layoutChanged(); // the layout changed elsewhere: the preset box follows
+
+    void paint (juce::Graphics& g) override;
+    void resized() override;
+    void mouseMove (const juce::MouseEvent& e) override;
+    void mouseExit (const juce::MouseEvent& e) override;
+    void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDrag (const juce::MouseEvent& e) override;
+    void mouseUp (const juce::MouseEvent& e) override;
+    void mouseDoubleClick (const juce::MouseEvent& e) override;
+    bool keyPressed (const juce::KeyPress& key) override;
+    ui::Hint hintAt (juce::Point<int> position) override;
+
+    static Icon groupIcon (toolbarlayout::Group g);
+
+private:
+    juce::Rectangle<int> trayArea() const { return { 0, toolbarHeight, getWidth(), trayHeight }; }
+    juce::Rectangle<int> chipArea() const;
+    juce::Rectangle<int> chipBounds (int index) const; // index in the default order
+    int panelAt (juce::Point<int> p) const;            // group or -1
+    int chipAt (juce::Point<int> p) const;             // group or -1
+    int dropX() const;                                 // where the dragged panel would land (x of the accent line), -1 none
+    void apply (toolbarlayout::Layout layout);
+    void showPanelMenu (toolbarlayout::Group g, bool inTray);
+    void move (toolbarlayout::Group g, int delta);
+
+    Host host;
+    int toolbarHeight = 0;
+    int hoverPanel = -1, hoverChip = -1;
+    int pressedGroup = -1;
+    bool pressedInTray = false, dragging = false;
+    juce::Point<int> dragPos, grabOffset;
+    juce::Image dragImage;
+    juce::ComboBox presetBox;
+    juce::TextButton resetButton, doneButton;
 };
 } // namespace lynx::toolbar
