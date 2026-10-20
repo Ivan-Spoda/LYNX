@@ -357,4 +357,74 @@ void SampleLibrary::forget (const juce::String& path)
     for (auto it = shared.stretched.begin(); it != shared.stretched.end();)
         it = it->first.startsWith (path + "|") ? shared.stretched.erase (it) : std::next (it);
 }
+
+std::shared_ptr<const SampleData> SampleLibrary::load (const juce::String& path)
+{
+    auto& shared = sharedCache();
+    {
+        std::unique_lock l (shared.lock);
+        for (;;)
+        {
+            if (const auto it = shared.entries.find (path); it != shared.entries.end())
+                if (auto cached = it->second.lock())
+                    return cached;
+            if (shared.loading.count (path) == 0)
+                break;
+            shared.done.wait (l);
+        }
+        shared.loading.insert (path);
+    }
+    auto data = decode (path);
+    {
+        const std::scoped_lock l (shared.lock);
+        shared.loading.erase (path);
+        if (data != nullptr)
+            shared.entries[path] = data;
+    }
+    shared.done.notify_all();
+    return data;
+}
+
+std::shared_ptr<const SampleData> SampleLibrary::decode (const juce::String& path)
+{
+    const juce::File file (path);
+
+    if (! file.existsAsFile())
+        return nullptr;
+
+    auto reader = createReader (file);
+
+    if (reader == nullptr || reader->lengthInSamples <= 0 || reader->numChannels == 0)
+        return nullptr;
+
+    if ((double) reader->lengthInSamples > reader->sampleRate * streamAboveSeconds)
+        if (auto streamed = loadStreamed (file, *reader))
+            return streamed;
+    // In memory: 10-minute safety limit (long ones go through the disk cache).
+    const auto frames = (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 600.0));
+    const auto channels = juce::jmin (2, (int) reader->numChannels);
+
+    juce::AudioBuffer<float> buffer (channels, frames);
+    reader->read (&buffer, 0, frames, 0, true, channels > 1);
+
+    auto data = std::make_shared<SampleData>();
+    data->sampleRate = reader->sampleRate;
+    data->left.assign (buffer.getReadPointer (0), buffer.getReadPointer (0) + frames);
+    // the file's own loop (WAV smpl, first loop; JUCE gives the end frame inclusive)
+    {
+        const auto& meta = reader->metadataValues;
+        if (meta.getValue ("NumSampleLoops", "0").getIntValue() > 0)
+        {
+            const auto start = meta.getValue ("Loop0Start", "-1").getLargeIntValue();
+            const auto end = meta.getValue ("Loop0End", "-1").getLargeIntValue() + 1;
+            if (start >= 0 && end > start && end <= frames)
+                data->loopStart = start, data->loopEnd = end;
+        }
+    }
+
+    if (channels > 1)
+        data->right.assign (buffer.getReadPointer (1), buffer.getReadPointer (1) + frames);
+
+    return data;
+}
 } // namespace lynx
