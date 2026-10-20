@@ -3,11 +3,13 @@
 #include "engine/FlStudio.h"
 
 #include <map>
+#include <thread>
 
 #include "engine/Text.h"
 #include "ui/I18n.h"
 
 #include "core/FlpImport.h"
+#include "core/LoadTrace.h"
 #include "core/Instruments.h"
 #include "core/Dither.h"
 #include "core/SoftClip.h"
@@ -1167,32 +1169,81 @@ void AudioEngine::publishSelection()
     extraLiveCount.store (extra);
 }
 
-bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error, const std::map<std::string, std::string>& relocations, bool asEdit)
+namespace
+{
+// Whether a drive / network share is there, within a time limit: a disconnected network drive can block a file
+// query for half a minute, and an open probes many paths under the same root (round 112). One probe per root per open.
+bool rootReachable (const std::string& root)
+{
+    auto result = std::make_shared<std::atomic<int>> (-1);
+    std::thread ([result, root] {
+        result->store (platform::localFile (root).isDirectory() ? 1 : 0); // FL's "C:\" spelling on macOS/Linux too
+    }).detach();
+    const auto started = juce::Time::getMillisecondCounter();
+    while (result->load() < 0 && juce::Time::getMillisecondCounter() - started < 2000)
+        juce::Thread::sleep (2);
+    return result->load() == 1; // still unknown after 2 s: treated as missing (the probe thread finishes on its own)
+}
+
+std::string userOf (const Song& song, std::size_t track)
+{
+    return song.mixer[track].name.empty() ? (track == 0 ? std::string ("Master") : "Insert " + std::to_string (track)) : song.mixer[track].name;
+}
+} // namespace
+
+void AudioEngine::prepareFlpImport (const juce::File& file, const std::map<std::string, std::string>& relocations, SampleLibrary& library,
+                                    PreparedFlp& out)
 {
     juce::MemoryBlock data;
-
-    if (! file.loadFileAsData (data))
     {
-        error = utf8 ("could not read the file");
-        return false;
+        const loadtrace::Scope timing ("read_project");
+        if (! file.loadFileAsData (data))
+        {
+            out.error = utf8 ("could not read the file");
+            return;
+        }
     }
 
     try
     {
+        loadtrace::stage (0.20, 0.30, TR_NOOP ("Reading the project..."));
+        const auto started = std::chrono::steady_clock::now();
         const auto project = flp::parseProject ({ static_cast<const std::uint8_t*> (data.getData()), data.getSize() });
+        loadtrace::add ("parse", loadtrace::msSince (started));
 
         FlpImportOptions options;
         options.roots = findFlStudioRoots();
         options.projectFolder = file.getParentDirectory().getFullPathName().toStdString();
-        options.fileExists = [] (const std::string& path) { return platform::localFile (path).existsAsFile(); };
-        options.readFile = [] (const std::string& path) {
+        // samples on a drive that is not there (unplugged external drive, dead network share): one probe per root
+        auto roots = std::make_shared<loadtrace::RootProbe> ([] (const std::string& root) {
+            const auto t = std::chrono::steady_clock::now();
+            const auto ok = rootReachable (root);
+            loadtrace::add ("probe_root", loadtrace::msSince (t));
+            return ok;
+        });
+        options.fileExists = [roots] (const std::string& path) {
+            if (! roots->rootAvailable (path))
+                return false;
+            const auto t = std::chrono::steady_clock::now();
+            const auto exists = platform::localFile (path).existsAsFile();
+            loadtrace::add ("probe_file", loadtrace::msSince (t));
+            return exists;
+        };
+        options.readFile = [roots] (const std::string& path) {
+            if (! roots->rootAvailable (path))
+                return std::vector<std::uint8_t> {};
+            const auto t = std::chrono::steady_clock::now();
             juce::MemoryBlock data;
             platform::localFile (path).loadFileAsData (data);
             const auto* bytes = static_cast<const std::uint8_t*> (data.getData());
+            loadtrace::add ("read_aux_file", loadtrace::msSince (t));
             return std::vector<std::uint8_t> (bytes, bytes + data.getSize());
         };
-        options.sampleFrames = [this] (const std::string& path) -> std::int64_t {
-            const auto sample = samples.load (juce::String::fromUTF8 (path.c_str()));
+        auto decoded = std::make_shared<std::vector<std::shared_ptr<const SampleData>>>();
+        options.sampleFrames = [&library, decoded] (const std::string& path) -> std::int64_t {
+            const auto sample = library.load (juce::String::fromUTF8 (path.c_str()));
+            if (sample != nullptr)
+                decoded->push_back (sample); // kept: the rack uses it next (it was decoded twice before)
             return sample != nullptr ? (std::int64_t) sample->frames() : 0;
         };
         // WAV that only exists inside the .flp (Slicex): goes to %APPDATA%\LYNX\flp-embedded, keyed by content
@@ -1210,71 +1261,204 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error, co
             return file.getFullPathName().toStdString();
         };
 
-        importReport = {};
-        options.report = &importReport;
+        out.report = {};
+        options.report = &out.report;
         options.relocations = relocations;
-        auto imported = importFlp (project, options);
+        {
+            const auto t = std::chrono::steady_clock::now();
+            out.song = importFlp (project, options);
+            loadtrace::add ("import", loadtrace::msSince (t));
+        }
+        loadtrace::add ("missing_roots", 0.0, (int) roots->missingRoots().size());
+        loadtrace::add ("probe_skipped", 0.0, roots->skipped());
 
         // the project's third-party plugins, to say which channel/insert used each one that is missing
-        struct Use
-        {
-            std::string name, user;
-            bool instrument;
-        };
-        std::vector<Use> uses;
-        for (const auto& c : imported.channels)
+        for (const auto& c : out.song.channels)
             if (c.plugin.foreign.format != ForeignPlugin::Format::none)
-                uses.push_back ({ c.plugin.foreign.name, c.name, true });
-        for (std::size_t t = 0; t < imported.mixer.size(); ++t)
-            for (const auto& fx : imported.mixer[t].effects)
+                out.uses.push_back ({ c.plugin.foreign.name, c.name, true });
+        for (std::size_t t = 0; t < out.song.mixer.size(); ++t)
+            for (const auto& fx : out.song.mixer[t].effects)
                 if (fx.kind == EffectKind::plugin && fx.plugin.foreign.format != ForeignPlugin::Format::none)
-                    uses.push_back ({ fx.plugin.foreign.name, imported.mixer[t].name.empty() ? (t == 0 ? std::string ("Master") : "Insert " + std::to_string (t))
-                                                                                            : imported.mixer[t].name,
-                                      false });
+                    out.uses.push_back ({ fx.plugin.foreign.name, userOf (out.song, t), false });
 
-        juce::StringArray missing;
-        juce::StringArray matched;
-        juce::StringArray withoutState;
-        juce::StringArray substituted;
-        plugins.adoptFlPlugins (imported, &missing, &matched, &withoutState, &substituted);
-        missingPlugins = missing;
-        matchedPlugins = matched;
-        pluginsWithoutState = withoutState;
-        missingPluginDetails.clear();
-        for (const auto& name : missing)
+        // the samples, decoded now (in parallel, off the message thread) so building the rack only finds them ready
+        std::vector<std::string> paths;
+        auto addPath = [&paths] (const std::string& p) {
+            if (! p.empty() && std::find (paths.begin(), paths.end(), p) == paths.end())
+                paths.push_back (p);
+        };
+        for (const auto& c : out.song.channels)
         {
-            MissingPlugin m;
-            m.name = name.toStdString();
-            for (const auto& u : uses)
-                if (u.name == m.name)
-                {
-                    if (std::find (m.usedBy.begin(), m.usedBy.end(), u.user) == m.usedBy.end())
-                        m.usedBy.push_back (u.user);
-                    m.replacement = u.instrument ? "Built-in synth (a preset chosen by the channel name)" : "Nothing: the slot was left out of the mixer";
-                }
-            missingPluginDetails.push_back (std::move (m));
+            if (c.instrument == InstrumentKind::sampler || c.instrument == InstrumentKind::audioClip || c.instrument == InstrumentKind::granulizer
+                || c.instrument == InstrumentKind::flkeys || c.instrument == InstrumentKind::directwave)
+                addPath (c.samplePath);
+            for (const auto& z : c.zones)
+                addPath (z.path);
         }
-        // missing, played by a LYNX substitute that keeps the original for when it is installed
-        for (std::size_t t = 0; t < imported.mixer.size(); ++t)
-            for (const auto& fx : imported.mixer[t].effects)
-                if (fx.isSubstitute())
-                {
-                    const auto name = substituteOriginalName (fx);
-                    auto it = std::find_if (missingPluginDetails.begin(), missingPluginDetails.end(),
-                                            [&] (const MissingPlugin& m) { return m.name == name && ! m.replacementArg.empty(); });
-                    if (it == missingPluginDetails.end())
-                        it = missingPluginDetails.insert (missingPluginDetails.end(),
-                                                          MissingPlugin { name, {}, TR_NOOP ("LYNX substitute: {0} (the original plugin is used again once it is installed)"),
-                                                                          effectInfo (fx.kind).name });
-                    const auto user = imported.mixer[t].name.empty() ? (t == 0 ? std::string ("Master") : "Insert " + std::to_string (t)) : imported.mixer[t].name;
-                    if (std::find (it->usedBy.begin(), it->usedBy.end(), user) == it->usedBy.end())
-                        it->usedBy.push_back (user);
-                }
-        // found, but the project's settings are in the other format (VST2 <-> VST3): they play their default sound
-        for (const auto& line : withoutState)
-            missingPluginDetails.push_back ({ line.toStdString(), {}, TR_NOOP ("Its default settings: the project saved them for the other format (VST2/VST3)") });
+        for (const auto& track : out.song.mixer)
+            for (const auto& fx : track.effects)
+                addPath (fx.samplePath);
 
-        plugins.clearLoadFailures();
+        loadtrace::stage (0.30, 0.55, TR_NOOP ("Reading the samples..."), TR_NOOP ("Reading {0}... {1}/{2}"));
+        const auto decodeStarted = std::chrono::steady_clock::now();
+        std::atomic<std::size_t> next { 0 }, done { 0 };
+        std::mutex keep;
+        auto worker = [&] {
+            for (auto i = next++; i < paths.size(); i = next++)
+            {
+                const auto t = std::chrono::steady_clock::now();
+                auto sample = library.load (juce::String::fromUTF8 (paths[i].c_str()));
+                loadtrace::add ("sample_decode", loadtrace::msSince (t));
+                {
+                    const std::scoped_lock l (keep);
+                    if (sample != nullptr)
+                        out.decoded.push_back (std::move (sample));
+                }
+                const auto n = ++done;
+                loadtrace::step ((int) n, (int) paths.size(),
+                                 juce::File::createFileWithoutCheckingPath (juce::String::fromUTF8 (paths[i].c_str())).getFileName().toStdString());
+            }
+        };
+        const auto threads = (std::size_t) juce::jlimit (1, 6, juce::SystemStats::getNumCpus() - 1);
+        std::vector<std::thread> pool;
+        for (std::size_t i = 1; i < juce::jmin (threads, paths.size()); ++i)
+            pool.emplace_back (worker);
+        worker();
+        for (auto& t : pool)
+            t.join();
+        for (auto& d : *decoded)
+            out.decoded.push_back (std::move (d));
+
+        // pitch-preserving stretch (audio clips that follow the tempo): the stretched copy too, in parallel, with the
+        // same ratio the rack asks for (RackState::build) — it was computed on the message thread while building
+        struct Stretch
+        {
+            std::string path;
+            double ratio;
+        };
+        std::vector<Stretch> stretches;
+        for (const auto& c : out.song.channels)
+            if ((c.instrument == InstrumentKind::sampler || c.instrument == InstrumentKind::audioClip) && c.zones.empty() && ! c.samplePath.empty()
+                && c.sampler.keepPitch && c.sampler.stretchBeats > 0.0f)
+                if (const auto data = library.load (juce::String::fromUTF8 (c.samplePath.c_str())); data != nullptr && data->frames() > 0)
+                {
+                    const auto target = c.sampler.stretchBeats * 60.0 / std::max (1.0, out.song.bpm);
+                    const auto ratio = target / ((double) data->frames() / data->sampleRate);
+                    if (std::none_of (stretches.begin(), stretches.end(), [&] (const Stretch& x) { return x.path == c.samplePath && x.ratio == ratio; }))
+                        stretches.push_back ({ c.samplePath, ratio });
+                }
+        if (! stretches.empty())
+        {
+            const auto stretchStarted = std::chrono::steady_clock::now();
+            std::atomic<std::size_t> nextStretch { 0 };
+            auto stretchWorker = [&] {
+                for (auto i = nextStretch++; i < stretches.size(); i = nextStretch++)
+                    library.loadStretched (juce::String::fromUTF8 (stretches[i].path.c_str()), stretches[i].ratio);
+            };
+            std::vector<std::thread> helpers;
+            for (std::size_t i = 1; i < juce::jmin (threads, stretches.size()); ++i)
+                helpers.emplace_back (stretchWorker);
+            stretchWorker();
+            for (auto& t : helpers)
+                t.join();
+            loadtrace::add ("stretch_wall", loadtrace::msSince (stretchStarted), (int) stretches.size());
+        }
+        loadtrace::add ("samples_wall", loadtrace::msSince (decodeStarted), (int) paths.size());
+        out.ok = true;
+    }
+    catch (const flp::Error& e)
+    {
+        out.error = juce::String::fromUTF8 (e.what());
+    }
+}
+
+void AudioEngine::adoptPrepared (PreparedFlp& prepared)
+{
+    if (prepared.adopted)
+        return;
+    prepared.adopted = true;
+    const auto t = std::chrono::steady_clock::now();
+    plugins.clearPreloaded();
+    plugins.setPreloadRate (transport.sampleRate.load());
+    plugins.adoptFlPlugins (prepared.song, &prepared.missing, &prepared.matched, &prepared.withoutState, &prepared.substituted);
+    loadtrace::add ("adopt_plugins", loadtrace::msSince (t));
+
+    // the hosted plugins the rack will create, in its order (channels, then inserts)
+    for (const auto& c : prepared.song.channels)
+        if (c.instrument == InstrumentKind::plugin && ! c.plugin.id.empty())
+            prepared.pluginQueue.push_back (c.plugin);
+    for (const auto& track : prepared.song.mixer)
+        for (std::size_t i = 0; i < track.effects.size() && i < (std::size_t) maxEffectSlots; ++i)
+            if (track.effects[i].kind == EffectKind::plugin && ! track.effects[i].plugin.id.empty())
+                prepared.pluginQueue.push_back (track.effects[i].plugin);
+}
+
+bool AudioEngine::preloadNextPlugin (PreparedFlp& prepared)
+{
+    adoptPrepared (prepared);
+    if (prepared.pluginsDone >= prepared.pluginQueue.size())
+        return false;
+    const auto total = (int) prepared.pluginQueue.size();
+    const auto& ref = prepared.pluginQueue[prepared.pluginsDone];
+    auto wanted = 0;
+    for (std::size_t i = 0; i <= prepared.pluginsDone; ++i)
+        wanted += prepared.pluginQueue[i].id == ref.id && prepared.pluginQueue[i].state == ref.state ? 1 : 0;
+    plugins.preload (ref, wanted);
+    ++prepared.pluginsDone;
+    loadtrace::step ((int) prepared.pluginsDone, total, {});
+    return prepared.pluginsDone < prepared.pluginQueue.size();
+}
+
+bool AudioEngine::finishFlpImport (PreparedFlp&& prepared, bool asEdit)
+{
+    if (! prepared.ok)
+        return false;
+    adoptPrepared (prepared);
+    auto& imported = prepared.song;
+    importReport = std::move (prepared.report);
+    const auto& uses = prepared.uses;
+
+    missingPlugins = prepared.missing;
+    matchedPlugins = prepared.matched;
+    pluginsWithoutState = prepared.withoutState;
+    missingPluginDetails.clear();
+    for (const auto& name : prepared.missing)
+    {
+        MissingPlugin m;
+        m.name = name.toStdString();
+        for (const auto& u : uses)
+            if (u.name == m.name)
+            {
+                if (std::find (m.usedBy.begin(), m.usedBy.end(), u.user) == m.usedBy.end())
+                    m.usedBy.push_back (u.user);
+                m.replacement = u.instrument ? "Built-in synth (a preset chosen by the channel name)" : "Nothing: the slot was left out of the mixer";
+            }
+        missingPluginDetails.push_back (std::move (m));
+    }
+    // missing, played by a LYNX substitute that keeps the original for when it is installed
+    for (std::size_t t = 0; t < imported.mixer.size(); ++t)
+        for (const auto& fx : imported.mixer[t].effects)
+            if (fx.isSubstitute())
+            {
+                const auto name = substituteOriginalName (fx);
+                auto it = std::find_if (missingPluginDetails.begin(), missingPluginDetails.end(),
+                                        [&] (const MissingPlugin& m) { return m.name == name && ! m.replacementArg.empty(); });
+                if (it == missingPluginDetails.end())
+                    it = missingPluginDetails.insert (missingPluginDetails.end(),
+                                                      MissingPlugin { name, {}, TR_NOOP ("LYNX substitute: {0} (the original plugin is used again once it is installed)"),
+                                                                      effectInfo (fx.kind).name });
+                const auto user = userOf (imported, t);
+                if (std::find (it->usedBy.begin(), it->usedBy.end(), user) == it->usedBy.end())
+                    it->usedBy.push_back (user);
+            }
+    // found, but the project's settings are in the other format (VST2 <-> VST3): they play their default sound
+    for (const auto& line : prepared.withoutState)
+        missingPluginDetails.push_back ({ line.toStdString(), {}, TR_NOOP ("Its default settings: the project saved them for the other format (VST2/VST3)") });
+
+    plugins.clearLoadFailures();
+    loadtrace::stage (0.90, 0.99, TR_NOOP ("Building the mixer..."));
+    {
+        const loadtrace::Scope timing ("set_song");
         if (asEdit)
             editSong ([&imported] (Song& s) { s = std::move (imported); });
         else
@@ -1283,17 +1467,30 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error, co
             rewind();
             setSong (std::move (imported));
         }
-
-        // installed but failed to load (the rack was just built): silence / bypass, said as loudly as a missing one
-        for (const auto& line : plugins.getLoadFailures())
-            missingPluginDetails.push_back ({ line.toStdString(), {}, TR_NOOP ("Silence: the plugin is installed but did not load") });
-        return true;
     }
-    catch (const flp::Error& e)
+    plugins.clearPreloaded(); // (any left over: a slot the rack reused, nothing to keep)
+    prepared.decoded.clear();
+
+    // installed but failed to load (the rack was just built): silence / bypass, said as loudly as a missing one
+    for (const auto& line : plugins.getLoadFailures())
+        missingPluginDetails.push_back ({ line.toStdString(), {}, TR_NOOP ("Silence: the plugin is installed but did not load") });
+    return true;
+}
+
+bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error, const std::map<std::string, std::string>& relocations, bool asEdit)
+{
+    PreparedFlp prepared;
+    prepareFlpImport (file, relocations, samples, prepared);
+    if (! prepared.ok)
     {
-        error = juce::String::fromUTF8 (e.what());
+        error = prepared.error;
         return false;
     }
+    loadtrace::stage (0.55, 0.90, TR_NOOP ("Loading plugins..."), TR_NOOP ("Loading {0}... {1}/{2}"));
+    while (preloadNextPlugin (prepared))
+    {
+    }
+    return finishFlpImport (std::move (prepared), asEdit);
 }
 
 void AudioEngine::publishSong()
@@ -1335,9 +1532,14 @@ void AudioEngine::publishSong()
     transport.loopStart.store ((double) song.loopStart);
     transport.loopEnd.store ((double) song.loopEnd);
 
+    const loadtrace::Scope buildTiming ("rack_build");
     RackState::Factories factories;
-    factories.samples = [this] (const std::string& path) { return samples.load (juce::String::fromUTF8 (path.c_str())); };
+    factories.samples = [this] (const std::string& path) {
+        const loadtrace::Scope timing ("rack_samples");
+        return samples.load (juce::String::fromUTF8 (path.c_str()));
+    };
     factories.stretchedSamples = [this] (const std::string& path, double ratio) {
+        const loadtrace::Scope timing ("rack_stretch");
         return samples.loadStretched (juce::String::fromUTF8 (path.c_str()), ratio);
     };
     factories.pluginInstruments = [this] (const PluginRef& ref, double sr) { return plugins.makeInstrument (ref, sr); };

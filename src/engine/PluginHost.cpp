@@ -1,16 +1,23 @@
 #include "engine/PluginHost.h"
 #include "platform/Paths.h"
 
+#include <algorithm>
+
 #include "core/Preferences.h"
 #include "core/PluginScanPolicy.h"
 
 #include "core/FlWrapper.h"
+#include "core/LoadTrace.h"
 
 #include "engine/ClapFormat.h"
 #include "engine/Vst2Format.h"
 #include "engine/PluginSandbox.h"
 #include "engine/FlStudio.h"
 #include "ui/I18n.h"
+
+#if JUCE_WINDOWS
+ #include <windows.h>
+#endif
 
 namespace lynx
 {
@@ -233,14 +240,15 @@ PluginHost::PluginHost (bool keep)
         // once: files marked as failed by scans before the class-count timeout (REA_rodada107 §2) get another try,
         // since a large bundle (Waves shell) was marked "hung" only for taking longer than 30 s
         const auto retried = settingsFolder().getChildFile ("scan-retry.txt");
-        if (retried.loadFileAsString().getIntValue() < 1)
+        // round 113: once more, as the scan now keeps a description whose plugin only hung while closing
+        if (retried.loadFileAsString().getIntValue() < 2)
         {
             if (! known.getBlacklistedFiles().isEmpty())
             {
                 known.clearBlacklistedFiles();
                 save();
             }
-            retried.replaceWithText ("1\n");
+            retried.replaceWithText ("2\n");
         }
     }
 }
@@ -372,6 +380,24 @@ juce::File classCountFile (const juce::File& result)
 {
     return result.withFileExtension ("classes");
 }
+
+// the child wrote its whole answer (the file closes with the root element): a hang after it is the plugin's shutdown
+bool scanResultComplete (const juce::File& result)
+{
+    if (! result.existsAsFile())
+        return false;
+    const auto xml = juce::XmlDocument::parse (result);
+    return xml != nullptr && xml->hasTagName ("PLUGINS") && xml->getNumChildElements() > 0;
+}
+
+// why a plugin file was not described (%APPDATA%\LYNX\scan-failures.log), so a "missing" plugin can be explained
+void logScanFailure (const juce::String& file, const juce::String& why, juce::uint32 elapsedMs)
+{
+    const auto log = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX").getChildFile ("scan-failures.log");
+    if (log.getSize() > 256 * 1024)
+        log.deleteFile();
+    log.appendText (juce::Time::getCurrentTime().toISO8601 (true) + " | " + file + " | " + why + " | " + juce::String (elapsedMs / 1000.0, 1) + " s\n");
+}
 } // namespace
 
 bool PluginHost::scanOne (juce::AudioPluginFormat& format, const juce::String& file)
@@ -407,18 +433,26 @@ bool PluginHost::scanOne (juce::AudioPluginFormat& format, const juce::String& f
                 classCountFile (result).deleteFile();
                 return false;
             }
-            ok = false; // hung: blacklist
+            // the description may be complete and only the plugin's shutdown hung (round 113): keep it then
+            ok = scanResultComplete (result);
+            logScanFailure (file, ok ? "result kept, child killed after it" : (classesKnown ? "timeout while describing" : "timeout before the class count"),
+                            juce::Time::getMillisecondCounter() - started);
         }
+        else if (child.getExitCode() != 0)
+            logScanFailure (file, "exit code " + juce::String ((int) child.getExitCode()), juce::Time::getMillisecondCounter() - started);
     }
-    ok = ok && child.getExitCode() == 0;
+    ok = ok && (child.isRunning() || child.getExitCode() == 0 || scanResultComplete (result));
     if (auto xml = ok ? juce::XmlDocument::parse (result) : nullptr)
     {
+        auto added = 0;
         for (auto* e : xml->getChildIterator())
         {
             juce::PluginDescription d;
             if (d.loadFromXml (*e))
-                known.addType (d);
+                added += known.addType (d) ? 1 : 0;
         }
+        if (xml->getNumChildElements() == 0 && added == 0)
+            rememberEmptyScan (file); // nothing in it: not described again on every open until it changes
     }
     else if (! ok)
         known.addToBlacklist (file);
@@ -433,7 +467,10 @@ int PluginHost::scan (const juce::FileSearchPath& paths, const std::function<boo
     for (auto* format : formats.getFormats())
         if (format->canScanForPlugins())
             files.addArray (format->searchPathsForPlugins (paths, true, false));
-    return scanFiles (files, progress);
+    const auto found = scanFiles (files, progress);
+    if (! stopScan)
+        forgetMisses(); // everything was looked at again: the projects' missing plugins may be findable now
+    return found;
 }
 
 int PluginHost::scanFiles (const juce::StringArray& files, const std::function<bool (float, const juce::String&)>& progress)
@@ -452,7 +489,7 @@ int PluginHost::scanFiles (const juce::StringArray& files, const std::function<b
         {
             if (! format->canScanForPlugins() || ! format->fileMightContainThisPluginType (file))
                 continue;
-            if (! known.isListingUpToDate (file, *format))
+            if (! known.isListingUpToDate (file, *format) && ! emptyScanIsCurrent (file))
                 scanOne (*format, file);
             break;
         }
@@ -483,6 +520,16 @@ void PluginHost::forgetFile (const juce::String& file)
         if (t.fileOrIdentifier == file)
             known.removeType (t);
     known.removeFromBlacklist (file);
+    {
+        juce::StringArray lines;
+        const auto list = settingsFolder().getChildFile ("scan-empty.txt");
+        lines.addLines (list.loadFileAsString());
+        for (int i = lines.size(); --i >= 0;)
+            if (lines[i].fromFirstOccurrenceOf ("|", false, false) == file)
+                lines.remove (i);
+        if (persistent)
+            list.replaceWithText (lines.joinIntoString ("\n"));
+    }
     save();
 }
 
@@ -490,7 +537,95 @@ void PluginHost::forgetAll()
 {
     known.clear();
     known.clearBlacklistedFiles();
+    if (persistent)
+        settingsFolder().getChildFile ("scan-empty.txt").deleteFile();
+    forgetMisses();
     save();
+}
+
+bool PluginHost::emptyScanIsCurrent (const juce::String& file)
+{
+    if (! persistent)
+        return false;
+    const auto stamp = juce::String (juce::File (file).getLastModificationTime().toMilliseconds());
+    juce::StringArray lines;
+    lines.addLines (settingsFolder().getChildFile ("scan-empty.txt").loadFileAsString());
+    return lines.contains (stamp + "|" + file);
+}
+
+void PluginHost::rememberEmptyScan (const juce::String& file)
+{
+    if (! persistent)
+        return;
+    const auto list = settingsFolder().getChildFile ("scan-empty.txt");
+    juce::StringArray lines;
+    lines.addLines (list.loadFileAsString());
+    for (int i = lines.size(); --i >= 0;)
+        if (lines[i].trim().isEmpty() || lines[i].fromFirstOccurrenceOf ("|", false, false) == file)
+            lines.remove (i);
+    lines.add (juce::String (juce::File (file).getLastModificationTime().toMilliseconds()) + "|" + file);
+    list.replaceWithText (lines.joinIntoString ("\n"));
+}
+
+namespace
+{
+juce::String missKey (const FlpPluginUse& use)
+{
+    const auto& p = use.plugin;
+    juce::String key = juce::String ((int) p.format) + ":" + (use.instrument ? "i" : "e") + ":" + juce::String::fromUTF8 (p.name.c_str()) + ":"
+                       + juce::String::fromUTF8 (p.path.c_str()) + ":" + juce::String ((juce::int64) p.vst2Id);
+    if (p.hasClassId)
+        key << ":" << juce::String::toHexString (p.classId.data(), (int) p.classId.size(), 0);
+    if (! p.clapId.empty())
+        key << ":" << juce::String::fromUTF8 (p.clapId.c_str());
+    // a Waves shell: the sub-plugin's name says which one
+    key << ":" << juce::String::fromUTF8 (wavesPluginName (pluginIdentity (p).state).c_str());
+    return key.replaceCharacters ("\r\n", "  ");
+}
+
+constexpr juce::int64 missMemoryMs = 7LL * 24 * 3600 * 1000;
+} // namespace
+
+bool PluginHost::recentlyMissed (const FlpPluginUse& use) const
+{
+    if (! persistent)
+        return false;
+    juce::StringArray lines;
+    lines.addLines (settingsFolder().getChildFile ("scan-misses.txt").loadFileAsString());
+    const auto key = missKey (use);
+    const auto now = juce::Time::currentTimeMillis();
+    for (const auto& line : lines)
+        if (line.fromFirstOccurrenceOf ("|", false, false) == key)
+        {
+            const auto when = line.upToFirstOccurrenceOf ("|", false, false).getLargeIntValue();
+            return now >= when && now - when < missMemoryMs;
+        }
+    return false;
+}
+
+void PluginHost::rememberMisses (const std::vector<FlpPluginUse>& uses)
+{
+    if (! persistent || uses.empty())
+        return;
+    const auto list = settingsFolder().getChildFile ("scan-misses.txt");
+    juce::StringArray lines;
+    lines.addLines (list.loadFileAsString());
+    const auto now = juce::String (juce::Time::currentTimeMillis());
+    for (const auto& use : uses)
+    {
+        const auto key = missKey (use);
+        for (int i = lines.size(); --i >= 0;)
+            if (lines[i].trim().isEmpty() || lines[i].fromFirstOccurrenceOf ("|", false, false) == key)
+                lines.remove (i);
+        lines.add (now + "|" + key);
+    }
+    list.replaceWithText (lines.joinIntoString ("\n"));
+}
+
+void PluginHost::forgetMisses()
+{
+    if (persistent)
+        settingsFolder().getChildFile ("scan-misses.txt").deleteFile();
 }
 
 void PluginHost::setFavourite (const std::string& id, bool favourite)
@@ -552,6 +687,12 @@ int PluginHost::scanOneFile (const juce::String& formatName, const juce::String&
     for (auto* d : found)
         xml.addChildElement (d->createXml().release());
     xml.writeTo (output);
+   #if JUCE_WINDOWS
+    // the answer is written: the child ends here, without unloading the plugin modules, whose shutdown can hang (a
+    // Waves shell in a desktop session) and get the whole file marked as hung (round 113)
+    if (! found.isEmpty())
+        TerminateProcess (GetCurrentProcess(), 0);
+   #endif
     return found.size();
 }
 
@@ -608,7 +749,10 @@ juce::String plainName (const juce::String& s)
 
 std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlugin& plugin, bool instrument, juce::String* how)
 {
-    const auto types = known.getTypes(); // a copy: a background scan may add types meanwhile
+    auto types = known.getTypes(); // a copy: a background scan may add types meanwhile
+    // entries whose file is gone (a plugin moved to another folder by its installer keeps a stale entry until the next
+    // full scan) go last: the same class ID found at the old path would load nothing ("no compatible plug-in format")
+    std::stable_partition (types.begin(), types.end(), [this] (const juce::PluginDescription& d) { return fileStillThere (d.fileOrIdentifier); });
     auto found = [how] (const juce::PluginDescription& d, const char* reason) {
         if (how != nullptr)
             *how = reason;
@@ -624,9 +768,16 @@ std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlu
         fileName = {};
         name = plainName (juce::String::fromUTF8 (wavesPluginName (pluginIdentity (plugin).state).c_str()));
     }
+    // a list entry whose file is gone (an uninstalled older version next to the current one, round 113) never matches:
+    // loading it fails and the slot would play nothing
+    auto present = [] (const juce::PluginDescription& d) {
+        return ! juce::File::isAbsolutePath (d.fileOrIdentifier) || juce::File (d.fileOrIdentifier).exists();
+    };
     // 1) the same plugin, by its format identifier
     for (const auto& d : types)
     {
+        if (! present (d))
+            continue;
         if (plugin.format == ForeignPlugin::Format::vst3 && plugin.hasClassId && d.pluginFormatName == "VST3"
             && (d.deprecatedUid == vst3Hash (plugin.classId) || d.uniqueId == vst3NormalisedHash (plugin.classId)))
             return found (d, TR_NOOP ("same VST3 class ID"));
@@ -648,15 +799,19 @@ std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlu
             return nullptr;
         const juce::File file (p);
         for (const auto& d : types)
-            if (d.isInstrument == instrument && juce::File::isAbsolutePath (d.fileOrIdentifier) && juce::File (d.fileOrIdentifier) == file)
+            if (d.isInstrument == instrument && juce::File::isAbsolutePath (d.fileOrIdentifier) && juce::File (d.fileOrIdentifier) == file && present (d))
                 return &d;
         return nullptr;
     };
-    if (const auto* entry = flPluginDatabase().match (plugin, instrument))
-        if (const auto* d = sameFile (entry->path))
-            return found (*d, TR_NOOP ("FL Studio's plugin database"));
-    if (const auto* d = sameFile (plugin.path))
-        return found (*d, TR_NOOP ("same file as in the project"));
+    // (not for a Waves shell: its file holds many plugins, the first one of the file would be the wrong one)
+    if (! shell)
+    {
+        if (const auto* entry = flPluginDatabase().match (plugin, instrument))
+            if (const auto* d = sameFile (entry->path))
+                return found (*d, TR_NOOP ("FL Studio's plugin database"));
+        if (const auto* d = sameFile (plugin.path))
+            return found (*d, TR_NOOP ("same file as in the project"));
+    }
     // 3) fallback, since FL swaps VST2 <-> VST3: same name (plugin or file), same role
     if (name.isEmpty() && fileName.isEmpty())
         return std::nullopt;
@@ -668,7 +823,7 @@ std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlu
     std::optional<juce::PluginDescription> byName;
     for (const auto& d : types)
     {
-        if (d.isInstrument != instrument)
+        if (d.isInstrument != instrument || ! present (d))
             continue;
         const auto candidate = plainName (d.name);
         const auto candidateFile = plainName (juce::File::createFileWithoutCheckingPath (d.fileOrIdentifier).getFileNameWithoutExtension());
@@ -693,6 +848,16 @@ std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlu
     if (byName && how != nullptr)
         *how = TR_NOOP ("same name, other format");
     return byName;
+}
+
+bool PluginHost::fileStillThere (const juce::String& file)
+{
+    if (! juce::File::isAbsolutePath (file))
+        return true;
+    const std::scoped_lock lock (existsLock);
+    if (const auto it = existsCache.find (file); it != existsCache.end())
+        return it->second;
+    return existsCache[file] = juce::File (file).exists();
 }
 
 juce::StringArray PluginHost::filesToScanFor (const std::vector<FlpPluginUse>& uses)
@@ -808,7 +973,8 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::St
     // FL automates a VST3 by "slot" (record 4: slot → ParamID); LYNX by position in JUCE's list, which is
     // getParameterInfo order (REA_rodada22 §2.3). Needs the plugin's current list: only when something is
     // automated, in-process (skipped with the sandbox on, where k stays the position — FL's default for a new instance).
-    auto remapVst3Slots = [&] (const ForeignPlugin& f, const juce::PluginDescription& d, auto&& isThisPlugin) {
+    // (the instance it asks for stays ready for the rack: the same plugin is not created twice on open)
+    auto remapVst3Slots = [&] (const ForeignPlugin& f, const juce::PluginDescription& d, const PluginRef& ref, auto&& isThisPlugin) {
         if (f.format != ForeignPlugin::Format::vst3 || d.pluginFormatName != "VST3" || pluginSandboxEnabled())
             return;
         const auto saved = flVst3ParamSlots (f.state);
@@ -817,10 +983,26 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::St
         if (saved.empty() || ! automated)
             return;
 
+        const loadtrace::Scope timing ("plugin_vst3_remap");
         juce::String error;
-        const auto instance = formats.createPluginInstance (d, 44100.0, 512, error);
+        auto instance = createInstance (ref, preloadRate, &error);
         if (instance == nullptr)
+        {
+            const std::scoped_lock lock (preloadLock);
+            preloaded[preloadKey (ref, preloadRate)].push_back ({ nullptr, error });
             return;
+        }
+        struct Keep
+        {
+            PluginHost& host;
+            const PluginRef& ref;
+            std::unique_ptr<juce::AudioPluginInstance>& instance;
+            ~Keep()
+            {
+                const std::scoped_lock lock (host.preloadLock);
+                host.preloaded[preloadKey (ref, host.preloadRate)].push_back ({ std::move (instance), {} });
+            }
+        } keep { *this, ref, instance };
         std::vector<std::uint32_t> ids;
         for (auto* p : instance->getParameters())
         {
@@ -844,10 +1026,12 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::St
         {
             channel.instrument = InstrumentKind::plugin;
             if (const auto d = findForeign (foreign, true))
-                remapVst3Slots (foreign, *d, [c] (const AutomationTarget& t) { return t.kind == AutomationTargetKind::channelParam && t.index == c; });
+                remapVst3Slots (foreign, *d, channel.plugin, [c] (const AutomationTarget& t) { return t.kind == AutomationTargetKind::channelParam && t.index == c; });
         }
     }
 
+    // the song's key etc., for substitutes whose own original doesn't say (round 113)
+    const auto context = substituteContextOf (song);
     // backwards: removing an unmatched slot shifts only the slots after it (their automations follow)
     for (int track = 0; track < (int) song.mixer.size(); ++track)
         for (int slot = (int) song.mixer[(std::size_t) track].effects.size() - 1; slot >= 0; --slot)
@@ -857,7 +1041,7 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::St
                 continue;
             const auto foreign = fx.plugin.foreign;
             // not installed: a LYNX substitute plays in its place and keeps the original record for later
-            if (pluginSubstitutesEnabled() && ! findForeign (foreign, false) && substituteEffectSlot (fx, pluginIdentity (foreign)))
+            if (pluginSubstitutesEnabled() && ! findForeign (foreign, false) && substituteEffectSlot (fx, pluginIdentity (foreign), context))
             {
                 if (substituted != nullptr)
                     substituted->addIfNotAlreadyThere (juce::String::fromUTF8 (substituteOriginalName (fx).c_str()) + " -> "
@@ -867,7 +1051,7 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::St
             if (! adopt (fx.plugin, false))
                 song.removeEffectSlot (track, slot);
             else if (const auto d = findForeign (foreign, false))
-                remapVst3Slots (foreign, *d, [track, slot] (const AutomationTarget& t) {
+                remapVst3Slots (foreign, *d, fx.plugin, [track, slot] (const AutomationTarget& t) {
                     return t.kind == AutomationTargetKind::effectParam && t.index == track && t.slot == slot;
                 });
         }
@@ -917,6 +1101,7 @@ int PluginHost::applySubstitutes (Song& song, int* restored, int* substituted)
     int back = 0, replaced = 0;
     bool foreignBack = false;
     const auto substitute = pluginSubstitutesEnabled();
+    const auto context = substituteContextOf (song);
     for (auto& track : song.mixer)
         for (auto& fx : track.effects)
         {
@@ -936,7 +1121,7 @@ int PluginHost::applySubstitutes (Song& song, int* restored, int* substituted)
             else if (substitute && fx.kind == EffectKind::plugin && fx.plugin.foreign.format == ForeignPlugin::Format::none
                      && ! fx.plugin.id.empty() && find (juce::String::fromUTF8 (fx.plugin.id.c_str())) == nullptr)
             {
-                if (substituteEffectSlot (fx, identityOf (fx.plugin)))
+                if (substituteEffectSlot (fx, identityOf (fx.plugin), context))
                     ++replaced;
             }
         }
@@ -960,8 +1145,74 @@ void setPluginSubstitutesEnabled (bool enabled)
     PluginHost::settingsFolder().getChildFile ("substitutes.txt").replaceWithText (enabled ? "1" : "0");
 }
 
+std::string PluginHost::preloadKey (const PluginRef& ref, double sampleRate)
+{
+    return ref.id + "|" + std::to_string (std::hash<std::string> {} (ref.state)) + "|" + std::to_string (ref.state.size()) + "|"
+           + std::to_string ((long long) std::llround (sampleRate));
+}
+
+void PluginHost::preload (const PluginRef& ref, int wanted)
+{
+    if (ref.id.empty())
+        return;
+    {
+        const std::scoped_lock lock (preloadLock);
+        if (const auto it = preloaded.find (preloadKey (ref, preloadRate)); it != preloaded.end() && (int) it->second.size() >= wanted)
+            return;
+    }
+    Preloaded p;
+    p.instance = createInstance (ref, preloadRate, &p.error);
+    const std::scoped_lock lock (preloadLock);
+    preloaded[preloadKey (ref, preloadRate)].push_back (std::move (p));
+}
+
+void PluginHost::clearPreloaded()
+{
+    {
+        const std::scoped_lock lock (existsLock);
+        existsCache.clear(); // (asked again on the next open)
+    }
+    std::map<std::string, std::vector<Preloaded>> old;
+    {
+        const std::scoped_lock lock (preloadLock);
+        old.swap (preloaded);
+    }
+    // (the unused instances are released here, outside the lock)
+}
+
+int PluginHost::preloadedCount() const
+{
+    const std::scoped_lock lock (preloadLock);
+    int n = 0;
+    for (const auto& [key, list] : preloaded)
+        n += (int) list.size();
+    return n;
+}
+
 std::unique_ptr<juce::AudioPluginInstance> PluginHost::instantiate (const PluginRef& ref, double sampleRate, juce::String* error)
 {
+    {
+        const std::scoped_lock lock (preloadLock);
+        if (auto it = preloaded.find (preloadKey (ref, sampleRate)); it != preloaded.end() && ! it->second.empty())
+        {
+            auto p = std::move (it->second.back());
+            it->second.pop_back();
+            if (it->second.empty())
+                preloaded.erase (it);
+            if (p.instance == nullptr && error != nullptr)
+                *error = p.error;
+            return std::move (p.instance);
+        }
+    }
+    return createInstance (ref, sampleRate, error);
+}
+
+std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const PluginRef& ref, double sampleRate, juce::String* error)
+{
+    if (onInstantiate)
+        onInstantiate (juce::String::fromUTF8 (ref.name.c_str()));
+    const loadtrace::Scope timing ("plugin_instantiate");
+    const loadtrace::Scope each ("plugin " + ref.name); // per plugin in load.log: which one is slow
     const auto description = find (juce::String::fromUTF8 (ref.id.c_str()));
 
     if (description == nullptr)

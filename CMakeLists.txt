@@ -23,6 +23,7 @@ add_library(lynx_core STATIC
     src/core/Scheduler.cpp
     src/core/Instruments.cpp
     src/core/RackRenderer.cpp
+    src/core/LoadTrace.cpp
     src/core/FlpImport.cpp
     src/core/Effects.cpp
     src/core/NoteEdit.cpp
@@ -245,6 +246,7 @@ if(LYNX_BUILD_APP)
         src/ui/PlaylistComponent.cpp
         src/ui/MixerComponent.cpp
         src/ui/PluginWindow.cpp
+        src/ui/ProjectLoading.cpp
         src/ui/WindowOwner.cpp
         src/ui/ParametricEqEditor.cpp
         src/ui/FacetEqEditor.cpp
