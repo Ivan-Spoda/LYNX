@@ -1942,6 +1942,8 @@ countries: br
 "Substitute missing plugins with LYNX equivalents" = "Substituir plugins ausentes por equivalentes do LYNX"
 "A project keeps the original plugin and uses it again once it is installed." = "O projeto guarda o plugin original e volta a usá-lo quando ele for instalado."
 "LYNX substitute for {0}" = "Substituto LYNX de {0}"
+"LYNX substitute for {0} (bypassed)" = "Substituto LYNX de {0} (desativado)"
+"Bypass all LYNX substitutes of this project" = "Desativar todos os substitutos LYNX deste projeto"
 "{0} (LYNX equivalent of {1})" = "{0} (equivalente LYNX de {1})"
 "LYNX equivalents" = "Equivalentes LYNX"
 "same Waves plugin" = "mesmo plugin Waves"
