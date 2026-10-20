@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -169,8 +170,37 @@ public:
 
     static constexpr int maxBlockSize = 4096;
 
+    // Opening a project (round 112): its hosted plugins are created one at a time before the rack is built, so a
+    // progress window can say which one is loading; makeInstrument/makeEffect then take the ready instance (same id,
+    // state and rate) instead of creating another. A failure is kept too, so a broken plugin is tried once. The rate
+    // is the one the rack will be built at (also used by the VST3 automation remap, which reuses the same instance).
+    // Message thread.
+    void setPreloadRate (double sampleRate) noexcept { preloadRate = sampleRate; }
+    void preload (const PluginRef& ref);
+    void clearPreloaded();
+    int preloadedCount() const;
+
+    // Targeted scans on open (round 112): a project plugin that one targeted scan could not find is not searched
+    // again on every open (it walked the plugin folders and rescanned files each time); a full scan, or a week,
+    // forgets this. Files a scan described with no plugin at all are skipped until they change on disk.
+    bool recentlyMissed (const FlpPluginUse& use) const;
+    void rememberMisses (const std::vector<FlpPluginUse>& uses);
+    void forgetMisses();
+
 private:
     std::unique_ptr<juce::AudioPluginInstance> instantiate (const PluginRef& ref, double sampleRate, juce::String* error);
+    std::unique_ptr<juce::AudioPluginInstance> createInstance (const PluginRef& ref, double sampleRate, juce::String* error);
+    static std::string preloadKey (const PluginRef& ref, double sampleRate);
+    struct Preloaded
+    {
+        std::unique_ptr<juce::AudioPluginInstance> instance;
+        juce::String error;
+    };
+    std::map<std::string, std::vector<Preloaded>> preloaded;
+    mutable std::mutex preloadLock;
+    double preloadRate = 44100.0;
+    bool emptyScanIsCurrent (const juce::String& file);
+    void rememberEmptyScan (const juce::String& file);
     void save();
     bool scanOne (juce::AudioPluginFormat& format, const juce::String& file);
 

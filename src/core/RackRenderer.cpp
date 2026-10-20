@@ -1,4 +1,5 @@
 #include "core/RackRenderer.h"
+#include "core/LoadTrace.h"
 #include "core/DynamicsSuite.h"
 #include "core/MixSuite.h"
 
@@ -196,6 +197,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                 sample = std::move (stretched);
         }
 
+        const loadtrace::Scope timing ("rack_instruments");
         std::shared_ptr<Instrument> instrument = makeInstrument (kind, std::move (sample));
         instrument->prepare (sampleRate);
         instrument->configure (channel, song.bpm);
@@ -246,6 +248,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
             }
             else
             {
+                const loadtrace::Scope timing ("rack_builtin_fx"); // (round 112: what the open spends on LYNX's own effects)
                 effect = makeEffect (slots[i]);
                 effect->prepare (sampleRate);
             }
@@ -262,7 +265,10 @@ std::unique_ptr<const RackState> RackState::build (Song song,
     state->schedule = makeScheduleIndex (state->song);
     state->sampleRate = sampleRate;
     state->buildAutomationTables();
-    state->buildPdc (previous);
+    {
+        const loadtrace::Scope timing ("pdc");
+        state->buildPdc (previous);
+    }
     state->buildMixerGraph();
 
     const auto& channels = state->song.channels;
