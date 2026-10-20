@@ -31,6 +31,7 @@
 #include "ui/ExportDialog.h"
 #include "ui/I18n.h"
 #include "ui/MainComponent.h"
+#include "engine/ProjectPackage.h"
 #include "ui/SetupWizard.h"
 #include "engine/FlStudio.h"
 #include "ui/HistoryPanel.h"
@@ -758,6 +759,49 @@ private:
             }
         }
 
+        // project package (REA round 118): a project with a sample exported as .zip, extracted and opened again,
+        // finds its sample inside the extracted folder
+        bool packageOk = false;
+        {
+            const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("lynx-selftest-package");
+            dir.deleteRecursively();
+            dir.getChildFile ("src").createDirectory();
+            const auto wav = dir.getChildFile ("src/hit.wav");
+            {
+                juce::WavAudioFormat format;
+                juce::AudioBuffer<float> hit (1, 480);
+                for (int i = 0; i < 480; ++i)
+                    hit.setSample (0, i, 0.5f * std::sin (0.1f * (float) i));
+                std::unique_ptr<juce::OutputStream> out (wav.createOutputStream().release());
+                if (auto* w = format.createWriterFor (out.get(), 48000.0, 1, 16, {}, 0))
+                {
+                    out.release();
+                    std::unique_ptr<juce::AudioFormatWriter> writer (w);
+                    writer->writeFromAudioSampleBuffer (hit, 0, 480);
+                }
+            }
+            auto source = lynx::Song::makeDefault();
+            lynx::ChannelDef c;
+            c.name = "Hit";
+            c.instrument = lynx::InstrumentKind::sampler;
+            c.samplePath = wav.getFullPathName().toStdString();
+            source.channels.push_back (c);
+            lynx::ProjectPackage::Result packed;
+            juce::String packageError;
+            const auto zip = dir.getChildFile ("Beat.zip");
+            if (wav.existsAsFile() && lynx::ProjectPackage::exportZip (source, "Beat", zip, packed, packageError) && packed.files == 1)
+            {
+                const auto project = lynx::ProjectPackage::extractZip (zip, dir.getChildFile ("out"), packageError);
+                const auto song = project.existsAsFile() ? lynx::ProjectFile::load (project, packageError) : std::nullopt;
+                if (song && ! song->channels.empty())
+                {
+                    const juce::File back (juce::String::fromUTF8 (song->channels.back().samplePath.c_str()));
+                    packageOk = back.existsAsFile() && back.isAChildOf (project.getParentDirectory()) && back.getSize() == wav.getSize();
+                }
+            }
+            dir.deleteRecursively();
+        }
+
         // WavPack: a .wv from the FL packs (if installed) opens through the sample loader
         juce::String wavpack = "NO_FL";
         {
@@ -776,7 +820,8 @@ private:
             }
         }
 
-        const auto ok = audioOk && projectOk && richOk && substituteOk && undoOk && recordOk && recordUndoOk && midiOk && wavpack != "ERROR";
+        const auto ok = audioOk && projectOk && richOk && substituteOk && undoOk && recordOk && recordUndoOk && midiOk && packageOk
+                        && wavpack != "ERROR";
 
         juce::String report;
         report << "connections=" << offline.getNumGraphConnections() << "\n"
@@ -787,6 +832,7 @@ private:
                << "undo=" << (undoOk ? "OK" : "ERROR") << "\n"
                << "recording=" << (recordOk && recordUndoOk ? "OK" : "ERROR") << "\n"
                << "midi=" << (midiOk ? "OK" : "ERROR") << "\n"
+               << "package=" << (packageOk ? "OK" : "ERROR") << "\n"
                << "wavpack=" << wavpack << "\n"
                << "result=" << (ok ? "OK" : "FAILED") << "\n";
 

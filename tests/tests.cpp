@@ -15408,6 +15408,8 @@ TEST (flp_pattern_events_import)
 }
 
 #include "PrefsTests.inc"
+#include "core/ProjectSafety.h"
+#include "SafetyTests118.inc"
 #include "AudioEditTests.inc"
 #include "InputTests.inc"
 #include "../asio/InputDrift.h"

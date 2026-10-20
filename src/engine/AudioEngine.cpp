@@ -224,6 +224,7 @@ float AudioEngine::renderOffline (const RenderOptions& options)
     constexpr int blockSize = 512;
     constexpr float silence = 3.0e-5f; // ~ -90 dB
     setOfflineRendering (true); // instruments with FL render-quality settings use them (Sytrus)
+    setPluginsRenderMode (true); // and hosted plugins are told an export is running (FL: "notify about rendering mode")
     transport.sampleRate.store (sampleRate);
     graph.setPlayConfigDetails (0, 2, sampleRate, blockSize);
     graph.prepareToPlay (sampleRate, blockSize);
@@ -299,6 +300,7 @@ float AudioEngine::renderOffline (const RenderOptions& options)
         rackProcessor->setMetering (true);
 
     graph.releaseResources();
+    setPluginsRenderMode (false);
     setOfflineRendering (false);
     return cancelled ? -1.0f : peak;
 }
@@ -1795,6 +1797,18 @@ std::shared_ptr<Effect> AudioEngine::getEffect (int track, int slot) const
         return nullptr;
 
     return effects[(std::size_t) track][(std::size_t) slot];
+}
+
+void AudioEngine::setPluginsRenderMode (bool offline)
+{
+    for (std::size_t i = 0; i < song.channels.size(); ++i)
+        if (auto* p = dynamic_cast<PluginInstrument*> (getChannelInstrument ((int) i).get()))
+            p->setRenderMode (offline);
+
+    for (std::size_t t = 0; t < song.mixer.size(); ++t)
+        for (std::size_t s = 0; s < song.mixer[t].effects.size(); ++s)
+            if (auto* p = dynamic_cast<PluginEffect*> (getEffect ((int) t, (int) s).get()))
+                p->setRenderMode (offline);
 }
 
 void AudioEngine::capturePluginStates()

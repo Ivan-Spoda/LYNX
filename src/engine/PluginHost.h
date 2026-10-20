@@ -17,6 +17,11 @@
 
 namespace lynx
 {
+// FL's "Notify about rendering mode" (wrapper option, on by default): tells the plugin an export is running
+// (VST3 kOffline process mode, VST2 offline process level) so it can use its render quality. Re-prepares the plugin
+// when the mode changes; call only while it is not processing (offline renders, before/after the render loop).
+void setPluginRenderMode (juce::AudioPluginInstance& plugin, bool offline, int blockSize);
+
 // Adapters: a JUCE plugin seen by the core as an Instrument/Effect.
 // Notes become MIDI at the start of the next rendered chunk; since the core
 // renders in chunks that start exactly at each event, timing is sample-accurate.
@@ -35,6 +40,7 @@ public:
     void render (float* left, float* right, int n, float gainLeft, float gainRight) noexcept override;
     void setParameter (int index, float value) noexcept override;
     int latencySamples() const noexcept override { return plugin->getLatencySamples(); }
+    void setRenderMode (bool offline) { setPluginRenderMode (*plugin, offline, blockSize); }
 
 private:
     std::unique_ptr<juce::AudioPluginInstance> plugin;
@@ -56,6 +62,7 @@ public:
     void process (float* left, float* right, int n, const EffectParams& params, double bpm) noexcept override;
     void setParameter (int index, float value) noexcept override;
     int latencySamples() const noexcept override { return plugin->getLatencySamples(); }
+    void setRenderMode (bool offline) { setPluginRenderMode (*plugin, offline, blockSize); }
 
 private:
     std::unique_ptr<juce::AudioPluginInstance> plugin;
