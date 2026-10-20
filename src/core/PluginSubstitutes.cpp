@@ -428,10 +428,12 @@ translate = pro-g
 product = SSL E-Channel
 vendor = Waves
 lynx = Ridge Strip
-# [DATA] class ID (stereo component) and <PluginName> from real projects; LYNX's channel strip (round 96) starts
-# neutral: the EQ curve and dynamics settings are not translated
+# [DATA] class ID (stereo component) and <PluginName> from real projects; LYNX's channel strip (round 96). Round 113:
+# filters, EQ, compressor and output are translated from the RealWorld list (measured on the official trial,
+# docs/analise/REA_rodada113.md §3c); without a readable state it starts neutral
 vst3 = 5354535648437353736c6368616e6e65
 waves = SSLChannel
+translate = waves-ssl-channel
 
 [ssl-native-channel]
 product = SSL Native Channel Strip / 4K E
@@ -1026,8 +1028,80 @@ int translateWavesCla2a (const std::vector<std::uint8_t>& state, EffectSlot& slo
     return 3;
 }
 
+// SSL E-Channel (57 values): 0 comp threshold dB, 1 ratio, 2 fast (1 = on), 3 release s, 11 dynamics bypass, 13 LF
+// bell, 14/15 LF gain dB / Hz, 16/17/18 LMF gain / kHz / Q, 19/20/21 HMF, 22 HF bell, 23/24 HF gain / kHz, 25 EQ bypass,
+// 27 HP Hz (< 16 = out), 30 output gain dB. [EXEC] Its bands are broader than Ridge's: each band was measured alone
+// (impulse at -60 dBFS) and Ridge's band fitted to it (0.03-0.5 dB RMS): HF shelf at 0.36 x the frequency, 0.8 x
+// the gain; HMF at 1.37 x, 0.8 x the gain, Q 0.5 + 0.27 x (Q - 0.5); LF shelf cuts are gentle at 60 Hz (0.32 x the
+// gain from about 400 Hz) and boosts 0.75 x at 2.4 x the frequency; HP 116 Hz is Ridge's 99 Hz. The dynamics run
+// before the EQ; the compressor at threshold - 15.7 dB and 1 + 0.375 x (ratio - 1) (soft knee) plus the original's
+// +0.9 dB make-up. Her whole state: 0.7 dB RMS on the stairs, 1 dB RMS (40 Hz - 18 kHz) on pink noise at -40 dBFS.
+// LMF (0 dB in every state surveyed) and the expander are taken at face value [model].
+int translateWavesSslChannel (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    namespace r = mixsuite::ridge;
+    const auto rw = wavesRealWorldParams (state);
+    if (slot.kind != EffectKind::ridgeStrip || rw.size() < 31)
+        return 0;
+    const auto at = [&] (std::size_t i, double fallback) { return wavesValue (rw, i).value_or (fallback); };
+    const auto interp = [] (double x, std::initializer_list<std::pair<double, double>> pts) {
+        auto prev = *pts.begin();
+        if (x <= prev.first)
+            return prev.second;
+        for (const auto& p : pts)
+        {
+            if (x <= p.first)
+                return prev.second + (p.second - prev.second) * (x - prev.first) / (p.first - prev.first);
+            prev = p;
+        }
+        return prev.second;
+    };
+    const auto gain = [] (double db) { return linNorm (db, -15.0, 15.0); };
+    const auto q = [] (double v) { return logNorm (0.5 + (v - 0.5) * 0.27, 0.5, 2.5); };
+    auto& p = slot.params;
+    p[r::curve] = 0.0f;
+    p[r::lpf] = 0.0f;
+    p[r::order] = 1.0f;
+    const auto hp = at (27, 0.0);
+    p[r::hpf] = hp >= 16.0 ? logNorm (interp (hp, { { 16, 9 }, { 50, 27 }, { 116, 99 }, { 250, 194 }, { 350, 272 } }), 16.0, 350.0) : 0.0f;
+    const auto lfDb = at (14, 0.0), lfHz = at (15, 100.0);
+    if (lfDb < 0.0)
+    {
+        p[r::lfGain] = gain (lfDb * interp (lfHz, { { 60, 0.32 }, { 200, 0.88 } }));
+        p[r::lfFreq] = logNorm (std::min (450.0, lfHz * 6.7), 30.0, 450.0);
+    }
+    else
+    {
+        p[r::lfGain] = gain (lfDb * interp (lfHz, { { 60, 0.75 }, { 400, 1.08 } }));
+        p[r::lfFreq] = logNorm (std::min (450.0, lfHz * 2.4), 30.0, 450.0);
+    }
+    p[r::lfBell] = at (13, 0.0) > 0.5 ? 1.0f : 0.0f;
+    p[r::lmfGain] = gain (at (16, 0.0) * 0.65);
+    p[r::lmfFreq] = logNorm (at (17, 0.5) * 1000.0, 200.0, 2500.0);
+    p[r::lmfQ] = q (at (18, 1.5));
+    p[r::hmfGain] = gain (at (19, 0.0) * 0.8);
+    p[r::hmfFreq] = logNorm (at (20, 3.5) * 1370.0, 600.0, 7000.0);
+    p[r::hmfQ] = q (at (21, 1.5));
+    p[r::hfGain] = gain (at (23, 0.0) * 0.8);
+    p[r::hfFreq] = logNorm (at (24, 8.0) * 360.0, 1500.0, 16000.0);
+    p[r::hfBell] = at (22, 0.0) > 0.5 ? 1.0f : 0.0f;
+    p[r::eqOn] = at (25, 0.0) > 0.5 ? 0.0f : 1.0f;
+    const auto ratio = std::max (1.0, at (1, 1.0));
+    const bool dynOn = at (11, 0.0) < 0.5;
+    p[r::compRatio] = (float) std::sqrt (std::clamp ((ratio - 1.0) * 0.375 / 19.0, 0.0, 1.0));
+    p[r::compThreshold] = linNorm (at (0, 0.0) - 15.7, -40.0, 0.0);
+    p[r::compRelease] = logNorm (std::max (0.1, at (3, 0.35)), 0.1, 4.0);
+    p[r::compFastAttack] = at (2, 0.0) == 1.0 ? 1.0f : 0.0f;
+    p[r::gateRange] = 0.0f;
+    p[r::dynOn] = dynOn ? 1.0f : 0.0f;
+    p[r::output] = linNorm (at (30, 0.0) + (dynOn && ratio > 1.01 ? 0.9 : 0.0), -20.0, 20.0);
+    return 20;
+}
+
 RawTranslator rawTranslatorNamed (std::string_view name)
 {
+    if (name == "waves-ssl-channel")
+        return translateWavesSslChannel;
     if (name == "auto-tune-pro")
         return translateAutoTunePro;
     if (name == "fresh-air")

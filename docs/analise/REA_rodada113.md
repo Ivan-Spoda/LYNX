@@ -158,8 +158,18 @@ Substitutes fitted (grid search, LYNX's effect run on the same signals through t
   0.40 + 0.021 x (knob - 40) (fitted on her take after RComp at peak reduction 40 / 62.6 / 75 / 85: 50 ms level
   envelope within 0.3-1.4 dB; Glow saturates above 75). On the stairs Glow's knee is softer (3 dB RMS), the take's
   envelope is what is matched.
-Before (gentle defaults) these three moved her take by -0.2 / -0.1 / +1.0 dB where the originals do -9.6 / -0.05 /
-+6.3 dB (CLA-2A after RComp): the defaults kept the level, the originals do not.
+- SSL E-Channel -> Ridge Strip: its bands are broader than Ridge's. Each band measured alone (impulse at -60 dBFS,
+  py/sslbands.py) and Ridge's band fitted to it (fxl/ridgefit, 0.03-0.5 dB RMS; LF boost at 400 Hz 1.5): HF shelf
+  at 0.36 x the frequency and 0.8 x the gain; HMF at 1.37 x, gain 0.8 x, Q 0.5 + 0.27 (Q - 0.5); LF cut at 60 Hz =
+  0.32 x the gain from ~400 Hz, boost 0.75 x at 2.4 x; HP 50 / 116 / 250 Hz = Ridge 27 / 99 / 194 Hz. With the EQ
+  bypassed the compressor at her state is Ridge's at threshold - 15.7 dB, 1 + 0.375 (ratio - 1), +0.9 dB (the
+  original's level below the threshold), dynamics before the EQ (py/sslxl.py): her whole state 0.69 dB RMS on the
+  stairs, pink at -40 dBFS within 1 dB RMS 40 Hz - 18 kHz (0.3 dB above 150 Hz), take level -2.1 vs -1.6 dB.
+  LMF (0 dB in her states) and the expander are taken at face value [model].
+Before (gentle defaults) RComp / DeEsser / CLA-2A moved her take by -0.2 / -0.1 / +1.0 dB where the originals do
+-9.6 / -0.05 / +6.3 dB (CLA-2A after RComp), and Ridge was flat where the SSL adds +6 dB at 6 kHz: the defaults kept
+the level and tone, the originals do not. Only one state per plugin exists in her corpus, so the laws are calibrated
+at her settings; other settings follow the same units with the same offsets [model].
 
 ## 4. Whole vocal path: substitutes vs bypassed vs FL
 
@@ -205,13 +215,16 @@ experiments: `LYNX_PARAM="t.k.p=v"`, and the substituted slots are listed with t
 ## Where I stopped / next steps
 - Done: §1 matching fixes, §2 Auto-Tune key/scale + project key, §3 gentle defaults + Fresh Air / DeEsser reads, §5
   switch, tests (`tests/Substitutes113Tests.inc`), PLUGIN_FALLBACK.md.
-- [EXEC] Verified on her laptop with this branch's LYNX.exe (hidden, idle priority, her settings restored after):
-  `kwe` hosts Auto-Tune Pro from `…\VST3\Antares\` (before: bypassed); `game over --find-plugins` scans both Waves
-  shells (16.0 and 16.3) in 88 s and then hosts Auto-Tune Pro, SSLChannel, NS1, CLA-2A, H-Delay, Fresh Air and the
-  Soundtoys plugins; only RComp and DeEsser (not installed there, FL leaves them empty) are substitutes.
-- Still to verify there: Auto-Tune Pro hosted from the Antares folder; the 16.0 shell described
-  (or `scan-failures.log` saying why not) — needs her LYNX run in her own desktop session.
-- Fresh Air: measured and translated (§3b). Official trials of Auto-Tune Pro, Waves and Soundtoys were still being
-  installed on this PC (2026-10-20): once they load headlessly, measure (fxmeasure) Auto-Tune Pro's scale list
-  (confirms or corrects §2) and the Waves RealWorld layouts (RComp, DeEsser, CLA-2A, SSL E-Channel) to translate them instead of the
-  gentle defaults; FL renders with the real plugins as the reference.
+- Done (2026-10-20, second landing): §3c RComp, DeEsser, CLA-2A and SSL E-Channel measured on the official Waves
+  trials and translated (`translate = waves-rcomp / waves-deesser / waves-cla-2a / waves-ssl-channel`); fxmeasure
+  picks a shell's plugin by name and loads raw component states.
+- [EXEC] Verified on her laptop with this branch's LYNX.exe (first landing): `kwe` hosts Auto-Tune Pro from
+  `…\VST3\Antares\`; `game over --find-plugins` scans both Waves shells and hosts Auto-Tune Pro, SSLChannel, NS1,
+  CLA-2A, H-Delay, Fresh Air and the Soundtoys plugins; only RComp and DeEsser are substitutes there.
+- Next:
+  - Auto-Tune Pro is still NOT installed on this PC (only Auto-Tune Central / Antares Central): the scale-list order
+    (§2, [model]) waits for the user to install the trial.
+  - Soundtoys 5 / UADx trials not installed (need vendor logins) — Decapitator / PanMan / EchoBoy stay at defaults.
+  - Waves Tune Real-Time and H-Delay layouts (same probe method), NS1 / Doubler have no LYNX role yet.
+  - Whole-chain check: FL here can now render her vocal with the real Waves trials (once FL finds the 17.x shell)
+    against LYNX with the translated substitutes; the per-plugin fits are from one state each.

@@ -221,6 +221,17 @@ TEST (waves_vocal_states_translated_round113)
         CHECK (std::abs (h::hz (s.params[h::frequency]) - 4460.0) < 10.0 && std::abs (h::thresholdDb (s.params[h::threshold]) + 19.2) < 0.1);
         CHECK (s.params[h::mode] == 0.0f && s.params[h::detector] == 0.0f && s.params[h::listen] == 0.0f);
     }
+    // her SSL E-Channel: comp -1.3 dB 1.8:1 fast 0.35 s, HP 116 Hz, LF -6 dB 60 Hz, HMF +3 dB 3.5 kHz Q 1.5, HF +4.8 dB 10.16 kHz
+    {
+        int n = 0;
+        const auto s = slotFor ("SSLChannel", "-1.3 1.8 1 0.35 * -30 0 0 0 0.2 * 0 0 0 -6 60 0 0.5 2.5 3 3.5 1.5 0 4.8 10.16 0 0 116 30 1 0 0 * * 1 * * 7 -18 0 0 * * * * * * -18 -18 -18 -18 -18 -18 -18 -18 0 0", n);
+        namespace r = mixsuite::ridge;
+        CHECK (n == 20 && s.kind == EffectKind::ridgeStrip);
+        CHECK (std::abs (r::hpfHz (s.params[r::hpf]) - 99.0) < 1.0 && std::abs (r::hfHz (s.params[r::hfFreq]) - 3658.0) < 5.0);
+        CHECK (std::abs (r::bandGainDb (s.params[r::hfGain], false) - 3.84) < 0.01 && std::abs (r::bandGainDb (s.params[r::hmfGain], false) - 2.4) < 0.01);
+        CHECK (std::abs (r::compThresholdDb (s.params[r::compThreshold]) + 17.0) < 0.01 && s.params[r::order] == 1.0f && s.params[r::compFastAttack] == 1.0f);
+        CHECK (std::abs (r::trimDb (s.params[r::output]) - 0.9) < 0.01 && s.params[r::eqOn] == 1.0f && s.params[r::dynOn] == 1.0f);
+    }
     // her CLA-2A: gain 48.96 (+15.5 dB below the threshold), peak reduction 62.6, comp
     {
         std::string values;
