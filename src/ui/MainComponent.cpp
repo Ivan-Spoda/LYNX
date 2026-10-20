@@ -1,3 +1,5 @@
+#include "ui/ProjectLoading.h"
+#include "core/LoadTrace.h"
 #include "ui/MainComponent.h"
 #include "ui/SetupWizard.h"
 #include "core/FlPluginDb.h"
@@ -393,6 +395,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
 
 MainComponent::~MainComponent()
 {
+    cancelProjectLoad(); // an open in progress uses the engine from its thread
     if (sessionLock != nullptr) // a clean exit: no "LYNX did not close properly" next time
         sessionMarker.deleteFile();
     mixerinput::openAudioSettings = nullptr;
@@ -2569,28 +2572,26 @@ void MainComponent::openFile (const juce::File& file)
 
     if (file.hasFileExtension ("flp"))
     {
-        // the project's third-party plugins: known ones resolve from the plugin list or FL Studio's database; the
-        // rest get a targeted scan of just their files first (no question asked)
-        std::vector<FlpPluginUse> uses;
-        if (juce::MemoryBlock data; file.loadFileAsData (data))
+        if (! persistent) // (command-line modes open synchronously, without scanning)
         {
-            try
-            {
-                uses = flpForeignPlugins (flp::parseProject ({ static_cast<const std::uint8_t*> (data.getData()), data.getSize() }));
-            }
-            catch (const flp::Error&)
-            {
-            }
-        }
-        if (! uses.empty() && persistent) // (command-line modes open synchronously, without scanning)
-        {
-            findProjectPlugins (engine, std::move (uses), [safe = juce::Component::SafePointer<MainComponent> (this), file] {
-                if (safe != nullptr)
-                    safe->importFlp (file);
-            });
+            importFlp (file);
             return;
         }
-        importFlp (file);
+        // behind a progress panel (round 112): the project's unknown plugins get a targeted scan of just their files,
+        // the samples are decoded off the message thread, the hosted plugins are created one by one with their names
+        // shown; the panel's bar never sits still at 0 %
+        if (projectLoadRunning())
+            return;
+        openFlpWithProgress (*this, engine, file, [safe = juce::Component::SafePointer<MainComponent> (this), file] (bool ok, const juce::String& error) {
+            if (safe == nullptr)
+                return;
+            if (! ok)
+            {
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not open"), error);
+                return;
+            }
+            safe->flpImported (file);
+        });
         return;
     }
 
@@ -2599,14 +2600,21 @@ void MainComponent::openFile (const juce::File& file)
 
 void MainComponent::importFlp (const juce::File& file)
 {
+    juce::String error;
+    loadtrace::begin (file.getFullPathName().toStdString());
+    const auto ok = engine.importFlpFile (file, error);
+    loadtrace::end();
+    if (! ok)
     {
-        juce::String error;
-        if (! engine.importFlpFile (file, error))
-        {
-            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not open"), error);
-            return;
-        }
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not open"), error);
+        return;
+    }
+    flpImported (file);
+}
 
+void MainComponent::flpImported (const juce::File& file)
+{
+    {
         currentFile = juce::File(); // imported: "Save" asks where to write the .lynx
         importedFlpFile = file;
         projectName = file.getFileNameWithoutExtension();
