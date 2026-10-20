@@ -2335,7 +2335,8 @@ void PlaylistComponent::showTrackMenu (int track)
     const auto count = numTracks();
     const auto info = track < (int) song.playlistTracks.size() ? song.playlistTracks[(std::size_t) track] : PlaylistTrack {};
     juce::PopupMenu menu;
-    menu.addSectionHeader (! info.name.empty() ? juce::String::fromUTF8 (info.name.c_str()) : tr ("Track {0}", { juce::String (track + 1) }));
+    ui::addItemHeader (menu, tr ("Playlist track"), ! info.name.empty() ? juce::String::fromUTF8 (info.name.c_str()) : tr ("Track {0}", { juce::String (track + 1) }),
+                       info.colour != 0 ? juce::Colour (info.colour) : juce::Colour());
     menu.addItem (tr ("Rename and color..."), [this, track] { renameTrack (track); });
     {
         juce::PopupMenu colours;
@@ -2633,7 +2634,22 @@ juce::PopupMenu PlaylistComponent::buildClipMenu (int index, int mouseX)
         sourceName = juce::String::fromUTF8 (song.channels[(std::size_t) clip.channel].name.c_str());
     else if (clip.kind == ClipKind::automation && clip.automation >= 0 && clip.automation < (int) song.automations.size())
         sourceName = juce::String::fromUTF8 (song.automations[(std::size_t) clip.automation].name.c_str());
-    menu.addSectionHeader (sourceName);
+    {
+        // the title band in the clip's colour
+        auto colour = theme::colour::automation;
+        auto kind = tr ("Automation clip");
+        if (clip.kind == ClipKind::pattern)
+        {
+            colour = patternColour (song, clip.pattern);
+            kind = tr ("Pattern clip");
+        }
+        else if (clip.kind == ClipKind::audio && clip.channel >= 0 && clip.channel < (int) song.channels.size())
+        {
+            colour = audioClipColour (song.channels[(std::size_t) clip.channel]);
+            kind = tr ("Audio clip");
+        }
+        ui::addItemHeader (menu, many ? kind + " (" + juce::String ((int) targets.size()) + ")" : kind, sourceName, colour);
+    }
     menu.addItem (tr ("Properties..."), [this, index, targets] {
         showClipProperties (engine, index, targets, [safe = juce::Component::SafePointer<PlaylistComponent> (this)] {
             if (safe != nullptr)

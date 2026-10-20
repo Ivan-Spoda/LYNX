@@ -1129,7 +1129,7 @@ private:
             {
                 const auto file = n.file;
                 const auto ok = ! n.missing;
-                menu.addSectionHeader (n.label);
+                ui::addItemHeader (menu, tr ("Audio file"), n.label, n.colour);
                 menu.addItem (tr ("Send to the selected channel"), ok && browser.onLoadIntoChannel != nullptr, false, [safe, file] {
                     if (safe != nullptr && safe->browser.onLoadIntoChannel)
                         safe->browser.onLoadIntoChannel (file);
@@ -1154,7 +1154,7 @@ private:
                 break;
             }
             case projectcontents::Kind::generator:
-                menu.addSectionHeader (n.label);
+                ui::addItemHeader (menu, tr ("Generator"), n.label, n.colour);
                 menu.addItem (tr ("Open settings"), [safe, channel = item.index] {
                     if (safe != nullptr && safe->browser.onOpenChannel)
                         safe->browser.onOpenChannel (channel);
@@ -1166,7 +1166,7 @@ private:
                     });
                 break;
             case projectcontents::Kind::effect:
-                menu.addSectionHeader (n.label + " (" + n.detail + ")");
+                ui::addItemHeader (menu, tr ("Effect") + " - " + n.detail, n.label, n.colour);
                 menu.addItem (tr ("View editor"), [safe, track = item.index, slot = item.slot] {
                     if (safe != nullptr && safe->browser.onOpenEffect)
                         safe->browser.onOpenEffect (track, slot);
@@ -1177,7 +1177,7 @@ private:
                 });
                 break;
             case projectcontents::Kind::automation:
-                menu.addSectionHeader (n.label);
+                ui::addItemHeader (menu, tr ("Automation clip"), n.label, n.colour);
                 menu.addItem (tr ("Open the automation editor"), [safe, index = item.index] {
                     if (safe != nullptr && safe->browser.onOpenAutomation)
                         safe->browser.onOpenAutomation (index);

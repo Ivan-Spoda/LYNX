@@ -193,6 +193,7 @@ private:
     void showCustomizeToolbar();
     // The toolbar's edit mode (drag panels to move, add or remove them; toolbar::EditOverlay)
     void setToolbarEditing (bool editing);
+    void undoRedo (bool redo); // with "Undone: ..." and the undo level in the hint bar
     std::unique_ptr<toolbar::EditOverlay> toolbarEditor;
     toolbar::EditOverlay::Bounds panelBounds {}; // each shown toolbar panel (for the edit mode)
     juce::Rectangle<int> fixedToolbarArea;       // the menu and the hint bar

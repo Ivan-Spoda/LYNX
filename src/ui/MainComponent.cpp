@@ -132,10 +132,10 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         return key.isEmpty() ? text : text + " (" + key + ")";
     };
     undoButton.setTooltip (withKey (tr ("Undo"), "edit.undo"));
-    undoButton.onClick = [this] { engine.undo(); };
+    undoButton.onClick = [this] { undoRedo (false); };
     undoButton.onRightClick = [this] { showHistory(); };
     redoButton.setTooltip (withKey (tr ("Redo"), "edit.redo"));
-    redoButton.onClick = [this] { engine.redo(); };
+    redoButton.onClick = [this] { undoRedo (true); };
     redoButton.onRightClick = [this] { showHistory(); };
     pluginPickerButton.setTooltip (withKey (tr ("Plugin picker: add an instrument or plugin as a new channel"), "panel.quickAdd"));
     pluginPickerButton.onClick = [this] { showQuickAdd(); };
@@ -837,6 +837,23 @@ void MainComponent::setToolbarEditing (bool editing)
         toolbarEditor->grabKeyboardFocus();
 }
 
+void MainComponent::undoRedo (bool redo)
+{
+    // FL says in the hint bar what was undone and the undo level ("Undone: ...  Level 2/3")
+    if (redo ? ! engine.canRedo() : ! engine.canUndo())
+        return;
+    const auto label = engine.getHistoryLabel (engine.getHistoryPosition() + (redo ? 1 : 0));
+    if (redo)
+        engine.redo();
+    else
+        engine.undo();
+    ui::Hint h;
+    h.text = (redo ? tr ("Redone: {0}", { tr (label.text, { juce::String::fromUTF8 (label.arg.c_str()) }) })
+                   : tr ("Undone: {0}", { tr (label.text, { juce::String::fromUTF8 (label.arg.c_str()) }) }));
+    h.value = tr ("Level {0}/{1}", { juce::String (engine.getHistoryPosition() + 1), juce::String (engine.getHistorySize()) });
+    ui::postHint (h, 2500);
+}
+
 ui::Hint MainComponent::hintAt (juce::Point<int> p)
 {
     ui::Hint h;
@@ -1017,8 +1034,8 @@ bool MainComponent::runAction (const std::string& id)
     else if (is ("file.save")) save (false);
     else if (is ("file.saveAs")) save (true);
     else if (is ("file.export")) exportAudio();
-    else if (is ("edit.undo")) engine.undo();
-    else if (is ("edit.redo")) engine.redo();
+    else if (is ("edit.undo")) undoRedo (false);
+    else if (is ("edit.redo")) undoRedo (true);
     else if (is ("help.shortcuts")) showHelp();
     else if (is ("rack.selectPrevious")) rack.selectRelative (-1, false);
     else if (is ("rack.selectNext")) rack.selectRelative (1, false);
@@ -1758,7 +1775,7 @@ juce::PopupMenu MainComponent::makePatternMenu()
     }
 
     juce::PopupMenu menu;
-    menu.addSectionHeader (juce::String::fromUTF8 (pattern.name.c_str()));
+    ui::addItemHeader (menu, tr ("Pattern"), juce::String::fromUTF8 (pattern.name.c_str()), PlaylistComponent::patternColour (song, index));
     menu.addItem (tr ("Next pattern") + shortcutText ("pattern.next"), index + 1 < (int) song.patterns.size(), false,
                   [this] { selectPattern (stepPattern (engine.getSong(), 1)); });
     menu.addItem (tr ("Previous pattern") + shortcutText ("pattern.previous"), index > 0, false,
@@ -2838,8 +2855,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
     }
     else if (index == 1)
     {
-        menu.addItem (tr ("Undo") + shortcutText ("edit.undo"), engine.canUndo(), false, [this] { engine.undo(); });
-        menu.addItem (tr ("Redo") + shortcutText ("edit.redo"), engine.canRedo(), false, [this] { engine.redo(); });
+        menu.addItem (tr ("Undo") + shortcutText ("edit.undo"), engine.canUndo(), false, [this] { undoRedo (false); });
+        menu.addItem (tr ("Redo") + shortcutText ("edit.redo"), engine.canRedo(), false, [this] { undoRedo (true); });
         menu.addItem (tr ("Undo history...") + shortcutText ("edit.history"), [this] { showHistory(); });
         menu.addItem (tr ("Audio editor..."), [this] { openAudioEditor (engine); });
         menu.addSeparator();
