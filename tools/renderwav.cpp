@@ -124,9 +124,11 @@ int main (int argc, char** argv)
         return std::vector<std::uint8_t> ((std::istreambuf_iterator<char> (f)), std::istreambuf_iterator<char>());
     };
 
+    const auto importStart = std::chrono::steady_clock::now();
     try
     {
         song = lynx::importFlp (flp::parseProject (bytes), options);
+        std::printf ("import: %.0f ms\n", std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - importStart).count());
     }
     catch (const flp::Error& e)
     {
@@ -198,6 +200,7 @@ int main (int argc, char** argv)
     // like the app's export: instruments with FL render-quality settings use them (LYNX_LIVE=1: the live ones)
     lynx::setOfflineRendering (std::getenv ("LYNX_LIVE") == nullptr);
     std::map<std::string, std::shared_ptr<const lynx::SampleData>> cache;
+    const auto buildStart = std::chrono::steady_clock::now();
     auto state = lynx::RackState::build (song, nullptr, sampleRate, [&] (const std::string& p) {
         auto& entry = cache[p];
         if (entry == nullptr)
@@ -206,6 +209,7 @@ int main (int argc, char** argv)
             std::printf ("  (could not read %s)\n", p.c_str());
         return entry;
     });
+    std::printf ("rack build: %.0f ms\n", std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - buildStart).count());
     {
         std::size_t edges = 0, delayed = 0, tracksWithFx = 0;
         for (const auto& ins : state->mixerInputs)
