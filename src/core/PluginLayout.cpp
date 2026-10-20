@@ -1576,17 +1576,22 @@ Layout ridgeStrip()
 
 Layout glowLeveler()
 {
+    // round 114: the optical levelers' classic front panel (the role: Waves CLA-2A / LA-2A), from the official product
+    // pages: GAIN on the left, PEAK REDUCTION on the right, the VU meter between them showing the gain reduction,
+    // the COMPRESS / LIMIT switch under the meter; LYNX's extras (sidechain emphasis, mix) small along the bottom
     Layout l;
-    l.width = 420;
-    l.height = 220;
+    l.width = 540;
+    l.height = 270;
     auto& v = l.items;
-    v.push_back (section (4, 4, 412, 212, TR_NOOP ("Optical leveler")));
-    v.push_back (meter (16, 28, 388, 20, 0, TR_NOOP ("Gain reduction")));
-    v.push_back (dial (90, 112, 64, "Gain", TR_NOOP ("Gain"), big));
-    v.push_back (dial (330, 112, 64, "Peak reduction", TR_NOOP ("Peak reduction"), big));
-    v.push_back (tabs (166, 62, 88, 22, "Limit", TR_NOOP ("Compress|Limit")));
-    v.push_back (dial (186, 128, 32, "Emphasis", TR_NOOP ("Emphasis")));
-    v.push_back (dial (236, 128, 32, "Mix", TR_NOOP ("Mix")));
+    v.push_back (section (4, 4, 532, 262, TR_NOOP ("Optical leveler")));
+    v.push_back (dial (86, 110, 92, "Gain", TR_NOOP ("Gain"), big));
+    v.push_back (dial (454, 110, 92, "Peak reduction", TR_NOOP ("Peak reduction"), big));
+    auto vu = display (170, 28, 200, 136, "vumeter");
+    vu.steps = 0; // live output 0: gain reduction
+    v.push_back (vu);
+    v.push_back (tabs (200, 172, 140, 22, "Limit", TR_NOOP ("Compress|Limit")));
+    v.push_back (dial (232, 226, 28, "Emphasis", TR_NOOP ("Emphasis")));
+    v.push_back (dial (308, 226, 28, "Mix", TR_NOOP ("Mix")));
     return l;
 }
 
@@ -1613,20 +1618,21 @@ Layout hushDeEsser()
 
 Layout aetherLayout()
 {
+    // round 114: the "air" processors' front panel (the role: Slate Digital Fresh Air), from the official product page:
+    // two big knobs side by side — the presence / exciter one (MID) on the left, the high shelf (HIGH) on the right —
+    // and the output trim between them; LYNX's extra settings (frequencies, character, mix) small under each
     Layout l;
-    l.width = 380;
-    l.height = 262;
+    l.width = 440;
+    l.height = 270;
     auto& v = l.items;
-    v.push_back (section (4, 4, 182, 192, TR_NOOP ("Air")));
-    v.push_back (dial (95, 68, 58, "Air", TR_NOOP ("Air"), big));
-    v.push_back (dial (95, 150, 32, "Air freq.", TR_NOOP ("Freq")));
-    v.push_back (section (190, 4, 186, 192, TR_NOOP ("Exciter")));
-    v.push_back (dial (283, 68, 58, "Harmonics", TR_NOOP ("Harmonics"), big));
-    v.push_back (dial (236, 150, 32, "Exciter freq.", TR_NOOP ("Freq")));
-    v.push_back (dial (330, 150, 32, "Character", TR_NOOP ("Even / odd"), bipolar));
-    v.push_back (section (4, 200, 372, 58, nullptr, boxed));
-    v.push_back (dial (140, 218, 24, "Mix", TR_NOOP ("Mix")));
-    v.push_back (dial (240, 218, 24, "Output", TR_NOOP ("Output"), bipolar));
+    v.push_back (section (4, 4, 432, 262, TR_NOOP ("Air")));
+    v.push_back (dial (104, 96, 104, "Harmonics", TR_NOOP ("Mid air"), big));
+    v.push_back (dial (336, 96, 104, "Air", TR_NOOP ("High air"), big));
+    v.push_back (dial (220, 120, 40, "Output", TR_NOOP ("Trim"), bipolar));
+    v.push_back (dial (66, 222, 26, "Exciter freq.", TR_NOOP ("Freq")));
+    v.push_back (dial (142, 222, 26, "Character", TR_NOOP ("Even / odd"), bipolar));
+    v.push_back (dial (220, 222, 26, "Mix", TR_NOOP ("Mix")));
+    v.push_back (dial (336, 222, 26, "Air freq.", TR_NOOP ("Freq")));
     return l;
 }
 
