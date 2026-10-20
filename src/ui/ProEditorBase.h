@@ -208,6 +208,16 @@ protected:
     }
     virtual void tick() {}
 
+    // the slot's on / off switch (the power button some references carry on the panel)
+    void toggleEnabled()
+    {
+        if (current() == nullptr) return;
+        engine.editSong ([tk = track, sl = slot] (Song& song) {
+            auto& fx = song.mixer[(std::size_t) tk].effects[(std::size_t) sl];
+            fx.enabled = ! fx.enabled;
+        });
+    }
+
     // --- parameters ----------------------------------------------------------------------------------
     int P (const char* name) const { return plugui::paramIndex (kind, name); }
     float v (int p) const
@@ -215,9 +225,12 @@ protected:
         const auto* fx = current();
         return fx != nullptr && p >= 0 && p < maxEffectParams ? fx->params[(std::size_t) p] : 0.0f;
     }
+    // a subclass may add linked changes (Aether's linked knobs) before they are applied
+    virtual void linkChanges (std::vector<std::pair<int, float>>&) const {}
     void set (std::vector<std::pair<int, float>> changes, bool undoable = true)
     {
         if (current() == nullptr) return;
+        linkChanges (changes);
         engine.editSong ([tk = track, sl = slot, changes] (Song& song) {
             auto& params = song.mixer[(std::size_t) tk].effects[(std::size_t) sl].params;
             for (const auto& [p, x] : changes)

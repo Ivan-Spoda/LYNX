@@ -1712,6 +1712,190 @@ private:
     }
 };
 
+// =============================================================================================================
+// Aether — the reference "air" processor's workflow: the output level on an arc meter fills the top; under it two
+// big knobs side by side (MID AIR = the presence exciter, HIGH AIR = the air shelf) with the link button between
+// them, the power switch at the bottom left and the small TRIM at the bottom right. LYNX's extra settings (the two
+// frequencies, the exciter's character, mix) sit in the bottom bar.
+class AetherEditor final : public ProEditor
+{
+public:
+    AetherEditor (AudioEngine& e, int t, int s, bool d) : ProEditor (e, t, s, EffectKind::aether, d, 720, 520) { fillDemo(); }
+
+private:
+    enum { idLink = 1, idPower };
+    bool linked = false;
+
+    juce::String title() const override { return "Aether"; }
+    juce::String gestures() const override { return tr ("Link: both knobs move together"); }
+    bool usesHistory() const override { return true; }
+
+    int pMid() const { return P ("Harmonics"); }
+    int pHigh() const { return P ("Air"); }
+    juce::Rectangle<float> display() const { return bodyArea().withHeight (206.0f); }
+    juce::Rectangle<float> panel() const { return bodyArea().withTrimmedTop (206.0f); }
+
+    Column demoColumn (int i) const override
+    {
+        const auto in = demoInDb (i) - 4.0f;
+        return { in, in + 1.5f, 0.0f };
+    }
+
+    void linkChanges (std::vector<std::pair<int, float>>& changes) const override
+    {
+        if (! linked || changes.size() != 1) return;
+        const auto [p, x] = changes.front();
+        if (p != pMid() && p != pHigh()) return;
+        const auto other = p == pMid() ? pHigh() : pMid();
+        changes.push_back ({ other, juce::jlimit (0.0f, 1.0f, v (other) + (x - v (p))) });
+    }
+
+    void layoutControls (std::vector<Ctl>& out) const override
+    {
+        const auto a = panel();
+        const auto cy = a.getY() + 12.0f;
+        out.push_back (knob ({ 110.0f, cy, 180.0f, 214.0f }, pMid(), tr ("Mid air"), 2));
+        out.push_back (knob ({ 430.0f, cy, 180.0f, 214.0f }, pHigh(), tr ("High air"), 2));
+        out.push_back (button ({ 332.0f, cy + 76.0f, 56.0f, 28.0f }, idLink, tr ("Link"), linked,
+                               tr ("Link: move both knobs together (keeps their difference)")));
+        out.push_back (custom ({ 28.0f, a.getBottom() - 70.0f, 48.0f, 48.0f }, idPower, -1, tr ("Power: switch the effect on or off")));
+        out.push_back (knob ({ 626.0f, a.getBottom() - 92.0f, 72.0f, 86.0f }, P ("Output"), tr ("Trim"), 0, true));
+        const auto b = barArea();
+        const auto y = b.getCentreY() - 11.0f;
+        out.push_back (barValue ({ 8.0f, y, 150.0f, 22.0f }, P ("Exciter freq."), tr ("Mid freq")));
+        out.push_back (barValue ({ 162.0f, y, 170.0f, 22.0f }, P ("Character"), tr ("Even / odd")));
+        out.push_back (barValue ({ 336.0f, y, 150.0f, 22.0f }, P ("Air freq."), tr ("High freq")));
+        out.push_back (barValue ({ 490.0f, y, 110.0f, 22.0f }, P ("Mix"), tr ("Mix")));
+        out.push_back (barValue ({ 604.0f, y, 110.0f, 22.0f }, P ("Output"), tr ("Trim")));
+    }
+
+    void buttonPressed (const Ctl& c, const juce::MouseEvent&) override
+    {
+        if (c.id == idLink) { linked = ! linked; repaint(); }
+    }
+    void customDown (const Ctl& c, const juce::MouseEvent&) override
+    {
+        if (c.id == idPower) toggleEnabled();
+    }
+
+    void paintCustom (juce::Graphics& g, const Ctl& c) override
+    {
+        if (c.id != idPower) return;
+        const auto* fx = current();
+        const auto on = fx != nullptr && fx->enabled;
+        const auto r = c.r.reduced (2.0f);
+        g.setColour (c.r.contains (mouse) ? colour::bg5 : colour::bg4);
+        g.fillEllipse (r);
+        g.setColour (on ? colour::accent : colour::borderStrong);
+        g.drawEllipse (r, 1.5f);
+        juce::Path glyph;
+        const auto cx = r.getCentreX(), cy = r.getCentreY(), rr = r.getWidth() * 0.24f;
+        glyph.addCentredArc (cx, cy, rr, rr, 0.0f, 0.75f, juce::MathConstants<float>::twoPi - 0.75f, true);
+        glyph.startNewSubPath (cx, cy - rr * 1.3f);
+        glyph.lineTo (cx, cy - rr * 0.2f);
+        g.setColour (on ? colour::accent : colour::textDisabled);
+        g.strokePath (glyph, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        caption (g, c.r.translated (0.0f, -18.0f).withHeight (14.0f).expanded (20.0f, 0.0f), tr ("Power"));
+    }
+
+    // the arc meter's scale: compressed at the bottom, open near 0 dB, like a programme meter
+    static float arcFrac (float db)
+    {
+        static constexpr std::array<std::pair<float, float>, 8> marks { { { -120.0f, 0.0f }, { -96.0f, 0.08f }, { -48.0f, 0.26f }, { -24.0f, 0.46f },
+                                                                          { -12.0f, 0.64f }, { -6.0f, 0.78f }, { -3.0f, 0.87f }, { 0.0f, 0.95f } } };
+        if (db <= marks.front().first) return 0.0f;
+        if (db >= 0.0f) return juce::jmin (1.0f, 0.95f + db * 0.0167f);
+        for (std::size_t k = 1; k < marks.size(); ++k)
+            if (db <= marks[k].first)
+            {
+                const auto [d0, f0] = marks[k - 1];
+                const auto [d1, f1] = marks[k];
+                return f0 + (f1 - f0) * (db - d0) / (d1 - d0);
+            }
+        return 0.95f;
+    }
+
+    void paintBody (juce::Graphics& g, const EffectSlot& fx) override
+    {
+        const auto d = display();
+        g.setColour (colour::bg0);
+        g.fillRect (bodyArea());
+        juce::ColourGradient bg (colour::bg1.brighter (0.06f), d.getCentreX(), d.getY(), colour::bg0, d.getCentreX(), d.getBottom(), false);
+        g.setGradientFill (bg);
+        g.fillRect (d);
+
+        // the output level (peak of the last 100 ms, with a hold)
+        auto level = -120.0f, hold = -120.0f;
+        for (int k = 0; k < 10; ++k) level = juce::jmax (level, columnBack (k).out);
+        for (int k = 0; k < 150; ++k) hold = juce::jmax (hold, columnBack (k).out);
+        if (! fx.enabled) level = hold = -120.0f;
+
+        const juce::Point<float> centre { d.getCentreX(), d.getBottom() + 40.0f };
+        const auto radius = d.getHeight() * 0.86f;
+        const auto a0 = -0.36f * juce::MathConstants<float>::pi, a1 = 0.36f * juce::MathConstants<float>::pi;
+        const auto angleOf = [&] (float db) { return a0 + (a1 - a0) * arcFrac (db); };
+        const auto at = [&] (float angle, float rad) { return centre + juce::Point<float> { std::sin (angle), -std::cos (angle) } * rad; };
+
+        // the track and the lit part (blue, red above −6 dB)
+        juce::Path track;
+        track.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, a0, a1, true);
+        g.setColour (colour::bg4);
+        g.strokePath (track, juce::PathStrokeType (10.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        if (level > -119.0f)
+        {
+            const auto split = angleOf (-6.0f), now = angleOf (level);
+            juce::Path lit;
+            lit.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, a0, juce::jmin (now, split), true);
+            g.setColour (colour::info.withAlpha (0.9f));
+            g.strokePath (lit, juce::PathStrokeType (10.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            if (now > split)
+            {
+                juce::Path hot;
+                hot.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, split, now, true);
+                g.setColour (colour::accent);
+                g.strokePath (hot, juce::PathStrokeType (10.0f, juce::PathStrokeType::curved, juce::PathStrokeType::butt));
+            }
+        }
+        if (hold > -119.0f)
+        {
+            g.setColour (hold > -6.0f ? colour::accent : colour::textPrimary);
+            g.fillEllipse (juce::Rectangle<float> (9.0f, 9.0f).withCentre (at (angleOf (hold), radius)));
+        }
+        // the red zone and the scale
+        juce::Path zone;
+        zone.addCentredArc (centre.x, centre.y, radius + 12.0f, radius + 12.0f, 0.0f, angleOf (-6.0f), a1, true);
+        g.setColour (colour::accent.withAlpha (0.6f));
+        g.strokePath (zone, juce::PathStrokeType (2.0f));
+        g.setFont (font (type::caption, true));
+        for (const auto db : { -120.0f, -96.0f, -48.0f, -24.0f, -12.0f, -6.0f, -3.0f, 0.0f })
+        {
+            const auto angle = angleOf (db);
+            g.setColour (db >= -6.0f ? colour::accent : colour::textSecondary);
+            g.drawLine ({ at (angle, radius + 8.0f), at (angle, radius + 15.0f) }, 1.4f);
+            g.drawText (db <= -120.0f ? juce::String::fromUTF8 ("-\xe2\x88\x9e") : juce::String ((int) db),
+                        juce::Rectangle<float> (40.0f, 14.0f).withCentre (at (angle, radius + 26.0f)), juce::Justification::centred, false);
+        }
+        g.setColour (colour::textPrimary);
+        g.setFont (font (type::title, true));
+        g.drawText (level > -119.0f ? juce::String (level, 1) + " dB" : juce::String::fromUTF8 ("-\xe2\x88\x9e dB"),
+                    juce::Rectangle<float> (160.0f, 22.0f).withCentre ({ centre.x, d.getBottom() - 46.0f }), juce::Justification::centred, false);
+        caption (g, juce::Rectangle<float> (160.0f, 14.0f).withCentre ({ centre.x, d.getBottom() - 26.0f }), tr ("Output peak"));
+
+        // the knob panel
+        const auto a = panel();
+        g.setColour (colour::bg2);
+        g.fillRect (a);
+        g.setColour (colour::border);
+        g.drawHorizontalLine ((int) a.getY(), 0.0f, a.getRight());
+        g.setColour (colour::textDisabled);
+        g.setFont (font (type::caption));
+        g.drawText ("0", juce::Rectangle<float> (80.0f, a.getY() + 160.0f, 30.0f, 14.0f), juce::Justification::centredRight, false);
+        g.drawText ("100", juce::Rectangle<float> (290.0f, a.getY() + 160.0f, 30.0f, 14.0f), juce::Justification::centredLeft, false);
+        g.drawText ("0", juce::Rectangle<float> (400.0f, a.getY() + 160.0f, 30.0f, 14.0f), juce::Justification::centredRight, false);
+        g.drawText ("15", juce::Rectangle<float> (610.0f, a.getY() + 160.0f, 30.0f, 14.0f), juce::Justification::centredLeft, false);
+    }
+};
+
 // --- windows -------------------------------------------------------------------------------------------------
 std::unique_ptr<ProEditor> make (AudioEngine& engine, int track, int slot, bool demo)
 {
@@ -1726,6 +1910,7 @@ std::unique_ptr<ProEditor> make (AudioEngine& engine, int track, int slot, bool 
         case EffectKind::sentryGate: return std::make_unique<SentryEditor> (engine, track, slot, demo);
         case EffectKind::prismMultiband: return std::make_unique<PrismEditor> (engine, track, slot, demo);
         case EffectKind::ember: return std::make_unique<EmberEditor> (engine, track, slot, demo);
+        case EffectKind::aether: return std::make_unique<AetherEditor> (engine, track, slot, demo);
         default: return nullptr;
     }
 }
@@ -1769,7 +1954,8 @@ namespace ProEditorWindows
 bool handles (EffectKind kind) noexcept
 {
     return kind == EffectKind::apexLimiter || kind == EffectKind::hushDeEsser || kind == EffectKind::crestCompressor
-           || kind == EffectKind::sentryGate || kind == EffectKind::prismMultiband || kind == EffectKind::ember;
+           || kind == EffectKind::sentryGate || kind == EffectKind::prismMultiband || kind == EffectKind::ember
+           || kind == EffectKind::aether;
 }
 
 void open (AudioEngine& engine, int track, int slot)
