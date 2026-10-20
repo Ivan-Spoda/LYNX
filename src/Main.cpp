@@ -1964,6 +1964,22 @@ private:
                     ui.setToolbarLayoutForSnapshot (layout);
                     saveArea (ui, ui.getToolbarBoundsForSnapshot(), prefix + "-toolbar-custom-1600.png");
                 }
+                {
+                    // the toolbar's edit mode (round 115): outlined panels and the tray of panels under it
+                    ui.setToolbarLayoutForSnapshot (lynx::toolbarlayout::Layout::makeDefault());
+                    auto layout = lynx::toolbarlayout::Layout::makeDefault();
+                    layout.setShown (lynx::toolbarlayout::Group::meters, false);
+                    ui.setToolbarLayoutForSnapshot (layout);
+                    ui.setToolbarEditingForSnapshot (true);
+                    offline.dispatchPendingMessages();
+                    saveArea (ui, ui.getToolbarBoundsForSnapshot().withHeight (ui.getToolbarAndTrayHeightForSnapshot()), prefix + "-toolbar-edit-1600.png");
+                    ui.setToolbarEditingForSnapshot (false);
+                    // Ctrl+F11: only the menu and the hint bar
+                    layout = lynx::toolbarlayout::Layout::makeDefault();
+                    layout.visible = false;
+                    ui.setToolbarLayoutForSnapshot (layout);
+                    saveArea (ui, ui.getLocalBounds().withHeight (120), prefix + "-toolbar-hidden-1600.png");
+                }
                 ui.setToolbarLayoutForSnapshot (lynx::toolbarlayout::Layout::makeDefault());
                 // quick tips: the toolbar and title bars with a few name bubbles, and every tip on one sheet
                 offline.dispatchPendingMessages();
@@ -2374,6 +2390,11 @@ private:
             ui.getBrowserForSnapshot().selectFirstSampleForSnapshot(); // the tree with a sample selected and its waveform
             offline.dispatchPendingMessages();
             saveSnapshot (ui, prefix + "-browser-tree.png");
+            // the Browser's PROJECT tab: the patterns, generators and audio files of the project in their colours
+            ui.getBrowserForSnapshot().showProjectForSnapshot();
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-browser-project.png");
+            ui.getBrowserForSnapshot().setTab (lynx::BrowserComponent::allTab);
 
             // the undo history after a few edits
             offline.editSong ([] (lynx::Song& s) { s.bpm += 1.0; });

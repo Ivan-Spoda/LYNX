@@ -441,8 +441,9 @@ void MainComponent::paint (juce::Graphics& g)
     g.fillRect (bar.withHeight (1).withY (bar.getBottom() - 1));
 
     g.setColour (colour::border.brighter (0.08f));
-    for (auto x : dividers)
-        g.fillRect (x, bar.getY() + 12, 1, bar.getHeight() - 24);
+    if (toolbarLayout.separators) // (the toolbar menu's "Separators")
+        for (auto x : dividers)
+            g.fillRect (x, bar.getY() + 12, 1, bar.getHeight() - 24);
 
     // play, stop and record share one quiet well
     if (! transportArea.isEmpty())
@@ -511,7 +512,10 @@ void MainComponent::resized()
 
     const auto room = toolbar.getWidth();
     const auto minHint = juce::jmax (menuWidth + 8, 320), maxHint = 620; // room for most hints on two lines
-    const auto visible = toolbarlayout::fit (toolbarLayout, widths, gap, room, minHint);
+    auto visible = toolbarlayout::fit (toolbarLayout, widths, gap, room, minHint);
+    if (! toolbarLayout.visible) // Ctrl+F11: only the menu and the hint bar, on one row
+        visible.fill (false);
+    panelBounds = {};
     int used = 0;
     for (int i = 0; i < toolbarlayout::groupCount; ++i)
         used += visible[(std::size_t) i] ? widths[(std::size_t) i] + gap : 0;
@@ -549,6 +553,16 @@ void MainComponent::resized()
     };
 
     // 1. the menu (and the project name beside it) over the hint bar; always first
+    if (! toolbarLayout.visible)
+    {
+        const auto row = toolbar.withHeight (h);
+        const auto menu = row.withWidth (juce::jmin (menuWidth + 8, row.getWidth()));
+        put (menuBar, menu);
+        titleArea = {};
+        put (hintBar, row.withTrimmedLeft (menu.getWidth() + 12).withWidth (juce::jmin (900, row.getWidth() - menu.getWidth() - 12)).reduced (0, 1));
+        fixedToolbarArea = bar;
+    }
+    else
     {
         auto column = take (hintWidth);
         const auto menu = column.withY (row1).withHeight (h).removeFromLeft (juce::jmin (menuWidth + 8, column.getWidth()));
@@ -557,6 +571,7 @@ void MainComponent::resized()
         if (titleArea.getWidth() < 60)
             titleArea = {};
         put (hintBar, column.withY (row2).withHeight (h).reduced (0, 1));
+        fixedToolbarArea = juce::Rectangle<int> (column.getX() - 4, 0, column.getWidth() + 8, toolbarHeight);
     }
 
     snapLabelArea = patternLabelArea = transportArea = {};
@@ -596,6 +611,7 @@ void MainComponent::resized()
 
         divide();
         auto panel = take (widths[(std::size_t) group]);
+        panelBounds[(std::size_t) group] = juce::Rectangle<int> (panel.getX() - 5, 0, panel.getWidth() + 10, toolbarHeight);
 
         switch (group)
         {
@@ -656,7 +672,15 @@ void MainComponent::resized()
         }
     }
 
-    workspace.setBounds (getLocalBounds().withTrimmedTop (toolbarHeight));
+    // the toolbar's edit mode: its overlay over the toolbar, and its tray between the toolbar and the windows
+    const auto tray = toolbarEditor != nullptr ? toolbar::EditOverlay::trayHeight : 0;
+    if (toolbarEditor != nullptr)
+    {
+        toolbarEditor->setBounds (0, 0, getWidth(), toolbarHeight + tray);
+        toolbarEditor->setToolbarHeight (toolbarHeight);
+        toolbarEditor->toFront (false);
+    }
+    workspace.setBounds (getLocalBounds().withTrimmedTop (toolbarHeight + tray));
 }
 
 // --- toolbar layout ------------------------------------------------------------------------------
@@ -667,7 +691,7 @@ void MainComponent::setToolbarLayout (const toolbarlayout::Layout& layout, bool 
     toolbarLayout = layout;
     const auto size = toolbarLayout.iconSize;
     rowHeight = toolbarlayout::rowHeight (size);
-    toolbarHeight = 2 * rowHeight + 8;
+    toolbarHeight = toolbarLayout.visible ? 2 * rowHeight + 8 : rowHeight + 6;
 
     const auto fraction = toolbarlayout::iconFraction (size), maxPx = toolbarlayout::iconMaxPx (size);
     for (auto* b : { &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton, &recordMenuButton, &newPatternButton,
@@ -687,6 +711,8 @@ void MainComponent::setToolbarLayout (const toolbarlayout::Layout& layout, bool 
 
     resized();
     repaint();
+    if (toolbarEditor != nullptr)
+        toolbarEditor->layoutChanged();
 
     if (save)
         saveUiSettings();
@@ -696,14 +722,39 @@ juce::PopupMenu MainComponent::makeToolbarMenu()
 {
     using toolbarlayout::Group;
     juce::PopupMenu menu;
+    // FL's toolbar menu (Edit, Separators, Hide, Presets), then LYNX's direct switches per panel
     menu.addSectionHeader (tr ("Toolbar"));
+    menu.addItem (tr ("Edit toolbar (drag panels to move, add or remove them)"), true, toolbarEditor != nullptr,
+                  [this] { setToolbarEditing (toolbarEditor == nullptr); });
+    menu.addItem (tr ("Separators"), true, toolbarLayout.separators, [this] {
+        auto layout = toolbarLayout;
+        layout.separators = ! layout.separators;
+        setToolbarLayout (layout);
+    });
+    menu.addItem (tr ("Hide the toolbar panels") + shortcutText ("view.toolbar"), true, ! toolbarLayout.visible, [this] {
+        auto layout = toolbarLayout;
+        layout.visible = ! layout.visible;
+        setToolbarLayout (layout);
+    });
 
+    juce::PopupMenu presets;
+    const auto current = toolbarlayout::matchingPreset (toolbarLayout);
+    for (int p = 0; p < toolbarlayout::presetCount; ++p)
+        presets.addItem (tr (toolbarlayout::presetName ((toolbarlayout::Preset) p)), true, current == p, [this, p] {
+            auto layout = toolbarlayout::applyPreset (toolbarLayout, (toolbarlayout::Preset) p);
+            layout.visible = true;
+            setToolbarLayout (layout);
+        });
+    menu.addSubMenu (tr ("Presets"), presets);
+
+    menu.addSectionHeader (tr ("Panels"));
     for (const auto& entry : toolbarLayout.entries)
     {
         const auto group = entry.group;
         menu.addItem (tr (toolbarlayout::groupName (group)), true, entry.shown, [this, group] {
             auto layout = toolbarLayout;
             layout.setShown (group, ! layout.isShown (group));
+            layout.visible = true;
             setToolbarLayout (layout);
         });
     }
@@ -734,6 +785,67 @@ juce::PopupMenu MainComponent::makeToolbarMenu()
         setToolbarLayout (toolbarlayout::Layout::makeDefault());
     });
     return menu;
+}
+
+void MainComponent::setToolbarEditing (bool editing)
+{
+    if (editing == (toolbarEditor != nullptr))
+        return;
+
+    if (! editing)
+    {
+        removeChildComponent (toolbarEditor.get());
+        toolbarEditor.reset();
+        resized();
+        repaint();
+        return;
+    }
+
+    if (! toolbarLayout.visible) // editing shows the panels
+    {
+        auto layout = toolbarLayout;
+        layout.visible = true;
+        setToolbarLayout (layout);
+    }
+
+    toolbar::EditOverlay::Host host;
+    host.layout = [this] { return toolbarLayout; };
+    host.setLayout = [this] (const toolbarlayout::Layout& layout) { setToolbarLayout (layout); };
+    host.panels = [this] { return panelBounds; };
+    host.fixedArea = [this] { return fixedToolbarArea; };
+    host.snapshot = [this] (juce::Rectangle<int> area) {
+        // the panel as it looks, without the edit overlay on it
+        if (toolbarEditor != nullptr)
+            toolbarEditor->setVisible (false);
+        auto image = createComponentSnapshot (area, true);
+        if (toolbarEditor != nullptr)
+            toolbarEditor->setVisible (true);
+        return image;
+    };
+    host.done = [safe = juce::Component::SafePointer<MainComponent> (this)] {
+        // after the click that asked for it
+        juce::MessageManager::callAsync ([safe] {
+            if (safe != nullptr)
+                safe->setToolbarEditing (false);
+        });
+    };
+    toolbarEditor = std::make_unique<toolbar::EditOverlay> (std::move (host), toolbarHeight);
+    addAndMakeVisible (*toolbarEditor);
+    resized();
+    repaint();
+    if (isShowing())
+        toolbarEditor->grabKeyboardFocus();
+}
+
+ui::Hint MainComponent::hintAt (juce::Point<int> p)
+{
+    ui::Hint h;
+    if (p.y < toolbarHeight)
+    {
+        h.text = tr ("Toolbar: [RMB] toolbar menu (edit the panels: move, add, remove; presets; hide with Ctrl+F11)");
+        h.hasMenu = true;
+    }
+    return h;
 }
 
 void MainComponent::showToolbarMenu()
@@ -829,6 +941,12 @@ bool MainComponent::runAction (const std::string& id)
     else if (is ("transport.pause")) playPause();
     else if (is ("transport.toggleMode")) toggleMode();
     else if (is ("view.typingPiano")) setTypingPiano (! typingPiano);
+    else if (is ("view.toolbar"))
+    {
+        auto layout = toolbarLayout;
+        layout.visible = ! layout.visible;
+        setToolbarLayout (layout);
+    }
     else if (is ("panel.playlist")) togglePanel (Panel::playlist);
     else if (is ("panel.channelRack")) togglePanel (Panel::channelRack);
     else if (is ("panel.pianoRoll"))
