@@ -64,6 +64,13 @@ crashed and was switched off…" (en + pt-BR) and appends a line to `%APPDATA%\L
 a crash inside the plugin's own editor window (its window procedure runs outside LYNX's calls) — the out-of-process
 option (Options → Run plugins in a separate process) remains the full protection.
 
+[EXEC] tools/testplugin/lynx_test_crash.c, a CLAP effect that crashes on purpose (env `LYNX_TEST_CRASH`):
+`process` = access violation in its 20th `process()` call: `LYNX.exe --plugintest` renders to the end, the slot plays
+through at full level afterwards (peak 0.71 instead of the plugin's half-gain 0.35) and `plugin_crashes=` lists it;
+`exit` = fail-fast in `DllMain(DLL_PROCESS_DETACH)` at process exit (the Waves case): `LYNX.exe --scantest` finds the
+plugin (`found=1`, nothing blacklisted). (Run with an isolated plugin list: --plugintest adds the file to
+`%APPDATA%\LYNX\plugins.xml`; the entry was removed again on this PC.)
+
 ## 3. Built-in effects: fuzzing (tools/fxfuzz.cpp, scripts/fxfuzz-asan.sh, LYNX.exe --fxfuzz, --selftest)
 
 [EXEC] `tools/fxfuzz.cpp` builds every EffectKind (default slot), every FL effect preset (.fst) and every effect slot
