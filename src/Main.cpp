@@ -43,6 +43,7 @@
 #include "core/EventEdit.h"
 #include "core/FacetEq.h"
 #include "ui/FacetEqEditor.h"
+#include "core/RackRenderer.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/PluginEditors.h"
 #include "core/PluginLayout.h"
@@ -405,6 +406,18 @@ public:
             // loaded with the FL plugin's Default preset when the FL installation has one
             const auto i = args.indexOf ("--plugui");
             runPluginEditorSnapshots (args[i + 1].unquoted());
+            return;
+        }
+
+        if (args.contains ("--fxfuzz"))
+        {
+            // LYNX.exe --fxfuzz report.txt [rounds]: every built-in effect in its editor, parameters swept and dragged
+            // with the mouse, audio rendered at several rates; a crash ends the process (round 111)
+            const auto i = args.indexOf ("--fxfuzz");
+            const auto rounds = args.size() > i + 2 ? juce::jmax (1, args[i + 2].getIntValue()) : 6;
+            const auto ok = runEffectFuzz (rounds, args[i + 1].unquoted());
+            setApplicationReturnValue (ok ? 0 : 1);
+            quit();
             return;
         }
 
@@ -788,7 +801,11 @@ private:
             }
         }
 
-        const auto ok = audioOk && projectOk && richOk && substituteOk && undoOk && recordOk && recordUndoOk && midiOk && wavpack != "ERROR";
+        // every built-in effect's editor and engine with extreme settings and mouse drags (round 111): a crash fails here
+        const auto effectsOk = runEffectFuzz (4, {});
+
+        const auto ok = audioOk && projectOk && richOk && substituteOk && undoOk && recordOk && recordUndoOk && midiOk && wavpack != "ERROR"
+                        && effectsOk;
 
         juce::String report;
         report << "connections=" << offline.getNumGraphConnections() << "\n"
@@ -800,6 +817,7 @@ private:
                << "recording=" << (recordOk && recordUndoOk ? "OK" : "ERROR") << "\n"
                << "midi=" << (midiOk ? "OK" : "ERROR") << "\n"
                << "wavpack=" << wavpack << "\n"
+               << "effects=" << (effectsOk ? "OK" : "NONFINITE") << "\n"
                << "result=" << (ok ? "OK" : "FAILED") << "\n";
 
         if (reportPath.isNotEmpty())
@@ -807,6 +825,113 @@ private:
 
         setApplicationReturnValue (ok ? 0 : 1);
         quit();
+    }
+
+    // Every built-in effect in its native editor: random / extreme parameters, mouse drags over the editor, the editor
+    // painted, audio rendered at 44.1 / 48 / 96 kHz. Returns false when an effect output NaN / inf (muted by the
+    // renderer's guard). The report lists each effect. Used by --fxfuzz and (a short run) by --selftest.
+    bool runEffectFuzz (int rounds, const juce::String& reportPath)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        lynx::setNativeEditorDemo (true);
+        juce::String report;
+        auto allFinite = true;
+        {
+            lynx::AudioEngine offline (false);
+            juce::Random random (111);
+            const auto value = [&] { const auto r = random.nextInt (6); return r == 0 ? 0.0f : r == 1 ? 1.0f : random.nextFloat(); };
+
+            for (int k = 0; k <= (int) lynx::EffectKind::sentryGate; ++k)
+            {
+                const auto kind = (lynx::EffectKind) k;
+                if (! lynx::NativeEffectWindows::canOpen (kind))
+                    continue;
+                const auto before = lynx::RackRenderer::nonFiniteEffectBlocks();
+                const auto& info = lynx::effectInfo (kind);
+                auto fx = lynx::makeEffectSlot (kind);
+
+                for (int round = 0; round < rounds; ++round)
+                {
+                    if (round > 0)
+                        for (std::size_t p = 0; p < info.params.size(); ++p)
+                            fx.params[p] = round == 1 ? 0.0f : round == 2 ? 1.0f : value();
+                    auto song = lynx::Song::makeDefault(); // its demo beat feeds the effect
+                    song.mixer.resize (2);
+                    song.mixer[0].name = "Master";
+                    song.mixer[1].name = "Insert 1";
+                    song.mixer[1].effects.assign (1, fx);
+                    for (auto& channel : song.channels)
+                        channel.mixerTrack = 1;
+                    offline.setSong (std::move (song));
+                    offline.dispatchPendingMessages();
+
+                    const auto pages = juce::jmax (1, (int) lynx::plugui::layoutFor (kind).pages.size());
+                    for (int page = 0; page < pages; ++page)
+                    {
+                        auto editor = kind == lynx::EffectKind::facetEq ? lynx::makeFacetEqEditor (offline, 1, 0, false)
+                                                                        : lynx::makeNativeEffectEditor (offline, 1, 0, 1.0f, page);
+                        if (editor == nullptr || editor->getWidth() <= 0 || editor->getHeight() <= 0)
+                            continue;
+                        juce::Image image (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
+                        const auto paint = [&] {
+                            juce::Graphics g (image);
+                            editor->paintEntireComponent (g, false);
+                        };
+                        paint();
+
+                        // drags from a grid of points, as a user moving every control (plain left button)
+                        if (round >= 3)
+                        {
+                            auto& source = juce::Desktop::getInstance().getMainMouseSource();
+                            const auto step = juce::jmax (12, juce::jmin (editor->getWidth(), editor->getHeight()) / 8);
+                            for (int y = step / 2; y < editor->getHeight(); y += step)
+                                for (int x = step / 2; x < editor->getWidth(); x += step)
+                                {
+                                    auto* target = editor->getComponentAt (x, y);
+                                    if (target == nullptr)
+                                        continue;
+                                    const auto at = target->getLocalPoint (editor.get(), juce::Point<float> ((float) x, (float) y));
+                                    const auto now = juce::Time::getCurrentTime();
+                                    const auto event = [&] (juce::Point<float> p, juce::ModifierKeys mods) {
+                                        return juce::MouseEvent (source, p, mods, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, target, target, now, at, now, 1, false);
+                                    };
+                                    const auto down = juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier);
+                                    const juce::Component::SafePointer<juce::Component> alive (target);
+                                    target->mouseDown (event (at, down));
+                                    const auto dy = (float) (random.nextBool() ? 400 : -400), dx = (float) (random.nextInt (401) - 200);
+                                    if (alive != nullptr)
+                                        target->mouseDrag (event (at + juce::Point<float> (dx * 0.5f, dy * 0.5f), down));
+                                    if (alive != nullptr)
+                                        target->mouseDrag (event (at + juce::Point<float> (dx, dy), down));
+                                    if (alive != nullptr)
+                                        target->mouseUp (event (at + juce::Point<float> (dx, dy), juce::ModifierKeys()));
+                                    juce::PopupMenu::dismissAllActiveMenus();
+                                    offline.dispatchPendingMessages();
+                                }
+                            paint();
+                        }
+                    }
+
+                    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+                        offline.renderOffline (0.05, rate);
+                    if (round == 0 || round >= 3) // keep what the drags set for the next round
+                        if (! offline.getSong().mixer.empty() && offline.getSong().mixer.size() > 1 && ! offline.getSong().mixer[1].effects.empty())
+                            fx = offline.getSong().mixer[1].effects[0];
+                }
+
+                const auto broken = lynx::RackRenderer::nonFiniteEffectBlocks() - before;
+                allFinite = allFinite && broken == 0;
+                report << info.name << ": " << (broken == 0 ? juce::String ("OK") : "non-finite output in " + juce::String ((juce::int64) broken) + " blocks") << "\n";
+                if (reportPath.isNotEmpty())
+                    juce::File (reportPath).replaceWithText (report + "(running)\n"); // what was reached, if it crashes
+            }
+        }
+        lynx::setNativeEditorDemo (false);
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        report << "result=" << (allFinite ? "OK" : "NONFINITE") << "\n";
+        if (reportPath.isNotEmpty())
+            juce::File (reportPath).replaceWithText (report);
+        return allFinite;
     }
 
     // LYNX.exe --plugintest plugin.vst3 report.txt: loads the plugin, plays notes if it is an

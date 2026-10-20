@@ -302,6 +302,30 @@ int main (int argc, char** argv)
         else if (a == "--only" && i + 1 < argc) only = std::atoi (argv[++i]);
     }
 
+    // --replay <kind> <sr> "<[i]=v ...>": a fresh instance of that kind with those parameters, every input mode
+    for (int i = 1; i + 3 < argc; ++i)
+        if (std::string (argv[i]) == "--replay")
+        {
+            auto slot = lynx::makeEffectSlot ((lynx::EffectKind) std::atoi (argv[i + 1]));
+            const double sr = std::atof (argv[i + 2]);
+            const char* s = argv[i + 3];
+            int index = 0, used = 0;
+            float value = 0.0f;
+            while (std::sscanf (s, " [%d]=%f%n", &index, &value, &used) == 2)
+            {
+                slot.params[(std::size_t) index] = value;
+                s += used;
+            }
+            for (int k = 0; k < 20; ++k)
+            {
+                auto fx = lynx::makeEffect (slot);
+                fx->prepare (sr);
+                run (*fx, slot.params, 6, 2048, "replay", "replay");
+            }
+            std::printf ("replay: %d of 20 non-finite\n", nonFinite);
+            return 0;
+        }
+
     if (kinds)
         for (int k = 0; k <= (int) lynx::EffectKind::sentryGate; ++k)
         {
