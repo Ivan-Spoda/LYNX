@@ -108,8 +108,39 @@ and 96 kHz. A short run of it is part of `--selftest` (`effects=OK`), so CI fail
 outputs NaN. tests/CrashFuzzTests111.inc: every effect at 44.1/48/96 kHz with extreme parameters, the shelf case, the
 two rate bugs and the renderer's NaN guard.
 
+## 4. Session breadcrumb for fail-fast crashes (src/platform/CrashGuard.*, src/Main.cpp)
+
+A fail-fast (0xC0000409, the Intel driver case of §1) or a forced end runs no crash handler, so the user gets no
+`crash*.txt` and nobody knows what LYNX was doing. While the UI runs, `%APPDATA%\LYNX\sessions\session-<pid>.txt`
+holds a header (version, pid, process creation time) and the last 10 steps, each written synchronously: plugin being
+loaded / loaded (name, format, file), plugin editor being opened / open / closed, project being opened, crash report
+written, closing. A clean exit deletes it. At the next start, a session file whose process is gone (pid not running, or
+running with another creation time = reused id; another open LYNX window is left alone) is appended to
+`%APPDATA%\LYNX\crash-history.log`, removed, and a message says "LYNX closed unexpectedly … Last step: …" (en + pt-BR).
+Command-line modes and the scan / sandbox children write nothing.
+
+[EXEC] this PC, round-111 build: UI started → session file with the header; `Stop-Process -Force` (stands in for a
+fail-fast) → next start appended it to crash-history.log and showed the message (last step "start-up"); the new
+session recorded "opening project self-demo.lynx"; closing the window normally removed the file.
+
+## 5. Waves (official trials on this PC) with this build
+
+[EXEC] `LYNX.exe --scantest` over copies of the four WaveShell bundles (17.1, 17.2, 17.4, 17.1-ARA): 620 plugins
+found, none rejected, 4 min, no crash dialog. `LYNX.exe --plugintest "<WaveShell1-VST3 17.1_x64.vst3>" report "<name>"`
+(new optional name argument to pick one plugin inside a shell) for CLA-2A, SSLChannel (the E-Channel), RCompressor,
+DeEsser, Doubler2, H-Delay, NS1 and Waves Tune Real-Time (all Stereo): each loads, processes audio (finite peak, no
+plugin crash caught), and the process exits with code 0 (no teardown crash). `--plugintest` itself was fixed: it checked
+for the plugin before the rack was built (the engine builds it when prepared), so it reported "not loaded" for every
+VST3; it now checks after the render and prints the host's load failures. This PC's plugin list was restored after the
+tests (plugintest adds the file to it).
+
+Tester's laptop (2026-10-20 ~18:40): reachable, but she was logged in with FL Studio open, so no GUI reproduction was
+tried. Read-only check: no LYNX crash events since the two of 2026-10-18 (§1).
+
 ## Where I stopped
 
-- Done: §1–§3 in feature/crash111.
-- Next: GUI reproduction on the tester's laptop (not allowed while she uses it); confirm Waves plugins scan and load
-  there with this build; consider a breadcrumb file for fail-fast crashes of the main process.
+- Done: §1–§5 in feature/crash111 (also two fuzz fixes: Fruity Delay Bank time product in 64-bit at 192 kHz; Maximus
+  saturation table index guarded against NaN / inf).
+- Next: GUI reproduction on the tester's laptop with 0.1.8 when she is not using it (open a Waves editor, close LYNX,
+  check the event log / crash-history.log); after 0.1.8 is installed there, confirm the Waves shell is rescanned
+  (scan-retry 2) and her vocal projects load the real Waves plugins instead of substitutes.
