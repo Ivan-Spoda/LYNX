@@ -56,8 +56,13 @@ tuning offset removed; tmp/r113/py/pcs.py):
 - game over, "A, 1": A natural minor holds 82 % of the sung frames, A major 69 %; G sung 10.8 % vs G# 0.4 %.
 - luisa sonsa, "E, 1": E minor 81 %, E major 70 %; G 8.7 % vs G# 2.3 %.
 - kwe, "C, 2": C is the default key; no scale on C fits (C minor 70 %, C major 57 %, best fit F# major 73 %).
-Reading [model]: 0 = major, 1 = minor, 2 = chromatic (the key is irrelevant, hence left at its default). Other values
-are not translated.
+[EXEC] The same test on the 22 main projects of her whole corpus (48 projects copied with her consent to tmp/gf/all,
+backups excluded; tmp/r113/py/scalefit.py, up to 8 takes × 60 s each): of the 21 projects saved with scale 1, 18 fit
+the minor scale on their key better than the major one (e.g. "pokke", C: minor 0.77 vs major 0.48; "need me", F:
+0.75 vs 0.41); the 3 others are close calls (G: 0.83 / 0.77, F#: 0.80 / 0.72, A#: 0.61 / 0.49). The only project
+saved with scale 0 ("OIOIOI", C#) fits major (0.84 vs 0.57).
+Reading [model, consistent with all of the above]: 0 = major, 1 = minor, 2 = chromatic (the key is irrelevant, hence
+left at its default in `kwe`). Other values are not translated.
 
 LYNX Tune used to start at C major, 20 ms for every Auto-Tune Pro: on `kwe` (chromatic) and `luisa` (E minor) it
 pulled sung notes to wrong pitches. [EXEC] Frames moved by more than 50 cents (LYNX Tune alone vs no tuning):
@@ -122,6 +127,16 @@ pitch moves are those of a 20 ms correction in the right key.
 equals FL to 0.0 dB in every window. The project's own path is exact; what differs is only what the third-party
 plugins (or their substitutes) do. (Note: renderwav normalises its .wav to −1 dBFS; levels above use its raw output.)
 
+## 4b. What her corpus uses (priorities for further substitute work)
+
+[DATA] Third-party slots in her 24 main projects (tmp/r113/py/inventory.py; backups excluded): her vocal preset is
+the same almost everywhere — Auto-Tune Pro (48 slots / 21 projects; key from the state now), CLA-2A (49), SSL
+E-Channel, NS1, RComp, DeEsser (48 each; 2–3 distinct states in the whole corpus), H-Delay (47), Doubler (46),
+ValhallaVintageVerb (42, translated since round 100), Fresh Air (41, read now), Filterverse (40), Little AlterBoy (39).
+Then Analog Lab V (6, instrument), Decapitator (6), PanMan (4). With so few distinct Waves states, measuring the five
+Waves vocal plugins once (official trials, fxmeasure) would translate her whole catalogue. NS1, Doubler, Filterverse
+and Little AlterBoy have no LYNX role yet (left out, as FL does when they are missing).
+
 ## 5. A/B switch
 
 Right-click a substitute slot › "Bypass all LYNX substitutes of this project" (pt-BR "Desativar todos os substitutos
@@ -133,7 +148,11 @@ experiments: `LYNX_PARAM="t.k.p=v"`, and the substituted slots are listed with t
 ## Where I stopped / next steps
 - Done: §1 matching fixes, §2 Auto-Tune key/scale + project key, §3 gentle defaults + Fresh Air / DeEsser reads, §5
   switch, tests (`tests/Substitutes113Tests.inc`), PLUGIN_FALLBACK.md.
-- To verify on her laptop with the new build: Auto-Tune Pro hosted from the Antares folder; the 16.0 shell described
+- [EXEC] Verified on her laptop with this branch's LYNX.exe (hidden, idle priority, her settings restored after):
+  `kwe` hosts Auto-Tune Pro from `…\VST3\Antares\` (before: bypassed); `game over --find-plugins` scans both Waves
+  shells (16.0 and 16.3) in 88 s and then hosts Auto-Tune Pro, SSLChannel, NS1, CLA-2A, H-Delay, Fresh Air and the
+  Soundtoys plugins; only RComp and DeEsser (not installed there, FL leaves them empty) are substitutes.
+- Still to verify there: Auto-Tune Pro hosted from the Antares folder; the 16.0 shell described
   (or `scan-failures.log` saying why not) — needs her LYNX run in her own desktop session.
 - Official trials of Auto-Tune Pro, Fresh Air, Waves and Soundtoys are being installed on this PC (2026-10-20): once
   they load headlessly, measure (fxmeasure) Auto-Tune Pro's scale list (confirms or corrects §2), Fresh Air's gain
