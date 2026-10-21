@@ -2042,38 +2042,40 @@ Layout epochVerbLayout()
 
 Layout atriumLayout()
 {
-    // six vertical faders on the left (mix, pre-delay, decay, low cut, high cut, early / late balance); the early and
-    // late sections side by side on the right (the reference flips between them with two tabs); type menu below
+    // six vertical faders on the left (mix, pre-delay, decay, low cut, high cut, depth = early / late balance); on the
+    // right the EARLY or the LATE controls, switched by two tabs as on the reference (round 129; the two sections were
+    // side by side before); the reverb mode menu below
     Layout l;
-    l.width = 900;
+    l.width = 640;
     l.height = 300;
+    l.pages = { TR_NOOP ("Early"), TR_NOOP ("Late") };
     auto& v = l.items;
     v.push_back (section (8, 8, 330, 244, nullptr, boxed));
     const char* faders[] = { "Mix", "Predelay", "Decay", "Low cut", "High cut", "Early/late" };
-    const char* captions[] = { TR_NOOP ("Mix"), TR_NOOP ("Predelay"), TR_NOOP ("Decay"), TR_NOOP ("Low cut"), TR_NOOP ("High cut"), TR_NOOP ("Late mix") };
+    const char* captions[] = { TR_NOOP ("Mix"), TR_NOOP ("Predelay"), TR_NOOP ("Decay"), TR_NOOP ("Low cut"), TR_NOOP ("High cut"), TR_NOOP ("Depth") };
     for (int i = 0; i < 6; ++i)
     {
         const auto x = 16.0f + 53.0f * (float) i;
         v.push_back (slider (Item::vslider, x + 8.0f, 18, 32, 196, faders[i], captions[i]));
         v.push_back (value (x, 222, 48, 16, faders[i], 0));
     }
-    v.push_back (section (342, 8, 270, 244, TR_NOOP ("Early")));
-    v.push_back (dial (386, 64, 34, "Early size", TR_NOOP ("Size")));
-    v.push_back (dial (446, 64, 34, "Early cross", TR_NOOP ("Cross")));
-    v.push_back (dial (506, 64, 34, "Early mod rate", TR_NOOP ("Mod rate")));
-    v.push_back (dial (566, 64, 34, "Early mod depth", TR_NOOP ("Mod depth")));
-    v.push_back (dial (386, 168, 34, "Early send", TR_NOOP ("Send")));
-    v.push_back (dial (446, 168, 34, "Diffusion", TR_NOOP ("Diffusion")));
-    v.push_back (dial (506, 168, 34, "Space", TR_NOOP ("Space")));
-    v.push_back (section (616, 8, 276, 244, TR_NOOP ("Late")));
-    v.push_back (dial (662, 64, 34, "Late size", TR_NOOP ("Size")));
-    v.push_back (dial (722, 64, 34, "Late cross", TR_NOOP ("Cross")));
-    v.push_back (dial (782, 64, 34, "Late mod rate", TR_NOOP ("Mod rate")));
-    v.push_back (dial (842, 64, 34, "Late mod depth", TR_NOOP ("Mod depth")));
-    v.push_back (dial (662, 168, 34, "Bass mult", TR_NOOP ("Bass mult")));
-    v.push_back (dial (722, 168, 34, "Bass xover", TR_NOOP ("Bass xover")));
-    v.push_back (dial (782, 168, 34, "High mult", TR_NOOP ("High mult")));
-    v.push_back (dial (842, 168, 34, "High xover", TR_NOOP ("High xover")));
+    v.push_back (section (342, 8, 290, 244, nullptr, boxed));
+    v.push_back (pageTabs (352, 16, 270, 22, TR_NOOP ("Early|Late")));
+    v.push_back (onPage (dial (392, 84, 34, "Early size", TR_NOOP ("Size")), 0));
+    v.push_back (onPage (dial (456, 84, 34, "Early cross", TR_NOOP ("Cross")), 0));
+    v.push_back (onPage (dial (520, 84, 34, "Early mod rate", TR_NOOP ("Mod rate")), 0));
+    v.push_back (onPage (dial (584, 84, 34, "Early mod depth", TR_NOOP ("Mod depth")), 0));
+    v.push_back (onPage (dial (392, 184, 34, "Early send", TR_NOOP ("Send")), 0));
+    v.push_back (onPage (dial (456, 184, 34, "Diffusion", TR_NOOP ("Diffusion")), 0));
+    v.push_back (onPage (dial (520, 184, 34, "Space", TR_NOOP ("Space")), 0));
+    v.push_back (onPage (dial (392, 84, 34, "Late size", TR_NOOP ("Size")), 1));
+    v.push_back (onPage (dial (456, 84, 34, "Late cross", TR_NOOP ("Cross")), 1));
+    v.push_back (onPage (dial (520, 84, 34, "Late mod rate", TR_NOOP ("Mod rate")), 1));
+    v.push_back (onPage (dial (584, 84, 34, "Late mod depth", TR_NOOP ("Mod depth")), 1));
+    v.push_back (onPage (dial (392, 184, 34, "Bass mult", TR_NOOP ("Bass mult")), 1));
+    v.push_back (onPage (dial (456, 184, 34, "Bass xover", TR_NOOP ("Bass xover")), 1));
+    v.push_back (onPage (dial (520, 184, 34, "High mult", TR_NOOP ("High mult")), 1));
+    v.push_back (onPage (dial (584, 184, 34, "High xover", TR_NOOP ("High xover")), 1));
     v.push_back (label (8, 264, 92, 24, TR_NOOP ("Reverb mode"), alignLeft));
     v.push_back (choiceMenu (102, 264, 200, 24, "Type", TR_NOOP ("Type"),
                              TR_NOOP ("Large Room|Medium Room|Bright Room|Large Chamber|Dark Room|Dark Chamber|Dark Space|Deep Space|Mirror Space|Vast Space|Distant Space|Dense Room")));
@@ -2122,6 +2124,7 @@ Layout nebulaLayout()
     v.push_back (dial (176, 84, 84, "Delay", TR_NOOP ("Delay"), big));
     v.push_back (dial (316, 84, 84, "Warp", TR_NOOP ("Warp"), big));
     v.push_back (tabs (114, 216, 168, 24, "Sync", TR_NOOP ("ms|Note|Dotted|Triplet")));
+    v.push_back (toggle (290, 186, 88, 22, "Clear", TR_NOOP ("Clear"), plugui::momentary));
     v.push_back (choiceMenu (290, 216, 88, 24, "Note", TR_NOOP ("Note"), "1/64|1/32|1/16|1/8|1/4|1/2|1/1"));
     v.push_back (section (392, 8, 100, 244, nullptr, boxed));
     v.push_back (dial (442, 50, 40, "Feedback", TR_NOOP ("Feedback")));
@@ -2294,6 +2297,10 @@ Layout echoformLayout()
     v.push_back (dial (738, k2, d, "Output", TR_NOOP ("Level"), bipolar)); // round 119
     // round 119: ping-pong in pairs (shown with the ping-pong style)
     v.push_back (when (toggle (280, 252, 90, 24, "Pairs", TR_NOOP ("Pairs")), "Style", 0.8f, 1.0f));
+    // round 129: the echoes' polarity per side (H-Delay's phase L / R) and a tap-tempo pad (sets the left time)
+    v.push_back (toggle (376, 252, 70, 24, "Phase L", TR_NOOP ("Phase L"), boxed));
+    v.push_back (toggle (452, 252, 70, 24, "Phase R", TR_NOOP ("Phase R"), boxed));
+    v.push_back (display (532, 252, 80, 24, "taptempo", "Time L", "Sync L"));
     // the mode selector along the bottom
     v.push_back (label (8, 254, 52, 20, TR_NOOP ("Mode")));
     v.push_back (menuOf (64, 252, 200, 24, "Mode", TR_NOOP ("Mode"),

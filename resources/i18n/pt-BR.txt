@@ -2844,3 +2844,7 @@ countries: br
 "Input and output level (peak, dBFS); the numbers hold the highest peak" = "Nível de entrada e de saída (pico, dBFS); os números guardam o maior pico"
 "Auto makeup" = "Ganho automático"
 "HF emphasis" = "Ênfase de agudos"
+"Phase L" = "Fase E"
+"Phase R" = "Fase D"
+"Early|Late" = "Iniciais|Cauda"
+"Tap tempo: click in time (two taps or more) to set the delay" = "Tap tempo: clique no tempo (dois toques ou mais) para definir o delay"

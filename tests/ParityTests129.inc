@@ -130,3 +130,70 @@ TEST (glow_trim_and_compressor_meters_round129)
     const auto [peak, gr] = run (EffectKind::compressor, comp, 0.9f);
     CHECK (peak > 0.0f && gr > 0.1f);
 }
+
+TEST (nebula_clear_and_echoform_phase_round129)
+{
+    using namespace lynx;
+    // Nebula's CLEAR: a flip of the button's value empties the network (the tail stops at once)
+    {
+        auto p = makeEffectSlot (EffectKind::nebula).params;
+        p[0] = 1.0f; // all wet
+        auto fx = makeEffect (EffectKind::nebula);
+        fx->prepare (48000.0);
+        std::vector<float> l (512, 0.0f), r (512, 0.0f);
+        l[0] = r[0] = 1.0f;
+        fx->process (l.data(), r.data(), 512, p, 120.0);
+        float tail = 0.0f;
+        for (int b = 0; b < 40; ++b)
+        {
+            std::fill (l.begin(), l.end(), 0.0f);
+            std::fill (r.begin(), r.end(), 0.0f);
+            fx->process (l.data(), r.data(), 512, p, 120.0);
+            for (const auto x : l) tail = std::max (tail, std::abs (x));
+        }
+        CHECK (tail > 1e-4f);
+        p[(std::size_t) presets::paramByName (EffectKind::nebula, "Clear")] = 1.0f;
+        float after = 0.0f;
+        for (int b = 0; b < 4; ++b)
+        {
+            std::fill (l.begin(), l.end(), 0.0f);
+            std::fill (r.begin(), r.end(), 0.0f);
+            fx->process (l.data(), r.data(), 512, p, 120.0);
+            for (const auto x : l) after = std::max (after, std::abs (x));
+        }
+        CHECK (after < 1e-6f);
+    }
+    // Echoform's phase L: the left echoes come out inverted, the right ones unchanged
+    {
+        auto run = [] (bool invertLeft) {
+            auto p = makeEffectSlot (EffectKind::echoform).params;
+            p[0] = 1.0f;
+            p[(std::size_t) presets::paramByName (EffectKind::echoform, "Mode")] = *presets::valueFromText (EffectKind::echoform, presets::paramByName (EffectKind::echoform, "Mode"), "Clean");
+            p[(std::size_t) presets::paramByName (EffectKind::echoform, "Phase L")] = invertLeft ? 1.0f : 0.0f;
+            auto fx = makeEffect (EffectKind::echoform);
+            fx->prepare (48000.0);
+            std::vector<float> l (48000, 0.0f), r (48000, 0.0f);
+            l[0] = r[0] = 1.0f;
+            for (int at = 0; at < 48000; at += 512)
+                fx->process (l.data() + at, r.data() + at, std::min (512, 48000 - at), p, 120.0);
+            return std::make_pair (l, r);
+        };
+        const auto a = run (false), b = run (true);
+        double ll = 0.0, lb = 0.0, rr = 0.0, rb = 0.0;
+        for (std::size_t i = 1; i < a.first.size(); ++i) // (sample 0 is the dry impulse: mix 100 % leaves none)
+        {
+            ll += (double) a.first[i] * a.first[i];
+            lb += (double) a.first[i] * b.first[i];
+            rr += (double) a.second[i] * a.second[i];
+            rb += (double) a.second[i] * b.second[i];
+        }
+        CHECK (ll > 1e-3 && std::abs (lb + ll) < 1e-3 * ll);
+        CHECK (rr > 1e-3 && std::abs (rb - rr) < 1e-3 * rr);
+    }
+    // Atrium: the early and the late controls on two pages, like the reference's tabs
+    const auto& atrium = plugui::layoutFor (EffectKind::atrium);
+    CHECK (atrium.pages.size() == 2);
+    for (const auto& item : atrium.items)
+        if (item.param != nullptr && (std::string (item.param).rfind ("Early ", 0) == 0 || std::string (item.param).rfind ("Late ", 0) == 0))
+            CHECK (item.page == (std::string (item.param).rfind ("Early ", 0) == 0 ? 0 : 1));
+}

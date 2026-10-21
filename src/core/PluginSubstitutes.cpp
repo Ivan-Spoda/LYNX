@@ -1200,6 +1200,9 @@ int translateWavesHDelay (const std::vector<std::uint8_t>& state, EffectSlot& sl
     const bool analog = wavesValue (rw, 23).value_or (2.0) >= 0.5;
     p[e::style] = e::styleValue (pingPong ? e::Style::pingPong : e::Style::single);
     p[e::pairs] = pingPong ? 1.0f : 0.0f;
+    // round 129: phase L / R (RealWorld 8 / 9, round 119 §2 [EXEC]; 1 = inverted)
+    p[e::phaseL] = wavesValue (rw, 8).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
+    p[e::phaseR] = wavesValue (rw, 9).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
     const auto note = (int) std::lround (wavesValue (rw, 4).value_or (13.0));
     if (*sync >= 0.5 && *sync < 1.5 && note >= 0 && note <= 19)
     {

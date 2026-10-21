@@ -949,6 +949,23 @@ class NebulaFx final : public VerbEffect
 public:
     NebulaFx() : VerbEffect (EffectKind::nebula, 4.2, 0.05) {}
 
+    // CLEAR (round 129): the panel's push button flips parameter 13; a flip empties the delay network at once
+    void process (float* left, float* right, int n, const EffectParams& p, double bpm) noexcept override
+    {
+        if (p[13] != lastClear)
+        {
+            if (lastClear >= 0.0f)
+                reset();
+            lastClear = p[13];
+        }
+        VerbEffect::process (left, right, n, p, bpm);
+    }
+
+private:
+    float lastClear = -1.0f;
+
+protected:
+
 protected:
     void configure (const EffectParams& p, double bpm, Settings& s, float& mix) const noexcept override
     {
@@ -1273,7 +1290,8 @@ const EffectInfo& info (EffectKind kind)
     static const EffectInfo nebulaInfo { "Nebula",
         params ({ { "Mix", 0.5f }, { "Sync", 0.0f }, { "Note", 0.333333f }, { "Delay", 0.5f }, { "Warp", 0.0f },
                   { "Feedback", 0.5f }, { "Density", 0.0f }, { "Width", 1.0f }, { "Low cut", 0.0f }, { "High cut", 1.0f },
-                  { "Mod rate", 0.273834f }, { "Mod depth", 0.5f }, { "Mode", 0.0f } }) };
+                  { "Mod rate", 0.273834f }, { "Mod depth", 0.5f }, { "Mode", 0.0f },
+                  { "Clear", 0.0f } }) }; // round 129: the reference's CLEAR button (any change of the value empties the network)
     static const EffectInfo haloInfo { "Halo",
         params ({ { "Mix", 0.5f }, { "Shift", 1.0f }, { "Feedback", 0.0f }, { "Diffusion", 0.919192f }, { "Size", 0.5f },
                   { "Low cut", 0.0f }, { "High cut", 0.530201f }, { "Mod rate", 0.1f }, { "Mod depth", 0.3f },
@@ -1350,6 +1368,7 @@ std::string paramText (EffectKind kind, int param, float v, double bpm)
         case EffectKind::nebula:
             switch (param)
             {
+                case 13: return "Clear";
                 case 1: return syncNames[choice (v, 4)];
                 case 2: return noteNames[choice (v, 7)];
                 case 3: return ms (nebulaDelayMs (v));

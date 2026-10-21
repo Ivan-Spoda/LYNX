@@ -30,6 +30,7 @@
 #include "ui/FacetEqEditor.h"
 #include "ui/ProEditors.h"
 #include "ui/ParametricEqEditor.h"
+#include "core/EffectPresets.h"
 #include "ui/PluginHeader.h"
 #include "ui/PluginSkin.h"
 #include "ui/Theme.h"
@@ -605,8 +606,8 @@ public:
 
             case Item::toggle:
             {
-                const auto on = (value >= 0.5f) != hasStyle (item, plugui::inverted);
-                if (hasStyle (item, plugui::boxed)) // a small lit button with its letter (FL's T / L buttons)
+                const auto on = (value >= 0.5f) != hasStyle (item, plugui::inverted) && ! hasStyle (item, plugui::momentary);
+                if (hasStyle (item, plugui::boxed) || hasStyle (item, plugui::momentary)) // a small lit button with its letter (FL's T / L buttons)
                 {
                     if (on)
                     {
@@ -1484,6 +1485,15 @@ public:
             }
             return;
         }
+        else if (id == "taptempo") // round 129: a tap pad (H-Delay's TAP): tap twice or more to set the delay time
+        {
+            const auto lit = juce::Time::getMillisecondCounter() - lastTap < 150;
+            skin::button (g, r, lit, false, accent, radius::sm * s);
+            g.setColour (lit ? colour::textPrimary : colour::textSecondary);
+            g.setFont (font (juce::jmax (7.0f, 10.0f * s), true));
+            g.drawText (tapBpm > 0.0 ? caps (tr ("Tap")) + "  " + juce::String (tapBpm, 1) : caps (tr ("Tap")), r, juce::Justification::centred, false);
+            return;
+        }
         else if (id == "vusel") // round 129: the VU display selector, INPUT | GR | OUTPUT (the reference's VU DISPLAY knob)
         {
             static constexpr int order[] = { 1, 0, 2 };
@@ -2116,6 +2126,33 @@ public:
             repaint();
             return;
         }
+        if (item.type == Item::display && juce::String (item.display) == "taptempo") // round 129: the tap pad
+        {
+            const auto now = juce::Time::getMillisecondCounter();
+            if (now - lastTap > 2000)
+                tapIntervals.clear();
+            else
+            {
+                tapIntervals.push_back ((double) (now - lastTap));
+                if (tapIntervals.size() > 4)
+                    tapIntervals.erase (tapIntervals.begin());
+                double sum = 0.0;
+                for (const auto t : tapIntervals) sum += t;
+                const auto msAvg = sum / (double) tapIntervals.size();
+                tapBpm = 60000.0 / msAvg;
+                const auto timeParam = plugui::paramIndex (kind, item.param), syncParam = plugui::paramIndex (kind, item.param2);
+                std::vector<std::pair<int, float>> changes;
+                if (const auto sync = presets::valueFromText (kind, syncParam, "ms"); sync && syncParam >= 0)
+                    changes.push_back ({ syncParam, *sync });
+                if (const auto t = presets::valueFromText (kind, timeParam, juce::String (msAvg, 1).toStdString() + " ms"); t && timeParam >= 0)
+                    changes.push_back ({ timeParam, *t });
+                bar.beginGesture();
+                setParams (changes);
+            }
+            lastTap = now;
+            repaint();
+            return;
+        }
         if (item.type == Item::display && juce::String (item.display) == "vusel") // round 129: INPUT | GR | OUTPUT
         {
             const auto r = rectOf (item);
@@ -2441,6 +2478,8 @@ public:
             return { tr ("Soundgoodizer preset A to D (read from your FL installation)"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "vumeter")
             return { tr ("VU meter: click to show the gain reduction, the output or the input level"), vuMode == 2 ? tr ("Output") : vuMode == 1 ? tr ("Input") : tr ("Gain reduction"), false, false };
+        if (item.type == Item::display && juce::String (item.display) == "taptempo")
+            return { tr ("Tap tempo: click in time (two taps or more) to set the delay"), tapBpm > 0.0 ? juce::String (tapBpm, 1) + " BPM" : juce::String(), false, false };
         if (item.type == Item::display && juce::String (item.display) == "iometer")
             return { tr ("Input and output level (peak, dBFS); the numbers hold the highest peak"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "vusel")
@@ -2661,7 +2700,10 @@ private:
     dynui::History dynHistory; // the dynamics suite's scrolling gain-reduction graph
     int crossoverDrag = -1;    // the crossover parameter being dragged on a band display
     float vuNeedle = 0.0f;     // the VU display's needle (dB below 0 VU, with inertia)
-    std::array<skin::Ballistics, 2> ioMeters {}; // the "iometer" display: input and output (round 129)
+    std::array<skin::Ballistics, 2> ioMeters {};
+    juce::uint32 lastTap = 0;          // the tap pad (round 129)
+    std::vector<double> tapIntervals;
+    double tapBpm = 0.0; // the "iometer" display: input and output (round 129)
     int vuMode = 0;            // what the VU shows: 0 gain reduction, 1 input level, 2 output level (0 VU = −18 dBFS)
     juce::Point<float> mouseAt { -1.0f, -1.0f };
 };
