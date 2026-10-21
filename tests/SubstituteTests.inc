@@ -173,10 +173,18 @@ TEST (substitute_waves_shell_by_plugin_name)
     CHECK (lynx::findPluginSubstitute (cla, false) != nullptr && lynx::findPluginSubstitute (cla, false)->key == "waves-cla-2a");
     shell.state = flVst3State (wavesComponent ("H-Delay", "1"));
     CHECK (lynx::findPluginSubstitute (lynx::pluginIdentity (shell), false) != nullptr
-           && lynx::findPluginSubstitute (lynx::pluginIdentity (shell), false)->effect == lynx::EffectKind::fruityDelay3);
+           && lynx::findPluginSubstitute (lynx::pluginIdentity (shell), false)->effect == lynx::EffectKind::echoform); // round 119
+
+    // round 119: NS1 and Doubler have LYNX roles now
+    shell.state = flVst3State (wavesComponent ("NS1", "1"));
+    CHECK (lynx::findPluginSubstitute (lynx::pluginIdentity (shell), false) != nullptr
+           && lynx::findPluginSubstitute (lynx::pluginIdentity (shell), false)->effect == lynx::EffectKind::quellDenoiser);
+    shell.state = flVst3State (wavesComponent ("Doubler", "1"));
+    CHECK (lynx::findPluginSubstitute (lynx::pluginIdentity (shell), false) != nullptr
+           && lynx::findPluginSubstitute (lynx::pluginIdentity (shell), false)->effect == lynx::EffectKind::geminiDoubler);
 
     // a shell sub-plugin LYNX has no substitute for: nothing (the shell's file name must not match anything)
-    shell.state = flVst3State (wavesComponent ("NS1", "1"));
+    shell.state = flVst3State (wavesComponent ("S1 Imager", "1"));
     CHECK (lynx::findPluginSubstitute (lynx::pluginIdentity (shell), false) == nullptr);
     // a .lynx reference of an installed-elsewhere Waves plugin: its display name
     lynx::PluginIdentity named;

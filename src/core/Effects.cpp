@@ -39,6 +39,7 @@
 #include "core/FacetEq.h"
 #include "core/ApexLimiter.h"
 #include "core/DynamicsSuite.h"
+#include "core/VoiceTools.h"
 
 #include <algorithm>
 #include <atomic>
@@ -2529,6 +2530,8 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::crestCompressor: return dyn::crestInfo();
         case EffectKind::prismMultiband: return dyn::prismInfo();
         case EffectKind::sentryGate: return dyn::sentryInfo();
+        case EffectKind::quellDenoiser: return voicetools::quellInfo();
+        case EffectKind::geminiDoubler: return voicetools::geminiInfo();
     }
     return eq;
 }
@@ -2928,6 +2931,9 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::prismMultiband:
         case EffectKind::sentryGate:
             return dyn::paramText (kind, param, v);
+        case EffectKind::quellDenoiser:
+        case EffectKind::geminiDoubler:
+            return voicetools::paramText (kind, param, v);
 
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
@@ -3117,6 +3123,8 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::crestCompressor:
         case EffectKind::prismMultiband:
         case EffectKind::sentryGate: return dyn::make (kind); // LYNX's dynamics suite (REA_rodada108)
+        case EffectKind::quellDenoiser:
+        case EffectKind::geminiDoubler: return voicetools::make (kind); // LYNX's voice tools (REA_rodada119)
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();

@@ -394,6 +394,7 @@ double shiftDetuneHz (float v) noexcept { return 10.0 * signedPow (bipolar (v), 
 double pitchSemis (float v) noexcept { return 24.0 * bipolar (v); }
 double lowCutHz (float v) noexcept { return 10.0 + 1990.0 * clamp01 (v); }
 double highCutHz (float v) noexcept { return 200.0 + 19800.0 * clamp01 (v); }
+double outputDb (float v) noexcept { return -18.0 + 36.0 * clamp01 (v); }
 Mode modeOf (float v) noexcept { return (Mode) std::clamp ((int) std::floor (clamp01 (v) * (float) modeCount), 0, modeCount - 1); }
 float modeValue (Mode m) noexcept { return ((float) m + 0.5f) / (float) modeCount; }
 Style styleOf (float v) noexcept { return (Style) std::clamp ((int) std::floor (clamp01 (v) * (float) styleCount), 0, styleCount - 1); }
@@ -482,6 +483,9 @@ public:
         tR = std::max (0.0, tR - spreadMs * 0.25);
 
         const auto g = feedbackGain (p[feedback]);
+        const bool pairsOn = p[pairs] >= 0.5f;
+        const auto outGain = (float) std::pow (10.0, outputDb (p[output]) / 20.0);
+        wetGain *= outGain;
         const auto ageV = clamp01 (p[age]);
         const auto driveGain = (float) std::pow (10.0, 24.0 * (double) clamp01 (p[drive]) / 20.0);
         const auto widthV = (float) bipolar (p[width]);
@@ -619,7 +623,13 @@ public:
             // loop inputs per style
             const auto mono = 0.5f * (in[0] + in[1]);
             float loopIn[2];
-            if (st == Style::pingPong)
+            if (st == Style::pingPong && pairsOn)
+            {
+                // in pairs: left → right at full level, the loop gain once per pair
+                loopIn[0] = mono + (float) g * fbSig[1];
+                loopIn[1] = fbSig[0];
+            }
+            else if (st == Style::pingPong)
             {
                 const auto half = (float) std::sqrt (g);
                 loopIn[0] = mono + half * fbSig[1];
@@ -1334,7 +1344,7 @@ const EffectInfo& echoformInfo()
                                      { "Diffusion", 0.0f }, { "Diffusion size", 1.0f }, { "Low cut", 0.0f }, { "High cut", 1.0f },
                                      { "Mod rate", 0.2738341f }, { "Mod depth", 0.5f }, { "Wow", 0.5f }, { "Flutter", 0.5f },
                                      { "Shift", 0.5f }, { "Shift detune", 0.58f }, { "Pitch", 0.5f }, { "Pitch detune", 0.5f },
-                                     { "Mode", 0.5f / 12.0f }, { "Ducking", 0.0f } } };
+                                     { "Mode", 0.5f / 12.0f }, { "Ducking", 0.0f }, { "Output", 0.5f }, { "Pairs", 0.0f } } };
     return info;
 }
 
@@ -1416,6 +1426,8 @@ std::string paramText (EffectKind kind, int param, float v)
             case pitch: return fmt ("%+.2f st", pitchSemis (v));
             case pitchDetune: return fmt ("%+.0f c", 100.0 * bipolar (v));
             case mode: return modeName (modeOf (v));
+            case output: return fmt ("%+.1f dB", outputDb (v));
+            case pairs: return v >= 0.5f ? "pairs" : "alternate";
             default: return fmt ("%.2f", v);
         }
     }
