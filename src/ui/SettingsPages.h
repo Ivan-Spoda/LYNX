@@ -27,7 +27,8 @@ struct GeneralOptions
     int autosaveKeep = prefs::defaultAutosaveKeep;
     bool pluginSandbox = false;
     bool pluginSubstitutes = true; // missing plugins play a LYNX equivalent (core/PluginSubstitutes.h)
-    bool reducedEffects = false;   // plugin editors without glows, blooms or the open animation (ui/PluginSkin.h)
+    bool reducedEffects = false;
+    int pluginStyle = 0;           // ui/PluginSkin.h skin::Style (0 = Glow)   // plugin editors without glows, blooms or the open animation (ui/PluginSkin.h)
 
     bool operator== (const GeneralOptions&) const = default;
 };

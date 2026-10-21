@@ -108,6 +108,16 @@ void glowStroke (juce::Graphics&, const juce::Path&, juce::Colour, float thickne
 // a value read-out plate (boxed values)
 void valuePlate (juce::Graphics&, juce::Rectangle<float> area, float corner);
 
+// --- plugin style (round 126) ---------------------------------------------------------------------
+// The look every built-in editor is drawn in (Settings > General > Plugin style): Glow (the default kit above),
+// Neon, Hardware or Vivid (ui/PluginStyles.inc). Only the drawing changes; layouts and gestures never do.
+enum class Style { glow = 0, neon, hardware, vivid };
+inline constexpr int styleCount = 4;
+Style style();
+void setStyle (Style);
+const char* styleName (Style);            // English; translated with tr()
+Style styleFromName (const juce::String&); // "neon", "Hardware"... (unknown: glow)
+
 // --- effects level (round 126) --------------------------------------------------------------------
 // "Reduced effects" (Settings > General): no glows, blooms, grain or open animation, for weak GPUs / old machines
 bool reducedEffects();

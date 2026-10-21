@@ -36,12 +36,68 @@ Evidence markers: [EXEC] LYNX runs (`--plugui` renders, `--editorcpu` measuremen
 ## 2. Flagships [model]
 - **Facet EQ** — the analyser is a deep accent fill rising to a lit edge; the area between the sum curve and 0 dB is
   lit; the sum is a white line in a two-layer red glow; every node glows in its band colour.
-- **Crest Compressor** — the gain-reduction trace burns red with a glow; the GR meter is a lit meter; the level fills
-  have lit edges; aurora backdrop.
+- **Crest Compressor** — the aurora backdrop behind the history, a lit GR meter (glow, hot edge, LED ladder), big
+  knobs that light the display around them; the history itself stays glow-free (it is redrawn at 30 Hz, section 4).
 - **LYNX Tune** — the correction ring is the hero: a rose bloom behind it that grows with the correction, a bezel,
   glowing lit segments brightening to a white-hot tip, dim glass LEDs when unlit, the target note glowing; the pitch
   graph's newest corrected point is a lit bead.
 - **Epoch Verb** (and every FL-arranged panel) — the big Decay knob lights the panel around it; glass sections.
 
+## 3. Before / after [EXEC]
+`LYNX.exe --plugui` with main (round 122's kit, before) and this branch (after), 87 PNGs each. Early preview sheet of 12
+editors (flagships first): `C:\Users\kauan\OneDrive\Área de Trabalho\LYNX-visual-ousado\index.html`.
+
+## 4. CPU of an open editor [EXEC]
+`LYNX.exe --editorcpu` (2 s settle, 8 s measured, % of one core), 5 runs of main vs 5 runs of the first bold build,
+medians. The machine was shared with several other agents' builds: single runs jumped to 15–25 % at random (e.g.
+Epoch Verb idle *before* 23.8 % once), so only medians are meaningful.
+
+| editor | mode | before (main) | bold, first build |
+|---|---|---|---|
+| Facet EQ | idle | 3.32 | 2.73 |
+| Crest Compressor | idle | 3.12 | 3.32 |
+| Apex Limiter | idle | 3.32 | 2.93 |
+| Prism Multiband | idle | 2.93 | 3.12 |
+| Epoch Verb | idle | 2.34 | 3.51 |
+| Glow Leveler | idle | 2.54 | 2.54 |
+| Fruity Limiter | idle | 2.93 | 2.93 |
+| LYNX Tune | idle | 3.32 | 3.51 |
+| Facet EQ | animating | 17.36 | 21.85 |
+| Crest Compressor | animating | 19.90 | 30.06 |
+| Apex Limiter | animating | 23.03 | 34.93 |
+| Prism Multiband | animating | 32.59 | 34.95 |
+| Epoch Verb | animating | 2.73 | 2.34 |
+| Glow Leveler | animating | 10.14 | 13.27 |
+| Fruity Limiter | animating | 2.93 | 2.93 |
+| LYNX Tune | animating | 17.16 | 23.42 |
+
+- **Idle stays where it was** (~3 %, window + message loop): nothing new animates on a silent track.
+- The first bold build cost +10 points on Crest and +12 on Apex while animating. Causes found: a lit edge stroked on
+  every 100-column-a-second history fill, Crest's wide gain-reduction glow (a 6 px stroke over 760 points at 30 Hz)
+  and live radial gradients for the knob / LED blooms. Fixed: the history fills keep their gradient but no stroke,
+  the GR trace is a plain line again, and `skin::bloom` blits a cached sprite (per colour and strength) instead of
+  computing a radial gradient per pixel; LYNX Tune's unlit ring segments lost their extra highlight stroke.
+  Re-measured numbers: section 6.
+
+## 5. Plugin styles: three bolder directions (switchable) [model]
+After the preview the user asked for "mais ainda" (much more). The kit now has a **style** (`skin::Style`, Settings >
+General > Plugin style, pt-BR included; `--pluginstyle <name>` for CLI renders), each a full set of the kit's
+drawing functions (`src/ui/PluginStyles.inc`), so every editor — and every control the parity agents add through the
+shared components — follows it:
+- **Glow** (default, sections 1–2).
+- **Neon** — near-black with full-panel washes of the family colour and a shifted hue, a faint neon grid, neon-outlined
+  glass sections, coloured header pills, LED segment rings + a glowing neon value ring on every knob over a glossy
+  black cap, neon buttons / switches / faders, LED-block meters with bloom, heavy glowing curves, a big neon title.
+- **Hardware** — premium studio gear in LYNX's own design: an anodized faceplate tinted by the family with brushed
+  metal, bevels and screws, recessed milled panels with silk-screened caps, an engraved silver name badge,
+  machined aluminium knobs (knurled skirt, turned top, engraved pointer, printed scale, a thin lamp ring), metal
+  fader caps, chunky lit buttons, backlit glass displays in bezels, LCD read-outs, LED ladders in bezels.
+- **Vivid** — a saturated colour block per family with big playful circles, dark rounded cards, oversized flat knobs
+  (drawn 10 % bigger), white arcs and chunky white pointers, solid pills, flat chunky meters, heavy uppercase title,
+  and a springy open animation (a small overshoot).
+Hardware and Vivid draw knobs a little bigger than the cell's circle (4 % / 10 %); no layout, control position,
+caption or gesture moves.
+
 ## Where I stopped
-- Kit + flagships written; first build running.
+- Glow kit + flagships done and measured; CPU fixes in; the three styles written; build queued on the Windows lock;
+  next: render the variants sheet for Crest / Epoch Verb / LYNX Tune, re-measure CPU, land.

@@ -77,6 +77,7 @@ juce::Colour accentForInstrument (const juce::String& name)
 namespace
 {
 bool reduced = false;
+Style currentStyle = Style::glow;
 
 // a deterministic grain tile (white and black specks at a few % alpha) laid over the canvases
 const juce::Image& grainTile()
@@ -114,6 +115,7 @@ void cachedLayer (juce::Graphics& g, juce::Rectangle<float> a, juce::Colour acce
     std::uint64_t key = (std::uint64_t) w;
     key = key * 16411u + (std::uint64_t) h;
     key = key * 31u + (std::uint64_t) style * 2u + (reduced ? 1u : 0u);
+    key = key * 7u + (std::uint64_t) currentStyle;
     key ^= (std::uint64_t) accent.getARGB() * 0x9e3779b97f4a7c15ull;
     static std::map<std::uint64_t, juce::Image> cache;
     auto it = cache.find (key);
@@ -143,9 +145,11 @@ struct OpenAnimation final : private juce::Timer
     {
         if (target == nullptr) return;
         const auto e = 1.0f - std::pow (1.0f - u, 3.0f); // ease out
-        target->setAlpha (u >= 1.0f ? 1.0f : juce::jmax (0.02f, e));
+        target->setAlpha (u >= 1.0f ? 1.0f : juce::jmax (0.02f, juce::jmin (1.0f, e * 1.4f)));
         const auto b = target->getLocalBounds().toFloat();
-        const auto s = 0.955f + 0.045f * e;
+        // Vivid springs (a small overshoot), the others glide
+        const auto spring = 1.0f - std::exp (-6.0f * u) * std::cos (u * 9.0f);
+        const auto s = currentStyle == Style::vivid ? 0.9f + 0.1f * spring : 0.955f + 0.045f * e;
         target->setTransform (u >= 1.0f ? juce::AffineTransform() : juce::AffineTransform::scale (s, s, b.getCentreX(), b.getCentreY()));
     }
     void timerCallback() override
@@ -165,6 +169,25 @@ struct OpenAnimation final : private juce::Timer
 
 bool reducedEffects() { return reduced; }
 void setReducedEffects (bool on) { reduced = on; }
+
+Style style() { return currentStyle; }
+void setStyle (Style s) { currentStyle = s; }
+const char* styleName (Style s)
+{
+    switch (s)
+    {
+        case Style::neon: return "Neon";
+        case Style::hardware: return "Hardware";
+        case Style::vivid: return "Vivid";
+        default: return "Glow";
+    }
+}
+Style styleFromName (const juce::String& name)
+{
+    for (int i = 0; i < styleCount; ++i)
+        if (name.trim().equalsIgnoreCase (styleName ((Style) i))) return (Style) i;
+    return Style::glow;
+}
 
 void playOpenAnimation (juce::Component& content)
 {
@@ -199,12 +222,15 @@ void bloom (juce::Graphics& g, juce::Point<float> c, float radius, juce::Colour 
     g.drawImage (it->second, juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (c), juce::RectanglePlacement::stretchToFit);
 }
 
+#include "ui/PluginStyles.inc"
+
 // --- surfaces ------------------------------------------------------------------------------------
 
 namespace
 {
 void drawCanvas (juce::Graphics& g, juce::Rectangle<float> a, juce::Colour accent, bool display)
 {
+    if (currentStyle != Style::glow) { styles::canvas (g, a, accent, display, currentStyle); return; }
     // the deep base
     g.setGradientFill (juce::ColourGradient (display ? juce::Colour (0xff14161c) : juce::Colour (0xff1c1e26), 0.0f, a.getY(),
                                              display ? juce::Colour (0xff060709) : juce::Colour (0xff0b0c10), 0.0f, a.getBottom(), false));
@@ -251,6 +277,7 @@ void backdrop (juce::Graphics& g, juce::Rectangle<float> a, juce::Colour accent)
 
 void headerBar (juce::Graphics& g, juce::Rectangle<float> a, juce::Colour accent)
 {
+    if (currentStyle != Style::glow) { styles::headerBar (g, a, accent, currentStyle); return; }
     g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2c2f39), 0.0f, a.getY(), juce::Colour (0xff15171c), 0.0f, a.getBottom(), false));
     g.fillRect (a);
     if (! reduced)
@@ -312,6 +339,7 @@ void brandMark (juce::Graphics& g, juce::Rectangle<float> a)
 
 float titleText (juce::Graphics& g, juce::Rectangle<float> a, const juce::String& name, juce::Colour accent, bool underline)
 {
+    if (currentStyle != Style::glow) return styles::titleText (g, a, name, accent, underline, currentStyle);
     // the name plate: big and bold, lit from behind in the accent
     const auto size = juce::jlimit (13.0f, 18.0f, a.getHeight() * 0.62f);
     g.setFont (juce::Font (theme::font (size, true)).withExtraKerningFactor (0.02f));
@@ -345,6 +373,7 @@ float titleText (juce::Graphics& g, juce::Rectangle<float> a, const juce::String
 
 void powerLed (juce::Graphics& g, juce::Point<float> c, float d, bool on)
 {
+    if (currentStyle != Style::glow) { styles::powerLed (g, c, d, on, currentStyle); return; }
     const auto r = juce::Rectangle<float> (d, d).withCentre (c);
     if (on) bloom (g, c, d * 1.9f, theme::colour::ledOn, 0.55f);
     g.setColour (juce::Colours::black.withAlpha (0.6f));
@@ -358,6 +387,7 @@ void powerLed (juce::Graphics& g, juce::Point<float> c, float d, bool on)
 
 void section (juce::Graphics& g, juce::Rectangle<float> a, float corner, bool raised, juce::Colour tint)
 {
+    if (currentStyle != Style::glow) { styles::section (g, a, corner, raised, tint, currentStyle); return; }
     // glass with real depth: a soft shadow under it, a translucent body (the aurora shows through), a sheen on the
     // upper part, the rim catching light along the top and a dark lip at the bottom
     if (! reduced)
@@ -391,6 +421,7 @@ void section (juce::Graphics& g, juce::Rectangle<float> a, float corner, bool ra
 
 void sectionTitle (juce::Graphics& g, juce::Rectangle<float> strip, const juce::String& text, juce::Colour accent, float fontSize)
 {
+    if (currentStyle != Style::glow) { styles::sectionTitle (g, strip, text, accent, fontSize, currentStyle); return; }
     g.setFont (juce::Font (theme::font (fontSize, true)).withExtraKerningFactor (0.1f));
     const auto w = juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), text);
     const auto dotD = juce::jmax (4.0f, fontSize * 0.5f);
@@ -419,6 +450,7 @@ void sectionTitle (juce::Graphics& g, juce::Rectangle<float> strip, const juce::
 
 void well (juce::Graphics& g, juce::Rectangle<float> a, float corner, juce::Colour glow)
 {
+    if (currentStyle != Style::glow) { styles::well (g, a, corner, glow, currentStyle); return; }
     g.setGradientFill (juce::ColourGradient (juce::Colour (0xff050608), 0.0f, a.getY(), juce::Colour (0xff0f1015), 0.0f, a.getBottom(), false));
     g.fillRoundedRectangle (a, corner);
     if (! reduced && glow.getAlpha() > 0)
@@ -451,6 +483,7 @@ void well (juce::Graphics& g, juce::Rectangle<float> a, float corner, juce::Colo
 
 void floatingPanel (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour edge, float corner)
 {
+    if (currentStyle != Style::glow) { styles::floatingPanel (g, r, edge, corner, currentStyle); return; }
     juce::DropShadow (juce::Colours::black.withAlpha (0.7f), 24, { 0, 8 }).drawForRectangle (g, r.toNearestInt());
     if (! reduced)
     {
@@ -473,6 +506,7 @@ void floatingPanel (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour ed
 
 void bottomBar (juce::Graphics& g, juce::Rectangle<float> a)
 {
+    if (currentStyle != Style::glow) { styles::bottomBar (g, a, currentStyle); return; }
     g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1f2128), 0.0f, a.getY(), juce::Colour (0xff111216), 0.0f, a.getBottom(), false));
     g.fillRect (a);
     g.setColour (juce::Colours::black.withAlpha (0.75f));
@@ -491,11 +525,14 @@ void drawKnobDirect (juce::Graphics& g, juce::Rectangle<float> bounds, const Kno
 // Knobs are drawn once per look into a small cached image (value to 1/1000, hover in 8 steps, the screen's pixel
 // scale) and blitted afterwards: a display editor repainting at 30 Hz re-uses its unchanged knobs for free. The
 // bloom a big knob casts on the panel (brighter as it is turned up) is one gradient, drawn live.
-void knob (juce::Graphics& g, juce::Rectangle<float> bounds, const KnobLook& k)
+void knob (juce::Graphics& g, juce::Rectangle<float> boundsIn, const KnobLook& k)
 {
+    // Hardware and Vivid draw their knobs a little bigger than the cell's circle (the ring sits close to the caption)
+    const auto grow = currentStyle == Style::vivid ? styles::knobScaleVivid : currentStyle == Style::hardware ? styles::knobScaleHardware : 1.0f;
+    const auto bounds = boundsIn.withSizeKeepingCentre (boundsIn.getWidth() * grow, boundsIn.getHeight() * grow);
     const auto size = juce::jmin (bounds.getWidth(), bounds.getHeight()) - 2.0f;
     if (size <= 4.0f) return;
-    if (size >= 52.0f && k.enabled)
+    if (size >= 52.0f && k.enabled && (currentStyle == Style::glow || currentStyle == Style::neon))
     {
         const auto v = juce::jlimit (0.0f, 1.0f, k.bipolar ? std::abs (k.value - 0.5f) * 2.0f : k.value);
         bloom (g, bounds.getCentre(), size * 0.8f, k.accent, 0.05f + 0.11f * v + 0.06f * juce::jmax (k.hover, k.active ? 1.0f : 0.0f));
@@ -510,6 +547,7 @@ void knob (juce::Graphics& g, juce::Rectangle<float> bounds, const KnobLook& k)
     key = key * 1009u + (std::uint64_t) std::lround (size * 4.0f);
     key = key * 9u + (std::uint64_t) std::lround (juce::jlimit (0.0f, 1.0f, k.hover) * 8.0f);
     key = key * 16u + (k.bipolar ? 1u : 0u) + (k.active ? 2u : 0u) + (k.enabled ? 4u : 0u) + (reduced ? 8u : 0u);
+    key = key * 7u + (std::uint64_t) currentStyle;
     key = key * 401u + (std::uint64_t) std::lround (scale * 100.0f);
     key ^= (std::uint64_t) k.accent.getARGB() * 0x9e3779b97f4a7c15ull;
 
@@ -537,6 +575,9 @@ void drawKnobDirect (juce::Graphics& g, juce::Rectangle<float> bounds, const Kno
     const auto size = juce::jmin (bounds.getWidth(), bounds.getHeight()) - 2.0f;
     if (size <= 4.0f) return;
     const auto area = bounds.withSizeKeepingCentre (size, size);
+    if (currentStyle == Style::neon) { styles::knobNeon (g, area, k); return; }
+    if (currentStyle == Style::hardware) { styles::knobHardware (g, area, k); return; }
+    if (currentStyle == Style::vivid) { styles::knobVivid (g, area, k); return; }
     const auto c = area.getCentre();
     const auto small = size < 26.0f;
     const auto fx = ! small && ! reduced;
@@ -684,6 +725,11 @@ void drawKnobDirect (juce::Graphics& g, juce::Rectangle<float> bounds, const Kno
 void slider (juce::Graphics& g, juce::Rectangle<float> t, float value01, bool vertical, bool bipolar, juce::Colour accent, bool hot, bool enabled,
              float thumbLength, float thumbThickness)
 {
+    if (currentStyle != Style::glow)
+    {
+        styles::slider (g, t, juce::jlimit (0.0f, 1.0f, value01), vertical, bipolar, accent, hot, enabled, thumbLength, thumbThickness, currentStyle);
+        return;
+    }
     const auto v = juce::jlimit (0.0f, 1.0f, value01);
     const auto thick = vertical ? t.getWidth() : t.getHeight();
     g.setColour (juce::Colour (0xff040506));
@@ -749,6 +795,7 @@ void slider (juce::Graphics& g, juce::Rectangle<float> t, float value01, bool ve
 
 void button (juce::Graphics& g, juce::Rectangle<float> r, bool lit, bool hover, juce::Colour accent, float corner)
 {
+    if (currentStyle != Style::glow) { styles::button (g, r, lit, hover, accent, corner, currentStyle); return; }
     if (lit)
     {
         // illuminated: the light spills out around the button
@@ -787,6 +834,7 @@ void button (juce::Graphics& g, juce::Rectangle<float> r, bool lit, bool hover, 
 
 void switchPill (juce::Graphics& g, juce::Rectangle<float> box, bool on, juce::Colour accent, bool enabled)
 {
+    if (currentStyle != Style::glow) { styles::switchPill (g, box, on, accent, enabled, currentStyle); return; }
     const auto c = enabled ? accent : theme::colour::textSecondary;
     const auto rr = box.getHeight() * 0.5f;
     if (on)
@@ -816,6 +864,7 @@ void switchPill (juce::Graphics& g, juce::Rectangle<float> box, bool on, juce::C
 
 void selector (juce::Graphics& g, juce::Rectangle<float> r, bool hover, float corner)
 {
+    if (currentStyle != Style::glow) { styles::selector (g, r, hover, corner, currentStyle); return; }
     g.setColour (juce::Colours::black.withAlpha (0.45f));
     g.fillRoundedRectangle (r.translated (0.0f, 1.5f), corner);
     g.setGradientFill (juce::ColourGradient (juce::Colour (hover ? 0xff464b57 : 0xff393d47), 0.0f, r.getY(), juce::Colour (hover ? 0xff2b2e36 : 0xff23252c), 0.0f,
@@ -842,6 +891,7 @@ void segmentGaps (juce::Graphics& g, juce::Rectangle<float> r, juce::Rectangle<f
 
 void meter (juce::Graphics& g, juce::Rectangle<float> r, float level01, float peak01, bool vertical)
 {
+    if (currentStyle != Style::glow) { styles::meter (g, r, juce::jlimit (0.0f, 1.0f, level01), juce::jlimit (0.0f, 1.0f, peak01), vertical, currentStyle); return; }
     g.setColour (juce::Colour (0xff040506));
     g.fillRoundedRectangle (r.expanded (1.0f), 2.5f);
     const auto lv = juce::jlimit (0.0f, 1.0f, level01);
@@ -892,6 +942,7 @@ void meter (juce::Graphics& g, juce::Rectangle<float> r, float level01, float pe
 
 void meterSolid (juce::Graphics& g, juce::Rectangle<float> r, float level01, juce::Colour c, bool fromTop)
 {
+    if (currentStyle != Style::glow) { styles::meterSolid (g, r, juce::jlimit (0.0f, 1.0f, level01), c, fromTop, currentStyle); return; }
     g.setColour (juce::Colour (0xff040506));
     g.fillRoundedRectangle (r.expanded (1.0f), 2.5f);
     g.setColour (c.withAlpha (0.08f));
@@ -916,6 +967,7 @@ void meterSolid (juce::Graphics& g, juce::Rectangle<float> r, float level01, juc
 
 void glowStroke (juce::Graphics& g, const juce::Path& p, juce::Colour c, float thickness, float glow)
 {
+    if (currentStyle != Style::glow) { styles::glowStroke (g, p, c, thickness, glow, currentStyle); return; }
     if (glow > 0.0f && ! reduced)
     {
         g.setColour (c.withAlpha (0.07f * glow));
@@ -934,6 +986,7 @@ void glowStroke (juce::Graphics& g, const juce::Path& p, juce::Colour c, float t
 
 void valuePlate (juce::Graphics& g, juce::Rectangle<float> r, float corner)
 {
+    if (currentStyle != Style::glow) { styles::valuePlate (g, r, corner, currentStyle); return; }
     g.setGradientFill (juce::ColourGradient (juce::Colour (0xff040507), 0.0f, r.getY(), juce::Colour (0xff101116), 0.0f, r.getBottom(), false));
     g.fillRoundedRectangle (r, corner);
     const auto sh = juce::jmin (5.0f, r.getHeight() * 0.35f);

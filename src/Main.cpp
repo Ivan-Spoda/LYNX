@@ -26,6 +26,7 @@
 #include "ui/PluginMonitorWindow.h"
 #include "ui/TouchKeyboard.h"
 #include "ui/AutomationUi.h"
+#include "ui/PluginSkin.h"
 #include "ui/ChannelSettings.h"
 #include "ui/Dialogs.h"
 #include "core/RackOps.h"
@@ -473,6 +474,12 @@ public:
             const auto only = i + 3 < args.size() && ! args[i + 3].startsWith ("--") ? args[i + 3].unquoted() : juce::String();
             runPluginTest (args[i + 1].unquoted(), args[i + 2].unquoted(), only);
             return;
+        }
+
+        if (args.contains ("--pluginstyle")) // round 126: the editors' style for this run (glow, neon, hardware, vivid)
+        {
+            const auto i = args.indexOf ("--pluginstyle");
+            if (i + 1 < args.size()) lynx::skin::setStyle (lynx::skin::styleFromName (args[i + 1].unquoted()));
         }
 
         if (args.contains ("--plugui"))

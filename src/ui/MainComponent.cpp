@@ -1143,6 +1143,8 @@ void MainComponent::loadUiSettings()
             ChannelRackComponent::keepEditorsOpen = on;
         else if (key == "waveSpectral") // ("waveColours", the old spectral-by-default key, is ignored)
             ui::WaveformCache::spectral = on;
+        else if (key == "pluginStyle")
+            skin::setStyle (skin::styleFromName (line.fromFirstOccurrenceOf ("=", false, false)));
         else if (key == "reducedEffects")
             skin::setReducedEffects (on);
         else if (key == "waveStereo")
@@ -1193,6 +1195,7 @@ void MainComponent::saveUiSettings()
                                       + "\nwaveSpectral=" + juce::String (ui::WaveformCache::spectral ? 1 : 0)
                                       + "\nwaveStereo=" + juce::String (ui::WaveformCache::stereo ? 1 : 0)
                                       + "\nreducedEffects=" + juce::String (skin::reducedEffects() ? 1 : 0)
+                                      + "\npluginStyle=" + juce::String (skin::styleName (skin::style()))
                                       + "\nrememberSeek=" + juce::String (EditorGlobals::get().rememberSeek ? 1 : 0)
                                       + "\nscopeMode=" + juce::String (toolbar::OutputMonitor::mode)
                                       + "\ntoolbarGroups=" + juce::String (toolbarLayout.orderToString())
@@ -2876,6 +2879,7 @@ void MainComponent::openSettings (int page)
         o.waveSpectral = ui::WaveformCache::spectral;
         o.waveStereo = ui::WaveformCache::stereo;
         o.reducedEffects = skin::reducedEffects();
+        o.pluginStyle = (int) skin::style();
         o.splash = safe->startup.splash;
         o.startupSound = safe->startup.sound;
         o.scanAtStart = backgroundScanAtStart();
@@ -2900,9 +2904,10 @@ void MainComponent::openSettings (int page)
             layout.uiScale = toolbarlayout::clampScale (o.uiScale);
             self.setToolbarLayout (layout, true);
         }
-        if (o.reducedEffects != skin::reducedEffects())
+        if (o.reducedEffects != skin::reducedEffects() || o.pluginStyle != (int) skin::style())
         {
             skin::setReducedEffects (o.reducedEffects);
+            skin::setStyle ((skin::Style) juce::jlimit (0, skin::styleCount - 1, o.pluginStyle));
             for (int i = 0; i < juce::Desktop::getInstance().getNumComponents(); ++i) // open editors redraw at once
                 if (auto* c = juce::Desktop::getInstance().getComponent (i)) c->repaint();
         }
