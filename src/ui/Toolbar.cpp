@@ -418,12 +418,15 @@ void PerformanceMeter::setValues (double cpu01, std::int64_t memoryBytes, int po
     repaint();
 }
 
-void PerformanceMeter::setRealtime (std::uint64_t over, std::uint64_t late, double peak, const juce::StringArray& units)
+void PerformanceMeter::setRealtime (std::uint64_t over, std::uint64_t late, double peak, const juce::StringArray& units, int device)
 {
-    if (over > overDeadline || late > lateCalls)
+    const auto count = RtStats::underrunCount (over, late, device);
+    if (over > overDeadline || late > lateCalls || count > underruns)
         lastGlitchAt = juce::jmax<juce::uint32> (1, juce::Time::getMillisecondCounter());
     overDeadline = over;
     lateCalls = late;
+    deviceUnderruns = device;
+    underruns = count;
     peakLoad = peak;
     heaviest = units;
     repaint();
@@ -444,6 +447,12 @@ void PerformanceMeter::paint (juce::Graphics& g)
     g.setFont (number);
     g.setColour (colour::textSecondary);
     g.drawText (juce::String (juce::roundToInt (cpuSmoothed * 100.0)) + "%", row1.removeFromRight (34), juce::Justification::centredRight, false);
+    if (underruns > 0) // FL's underrun counter, next to the percentage
+    {
+        g.setColour (colour::meterClip);
+        g.drawText (underruns > 999 ? juce::String ("999+") : juce::String ((juce::int64) underruns), row1.removeFromRight (26),
+                    juce::Justification::centredRight, false);
+    }
     const auto bar = row1.reduced (2, 3).toFloat();
     g.setColour (colour::bg0);
     g.fillRoundedRectangle (bar, 2.0f);
@@ -489,6 +498,8 @@ ui::Hint PerformanceMeter::hintAt (juce::Point<int> p)
     if (p.y < getHeight() / 2)
     {
         h.text = tr ("CPU: how much of the audio deadline the processing takes; near 100% the sound breaks up");
+        if (underruns > 0)
+            h.text << "  " << tr ("{0} underruns (the sound broke up; red number)", { juce::String ((juce::int64) underruns) });
         if (overDeadline > 0 || lateCalls > 0)
             h.text << "  " << tr ("{0} audio blocks missed the deadline (crackles), the device called late {1} times; log: audio-glitches.log",
                                   { juce::String ((juce::int64) overDeadline), juce::String ((juce::int64) lateCalls) });
@@ -536,6 +547,16 @@ void OutputMonitor::update()
         clipFrames = 60;
     else if (clipFrames > 0)
         --clipFrames;
+
+    // silence after everything has fallen to zero (meter, hold, clip, the long view's history, the spectrum bands)
+    // looks the same frame after frame: stop repainting at 30 Hz while nothing plays (REA round 116, idle CPU)
+    silentFrames = now > 0.0f ? 0 : juce::jmin (silentFrames + 1, 1 << 20);
+    if (silentFrames > (int) history.size() + 90)
+    {
+        peak = held = 0.0f;
+        bands.fill (0.0f);
+        return;
+    }
 
     // long view: the level scrolls from right to left
     std::rotate (history.begin(), history.begin() + 1, history.end());

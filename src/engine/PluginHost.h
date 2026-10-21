@@ -11,6 +11,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "core/Effects.h"
+#include "core/FixedBlock.h"
 #include "core/FlPluginDb.h"
 #include "core/PluginSubstitutes.h"
 #include "core/Instruments.h"
@@ -21,6 +22,11 @@ namespace lynx
 // (VST3 kOffline process mode, VST2 offline process level) so it can use its render quality. Re-prepares the plugin
 // when the mode changes; call only while it is not processing (offline renders, before/after the render loop).
 void setPluginRenderMode (juce::AudioPluginInstance& plugin, bool offline, int blockSize);
+
+// Block length of "Use fixed size buffers" (PluginRef::fixedBuffers): the audio device's buffer size, as FL (set when
+// the device starts; 512 until then). Plugins created afterwards use it.
+int fixedPluginBlock() noexcept;
+void setFixedPluginBlock (int samples) noexcept;
 
 // Adapters: a JUCE plugin seen by the core as an Instrument/Effect.
 // Notes become MIDI at the start of the next rendered chunk; since the core
@@ -38,7 +44,8 @@ std::vector<PluginCrash> pluginCrashes();
 class PluginInstrument final : public Instrument
 {
 public:
-    PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize);
+    // fixedBlock > 0: FL's "Use fixed size buffers" — the plugin always gets blocks of that length (+ that much latency)
+    PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize, int fixedBlock = 0);
     ~PluginInstrument() override;
 
     juce::AudioPluginInstance& getInstance() noexcept { return *plugin; }
@@ -49,7 +56,10 @@ public:
     void allNotesOff() noexcept override;
     void render (float* left, float* right, int n, float gainLeft, float gainRight) noexcept override;
     void setParameter (int index, float value) noexcept override;
-    int latencySamples() const noexcept override { return crashed.load (std::memory_order_relaxed) ? 0 : plugin->getLatencySamples(); }
+    int latencySamples() const noexcept override
+    {
+        return crashed.load (std::memory_order_relaxed) ? 0 : plugin->getLatencySamples() + (fixed != nullptr ? fixed->latency() : 0);
+    }
 
     // The plugin crashed inside a call (caught by platform/CrashGuard.h): it is never called again, the slot plays
     // through (effect) or stays silent (instrument) and the UI is told (pluginCrashes()).
@@ -59,6 +69,7 @@ public:
     // Sets a parameter from the UI / controllers (setValueNotifyingHost), guarded like the audio calls.
     void setParameterFromUi (int index, float value);
     void setRenderMode (bool offline) { if (! hasCrashed()) setPluginRenderMode (*plugin, offline, blockSize); }
+    bool usesFixedBlocks() const noexcept { return fixed != nullptr; }
 
 private:
     void failed (std::uint32_t code) noexcept;
@@ -69,12 +80,16 @@ private:
     int blockSize;
     std::string name;
     std::atomic<bool> crashed { false };
+    std::unique_ptr<FixedBlock> fixed;
+    std::vector<float> scratch; // fixed blocks: the delayed output before it is mixed in
+    juce::MidiBuffer pending; // fixed blocks: MIDI waiting for the block being collected, at its offsets in it
 };
 
 class PluginEffect final : public Effect
 {
 public:
-    PluginEffect (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize);
+    // fixedBlock > 0: FL's "Use fixed size buffers" — the plugin always gets blocks of that length (+ that much latency)
+    PluginEffect (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize, int fixedBlock = 0);
     ~PluginEffect() override;
 
     juce::AudioPluginInstance& getInstance() noexcept { return *plugin; }
@@ -83,7 +98,10 @@ public:
     void reset() noexcept override {}
     void process (float* left, float* right, int n, const EffectParams& params, double bpm) noexcept override;
     void setParameter (int index, float value) noexcept override;
-    int latencySamples() const noexcept override { return crashed.load (std::memory_order_relaxed) ? 0 : plugin->getLatencySamples(); }
+    int latencySamples() const noexcept override
+    {
+        return crashed.load (std::memory_order_relaxed) ? 0 : plugin->getLatencySamples() + (fixed != nullptr ? fixed->latency() : 0);
+    }
 
     // The plugin crashed inside a call (caught by platform/CrashGuard.h): it is never called again, the slot plays
     // through (effect) or stays silent (instrument) and the UI is told (pluginCrashes()).
@@ -93,6 +111,7 @@ public:
     // Sets a parameter from the UI / controllers (setValueNotifyingHost), guarded like the audio calls.
     void setParameterFromUi (int index, float value);
     void setRenderMode (bool offline) { if (! hasCrashed()) setPluginRenderMode (*plugin, offline, blockSize); }
+    bool usesFixedBlocks() const noexcept { return fixed != nullptr; }
 
 private:
     void failed (std::uint32_t code) noexcept;
@@ -103,6 +122,7 @@ private:
     int blockSize;
     std::string name;
     std::atomic<bool> crashed { false };
+    std::unique_ptr<FixedBlock> fixed;
 };
 
 // Plugin formats, known-plugin list (saved in AppData) and instance creation.

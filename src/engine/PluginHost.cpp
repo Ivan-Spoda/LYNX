@@ -96,6 +96,21 @@ int bufferChannels (const juce::AudioPluginInstance& plugin)
 }
 } // namespace
 
+namespace
+{
+std::atomic<int> fixedBlockSamples { 512 };
+}
+
+int fixedPluginBlock() noexcept
+{
+    return fixedBlockSamples.load (std::memory_order_relaxed);
+}
+
+void setFixedPluginBlock (int samples) noexcept
+{
+    fixedBlockSamples.store (juce::jlimit (16, PluginHost::maxBlockSize, samples), std::memory_order_relaxed);
+}
+
 // ---------------------------------------------------------------------------
 
 // Crashes of hosted plugins this session. The audio thread only writes a fixed slot (no allocation, no lock): a bounded
@@ -180,13 +195,19 @@ void guardedUiParameter (juce::AudioPluginInstance& plugin, std::atomic<bool>& c
 }
 } // namespace
 
-PluginInstrument::PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize)
+PluginInstrument::PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize, int fixedBlock)
     : plugin (std::move (instance)),
       blockSize (maxBlockSize),
       name (plugin->getName().toStdString())
 {
     buffer.setSize (bufferChannels (*plugin), blockSize);
     midi.ensureSize (8192); // the audio thread only adds events within this capacity
+    if (fixedBlock > 0)
+    {
+        fixed = std::make_unique<FixedBlock> (juce::jmin (fixedBlock, blockSize), 2);
+        pending.ensureSize (8192);
+        scratch.assign ((std::size_t) blockSize * 2, 0.0f);
+    }
     plugin->setPlayHead (&timelinePlayHead());
 }
 
@@ -247,6 +268,44 @@ void PluginInstrument::render (float* left, float* right, int n, float gl, float
         return; // silent
     }
 
+    if (fixed != nullptr)
+    {
+        // events of this chunk start where the block being collected stands now
+        const auto at = fixed->position();
+        for (const auto event : midi)
+            pending.addEvent (event.data, event.numBytes, at);
+        midi.clear();
+
+        auto process = [this] (float* const* ch, int count) {
+            juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), count);
+            view.clear();
+            if (! crashed.load (std::memory_order_relaxed))
+                if (const auto code = crashguard::run (BlockCall { plugin.get(), &view, &pending }); code != 0)
+                {
+                    failed (code);
+                    view.clear(); // silent from here on
+                }
+            pending.clear();
+            std::memcpy (ch[0], view.getReadPointer (0), sizeof (float) * (size_t) count);
+            std::memcpy (ch[1], view.getReadPointer (view.getNumChannels() > 1 ? 1 : 0), sizeof (float) * (size_t) count);
+        };
+
+        for (int done = 0; done < n;)
+        {
+            const auto count = juce::jmin (blockSize, n - done);
+            float* io[2] = { scratch.data(), scratch.data() + blockSize };
+            fixed->run (io, count, false, process);
+
+            for (int i = 0; i < count; ++i)
+            {
+                left[done + i] += io[0][i] * gl;
+                right[done + i] += io[1][i] * gr;
+            }
+            done += count;
+        }
+        return;
+    }
+
     for (int done = 0; done < n;)
     {
         const auto count = juce::jmin (blockSize, n - done);
@@ -275,12 +334,14 @@ void PluginInstrument::render (float* left, float* right, int n, float gl, float
 
 // ---------------------------------------------------------------------------
 
-PluginEffect::PluginEffect (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize)
+PluginEffect::PluginEffect (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize, int fixedBlock)
     : plugin (std::move (instance)),
       blockSize (maxBlockSize),
       name (plugin->getName().toStdString())
 {
     buffer.setSize (bufferChannels (*plugin), blockSize);
+    if (fixedBlock > 0)
+        fixed = std::make_unique<FixedBlock> (juce::jmin (fixedBlock, blockSize), 2);
     plugin->setPlayHead (&timelinePlayHead());
 }
 
@@ -320,6 +381,29 @@ void PluginEffect::process (float* left, float* right, int n, const EffectParams
 {
     if (crashed.load (std::memory_order_relaxed))
         return; // bypassed: the input plays through
+
+    if (fixed != nullptr)
+    {
+        float* io[2] = { left, right };
+        fixed->run (io, n, true, [this] (float* const* ch, int count) {
+            if (crashed.load (std::memory_order_relaxed))
+                return; // (crashed in an earlier block of this call: the input passes through)
+            juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), count);
+            view.clear();
+            view.copyFrom (0, 0, ch[0], count);
+            view.copyFrom (1, 0, ch[1], count);
+            if (const auto code = crashguard::run (BlockCall { plugin.get(), &view, &midi }); code != 0)
+            {
+                midi.clear();
+                failed (code); // this block keeps its dry input
+                return;
+            }
+            midi.clear();
+            std::memcpy (ch[0], view.getReadPointer (0), sizeof (float) * (size_t) count);
+            std::memcpy (ch[1], view.getReadPointer (view.getNumChannels() > 1 ? 1 : 0), sizeof (float) * (size_t) count);
+        });
+        return;
+    }
 
     for (int done = 0; done < n;)
     {
@@ -1319,7 +1403,7 @@ void setPluginSubstitutesEnabled (bool enabled)
 std::string PluginHost::preloadKey (const PluginRef& ref, double sampleRate)
 {
     return ref.id + "|" + std::to_string (std::hash<std::string> {} (ref.state)) + "|" + std::to_string (ref.state.size()) + "|"
-           + std::to_string ((long long) std::llround (sampleRate));
+           + std::to_string ((long long) std::llround (sampleRate)) + (ref.separateProcess ? "|own process" : "");
 }
 
 void PluginHost::preload (const PluginRef& ref, int wanted)
@@ -1395,9 +1479,9 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const Plu
 
     loadedAny.store (true); // (even a failed load may leave the module mapped)
     juce::String message;
-    if (pluginSandboxEnabled())
+    if (pluginSandboxEnabled() || ref.separateProcess)
     {
-        // separate process: the child prepares the plugin and applies the state
+        // separate process (for every plugin, or this one only — FL's "Make bridged"): the child prepares the plugin and applies the state
         if (auto remote = createSandboxedPlugin (*description, sampleRate, maxBlockSize, ref.state, message))
             return remote;
         if (error != nullptr)
@@ -1457,7 +1541,7 @@ std::shared_ptr<Instrument> PluginHost::makeInstrument (const PluginRef& ref, do
 {
     juce::String why;
     if (auto instance = instantiate (ref, sampleRate, &why))
-        return std::make_shared<PluginInstrument> (std::move (instance), maxBlockSize);
+        return std::make_shared<PluginInstrument> (std::move (instance), maxBlockSize, ref.fixedBuffers ? fixedPluginBlock() : 0);
 
     {
         const std::scoped_lock lock (failuresLock);
@@ -1472,7 +1556,7 @@ std::shared_ptr<Effect> PluginHost::makeEffect (const PluginRef& ref, double sam
 {
     juce::String why;
     if (auto instance = instantiate (ref, sampleRate, &why))
-        return std::make_shared<PluginEffect> (std::move (instance), maxBlockSize);
+        return std::make_shared<PluginEffect> (std::move (instance), maxBlockSize, ref.fixedBuffers ? fixedPluginBlock() : 0);
 
     {
         const std::scoped_lock lock (failuresLock);

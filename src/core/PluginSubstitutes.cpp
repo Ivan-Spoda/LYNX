@@ -365,13 +365,12 @@ names = FabFilter Pro-L; FabFilter Pro-L 2; Pro-L; Pro-L 2
 product = Renaissance Compressor
 vendor = Waves
 lynx = Compressor
-# [DATA] class ID (stereo component) and <PluginName> from real projects; its RealWorld values are readable but
-# their meaning is not confirmed, so the default preset is used, with auto gain: the substitute shapes the dynamics
-# but keeps the level (its makeup gain is unknown; round 107: without it her vocals came out 4 dB quieter)
+# [DATA] class ID (stereo component) and <PluginName> from real projects
 vst3 = 5554535643527253636f6d7072657373
 waves = RComp
-# round 113: a gentle default (2:1 above -15 dBFS): her vocal takes through the old -18 dB 4:1 lost the most low/high
-# balance of any substitute but the de-esser (docs/analise/REA_rodada113.md §3)
+# round 113: its RealWorld list is translated (threshold, ratio, attack, release, gain; measured on the official
+# trial, docs/analise/REA_rodada113.md §3c). Without a readable state: a gentle default (2:1 above -15 dBFS, auto gain)
+translate = waves-rcomp
 preset = Threshold=0.75; Ratio=0.0526; Auto gain=1
 
 [waves-cla-2a]
@@ -381,9 +380,10 @@ lynx = Glow Leveler
 # [DATA] class ID (stereo component) and <PluginName> from real projects
 vst3 = 4c545356324163536c612d3261207374
 waves = CLA-2A
-# LYNX's optical leveler (round 96); its state is not translated: light leveling (−2 dB into the cell, +2 dB gain;
-# round 113: was +7 dB / +3 dB)
+# LYNX's optical leveler (round 96). Round 113: gain, peak reduction and comp / limit are translated from the
+# RealWorld list (measured on the official trial, REA_rodada113 §3c); without a readable state light leveling
 preset = Peak reduction=0.30; Gain=0.067
+translate = waves-cla-2a
 
 [waves-compressors]
 product = Waves compressor (CLA-76 / CLA-3A / C1 / SSLComp / API-2500)
@@ -428,10 +428,12 @@ translate = pro-g
 product = SSL E-Channel
 vendor = Waves
 lynx = Ridge Strip
-# [DATA] class ID (stereo component) and <PluginName> from real projects; LYNX's channel strip (round 96) starts
-# neutral: the EQ curve and dynamics settings are not translated
+# [DATA] class ID (stereo component) and <PluginName> from real projects; LYNX's channel strip (round 96). Round 113:
+# filters, EQ, compressor and output are translated from the RealWorld list (measured on the official trial,
+# docs/analise/REA_rodada113.md §3c); without a readable state it starts neutral
 vst3 = 5354535648437353736c6368616e6e65
 waves = SSLChannel
+translate = waves-ssl-channel
 
 [ssl-native-channel]
 product = SSL Native Channel Strip / 4K E
@@ -457,10 +459,10 @@ product = DeEsser
 vendor = Waves
 lynx = Hush De-esser
 waves = DeEsser; DeEsser Stereo
-# round 113: a gentle default (5.5 kHz, -20 dBFS, at most 4 dB): the old one (6 kHz, -30 dBFS, 12 dB) took 4-5 dB off
-# her vocals above 8 kHz. [model] value 0 of the RealWorld list is the only one in Hz (5506 in every state surveyed):
-# the frequency
-map = waves:0 -> Frequency | curve 2000:0 2828:0.1667 4000:0.3333 5657:0.5 8000:0.6667 11314:0.8333 16000:1
+# round 113: frequency, threshold, split / wideband, side-chain filter and monitor are translated from the RealWorld
+# list (measured on the official trial, REA_rodada113 §3c); without a readable state a gentle default (5.5 kHz,
+# -20 dBFS, at most 4 dB)
+translate = waves-deesser
 preset = Frequency=0.487; Threshold=0.667; Range=0.167
 
 [fabfilter-pro-ds]
@@ -480,7 +482,8 @@ product = Fresh Air
 vendor = Slate Digital
 lynx = Aether
 names = Fresh Air; FreshAir
-# round 113: its two air amounts are read from the state (freshAirAmounts) and set a gentle air shelf / exciter
+# round 113: its two air amounts are read from the state (freshAirAmounts) and set Aether's air shelf through laws
+# measured on the official trial
 translate = fresh-air
 
 [soundtoys-decapitator]
@@ -919,24 +922,196 @@ int translateAutoTunePro (const std::vector<std::uint8_t>& state, EffectSlot& sl
     return 2;
 }
 
-// Fresh Air: the high air amount becomes Aether's air shelf (at most +6 dB for a full knob, a conservative reading:
-// the vendor's gain law is not known), the mid air amount a light share of its exciter.
+// Fresh Air: its two air amounts become Aether's air shelf. [EXEC] Black-box measurement of the official trial
+// (fxmeasure, pink noise at -20 dBFS RMS, 48 kHz; docs/analise/REA_rodada113.md §3b): each setting's response above
+// 2 kHz is fitted by one high shelf (RBJ, S = 0.6, Aether's); gain and frequency follow these least-squares laws of
+// (mid, high), within 0.5 dB RMS of the measured curves for the settings her projects use. The exciter stays off.
 int translateFreshAir (const std::vector<std::uint8_t>& state, EffectSlot& slot)
 {
     const auto air = freshAirAmounts (state);
     if (! air || slot.kind != EffectKind::aether)
         return 0;
-    slot.params[mixsuite::aether::air] = std::clamp (air->second * 6.0f / 15.0f, 0.0f, 1.0f);
-    slot.params[mixsuite::aether::harmonics] = std::clamp (air->first * 0.25f, 0.0f, 1.0f);
+    const auto m = (double) air->first, h = (double) air->second;
+    const auto gainDb = std::clamp (10.345 * m + 20.548 * h - 2.32 * m * m - 7.75 * h * h - 11.673 * m * h, 0.0, 15.0);
+    const auto hz = std::clamp (std::exp2 (12.8069 - 0.7108 * m + 0.6746 * h - 0.5369 * m * h), 5000.0, 20000.0);
+    slot.params[mixsuite::aether::air] = (float) (gainDb / 15.0);
+    slot.params[mixsuite::aether::airFreq] = (float) (std::log (hz / 5000.0) / std::log (4.0));
+    slot.params[mixsuite::aether::harmonics] = 0.0f;
     return 2;
+}
+
+// --- Waves RealWorld lists (round 113). [EXEC] Black-box measurement of the official trials (WaveShell 17.1, tools/
+// fxmeasure, headless): each control was moved alone and the value of the list that followed it (and its text) was
+// recorded; then the plugin at her projects' states and LYNX's substitute were run on the same sine stairs (1 and
+// 6 kHz, -60 .. 0 dBFS) and vocal takes and the substitute fitted (docs/analise/REA_rodada113.md §3c).
+// The value at `i`, or nothing when the list is shorter / holds "*"
+std::optional<double> wavesValue (const std::vector<double>& rw, std::size_t i)
+{
+    if (i < rw.size() && std::isfinite (rw[i]))
+        return rw[i];
+    return std::nullopt;
+}
+
+float logNorm (double v, double lo, double hi) { return (float) std::clamp (std::log (v / lo) / std::log (hi / lo), 0.0, 1.0); }
+float linNorm (double v, double lo, double hi) { return (float) std::clamp ((v - lo) / (hi - lo), 0.0, 1.0); }
+
+// Renaissance Compressor (28 values): 0 release ms, 1 threshold dB, 2 gain dB, 8 attack ms, 9 ratio, 17 ARC (0) /
+// manual. Her state (-15 dB, 2.95:1, 0.5 ms, ARC, gain 0) is matched by LYNX's peak compressor at 5 dB lower threshold
+// (RComp's soft knee / RMS detector), the same ratio, 300 ms release (ARC), no auto gain (RComp at gain 0 does not make
+// up: -9.6 dB on her take), within 0.5 dB on the stairs. Warm / Smooth and Electro / Opto are not translated.
+int translateWavesRComp (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    const auto rw = wavesRealWorldParams (state);
+    const auto threshold = wavesValue (rw, 1), ratio = wavesValue (rw, 9);
+    if (slot.kind != EffectKind::compressor || ! threshold || ! ratio)
+        return 0;
+    slot.params[0] = linNorm (*threshold - 5.0, -60.0, 0.0);
+    slot.params[1] = linNorm (*ratio, 1.0, 20.0);
+    slot.params[2] = logNorm (wavesValue (rw, 8).value_or (0.5), 0.1, 100.0);
+    const bool arc = wavesValue (rw, 17).value_or (0.0) < 0.5;
+    slot.params[3] = logNorm (arc ? 300.0 : wavesValue (rw, 0).value_or (300.0), 10.0, 1000.0);
+    slot.params[4] = linNorm (wavesValue (rw, 2).value_or (0.0), 0.0, 24.0);
+    slot.params[5] = 0.0f;
+    return 5;
+}
+
+// DeEsser (15 values): 0 frequency Hz, 2 threshold dB, 10 monitor (1 = side chain), 13 side chain (1 = high pass,
+// 2 = band pass), 14 audio (0 = split, 1 = wideband). Her state (5506 Hz, -24.2 dB, high pass, split) is matched by
+// Hush at 0.81 x the frequency, threshold +5 dB, 12 dB range, within 0.9 dB on the 6 kHz stairs (1 kHz untouched in
+// both); the range is not a control of the original (its curve flattens about 10 dB down at full scale).
+int translateWavesDeEsser (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    namespace h = mixsuite::hush;
+    const auto rw = wavesRealWorldParams (state);
+    const auto hz = wavesValue (rw, 0);
+    if (slot.kind != EffectKind::hushDeEsser || ! hz)
+        return 0;
+    int n = 1;
+    slot.params[h::frequency] = logNorm (*hz * 0.81, 2000.0, 16000.0);
+    if (const auto t = wavesValue (rw, 2))
+    {
+        slot.params[h::threshold] = linNorm (*t + 5.0, -60.0, 0.0);
+        slot.params[h::range] = linNorm (12.0, 0.0, 24.0);
+        ++n;
+    }
+    if (const auto m = wavesValue (rw, 14))
+        slot.params[h::mode] = *m >= 0.5 ? 1.0f : 0.0f, ++n;
+    if (const auto d = wavesValue (rw, 13))
+        slot.params[h::detector] = *d >= 1.5 ? 1.0f : 0.0f, ++n;
+    if (const auto l = wavesValue (rw, 10))
+        slot.params[h::listen] = *l >= 0.5 ? 1.0f : 0.0f, ++n;
+    return n;
+}
+
+// CLA-2A (208 values): 38 gain, 74 peak reduction, 112 comp (0) / limit. [EXEC] The gain knob's level below the
+// cell's threshold (noise at -70 dBFS): 20 -> -18.5 dB, 30 -> -3.0, 40 -> +8.0, 48.96 -> +15.5, 60 -> +24.2,
+// 70 -> +29.2, 80 -> +31.8. On her take after RComp (peak -12 dBFS) Glow Leveler's 50 ms level envelope follows the
+// original within 0.3-1.4 dB with peak reduction 0.40 + 0.021 x (knob - 40) and the gain above + 1.5 dB.
+int translateWavesCla2a (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    namespace g = mixsuite::glow;
+    const auto rw = wavesRealWorldParams (state);
+    const auto gain = wavesValue (rw, 38), reduction = wavesValue (rw, 74);
+    if (slot.kind != EffectKind::glowLeveler || ! gain || ! reduction)
+        return 0;
+    static constexpr double knob[] = { 0.0, 20.0, 30.0, 40.0, 48.96, 60.0, 70.0, 80.0, 100.0 };
+    static constexpr double db[] = { -60.0, -18.5, -3.0, 8.0, 15.5, 24.2, 29.2, 31.8, 34.0 };
+    const auto k = std::clamp (*gain, 0.0, 100.0);
+    std::size_t i = 1;
+    while (i < std::size (knob) - 1 && knob[i] < k)
+        ++i;
+    const auto levelDb = db[i - 1] + (db[i] - db[i - 1]) * (k - knob[i - 1]) / (knob[i] - knob[i - 1]);
+    slot.params[g::gain] = linNorm (levelDb + 1.5, 0.0, 30.0);
+    slot.params[g::peakReduction] = (float) std::clamp (0.40 + 0.021 * (*reduction - 40.0), 0.0, 1.0);
+    slot.params[g::mode] = wavesValue (rw, 112).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
+    slot.params[g::emphasis] = 0.0f;
+    return 3;
+}
+
+// SSL E-Channel (57 values): 0 comp threshold dB, 1 ratio, 2 fast (1 = on), 3 release s, 11 dynamics bypass, 13 LF
+// bell, 14/15 LF gain dB / Hz, 16/17/18 LMF gain / kHz / Q, 19/20/21 HMF, 22 HF bell, 23/24 HF gain / kHz, 25 EQ bypass,
+// 27 HP Hz (< 16 = out), 30 output gain dB. [EXEC] Its bands are broader than Ridge's: each band was measured alone
+// (impulse at -60 dBFS) and Ridge's band fitted to it (0.03-0.5 dB RMS): HF shelf at 0.36 x the frequency, 0.8 x
+// the gain; HMF at 1.37 x, 0.8 x the gain, Q 0.5 + 0.27 x (Q - 0.5); LF shelf cuts are gentle at 60 Hz (0.32 x the
+// gain from about 400 Hz) and boosts 0.75 x at 2.4 x the frequency; HP 116 Hz is Ridge's 99 Hz. The dynamics run
+// before the EQ; the compressor at threshold - 15.7 dB and 1 + 0.375 x (ratio - 1) (soft knee) plus the original's
+// +0.9 dB make-up. Her whole state: 0.7 dB RMS on the stairs, 1 dB RMS (40 Hz - 18 kHz) on pink noise at -40 dBFS.
+// LMF (0 dB in every state surveyed) and the expander are taken at face value [model].
+int translateWavesSslChannel (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    namespace r = mixsuite::ridge;
+    const auto rw = wavesRealWorldParams (state);
+    if (slot.kind != EffectKind::ridgeStrip || rw.size() < 31)
+        return 0;
+    const auto at = [&] (std::size_t i, double fallback) { return wavesValue (rw, i).value_or (fallback); };
+    const auto interp = [] (double x, std::initializer_list<std::pair<double, double>> pts) {
+        auto prev = *pts.begin();
+        if (x <= prev.first)
+            return prev.second;
+        for (const auto& p : pts)
+        {
+            if (x <= p.first)
+                return prev.second + (p.second - prev.second) * (x - prev.first) / (p.first - prev.first);
+            prev = p;
+        }
+        return prev.second;
+    };
+    const auto gain = [] (double db) { return linNorm (db, -15.0, 15.0); };
+    const auto q = [] (double v) { return logNorm (0.5 + (v - 0.5) * 0.27, 0.5, 2.5); };
+    auto& p = slot.params;
+    p[r::curve] = 0.0f;
+    p[r::lpf] = 0.0f;
+    p[r::order] = 1.0f;
+    const auto hp = at (27, 0.0);
+    p[r::hpf] = hp >= 16.0 ? logNorm (interp (hp, { { 16, 9 }, { 50, 27 }, { 116, 99 }, { 250, 194 }, { 350, 272 } }), 16.0, 350.0) : 0.0f;
+    const auto lfDb = at (14, 0.0), lfHz = at (15, 100.0);
+    if (lfDb < 0.0)
+    {
+        p[r::lfGain] = gain (lfDb * interp (lfHz, { { 60, 0.32 }, { 200, 0.88 } }));
+        p[r::lfFreq] = logNorm (std::min (450.0, lfHz * 6.7), 30.0, 450.0);
+    }
+    else
+    {
+        p[r::lfGain] = gain (lfDb * interp (lfHz, { { 60, 0.75 }, { 400, 1.08 } }));
+        p[r::lfFreq] = logNorm (std::min (450.0, lfHz * 2.4), 30.0, 450.0);
+    }
+    p[r::lfBell] = at (13, 0.0) > 0.5 ? 1.0f : 0.0f;
+    p[r::lmfGain] = gain (at (16, 0.0) * 0.65);
+    p[r::lmfFreq] = logNorm (at (17, 0.5) * 1000.0, 200.0, 2500.0);
+    p[r::lmfQ] = q (at (18, 1.5));
+    p[r::hmfGain] = gain (at (19, 0.0) * 0.8);
+    p[r::hmfFreq] = logNorm (at (20, 3.5) * 1370.0, 600.0, 7000.0);
+    p[r::hmfQ] = q (at (21, 1.5));
+    p[r::hfGain] = gain (at (23, 0.0) * 0.8);
+    p[r::hfFreq] = logNorm (at (24, 8.0) * 360.0, 1500.0, 16000.0);
+    p[r::hfBell] = at (22, 0.0) > 0.5 ? 1.0f : 0.0f;
+    p[r::eqOn] = at (25, 0.0) > 0.5 ? 0.0f : 1.0f;
+    const auto ratio = std::max (1.0, at (1, 1.0));
+    const bool dynOn = at (11, 0.0) < 0.5;
+    p[r::compRatio] = (float) std::sqrt (std::clamp ((ratio - 1.0) * 0.375 / 19.0, 0.0, 1.0));
+    p[r::compThreshold] = linNorm (at (0, 0.0) - 15.7, -40.0, 0.0);
+    p[r::compRelease] = logNorm (std::max (0.1, at (3, 0.35)), 0.1, 4.0);
+    p[r::compFastAttack] = at (2, 0.0) == 1.0 ? 1.0f : 0.0f;
+    p[r::gateRange] = 0.0f;
+    p[r::dynOn] = dynOn ? 1.0f : 0.0f;
+    p[r::output] = linNorm (at (30, 0.0) + (dynOn && ratio > 1.01 ? 0.9 : 0.0), -20.0, 20.0);
+    return 20;
 }
 
 RawTranslator rawTranslatorNamed (std::string_view name)
 {
+    if (name == "waves-ssl-channel")
+        return translateWavesSslChannel;
     if (name == "auto-tune-pro")
         return translateAutoTunePro;
     if (name == "fresh-air")
         return translateFreshAir;
+    if (name == "waves-rcomp")
+        return translateWavesRComp;
+    if (name == "waves-deesser")
+        return translateWavesDeEsser;
+    if (name == "waves-cla-2a")
+        return translateWavesCla2a;
     return nullptr;
 }
 
@@ -983,7 +1158,7 @@ std::optional<std::pair<int, int>> autoTuneProKey (const std::vector<std::uint8_
 std::optional<std::pair<float, float>> freshAirAmounts (const std::vector<std::uint8_t>& state)
 {
     // [DATA] the component state of every Fresh Air slot surveyed (round 113): 2530 bytes, u32 1, u32 size − 8, then
-    // two floats 0..1 at 1290 / 1294 (the two air knobs, in the order the vendor's manual lists them: mid, high)
+    // two floats 0..1 at 1290 / 1294; [EXEC] the official trial saves its "Mid Air" / "High Air" parameters there
     if (state.size() != 2530)
         return std::nullopt;
     auto u32 = [&state] (std::size_t at) {

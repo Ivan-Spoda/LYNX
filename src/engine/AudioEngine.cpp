@@ -1975,6 +1975,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
         done += n;
     }
 
+    // the block is done: the workers sleep until the next one instead of spinning (REA round 116)
+    if (workers != nullptr)
+        workers->park();
+
     blockTimeMs.store (juce::Time::getMillisecondCounterHiRes(), std::memory_order_relaxed);
 }
 
@@ -1982,6 +1986,7 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
     rtStats.deviceRestarted();
     transport.sampleRate.store (device->getCurrentSampleRate());
+    setFixedPluginBlock (device->getCurrentBufferSizeSamples()); // FL's fixed size buffers = the device buffer
 
     // the callback gets the open input channels only, in order: map device channel -> callback index
     const auto active = device->getActiveInputChannels();
