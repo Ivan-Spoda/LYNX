@@ -558,6 +558,13 @@ TEST (lynx_tune_editor_layout_round95)
             if (p >= 0)
                 placed[(std::size_t) p] = true;
         }
+        // round 128: the keyboard display edits the note switches (on / remove and bypass); the Scale menu also
+        // lists the extra scales (More scales)
+        if (item.type == lynx::plugui::Item::display && item.display != nullptr && std::string (item.display) == "tunekeys")
+            for (int k = 0; k < 12; ++k)
+                placed[(std::size_t) (lynx::lynxtune::noteC + k)] = placed[(std::size_t) (lynx::lynxtune::bypassC + k)] = true;
+        if (item.type == lynx::plugui::Item::menu && item.param != nullptr && std::string (item.param) == "Scale")
+            placed[(std::size_t) lynx::lynxtune::moreScales] = true;
     }
     CHECK (inside);
     CHECK (std::all_of (placed.begin(), placed.end(), [] (bool b) { return b; }));

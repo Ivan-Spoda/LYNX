@@ -34,6 +34,29 @@ Aether ← Fresh Air, LYNX Tune ← Auto-Tune Pro (Auto mode).
 ## 3. Implementation
 (filled in per batch)
 
+### §3c LYNX Tune ← Auto-Tune Pro, Auto mode (sub-branch feature/parity128c)
+- Engine (core/LynxTune.cpp, appended parameters, all neutral at their defaults so saved projects play unchanged —
+  test `lynx_tune_round128_params_are_neutral_by_default`): **Natural vibrato** −12…+12 dB (the sung pitch's vibrato,
+  measured against the pitch smoothed by two 80 ms one-poles, is scaled before the correction: +6 dB doubles it,
+  −12 dB keeps a quarter); **per-note Bypass** (12 switches: a bypassed note stays a target but passes as sung, while
+  a Removed note — the existing note switches — retargets to the next one); **Ignore vibrato** (targets chosen from
+  the smoothed pitch, so a wide vibrato no longer flips to the neighbour note); **Create vibrato** (none / sine /
+  square / sawtooth, 0.1–10 Hz, 0–100 c, onset delay and onset rate 0–1500 ms from each note's start); **More
+  scales** (whole tone, diminished — a separate parameter because the Scale parameter's steps are saved in projects).
+- AUTO KEY (core/VocalPitch.cpp `detectKey`): Krumhansl–Kessler major / minor profiles against the time per pitch
+  class sung while the editor is open (fading over ~30 s).
+- Editor (core/PluginLayout.cpp lynxTune, ui/PluginEditors.cpp): the original's arrangement — Auto Key under Scale;
+  a MODE group (low latency, MIDI targets); formant / shift / transpose / A4 / mix on the right of the top bar;
+  RETUNE SPEED, FLEX-TUNE, the ring (click = HOLD), NATURAL VIBRATO, HUMANIZE; a Pitch graph | Advanced page pair
+  (Advanced = Create Vibrato + Ignore Vibrato); a four-octave keyboard at the bottom with BYPASS / REMOVE and LATCH
+  (latch off = the edit lasts while the key is held). The Scale menu lists the two extra scales after a separator.
+- Translation (PluginSubstitutes.cpp, inside translateAutoTunePro + `autoTuneProNoteEdits`): X62 natural vibrato,
+  X44 ignore vibrato, X5/X7/X6/X46/X50 created vibrato, and the active scale's legacy `<Scales>` Bypass / Remove
+  digits (one per scale degree: 7 for major / minor, 12 for chromatic, from the root) [DATA].
+- Not done: Classic mode, Throat length (LYNX keeps its formant shift in semitones), the created vibrato's
+  amplitude / formant / variation, per-note scale detune, historical tunings, single-octave keyboard edits,
+  Learn scale from MIDI, Graph mode, Harmony Player.
+
 ## Where I stopped
 - Done: §1, §2, docs/PARITY.md (tables + before scores), Desktop page.
 - Next: shared editor header (undo / redo, A/B, presets), then per-engine gaps in the order of §2.

@@ -44,8 +44,20 @@ enum Param : int
     tracking,        // detector strictness (YIN threshold 0.05 … 0.30)
     noteC,           // 12 note switches (C … B): a note that is off is never a target
     flexTune = noteC + 12, // 0…100 %: notes far from their target are left as sung (round 120)
+    // round 128 (parity with the auto-mode corrector it stands in for; all neutral at their defaults)
+    naturalVibrato,          // −12…+12 dB: the vibrato already in the voice, scaled (0 dB = untouched)
+    bypassC,                 // 12 note switches (C … B): a bypassed note is still a target, but passes uncorrected
+    ignoreVibrato = bypassC + 12, // on / off: the target is chosen from the pitch with its vibrato smoothed away
+    vibratoShape,            // created vibrato: none, sine, square, sawtooth
+    vibratoRate,             // 0.1…10 Hz
+    vibratoDepth,            // 0…100 cents (peak)
+    vibratoDelay,            // onset delay 0…1500 ms after a note starts
+    vibratoOnset,            // onset rate (fade-in) 0…1500 ms
+    moreScales,              // 0 = the Scale parameter; else whole tone / diminished
     count
 };
+
+constexpr int vibratoShapes = 4;
 
 constexpr int rangeCount = 4;
 const char* rangeName (int r) noexcept;
@@ -59,6 +71,13 @@ double formantSemitones (float v) noexcept;
 int transposeSemitones (float v) noexcept;
 double referenceHz (float v) noexcept;
 int midiChannelIndex (float v) noexcept; // −1 = off, else the channel index (0-based)
+double naturalVibratoDb (float v) noexcept;
+int vibratoShapeIndex (float v) noexcept;
+double vibratoRateHz (float v) noexcept;
+double vibratoDepthCents (float v) noexcept;
+double vibratoOnsetMs (float v) noexcept; // delay and onset rate share one law
+// The scale in effect: the Scale parameter, or one of the extra scales chosen by More scales (round 128)
+int effectiveScale (float scaleValue, float moreScalesValue) noexcept;
 
 // Latency (samples) for a sample rate and the range / low-latency parameters
 int latencyFor (double sampleRate, int range, bool lowLatency) noexcept;

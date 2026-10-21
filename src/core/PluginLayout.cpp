@@ -1014,69 +1014,81 @@ Layout fruitySend()
 
 Layout lynxTune()
 {
-    // LYNX Tune (own design, REA rounds 95 / 120). Round 120: the workflow of the automatic pitch correctors' "auto"
-    // mode it stands in for (Auto-Tune Pro, studied on the official trial — layout logic only, LYNX's own drawing):
-    // the input / key / scale bar on top; the correction row in the middle — RETUNE SPEED big on the left, FLEX-TUNE
-    // beside it, the live correction meter (note name, ±100 cent ring) in the centre, the formant control and HUMANIZE
-    // big on the right; the scrolling pitch graph below; the target notes as a keyboard octave at the bottom.
+    // LYNX Tune (own design, REA rounds 95 / 120 / 128). The workflow of the automatic pitch correctors' "auto" mode it
+    // stands in for (Auto-Tune Pro, studied on the official trial — layout logic only, LYNX's own drawing): the input /
+    // key / scale bar on top with AUTO KEY under the scale and the formant / transpose / A4 / mix group on the right;
+    // the correction row in the middle — RETUNE SPEED big on the left, FLEX-TUNE beside it, the live correction meter
+    // (note name, ±100 cent ring; click = HOLD) in the centre, NATURAL VIBRATO and HUMANIZE big on the right; the pitch
+    // graph or the ADVANCED page (created vibrato, ignore vibrato) below; the keyboard at the bottom with its
+    // BYPASS / REMOVE modes and LATCH (round 128).
     Layout l;
     l.width = 800;
-    l.height = 548;
+    l.height = 610;
+    l.pages = { TR_NOOP ("Pitch graph"), TR_NOOP ("Advanced") };
     auto& v = l.items;
-    // --- top bar
-    v.push_back (section (0, 0, 382, 70, TR_NOOP ("INPUT")));
-    v.push_back (knob (36, 40, 30, "Tracking", TR_NOOP ("TRACKING"), 64, 0));
-    LayoutItem range;
-    range.type = Item::menu;
-    range.x = 70, range.y = 40, range.w = 112, range.h = 22;
-    range.param = "Range";
-    range.label = TR_NOOP ("Input type");
-    range.options = TR_NOOP ("Soprano|Alto / Tenor|Low male|Instrument");
-    v.push_back (range);
-    LayoutItem key;
-    key.type = Item::menu;
-    key.x = 190, key.y = 40, key.w = 62, key.h = 22;
-    key.param = "Key";
-    key.label = TR_NOOP ("Key");
-    key.options = "C|C#|D|D#|E|F|F#|G|G#|A|A#|B";
-    v.push_back (key);
-    LayoutItem scale;
-    scale.type = Item::menu;
-    scale.x = 260, scale.y = 40, scale.w = 114, scale.h = 22;
-    scale.param = "Scale";
-    scale.label = TR_NOOP ("Scale");
-    scale.options = TR_NOOP ("Chromatic|Major|Minor|Harmonic minor|Melodic minor|Major pentatonic|Minor pentatonic|Blues|Dorian|Mixolydian|Phrygian|Lydian|Locrian|Custom");
-    v.push_back (scale);
-    v.push_back (label (70, 24, 112, 14, TR_NOOP ("Input type")));
-    v.push_back (label (190, 24, 62, 14, TR_NOOP ("Key")));
-    v.push_back (label (260, 24, 114, 14, TR_NOOP ("Scale")));
-    v.push_back (section (386, 0, 414, 70, TR_NOOP ("OUTPUT")));
-    v.push_back (stepper (398, 30, 88, 22, "Transpose", TR_NOOP ("Transpose"), 25));
-    v.push_back (knob (526, 38, 30, "Reference", TR_NOOP ("A4"), 64, showValue));
-    v.push_back (knob (590, 38, 30, "Mix", TR_NOOP ("MIX"), 64, showValue));
-    v.push_back (toggle (636, 22, 154, 18, "Low latency", TR_NOOP ("Low latency")));
-    v.push_back (stepper (636, 44, 154, 20, "MIDI", TR_NOOP ("MIDI channel"), 129));
+    auto menu = [&v] (float x, float y, float w, const char* param, const char* caption, const char* options, int steps = 0) {
+        LayoutItem m;
+        m.type = Item::menu;
+        m.x = x, m.y = y, m.w = w, m.h = 22;
+        m.param = param;
+        m.label = caption;
+        m.options = options;
+        m.steps = steps;
+        v.push_back (m);
+        v.push_back (label (x, y - 16, w, 14, caption));
+    };
+    // --- top bar: input
+    v.push_back (section (0, 0, 334, 92, TR_NOOP ("INPUT")));
+    v.push_back (knob (34, 44, 30, "Tracking", TR_NOOP ("TRACKING"), 70, 0));
+    menu (66, 40, 106, "Range", TR_NOOP ("Input type"), TR_NOOP ("Soprano|Alto / Tenor|Low male|Instrument"));
+    menu (178, 40, 52, "Key", TR_NOOP ("Key"), "C|C#|D|D#|E|F|F#|G|G#|A|A#|B");
+    menu (236, 40, 92, "Scale", TR_NOOP ("Scale"),
+          TR_NOOP ("Chromatic|Major|Minor|Harmonic minor|Melodic minor|Major pentatonic|Minor pentatonic|Blues|Dorian|Mixolydian|Phrygian|Lydian|Locrian|Custom"));
+    v.push_back (display (236, 66, 92, 20, "tuneautokey"));
+    // --- mode: latency and MIDI targets
+    v.push_back (section (338, 0, 140, 92, TR_NOOP ("MODE")));
+    v.push_back (toggle (346, 24, 124, 18, "Low latency", TR_NOOP ("Low latency")));
+    v.push_back (stepper (346, 54, 124, 24, "MIDI", TR_NOOP ("MIDI channel"), 129));
+    // --- output: formant, transpose, reference, mix
+    v.push_back (section (482, 0, 318, 92, TR_NOOP ("OUTPUT")));
+    v.push_back (toggle (490, 22, 82, 18, "Formant preserve", TR_NOOP ("Formant")));
+    v.push_back (knob (531, 58, 26, "Formant shift", TR_NOOP ("SHIFT"), 82, bipolar));
+    v.push_back (stepper (580, 40, 78, 22, "Transpose", TR_NOOP ("Transpose"), 25));
+    v.push_back (knob (700, 44, 30, "Reference", TR_NOOP ("A4"), 70, showValue));
+    v.push_back (knob (760, 44, 30, "Mix", TR_NOOP ("MIX"), 70, showValue));
     // --- correction row
-    v.push_back (section (0, 74, 800, 236, TR_NOOP ("CORRECTION")));
-    v.push_back (knob (110, 180, 104, "Retune", TR_NOOP ("RETUNE SPEED"), 262, big | showValue));
-    v.push_back (knob (240, 204, 60, "Flex-Tune", TR_NOOP ("FLEX-TUNE"), 262, showValue));
-    v.push_back (display (300, 96, 200, 200, "pitchring"));
-    v.push_back (toggle (528, 128, 84, 20, "Formant preserve", TR_NOOP ("Formant")));
-    v.push_back (knob (570, 204, 60, "Formant shift", TR_NOOP ("FORMANT SHIFT"), 262, bipolar | showValue));
-    v.push_back (knob (690, 180, 104, "Humanize", TR_NOOP ("HUMANIZE"), 262, big | showValue));
-    // --- pitch graph
-    v.push_back (section (0, 314, 800, 130, TR_NOOP ("PITCH GRAPH")));
-    v.push_back (display (6, 336, 788, 102, "pitchtrace"));
-    // --- target notes: one keyboard octave (white keys below, black keys above them)
-    v.push_back (section (0, 448, 800, 100, TR_NOOP ("TARGET NOTES")));
-    static const char* const whites[7] { "C", "D", "E", "F", "G", "A", "B" };
-    for (int k = 0; k < 7; ++k)
-        v.push_back (toggle (14.0f + 46.0f * (float) k, 506, 42, 30, whites[k], whites[k]));
-    static const char* const blacks[5] { "C#", "D#", "F#", "G#", "A#" };
-    static const int after[5] { 0, 1, 3, 4, 5 }; // the white key each black key follows
-    for (int k = 0; k < 5; ++k)
-        v.push_back (toggle (14.0f + 46.0f * (float) after[k] + 25.0f, 474, 42, 26, blacks[k], blacks[k]));
-    v.push_back (label (360, 478, 420, 50, TR_NOOP ("Target notes: click a key to switch it off or on")));
+    v.push_back (section (0, 96, 800, 236, TR_NOOP ("CORRECTION")));
+    v.push_back (knob (100, 200, 104, "Retune", TR_NOOP ("RETUNE SPEED"), 284, big | showValue));
+    v.push_back (knob (226, 224, 60, "Flex-Tune", TR_NOOP ("FLEX-TUNE"), 284, showValue));
+    v.push_back (display (300, 116, 200, 200, "pitchring"));
+    v.push_back (knob (574, 224, 60, "Natural vibrato", TR_NOOP ("NATURAL VIBRATO"), 284, bipolar | showValue));
+    v.push_back (knob (700, 200, 104, "Humanize", TR_NOOP ("HUMANIZE"), 284, big | showValue));
+    // --- pitch graph / advanced (pages)
+    v.push_back (section (0, 336, 800, 142, nullptr, boxed));
+    v.push_back (pageTabs (8, 340, 220, 20, TR_NOOP ("Pitch graph|Advanced")));
+    v.push_back (onPage (display (6, 366, 788, 106, "pitchtrace"), 0));
+    auto adv = [&v] (LayoutItem i) { v.push_back (onPage (std::move (i), 1)); };
+    adv (label (14, 368, 300, 16, TR_NOOP ("Create vibrato"), alignLeft));
+    {
+        LayoutItem m;
+        m.type = Item::menu;
+        m.x = 14, m.y = 408, m.w = 110, m.h = 22;
+        m.param = "Vibrato shape";
+        m.label = TR_NOOP ("Shape");
+        m.options = TR_NOOP ("No vibrato|Sine|Square|Sawtooth");
+        adv (m);
+        adv (label (14, 392, 110, 14, TR_NOOP ("Shape")));
+    }
+    adv (knob (176, 420, 34, "Vibrato rate", TR_NOOP ("RATE"), 452, showValue));
+    adv (knob (250, 420, 34, "Vibrato depth", TR_NOOP ("DEPTH"), 452, showValue));
+    adv (knob (324, 420, 34, "Onset delay", TR_NOOP ("ONSET DELAY"), 452, showValue));
+    adv (knob (398, 420, 34, "Onset rate", TR_NOOP ("ONSET RATE"), 452, showValue));
+    adv (label (470, 368, 300, 16, TR_NOOP ("Pitch tracking"), alignLeft));
+    adv (toggle (470, 400, 150, 20, "Ignore vibrato", TR_NOOP ("Ignore vibrato")));
+    adv (label (470, 428, 320, 36, TR_NOOP ("Ignore vibrato: notes are chosen from the pitch with its vibrato smoothed away"), alignLeft | dim));
+    // --- the keyboard: BYPASS / REMOVE modes, LATCH, four octaves (a key edits its note name in every octave)
+    v.push_back (section (0, 482, 800, 128, TR_NOOP ("TARGET NOTES")));
+    v.push_back (display (8, 502, 784, 102, "tunekeys"));
     return l;
 }
 

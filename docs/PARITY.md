@@ -35,7 +35,7 @@ Round 128 covers the FabFilter / Slate / Antares roles (below). Round 129 covers
 | Hush De-esser | Pro-DS (v1.3.2) | 4 | 6 | … | … |
 | Ember Saturator | Saturn 2 (v2.1.3); Decapitator role (not installed) | 3 | 6 | … | … |
 | Aether | Fresh Air (v1.1.7) | 8 | 8 | … | … |
-| LYNX Tune | Auto-Tune Pro (v11.6, Auto mode) | 5 | 6 | … | … |
+| LYNX Tune | Auto-Tune Pro (v11.6, Auto mode) | 5 | 6 | 7 | 7 |
 
 The "after" columns are filled in as round 128's batches land (see the per-plugin tables and
 `docs/analise/REA_rodada128.md`).
@@ -301,20 +301,20 @@ edits (Remove / Bypass, Latched / Momentary), Hold, Auto Key.
 |---|---|---|
 | Top strip: Tracking, Input Type, Key, Scale, Formant, Transpose, Detune, Mix | ✅ | Detune shown as the A4 frequency (440 Hz ± 100 c) |
 | Retune Speed, Flex-Tune, Humanize big knobs | ✅ | |
-| Natural Vibrato knob (±12 dB) | ❌ | |
+| Natural Vibrato knob (±12 dB) | ✅ | round 128: right of the ring, as in the original |
 | Centre: correction ring with the note name and cents | ✅ | |
-| Hold (freeze the read-out) | ❌ | |
-| Scales | ⚠️ | 14 (chromatic, major, minor, 9 modes / pentatonics / blues, custom); no Whole Tone / Diminished, no historical tunings |
-| Auto Key (detect the key) | ❌ | |
+| Hold (freeze the read-out) | ✅ | round 128: click the ring (HOLD lights) |
+| Scales | ⚠️ | 16: the modern list (chromatic, major, minor, harmonic / melodic minor, modes, pentatonics, blues, whole tone, diminished) + custom; no historical tunings (Pythagorean, just, 19/24/31/53-tone …) |
+| Auto Key (detect the key) | ✅ | round 128: button under Scale; key + major / minor from what was sung while the editor is open (pitch-class time, Krumhansl–Kessler profiles) |
 | Learn (scale from MIDI) | ❌ | |
-| Keyboard at the bottom: click a note = remove / bypass, latch | ⚠️ | 12 target-note switches (remove only); no Bypass state, no keyboard strip |
-| Per-note Bypass (pass uncorrected) vs Remove | ❌ | |
+| Keyboard at the bottom: click a note = remove / bypass, latch | ✅ | round 128: four-octave keyboard with BYPASS / REMOVE modes and LATCH; a key edits its note name in every octave (no single-octave edits) |
+| Per-note Bypass (pass uncorrected) vs Remove | ✅ | round 128 (translated from the state's legacy scale edits) |
 | Classic mode | ❌ | |
 | Formant Correction on / off | ✅ | |
 | Throat Length | ⚠️ | "Formant shift" in semitones instead of a throat length % |
 | Transpose ±12 | ✅ | |
 | Mix | ✅ | |
-| ADVANCED: Create Vibrato (shape, rate, depth, onset), Ignore Vibrato, scale detune | ❌ | |
+| ADVANCED: Create Vibrato (shape, rate, depth, onset), Ignore Vibrato, scale detune | ⚠️ | round 128: ADVANCED page with Create Vibrato (shape, rate, depth, onset delay / rate) and Ignore Vibrato, translated; no amplitude / formant / variation of the created vibrato, no per-note scale detune |
 | Target notes via MIDI | ✅ | "MIDI channel" |
 | Low latency | ✅ | |
 | Pitch graph | ✅ | LYNX extra in Auto mode (input vs corrected) |

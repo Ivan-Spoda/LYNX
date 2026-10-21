@@ -17,6 +17,7 @@
 
 #include <array>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace lynx::vocal
@@ -27,13 +28,20 @@ namespace lynx::vocal
 enum class Scale : int
 {
     chromatic, major, minor, harmonicMinor, melodicMinor, majorPentatonic, minorPentatonic, blues, dorian, mixolydian,
-    phrygian, lydian, locrian, custom
+    phrygian, lydian, locrian, custom,
+    wholeTone, diminished // round 128 (Auto-Tune's modern list): chosen through LYNX Tune's "More scales" parameter
 };
-constexpr int scaleCount = 14;
+constexpr int scaleCount = 14;    // the scales a "Scale" parameter steps through (chromatic … custom; saved projects)
+constexpr int scaleCountAll = 16; // with the two extra scales
 const char* scaleName (Scale s) noexcept;
 // Allowed pitch classes (bit k = pitch class (key + k) mod 12 relative to C) of a scale on a key (0 = C … 11 = B).
 // `custom` returns `customMask` (bit k = pitch class k).
 std::uint16_t scaleMask (Scale s, int key, std::uint16_t customMask = 0xfff) noexcept;
+
+// Key detection (round 128, LYNX Tune's AUTO KEY): the key and mode (Scale::major / Scale::minor) whose
+// Krumhansl–Kessler profile correlates best with a pitch-class histogram (bin k = time spent on pitch class k).
+// Returns {-1, major} when the histogram is empty.
+std::pair<int, Scale> detectKey (const std::array<double, 12>& histogram) noexcept;
 
 // The allowed note (MIDI number) closest to `note` (fractional MIDI number). `mask` bit k = pitch class k allowed;
 // an empty mask returns the nearest semitone. Hysteresis: while `current` is allowed and `note` is within

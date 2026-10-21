@@ -960,6 +960,21 @@ int translateAutoTunePro (const std::vector<std::uint8_t>& state, EffectSlot& sl
     slot.params[lynxtune::retune] = (float) std::sqrt (std::clamp (1.36 * retune - 3.0, 0.0, 400.0) / 400.0);
     slot.params[lynxtune::humanize] = (float) std::clamp (at (61, 0.0) / 100.0, 0.0, 1.0);
     slot.params[lynxtune::flexTune] = (float) std::clamp (at (90, 0.0) / 100.0, 0.0, 1.0);
+    // round 128: natural vibrato (X62, dB), ignore vibrato (X44), Create Vibrato (X5 shape, X7 rate, X6 cents, X46 / X50
+    // onset delay / rate, ms) and the active scale's per-note Bypass / Remove edits (autoTuneProNoteEdits)
+    slot.params[lynxtune::naturalVibrato] = (float) std::clamp (at (62, 0.0) / 24.0 + 0.5, 0.0, 1.0);
+    slot.params[lynxtune::ignoreVibrato] = at (44, 0.0) >= 0.5 ? 1.0f : 0.0f;
+    slot.params[lynxtune::vibratoShape] = (float) std::clamp (std::round (at (5, 0.0)), 0.0, 3.0) / 3.0f;
+    slot.params[lynxtune::vibratoRate] = (float) std::clamp ((at (7, 5.5) - 0.1) / 9.9, 0.0, 1.0);
+    slot.params[lynxtune::vibratoDepth] = (float) std::clamp (at (6, 18.0) / 100.0, 0.0, 1.0);
+    slot.params[lynxtune::vibratoDelay] = (float) std::clamp (at (46, 500.0) / 1500.0, 0.0, 1.0);
+    slot.params[lynxtune::vibratoOnset] = (float) std::clamp (at (50, 500.0) / 1500.0, 0.0, 1.0);
+    if (const auto edits = autoTuneProNoteEdits (state, key->first, key->second))
+        for (int k = 0; k < 12; ++k)
+        {
+            slot.params[(std::size_t) (lynxtune::noteC + k)] = ((edits->second >> k) & 1u) != 0 ? 0.0f : 1.0f;
+            slot.params[(std::size_t) (lynxtune::bypassC + k)] = ((edits->first >> k) & 1u) != 0 ? 1.0f : 0.0f;
+        }
     return 5;
 }
 
@@ -1357,6 +1372,38 @@ std::optional<std::pair<int, int>> autoTuneProKey (const std::vector<std::uint8_
     else
         return std::nullopt; // the other scales: not confirmed
     return std::pair<int, int> { (int) key, (int) lynxScale };
+}
+
+std::optional<std::pair<std::uint16_t, std::uint16_t>> autoTuneProNoteEdits (const std::vector<std::uint8_t>& state, int key, int lynxScale)
+{
+    // [DATA] <Scales><Scale ScaleIndex="n" Length="7|12"><Bypass Values="0100000"/><Remove Values="…"/>: one digit per
+    // scale degree (major / minor: 7 degrees above the root; chromatic: 12 semitones above the root)
+    const int index = lynxScale == (int) vocal::Scale::major ? 0 : lynxScale == (int) vocal::Scale::minor ? 1 : lynxScale == (int) vocal::Scale::chromatic ? 2 : -1;
+    if (index < 0)
+        return std::nullopt;
+    const auto at = findBytes (state, "<Scale ScaleIndex=\"" + std::to_string (index) + "\"");
+    if (at == std::string::npos)
+        return std::nullopt;
+    const std::string text (state.begin() + (std::ptrdiff_t) at, state.begin() + (std::ptrdiff_t) std::min (state.size(), at + 600));
+    static constexpr int major[7] { 0, 2, 4, 5, 7, 9, 11 }, minor[7] { 0, 2, 3, 5, 7, 8, 10 };
+    auto mask = [&] (const char* element) -> std::optional<std::uint16_t> {
+        const auto e = text.find (element);
+        if (e == std::string::npos)
+            return std::nullopt;
+        const auto v = attributeIn (text, e, "Values");
+        const auto n = index == 2 ? 12u : 7u;
+        if (v.size() != n)
+            return std::nullopt;
+        std::uint16_t m = 0;
+        for (std::size_t d = 0; d < n; ++d)
+            if (v[d] == '1')
+                m = (std::uint16_t) (m | (1u << ((key + (index == 2 ? (int) d : index == 0 ? major[d] : minor[d])) % 12)));
+        return m;
+    };
+    const auto bypass = mask ("<Bypass "), remove = mask ("<Remove ");
+    if (! bypass || ! remove)
+        return std::nullopt;
+    return std::pair<std::uint16_t, std::uint16_t> { *bypass, *remove };
 }
 
 std::map<int, double> autoTuneProParams (const std::vector<std::uint8_t>& state)

@@ -47,6 +47,21 @@ int midiChannelIndex (float v) noexcept
     return k <= 0 ? -1 : k - 1;
 }
 
+double naturalVibratoDb (float v) noexcept { return 24.0 * ((double) std::clamp (v, 0.0f, 1.0f) - 0.5); }
+int vibratoShapeIndex (float v) noexcept { return stepped (v, vibratoShapes); }
+double vibratoRateHz (float v) noexcept { return 0.1 + 9.9 * (double) std::clamp (v, 0.0f, 1.0f); }
+double vibratoDepthCents (float v) noexcept { return 100.0 * (double) std::clamp (v, 0.0f, 1.0f); }
+double vibratoOnsetMs (float v) noexcept { return 1500.0 * (double) std::clamp (v, 0.0f, 1.0f); }
+int effectiveScale (float scaleValue, float moreScalesValue) noexcept
+{
+    switch (stepped (moreScalesValue, 3))
+    {
+        case 1: return (int) vocal::Scale::wholeTone;
+        case 2: return (int) vocal::Scale::diminished;
+        default: return scaleIndex (scaleValue);
+    }
+}
+
 int latencyFor (double sampleRate, int range, bool lowLatency) noexcept
 {
     const auto pmax = sampleRate / rangeMinHz (range);
@@ -73,6 +88,19 @@ const EffectInfo& info()
         for (const auto* n : keyNames)
             e.params.push_back ({ n, 1.0f });
         e.params.push_back ({ "Flex-Tune", 0.0f });
+        // round 128
+        e.params.push_back ({ "Natural vibrato", 0.5f });
+        static const char* const bypassNames[12] { "C bypass", "C# bypass", "D bypass", "D# bypass", "E bypass", "F bypass",
+                                                   "F# bypass", "G bypass", "G# bypass", "A bypass", "A# bypass", "B bypass" };
+        for (const auto* n : bypassNames)
+            e.params.push_back ({ n, 0.0f });
+        e.params.push_back ({ "Ignore vibrato", 0.0f });
+        e.params.push_back ({ "Vibrato shape", 0.0f });
+        e.params.push_back ({ "Vibrato rate", (float) ((5.5 - 0.1) / 9.9) }); // 5.5 Hz
+        e.params.push_back ({ "Vibrato depth", 0.18f });                        // 18 c
+        e.params.push_back ({ "Onset delay", 1.0f / 3.0f });                    // 500 ms
+        e.params.push_back ({ "Onset rate", 1.0f / 3.0f });                     // 500 ms
+        e.params.push_back ({ "More scales", 0.0f });
         return e;
     }();
     return i;
@@ -86,6 +114,14 @@ std::string paramText (int param, float v)
     {
         case key: return keyNames[keyIndex (v)];
         case scale: return vocal::scaleName ((vocal::Scale) scaleIndex (v));
+        case naturalVibrato: std::snprintf (t, sizeof t, "%+.1f dB", naturalVibratoDb (v)); return t;
+        case ignoreVibrato: return onOff();
+        case vibratoShape: { static const char* n[vibratoShapes] { "No vibrato", "Sine", "Square", "Sawtooth" }; return n[vibratoShapeIndex (v)]; }
+        case vibratoRate: std::snprintf (t, sizeof t, "%.1f Hz", vibratoRateHz (v)); return t;
+        case vibratoDepth: std::snprintf (t, sizeof t, "%.0f c", vibratoDepthCents (v)); return t;
+        case vibratoDelay:
+        case vibratoOnset: std::snprintf (t, sizeof t, "%.0f ms", vibratoOnsetMs (v)); return t;
+        case moreScales: { static const char* n[3] { "Off", "Whole tone", "Diminished" }; return n[stepped (v, 3)]; }
         case retune: std::snprintf (t, sizeof t, "%.0f ms", retuneMs (v)); return t;
         case humanize:
         case flexTune:
@@ -107,7 +143,7 @@ std::string paramText (int param, float v)
         }
         default: break;
     }
-    if (param >= noteC && param < noteC + 12)
+    if ((param >= noteC && param < noteC + 12) || (param >= bypassC && param < bypassC + 12))
         return onOff();
     std::snprintf (t, sizeof t, "%.2f", (double) v);
     return t;
@@ -138,6 +174,10 @@ public:
         noteAge = 0.0;
         unvoicedFor = 1e9;
         sung = -1.0;
+        center1 = center2 = 0.0;
+        extraWanted = extra = 0.0;
+        noteTime = 0.0;
+        lfoPhase = 0.0;
     }
 
     void setHeldNotes (const NoteMask* channels, int count) noexcept override
@@ -160,7 +200,20 @@ public:
         for (int k = 0; k < 12; ++k)
             if (p[(std::size_t) (noteC + k)] >= 0.5f)
                 notes = (std::uint16_t) (notes | (1u << k));
-        const auto sc = (vocal::Scale) scaleIndex (p[scale]);
+        const auto sc = (vocal::Scale) effectiveScale (p[scale], p[moreScales]);
+        std::uint16_t bypass = 0;
+        for (int k = 0; k < 12; ++k)
+            if (p[(std::size_t) (bypassC + k)] >= 0.5f)
+                bypass = (std::uint16_t) (bypass | (1u << k));
+        // round 128: natural vibrato (gain on the vibrato already sung), ignore vibrato, created vibrato
+        const auto natGain = std::pow (10.0, naturalVibratoDb (p[naturalVibrato]) / 20.0);
+        const auto natural = std::abs (natGain - 1.0) > 1e-9;
+        const auto ignoreVib = p[ignoreVibrato] >= 0.5f;
+        const auto vibShape = vibratoShapeIndex (p[vibratoShape]);
+        const auto vibInc = vibratoRateHz (p[vibratoRate]) / sr;
+        const auto vibDepth = vibratoDepthCents (p[vibratoDepth]) / 100.0;
+        const auto vibDelay = vibratoOnsetMs (p[vibratoDelay]) * 0.001;
+        const auto vibOnset = vibratoOnsetMs (p[vibratoOnset]) * 0.001;
         auto mask = (std::uint16_t) (vocal::scaleMask (sc, keyIndex (p[key]), notes) & notes);
 
         // MIDI targets: the pitch classes held on the source channel (none held: the scale)
@@ -206,6 +259,17 @@ public:
                     // A single move (the singer settles on another pitch) keeps the note sustained; another move 30 …
                     // 150 ms later (a vibrato, a wobble) makes it unsteady.
                     sinceJump += hop;
+                    // the pitch with its vibrato smoothed away (two one-poles, 80 ms): ignore vibrato / natural vibrato
+                    if (newPhrase)
+                        center1 = center2 = sung;
+                    else
+                    {
+                        const auto a = 1.0 - std::exp (-hop / 0.08);
+                        center1 += a * (sung - center1);
+                        center2 += a * (center1 - center2);
+                    }
+                    extraWanted = natural ? (natGain - 1.0) * (sung - center2) : 0.0;
+                    const auto heard = sung + extraWanted; // the sung pitch with the natural-vibrato gain
                     if (newPhrase)
                     {
                         steadyRef = sung;
@@ -232,13 +296,20 @@ public:
                         // the first notes of the next one, by up to half a semitone the wrong way)
                         shift = 0.0;
                     }
-                    const auto t = vocal::nearestNote (sung, mask, target, hysteresisSt);
+                    const auto t = vocal::nearestNote (ignoreVib ? center2 : sung, mask, target, hysteresisSt);
                     if (t != target)
                     {
                         target = t;
                         noteAge = 0.0;
+                        noteTime = 0.0;
                     }
-                    wanted = (double) target - sung;
+                    else
+                        noteTime += hop;
+                    if (newPhrase)
+                        noteTime = 0.0;
+                    wanted = (double) target - heard;
+                    if (((bypass >> (((target % 12) + 12) % 12)) & 1u) != 0)
+                        wanted = 0.0; // a bypassed note passes as sung
                     // flex-tune: a note far from its target is left as sung. [EXEC] Auto-Tune Pro (round 120 §5): the
                     // correction of a note d cents from its target is min (d, (1 − F) / F · (50 − d)) cents, d measured
                     // in hundredths of the gap to the next target on the sung side (a semitone in chromatic)
@@ -259,6 +330,7 @@ public:
                 else
                 {
                     psola.setPitch (0.0, false);
+                    extraWanted = 0.0;
                     unvoicedFor += hop;
                     if (unvoicedFor > 0.06)
                         sung = -1.0;
@@ -276,7 +348,26 @@ public:
             }
             shift += (t > 0.0 ? 1.0 - std::exp (-dt / t) : 1.0) * (wanted - shift);
 
-            const auto semis = std::clamp (shift + trans, -24.0, 24.0);
+            auto semis = shift + trans;
+            if (natural || extra != 0.0)
+            {
+                extra += (1.0 - std::exp (-dt / 0.003)) * (extraWanted - extra);
+                semis += extra;
+            }
+            if (vibShape > 0)
+            {
+                lfoPhase += vibInc;
+                lfoPhase -= std::floor (lfoPhase);
+                if (unvoicedFor <= 0.0 && noteTime > vibDelay)
+                {
+                    const auto env = vibOnset > 0.0 ? std::min (1.0, (noteTime - vibDelay) / vibOnset) : 1.0;
+                    const auto w = vibShape == 1 ? std::sin (2.0 * 3.14159265358979323846 * lfoPhase)
+                                 : vibShape == 2 ? (lfoPhase < 0.5 ? 1.0 : -1.0)
+                                                 : 2.0 * lfoPhase - 1.0;
+                    semis += vibDepth * env * w;
+                }
+            }
+            semis = std::clamp (semis, -24.0, 24.0);
             const auto ratio = std::exp2 (semis / 12.0);
             psola.setShift (ratio, preserve ? fShift : ratio * fShift);
 
@@ -339,6 +430,7 @@ private:
     std::vector<float> dry;
     std::int64_t dryPos = 0;
     double shift = 0.0, wanted = 0.0, noteAge = 0.0, steadyRef = 0.0, sinceJump = 1.0, unvoicedFor = 1e9, sung = -1.0;
+    double center1 = 0.0, center2 = 0.0, extraWanted = 0.0, extra = 0.0, noteTime = 0.0, lfoPhase = 0.0;
     int target = -1;
     const NoteMask* held = nullptr;
     int heldCount = 0;
