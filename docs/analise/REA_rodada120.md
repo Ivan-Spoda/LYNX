@@ -84,11 +84,11 @@ LYNX Tune at retune = NT on the same signal (before → after this round):
 Tests: `tests/Tune120Tests.inc` (phrase onset, retune curve vs the Waves numbers, glide bias, Note Transition read).
 Scripts: tmp/tune120/py (mksig, ana, wtrun, sweep1, take), fx/tunerun; renders in C:\Users\kauan\lynx-test\tune120.
 
-## 3. Auto-Tune Pro
+## 3. Auto-Tune Pro: install
 
-Not installed. [EXEC] No Auto-Tune Pro plug-in anywhere on C: (VST3 / VST2 / AAX folders) as of 2026-10-21 00:30;
-Auto-Tune Central's log ends with "user did not grant permission" at 23:00 — the install's Windows permission
-(UAC) prompt was refused or timed out → tmp/tune120/ASK_USER.md. The scale-list order stays [model].
+The first install attempt failed at the Windows permission (UAC) prompt (Auto-Tune Central's log: "user did not grant
+permission", 23:00). The user reinstalled it on 2026-10-21: `VST3\Auto-Tune Pro.vst3` v11.6.0.2336 (official trial),
+hosted headless in fxmeasure and on screen in the look114 uiview host; it runs without a login dialog.
 
 ## 4. LYNX Tune measured on the same test signal
 
@@ -104,12 +104,68 @@ output (YIN, 2 ms hop). LYNX Tune before this round, chromatic, retune 20 ms (fx
     vibrato ±40 c        56 % of the vibrato kept
     octave glide         27 % of the time within 10 c of a semitone (input 19 %): the glide stays smooth
 
+## 5. Auto-Tune Pro measured (official trial, black-box)
+
+**Parameters and her states.** [EXEC] 182 parameters; the parameter ID is the number n of the `X<n>` entries in the
+`ParamsData` of the state (JUCE base64 XML, real units): loading her states and reading the parameters back gives
+exactly those values. The **Scale** list (its own texts): 0 Major, 1 Minor, 2 Chromatic, then historical tunings
+(Pythagorean, Just, Meantone, … Harmonic) — **round 113's 0 = major / 1 = minor / 2 = chromatic is confirmed**; v11
+also has "Modern Scale" (Chromatic, Major, Minor, Harmonic Minor, …), which her (older) states don't set. Key 0…11 =
+C…B. [DATA] Her 143 Auto-Tune slots (tmp/tune120/at, py/atstates.py / atdecode.py), the controls that matter:
+
+    X4  Retune Speed (ms)   0 … 14 (mostly 5.8 – 8.2; game over 0 = the hard effect). Round 113 read X31 (20 ms) —
+                            that is "Object Retune Speed" of Graph mode, not the live one
+    X61 Humanize            100 (137 slots), 65 / 68 / 30 / 0 in a few
+    X90 Flex-Tune           20 (109), 22 (26), 0 – 18 in the rest
+    X62 Natural Vibrato     0 dB everywhere;  X10 Input type Alto/Tenor;  X9 Tracking 50;  X70 Formant on (142)
+    X1 / X2 / ScaleGivenScale / ScaleGivenKey   the scale and key (98 minor, 43 chromatic, 2 major)
+
+**Measurements** (tmp/tune120/py: mksig / mksig2 test signals, atrun / sweep2 / sweep3, ana / ana2; latency 2670
+samples reported and compensated). Chromatic, instant onset from silence ≈ 30 ms for every speed.
+- Retune Speed R: a held note going 30 c sharp mid-note is pulled back along a first-order curve: 50 % / 90 % at 4/20
+  (R 5), 10/30 (8), 22/64 (20), 50/162 (50), 98/318 (100), 198/638 ms (200) → time constant ≈ 1.36 R − 3 ms (t50 ≈ R).
+  Vibrato ±40 c 5.5 Hz kept: 3 % (R 0), 20 % (5), 35 % (8), 68 % (20), 91 % (50).
+- Humanize H: only a **sustained** note is slowed: a note held steady for 0.8 s, then 30 c sharp, is pulled back as if
+  the speed were R + H ms (R 0: H 25/50/75/100 → 50 % at 26/50/74/100 ms; R 5 → 30/54/80/104; R 20 → 46/70/94/118).
+  After only 0.3 s steady the slow-down is partial; a note with even a ±5 c vibrato is not "sustained" (no slow-down).
+- Flex-Tune F: a note d cents from its target is corrected by min (d, (1 − F)/F × (50 − d)) cents (F 10 … 90, d 5 …
+  50 c, e.g. F 50: d 30 → 20 c, d 45 → 5 c; F 90: 4.5 c at most); in a scale d counts in hundredths of the gap to
+  the next target (E minor, F + 20 c = 80 c below F#: F 50 corrects 23 c, F 80 6 c, F 20 fully).
+- Natural Vibrato (her states: 0 dB): ±12 dB roughly doubles / removes the vibrato that survives the correction —
+  not reproduced (LYNX Tune has no such control yet).
+
+**LYNX Tune refit** (core/LynxTune.cpp, same signals through fx/tunerun):
+- new parameter **Flex-Tune** (appended, default 0 = unchanged) with the law above, gap-normalised in scales: F 20 /
+  50 / 90 corrected fractions at 5 … 50 c match within 0.05 (e.g. F 50: 0.67 / 0.43 / 0.24 / 0.11 at 30 – 45 c vs
+  0.67 / 0.43 / 0.25 / 0.11); E minor F+20 c: 65.40 vs 65.43 (F 50), 65.25 vs 65.26 (F 80).
+- **Humanize** now follows steadiness instead of note age: a note counts as sustained once its pitch stays within 4 c
+  of its own recent average (a single move — the singer settling elsewhere — keeps it; another move 30 – 150 ms
+  later, i.e. a vibrato, resets it); the slow-down adds humanize × 135 ms to the time constant over 0.2 – 0.6 s of
+  steadiness (was: up to +250 ms by note age, vibrato included). R 5 / H 100: 110 / 334 ms vs 104 / 336; R 20 / H 100:
+  122 / 384 vs 118 / 384; R 0 / H 50: 58 / 168 vs 50 / 160; vibrato notes stay fast in both.
+- **Translation** (`translate = auto-tune-pro`): key / scale as before, retune = 1.36 × X4 − 3 ms (LYNX's time
+  constant), humanize = X61, flex-tune = X90 (`autoTuneProParams` decodes ParamsData).
+- [EXEC] Her `luisa sonsa` takes (37 s) through Auto-Tune Pro with her own state (E minor, 8 ms, H 100, F 20) vs LYNX
+  Tune, |pitch difference| over 2260 voiced 10 ms frames: as translated now median 4.5 c / mean 13.0 c / 15.1 % of
+  frames > 20 c; the 0.1.9 translation (20 ms, no humanize / flex) 5.7 / 14.2 / 16.8 %; no correction 24.1 / 26.5 /
+  58.1 %.
+
+## 6. LYNX Tune's editor in the auto-mode workflow
+
+Reference: Auto-Tune Pro's Auto mode screenshotted in our host (tmp/look114 uiview; kept in
+C:\Users\kauan\lynx-test\tune120\ref, never in git): a top bar (tracking, input type, key, scale | formant,
+transpose, detune, mix), the correction row (Retune Speed big on the left, Flex Tune, a round correction meter with
+the note name in the centre, Natural Vibrato, Humanize big on the right) and a keyboard of the target notes at the
+bottom. LYNX Tune now has the same layout logic in LYNX's own drawing (PluginLayout.cpp `lynxTune`, 800 × 548):
+INPUT (tracking, input type, key, scale) and OUTPUT (transpose, A4, mix, low latency, MIDI channel) on top; the
+CORRECTION row with RETUNE SPEED and HUMANIZE big, FLEX-TUNE and FORMANT (preserve + shift) beside them and the new
+`pitchring` display in the centre (50 segments for ±100 c lit toward the applied correction, the target note's name,
+the sung offset); LYNX's scrolling PITCH GRAPH (`pitchtrace`, the graph of round 103 without its read-out) below;
+the TARGET NOTES as one keyboard octave. No shared component was added (two displays in PluginEditors.cpp).
+
 ## Where I stopped
 - Landed a4f0e55: §1 scale translation. Second landing: §2 Note Transition → retune, §2b engine refit + tests.
-- Blocked on the user (tmp/tune120/ASK_USER.md): Auto-Tune Pro install (UAC prompt refused) — its scale-list order
-  stays [model] (now supported by her Waves Tune state in luisa sonsa, E natural minor = Auto-Tune "E, 1").
-- Next, once Auto-Tune Pro loads: `texts` of its Scale / Key parameters, the X0…X92 meaning of her ParamsData, its
-  retune / humanize / flex-tune curves on in_test.wav (py/ana.py), Auto-mode screenshots → LYNX Tune editor in its
-  workflow (flex-tune / natural vibrato would be new appended parameters).
+- Third landing: §5 Auto-Tune Pro translation + Flex-Tune / Humanize refit, §6 editor.
+- Next: Natural Vibrato (a vibrato gain after the correction); Auto-Tune's Graph mode is not reproduced.
 - Ideas: compensate the detector lag on moving pitch (glide bias −8 c vs Waves −3 c); Waves Tune's Speed /
   Tolerance / Vibrato controls (unused in her states).

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <map>
 
 #include "core/Effects.h"
 #include "core/FabFilterStates.h"
@@ -529,8 +530,9 @@ product = Auto-Tune Pro
 vendor = Antares
 lynx = LYNX Tune
 # [DATA] VST3 class ID from FL wrapper records of real projects (round 98). Round 113: the state's key and scale are
-# read (autoTuneProKey) and set with a 20 ms retune; without them the project's key (another readable pitch corrector)
-# or, failing that, a gentle chromatic correction (50 ms, humanize 50 %) instead of forcing C major
+# read (autoTuneProKey); round 120: its retune speed, humanize and flex-tune too (measured on the official trial);
+# without a key the project's key (another readable pitch corrector) or, failing that, a gentle chromatic correction
+# (50 ms, humanize 50 %) instead of forcing C major
 vst3 = 415453563854413175746f2d54756e65
 names = Auto-Tune Pro; Auto-Tune Pro X; Auto-Tune Artist; Auto-Tune Access; Auto-Tune EFX+; Auto-Tune Hybrid; Auto-Tune
 translate = auto-tune-pro
@@ -936,8 +938,12 @@ constexpr std::uint32_t foreignTextMagic = 0x31464C4Cu; // "LLF1"
 // --- translators of states whose layout is readable without a vendor library (round 113) ------------------------
 using RawTranslator = int (*) (const std::vector<std::uint8_t>& state, EffectSlot& slot);
 
-// Auto-Tune Pro: key and scale (autoTuneProKey); with them the retune speed of the original's own default and of
-// every state of the projects surveyed (20 ms), no humanize. Without them the slot keeps the entry's gentle preset.
+// Auto-Tune Pro: key and scale (autoTuneProKey) and the Auto-mode controls of its ParamsData (autoTuneProParams;
+// [EXEC] REA round 120 §5: the X<n> entries are the plugin's parameter n in real units — 4 Retune Speed (ms),
+// 61 Humanize, 90 Flex-Tune (0…100)). Measured black-box on the official trial: a held note is pulled to its target
+// along a first-order curve whose time constant is 1.36 × the retune speed − 3 ms (LYNX Tune's retune is that time
+// constant); Humanize and Flex-Tune map 1:1 onto LYNX Tune's (fitted to the same measurements, LynxTune.cpp).
+// Without a readable key the slot keeps the entry's gentle preset.
 int translateAutoTunePro (const std::vector<std::uint8_t>& state, EffectSlot& slot)
 {
     const auto key = autoTuneProKey (state);
@@ -945,9 +951,16 @@ int translateAutoTunePro (const std::vector<std::uint8_t>& state, EffectSlot& sl
         return 0;
     slot.params[lynxtune::key] = (float) key->first / 11.0f;
     slot.params[lynxtune::scale] = (float) key->second / (float) (vocal::scaleCount - 1);
-    slot.params[lynxtune::retune] = 0.2236068f; // 20 ms
-    slot.params[lynxtune::humanize] = 0.0f;
-    return 2;
+    const auto x = autoTuneProParams (state);
+    auto at = [&x] (int n, double fallback) {
+        const auto it = x.find (n);
+        return it != x.end() && std::isfinite (it->second) ? it->second : fallback;
+    };
+    const auto retune = std::clamp (at (4, 20.0), 0.0, 400.0);
+    slot.params[lynxtune::retune] = (float) std::sqrt (std::clamp (1.36 * retune - 3.0, 0.0, 400.0) / 400.0);
+    slot.params[lynxtune::humanize] = (float) std::clamp (at (61, 0.0) / 100.0, 0.0, 1.0);
+    slot.params[lynxtune::flexTune] = (float) std::clamp (at (90, 0.0) / 100.0, 0.0, 1.0);
+    return 5;
 }
 
 // Waves Tune Real-Time: the key and scale saved in its state (wavesTuneScale; [DATA] every one of the 11 distinct
@@ -1332,9 +1345,8 @@ std::optional<std::pair<int, int>> autoTuneProKey (const std::vector<std::uint8_
         return std::nullopt;
     if (key < 0 || key > 11 || key != std::floor (key))
         return std::nullopt;
-    // [model] the scale list's first three entries: 0 = major, 1 = minor, 2 = chromatic. Read from the raw vocal takes
-    // of three of her projects (round 113 §2): the pitch classes sung under "A, 1" and "E, 1" fit the minor scale (the
-    // natural minor's 7th / 3rd / 6th are sung, the major's are not); "C, 2" (C = the default key) fits no scale on C.
+    // [EXEC] the scale list's first entries (the official trial's own texts, REA round 120 §5): 0 = Major, 1 = Minor,
+    // 2 = Chromatic — as read from her takes in round 113 §2. The other scales (tunings) are not translated.
     vocal::Scale lynxScale;
     if (scale == 0.0f)
         lynxScale = vocal::Scale::major;
@@ -1345,6 +1357,62 @@ std::optional<std::pair<int, int>> autoTuneProKey (const std::vector<std::uint8_
     else
         return std::nullopt; // the other scales: not confirmed
     return std::pair<int, int> { (int) key, (int) lynxScale };
+}
+
+std::map<int, double> autoTuneProParams (const std::vector<std::uint8_t>& state)
+{
+    std::map<int, double> out;
+    const auto at = findBytes (state, "ParamsData=\"");
+    if (at == std::string::npos || findBytes (state, "<SessionChunkData") == std::string::npos)
+        return out;
+    const auto start = at + 12;
+    const auto end = findBytes (state, "\"", start);
+    if (end == std::string::npos)
+        return out;
+    // JUCE MemoryBlock::toBase64Encoding: "<size>.<chars>", 6 bits per char, least significant bit first
+    const std::string text (state.begin() + (std::ptrdiff_t) start, state.begin() + (std::ptrdiff_t) end);
+    const auto dot = text.find ('.');
+    if (dot == std::string::npos || dot == 0 || dot > 9)
+        return out;
+    std::size_t size = 0;
+    for (std::size_t i = 0; i < dot; ++i)
+    {
+        if (text[i] < '0' || text[i] > '9')
+            return out;
+        size = size * 10 + (std::size_t) (text[i] - '0');
+    }
+    if (size > (1u << 20))
+        return out;
+    static constexpr const char* alphabet = ".ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+";
+    std::string raw (size, '\0');
+    std::size_t bit = 0;
+    for (std::size_t i = dot + 1; i < text.size() && bit < size * 8; ++i)
+    {
+        const auto* c = std::strchr (alphabet, text[i]);
+        if (c == nullptr || text[i] == '\0')
+            return {};
+        const auto v = (unsigned) (c - alphabet);
+        for (int k = 0; k < 6 && bit < size * 8; ++k, ++bit)
+            if ((v >> k) & 1u)
+                raw[bit >> 3] = (char) (raw[bit >> 3] | (1 << (bit & 7)));
+    }
+    // <Parameter X<n>="<value>"/> entries
+    for (auto p = raw.find (" X"); p != std::string::npos; p = raw.find (" X", p + 2))
+    {
+        std::size_t q = p + 2;
+        int n = 0, digits = 0;
+        while (q < raw.size() && raw[q] >= '0' && raw[q] <= '9' && digits < 4)
+            n = n * 10 + (raw[q++] - '0'), ++digits;
+        if (digits == 0 || q + 1 >= raw.size() || raw[q] != '=' || raw[q + 1] != '"')
+            continue;
+        const auto close = raw.find ('"', q + 2);
+        if (close == std::string::npos)
+            break;
+        float v = 0;
+        if (parseFloat (raw.substr (q + 2, close - q - 2), v))
+            out[n] = (double) v;
+    }
+    return out;
 }
 
 std::optional<PitchCorrectorScale> wavesTuneScale (const std::vector<std::uint8_t>& state)
