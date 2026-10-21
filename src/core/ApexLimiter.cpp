@@ -1,6 +1,7 @@
 #include "core/ApexLimiter.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 
@@ -94,6 +95,13 @@ public:
 
     int latencySamples() const noexcept override { return latency; }
 
+    // live meters for the editor (round 114): 0 = gain reduction over 0 … 30 dB (0..1), 2 = input peak, 3 = output peak
+    float controlOutput (int k) const noexcept override
+    {
+        return k == 0 ? meterGr.load (std::memory_order_relaxed) : k == 2 ? meterIn.load (std::memory_order_relaxed)
+                      : k == 3 ? meterOut.load (std::memory_order_relaxed) : 0.0f;
+    }
+
     void process (float* left, float* right, int n, const EffectParams& p, double) noexcept override
     {
         if (inL.empty()) prepare (sampleRate);
@@ -116,6 +124,8 @@ public:
         const auto& ip = interp();
         const int len = (int) inL.size();
         const int pad = maxLook - look;
+        double minGain = 1.0;
+        float inPeak = 0.0f, outPeak = 0.0f;
 
         for (int i = 0; i < n; ++i)
         {
@@ -156,6 +166,8 @@ public:
             const double gL = std::min (aL, (1.0 - law.slowShare) * fastL + law.slowShare * slowL);
             const double gR = std::min (aR, (1.0 - law.slowShare) * fastR + law.slowShare * slowR);
 
+            minGain = std::min (minGain, std::min (gL, gR));
+            inPeak = std::max (inPeak, std::max (std::abs (left[i]), std::abs (right[i])));
             inL[(std::size_t) pos] = (float) cl; inR[(std::size_t) pos] = (float) cr;
             const int back = (pos - look + len) % len;
             const double yl = std::clamp (inL[(std::size_t) back] * gL, -ceiling, ceiling); // safety clip
@@ -164,8 +176,12 @@ public:
             outL[(std::size_t) pos] = (float) yl; outR[(std::size_t) pos] = (float) yr;
             const int rd = (pos - pad + len) % len;
             left[i] = outL[(std::size_t) rd]; right[i] = outR[(std::size_t) rd];
+            outPeak = std::max (outPeak, std::max (std::abs (left[i]), std::abs (right[i])));
             pos = (pos + 1) % len;
         }
+        meterGr.store ((float) std::clamp (-20.0 * std::log10 (std::max (minGain, 1e-9)) / 30.0, 0.0, 1.0), std::memory_order_relaxed);
+        meterIn.store (std::min (inPeak, 1.0f), std::memory_order_relaxed);
+        meterOut.store (std::min (outPeak, 1.0f), std::memory_order_relaxed);
     }
 
 private:
@@ -178,6 +194,7 @@ private:
     int boxPos = 0, pos = 0;
     SlidingMin minAll, minL, minR;
     double fastL = 1.0, fastR = 1.0, slowL = 1.0, slowR = 1.0;
+    std::atomic<float> meterGr { 0.0f }, meterIn { 0.0f }, meterOut { 0.0f };
 };
 } // namespace
 

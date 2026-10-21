@@ -27,6 +27,7 @@
 #include "ui/I18n.h"
 #include "ui/Icons.h"
 #include "ui/FacetEqEditor.h"
+#include "ui/ProEditors.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/Theme.h"
 #include "ui/ValueControl.h"
@@ -86,7 +87,8 @@ public:
         const auto& l = activeLayout();
         for (const auto& item : l.items) // live meters and graphs (mixing suite, LYNX Tune's pitch, round 108's dynamics): 30 Hz
             if (item.type == Item::display && item.display != nullptr
-                && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "pitchgraph") == 0 || dynui::isLive (item.display)))
+                && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "pitchgraph") == 0
+                    || dynui::isLive (item.display)))
             {
                 startTimerHz (30);
                 break;
@@ -141,6 +143,13 @@ public:
         return fx != nullptr && plugui::isShown (kind, item, page, fx->params, &fx->state);
     }
 
+    // wide option menus of LYNX's own panels get step arrows at both ends (round 114)
+    bool hasStepArrows (const LayoutItem& item) const
+    {
+        return item.type == Item::menu && item.w >= 110.0f && kind != EffectKind::parametricEq && kind != EffectKind::fruitySend
+               && std::find (plugui::ownLayoutKinds().begin(), plugui::ownLayoutKinds().end(), kind) != plugui::ownLayoutKinds().end();
+    }
+
     // the knob's circle inside its cell (the caption takes the rest)
     juce::Rectangle<float> knobCircle (const LayoutItem& item) const
     {
@@ -148,7 +157,12 @@ public:
         const auto s = scale();
         if (hasStyle (item, plugui::valueAbove))
             r.removeFromTop (16.0f * s);
-        if (! hasStyle (item, plugui::noCaption))
+        if (hasStyle (item, plugui::captionAbove))
+        {
+            r.removeFromTop (14.0f * s);
+            r.removeFromBottom (13.0f * s);
+        }
+        else if (! hasStyle (item, plugui::noCaption))
             r.removeFromBottom ((hasStyle (item, plugui::showValue) ? 26.0f : 14.0f) * s);
         const auto d = juce::jmin (r.getWidth(), r.getHeight());
         return r.withSizeKeepingCentre (d, d).withY (r.getY());
@@ -471,7 +485,14 @@ public:
                     g.setFont (font (juce::jmax (8.0f, 9.0f * s)));
                     g.drawFittedText (valueText (param, value), box.toNearestInt(), juce::Justification::centred, 1, 0.6f);
                 }
-                if (! hasStyle (item, plugui::noCaption))
+                if (hasStyle (item, plugui::captionAbove))
+                {
+                    caption (g, item, r.withHeight (13.0f * s).expanded (10.0f * s, 0.0f));
+                    g.setColour (hot ? colour::accent : colour::textPrimary);
+                    g.setFont (font (juce::jmax (8.0f, 10.5f * s)));
+                    g.drawFittedText (valueText (param, value), below.withHeight (13.0f * s).expanded (10.0f * s, 0.0f).toNearestInt(), juce::Justification::centred, 1, 0.7f);
+                }
+                else if (! hasStyle (item, plugui::noCaption))
                 {
                     caption (g, item, below.withHeight (12.0f * s));
                     if (hasStyle (item, plugui::showValue))
@@ -684,10 +705,29 @@ public:
                     drawBandShape (g, r.reduced (2.0f * s, 4.0f * s), chosen);
                 else
                 {
-                    g.setFont (font (juce::jmax (8.0f, 9.0f * s), true));
+                    // round 114: readable mode names (light on the control, bigger), arrows to step on wide menus
                     const auto labels = plugui::optionLabels (item);
+                    auto textArea = r;
+                    if (hasStepArrows (item))
+                    {
+                        const auto edge = 18.0f * s;
+                        for (const auto left : { true, false })
+                        {
+                            const auto a = left ? r.withWidth (edge) : r.withLeft (r.getRight() - edge);
+                            const auto c0 = a.getCentre();
+                            juce::Path tri;
+                            const auto h = 4.0f * s;
+                            if (left) tri.addTriangle (c0.x + h * 0.7f, c0.y - h, c0.x + h * 0.7f, c0.y + h, c0.x - h * 0.7f, c0.y);
+                            else tri.addTriangle (c0.x - h * 0.7f, c0.y - h, c0.x - h * 0.7f, c0.y + h, c0.x + h * 0.7f, c0.y);
+                            g.setColour (a.contains (mouseAt) ? colour::textPrimary : colour::textSecondary);
+                            g.fillPath (tri);
+                        }
+                        textArea = r.reduced (edge, 0.0f);
+                    }
+                    g.setColour (colour::textPrimary);
+                    g.setFont (font (juce::jmax (9.0f, juce::jmin (12.0f * s, r.getHeight() * 0.55f)), true));
                     if (chosen < (int) labels.size())
-                        g.drawFittedText (tr (juce::String::fromUTF8 (labels[(std::size_t) chosen].c_str())), r.toNearestInt(), juce::Justification::centred, 1, 0.6f);
+                        g.drawFittedText (tr (juce::String::fromUTF8 (labels[(std::size_t) chosen].c_str())), textArea.toNearestInt(), juce::Justification::centred, 1, 0.6f);
                 }
                 break;
             }
@@ -1255,6 +1295,55 @@ public:
             }
             return;
         }
+        else if (id == "vumeter") // round 114: an analog-style VU needle showing the gain reduction (the optical leveler)
+        {
+            // gain reduction (needle down from 0 VU) or the output level (0 VU = −18 dBFS), like the reference's selector
+            const auto out = liveMeter (3);
+            const auto target = vuOutput ? -juce::jlimit (-3.0f, 30.0f, -(20.0f * std::log10 (juce::jmax (1e-6f, out)) + 18.0f))
+                                         : -juce::jlimit (0.0f, 1.0f, liveMeter (item.steps)) * 30.0f;
+            vuNeedle += (-target - vuNeedle) * 0.35f; // a meter's inertia (~300 ms at the 30 Hz refresh)
+            const auto face = r.reduced (2.0f * s);
+            g.setColour (juce::Colour (0xffd9cfb4).withAlpha (fx.enabled ? 1.0f : 0.5f));
+            g.fillRoundedRectangle (face, radius::lg * s);
+            g.setColour (colour::bg0);
+            g.drawRoundedRectangle (face, radius::lg * s, 2.0f * s);
+            const juce::Point<float> pivot { face.getCentreX(), face.getBottom() + face.getHeight() * 0.18f };
+            const auto radiusV = face.getHeight() * 0.92f;
+            const auto fracOf = [] (float db) { // the VU scale: −20 … +3 on a linear-voltage law
+                const auto lo = std::pow (10.0f, -1.0f), hi = std::pow (10.0f, 3.0f / 20.0f);
+                return juce::jlimit (0.0f, 1.0f, (std::pow (10.0f, db / 20.0f) - lo) / (hi - lo));
+            };
+            const auto angleOf = [&] (float db) { return juce::MathConstants<float>::pi * (-0.27f + 0.54f * fracOf (db)); };
+            g.setFont (font (juce::jmax (7.0f, 9.0f * s), true));
+            for (const auto db : { -20.0f, -10.0f, -7.0f, -5.0f, -3.0f, -2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f })
+            {
+                const auto a = angleOf (db);
+                const juce::Point<float> dir { std::sin (a), -std::cos (a) };
+                g.setColour (db > 0.0f ? juce::Colour (0xffb3261e) : juce::Colour (0xff2a2622));
+                g.drawLine ({ pivot + dir * (radiusV * 0.86f), pivot + dir * (radiusV * 0.95f) }, 1.4f * s);
+                if (db == -20.0f || db == -10.0f || db == -5.0f || db == -3.0f || db == 0.0f || db == 3.0f)
+                    g.drawText (db > 0.0f ? "+" + juce::String ((int) db) : juce::String ((int) db),
+                                juce::Rectangle<float> (24.0f * s, 12.0f * s).withCentre (pivot + dir * (radiusV * 1.04f)).toNearestInt(), juce::Justification::centred, false);
+            }
+            g.setColour (juce::Colour (0xffb3261e).withAlpha (0.8f));
+            juce::Path redArc;
+            redArc.addCentredArc (pivot.x, pivot.y, radiusV * 0.9f, radiusV * 0.9f, 0.0f, angleOf (0.0f), angleOf (3.0f), true);
+            g.strokePath (redArc, juce::PathStrokeType (3.0f * s));
+            g.setColour (juce::Colour (0xff2a2622));
+            g.setFont (font (juce::jmax (8.0f, 11.0f * s), true));
+            g.drawText ("VU", face.withTop (face.getY() + face.getHeight() * 0.5f).withHeight (16.0f * s).toNearestInt(), juce::Justification::centred, false);
+            g.setFont (font (juce::jmax (7.0f, 8.5f * s)));
+            g.drawText ((vuOutput ? tr ("Output") : tr ("Gain reduction")) + "  " + juce::String (-vuNeedle, 1) + (vuOutput ? " VU" : " dB"), face.withTop (face.getBottom() - 16.0f * s).toNearestInt(), juce::Justification::centred, false);
+            // the needle
+            const auto a = angleOf (-vuNeedle);
+            const juce::Point<float> dir { std::sin (a), -std::cos (a) };
+            g.saveState();
+            g.reduceClipRegion (face.toNearestInt());
+            g.setColour (juce::Colour (0xff141210));
+            g.drawLine ({ pivot + dir * (radiusV * 0.25f), pivot + dir * (radiusV * 0.97f) }, 1.6f * s);
+            g.restoreState();
+            return;
+        }
         else if (id == "ridgeeq") // the strip's EQ + filters (20 Hz .. 20 kHz, ±20 dB)
         {
             grid (10, 4);
@@ -1742,6 +1831,11 @@ public:
         const auto p = e.position;
         const auto h = headerItemAt (p);
         const auto i = h == 0 ? itemAt (p) : -1;
+        if (i >= 0 && hasStepArrows (activeLayout().items[(std::size_t) i]))
+        {
+            mouseAt = p; // the menu's arrows light under the mouse
+            repaint();
+        }
         if (h != hoverHeader || i != hoverItem)
         {
             hoverHeader = h;
@@ -1755,6 +1849,7 @@ public:
     {
         hoverHeader = 0;
         hoverItem = -1;
+        mouseAt = { -1.0f, -1.0f };
         repaint();
     }
 
@@ -1793,6 +1888,12 @@ public:
             return;
         }
 
+        if (item.type == Item::display && juce::String (item.display) == "vumeter") // the VU's selector: gain reduction / output
+        {
+            vuOutput = ! vuOutput;
+            repaint();
+            return;
+        }
         if (item.type == Item::display && juce::String (item.display) == "sgpresets")
         {
             const auto r = rectOf (item);
@@ -1873,9 +1974,23 @@ public:
                 menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (r.toNearestInt())));
                 return;
             }
-            juce::PopupMenu menu;
             const auto labels = plugui::optionLabels (item);
             const auto chosen = plugui::optionAt (item, valueOf (param));
+            // round 114: wide mode menus step with the arrows at their ends (the reference reverbs' ◀ ▶), the middle opens the list
+            if (hasStepArrows (item) && ! labels.empty())
+            {
+                const auto edge = 18.0f * scale();
+                const auto dir = e.position.x < r.getX() + edge ? -1 : e.position.x > r.getRight() - edge ? 1 : 0;
+                if (dir != 0)
+                {
+                    const auto n = (int) labels.size();
+                    const auto next = (chosen + dir + n) % n;
+                    setValue (param, plugui::optionValue (item, next));
+                    ui::flashValueTip (*this, r.toNearestInt(), optionTexts (item)[(std::size_t) next]);
+                    return;
+                }
+            }
+            juce::PopupMenu menu;
             for (int o = 0; o < (int) labels.size(); ++o)
                 menu.addItem (optionTexts (item)[(std::size_t) o], true, o == chosen,
                               [this, param, v = plugui::optionValue (item, o)] { setValue (param, v); });
@@ -2093,6 +2208,8 @@ public:
             return { tr ("Amount: drag up or down (Ctrl: fine)"), juce::String (soundgoodizerAmount() * 100.0f, 0) + "%", false, false };
         if (item.type == Item::display && juce::String (item.display) == "sgpresets")
             return { tr ("Soundgoodizer preset A to D (read from your FL installation)"), {}, false, false };
+        if (item.type == Item::display && juce::String (item.display) == "vumeter")
+            return { tr ("VU meter: click to show the gain reduction or the output level"), vuOutput ? tr ("Output") : tr ("Gain reduction"), false, false };
         if (item.type == Item::display && juce::String (item.display) == "xy")
             return { tr ("Drag the point: both values at once"), {}, false, false };
         if (item.type == Item::display)
@@ -2240,7 +2357,7 @@ private:
                     pitchHistory.erase (pitchHistory.begin(), pitchHistory.begin() + (std::ptrdiff_t) (pitchHistory.size() - pitchHistoryLength));
                 repaint (rectOf (item).getSmallestIntegerContainer());
             }
-            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || dynui::isLive (item.display)) && visible (item))
+            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || dynui::isLive (item.display)) && visible (item))
             {
                 history = history || std::strcmp (item.display, "grhistory") == 0;
                 repaint (rectOf (item).getSmallestIntegerContainer());
@@ -2269,6 +2386,9 @@ private:
     juce::Point<float> eqDragOffset;
     dynui::History dynHistory; // the dynamics suite's scrolling gain-reduction graph
     int crossoverDrag = -1;    // the crossover parameter being dragged on a band display
+    float vuNeedle = 0.0f;     // the VU display's needle (dB below 0 VU, with inertia)
+    bool vuOutput = false;     // the VU shows the output level instead of the gain reduction
+    juce::Point<float> mouseAt { -1.0f, -1.0f };
 };
 
 // --- the window ------------------------------------------------------------------------------------
@@ -2351,6 +2471,11 @@ void open (AudioEngine& engine, int track, int slot)
         FacetEqWindows::open (engine, track, slot);
         return;
     }
+    if (ProEditorWindows::handles (kind)) // display-first editors of the dynamics / saturation engines (REA round 114)
+    {
+        ProEditorWindows::open (engine, track, slot);
+        return;
+    }
 
     auto& open = windows();
     const auto key = std::make_pair (track, slot);
@@ -2375,6 +2500,7 @@ void closeAll()
 {
     windows().clear();
     FacetEqWindows::closeAll();
+    ProEditorWindows::closeAll();
 }
 } // namespace NativeEffectWindows
 } // namespace lynx
