@@ -27,24 +27,68 @@ twelve `<NoteStatus>` values above the root (`0` = a target note, `x` = excluded
 So luisa sonsa's Waves Tune is in **E natural minor** — the same key/scale its two Auto-Tune Pro slots name ("E, 1"),
 an independent confirmation that Auto-Tune Pro's scale 1 = minor in her projects (round 113 §2 [model]).
 RealWorld [5] follows the scale (2 = major, 3 = natural minor, 1 in the untouched setup); [20] / [21] are the only
-other values that vary — presumably the speed / note-transition times (ms), not confirmed (§2).
+other values that vary — the Speed / Note Transition times in ms ([EXEC] §2).
 
 Translation (`translate = waves-tune`, `wavesTuneScale`): the active setup's root and note set become LYNX Tune's key
 and scale (the named LYNX scale with exactly those notes, else LYNX Tune's custom scale with the same note switches);
-these states also vote for the project key (`substituteContextOf`) like Auto-Tune Pro's. Speed / note transition stay
-at the entry's gentle preset until measured. Tests: `tests/Tune120Tests.inc`.
+these states also vote for the project key (`substituteContextOf`) like Auto-Tune Pro's; the retune comes from the
+Note Transition time (§2). Tests: `tests/Tune120Tests.inc`.
 
-## 2. Waves Tune Real-Time hosted (official trial)
+## 2. Waves Tune Real-Time measured (official trial)
 
-[EXEC] The bundle is installed (`Plug-Ins V17\Waves Tune Real-Time.bundle`) and WaveShell1-VST3 17.1 lists "Waves
-Tune Real-Time Mono / Stereo", but hosted in fxmeasure both entries come up as a **Q10 equalizer**: its parameters are
-"Band 1 On/Off … Precision Mode", the state it saves names `<PluginName>Q10`, and the test signal passes unchanged.
-CLA-2A did the same before its trial was activated (round 114 §7), so the Waves Tune Real-Time trial is most likely
-not activated on this PC → tmp/tune120/ASK_USER.md. Our GUI host (uiview) stalls while loading it.
+[EXEC] Hosted in fxmeasure (WaveShell1-VST3 17.1, "Waves Tune Real-Time Mono"). The first plugin our host creates from
+the shell comes up as Q10 (round 119 §1): a DeEsser is loaded first, then Waves Tune is itself (143 parameters). Trial
+in demo mode; the analysis skips silent frames. Parameters: Speed, Note Transition (0.1 … 800 ms each), Correction
+(%), Reference (415–466 Hz), Tolerance time / cents, Vibrato depth / on, Scale Type (User, Chromatic, Major, Natural
+Minor, Harmonic Minor, … 44 entries), Scale Root (17 names: C, C#, Db, …). The RealWorld list: [5] = Scale Type
+index (1 chromatic, 2 major, 3 natural minor), [20] = Speed, [21] = Note Transition (defaults 15 / 120 ms; her state
+loads back as 21.4 / 54.2 ms).
+
+On the test signal of §4 (chromatic unless noted), time to 50 % / 90 % of the correction of a held note 30 c sharp:
+
+    Note Transition   0.1      20.9     54.2      120       250 ms
+    from silence      30/30    30/64    50/144    96/298    188/590
+    mid-note drift    14/40    20/50    42/120    88/278    172/574
+    vibrato kept      45 %     57 %     88 %      97 %      99 %     (5.5 Hz, ±40 c)
+
+Speed 0.1 … 400 ms (Note Transition 120) changes none of these (only below ~5 ms: 82 % instead of 97 % of the
+vibrato). So on sung notes Waves Tune's correction is a first-order pull toward the target with time constant = the
+Note Transition time (+ ~12 ms detection): t50 ≈ 12 ms + 0.69 NT, t90 ≈ 12 ms + 2.3 NT — the same law as LYNX Tune's
+retune. Instant note changes are followed at once; a sung slide passes through; on an octave glide the correction
+averages −3 c; notes exactly between two targets go to the lower one. Her state (E natural minor, 21.4 / 54.2 ms):
+every semitone E4…E5 goes to the nearest E-minor note — same choices as LYNX Tune in E minor.
+
+Translation: Note Transition → LYNX Tune's retune (ms), humanize 0; Speed, Correction (100 % in every state),
+tolerance and vibrato (off) are not translated.
+
+## 2b. LYNX Tune engine refit (item 3)
+
+LYNX Tune at retune = NT on the same signal (before → after this round):
+- [EXEC] **A phrase started with the previous phrase's correction still applied** (the applied shift was never reset
+  across silence): a note 30 c flat after a sharp phrase was first bent ~18 c further DOWN before being pulled up (50 %
+  at 106 ms instead of 50). Now each phrase starts at the sung pitch: 50 % / 90 % = 52 / 134 ms at 54.2 (Waves 50 /
+  144), 98 / 284 at 120 (Waves 96 / 298), 185 / 570 at 250 (Waves 188 / 590), symmetric for sharp and flat notes.
+- [EXEC] **Glides were pulled back** against their direction: the held target was kept 0.1 semitone past the midpoint,
+  biasing the correction of an octave glide by −15 c (Waves −3 c). Hysteresis 0.03 st: −8 c, and a note held exactly
+  between two targets still does not flip. (The rest is detection lag on a moving pitch, not changed.)
+- Mid-note drift and vibrato retention already matched (e.g. NT 54.2: drift 48 / 126 ms vs 42 / 120; vibrato 87 % vs
+  88 %; NT 20.9: 58 % vs 57 %).
+
+[EXEC] Her `luisa sonsa` takes (3 takes, 37 s, 2195 voiced 10 ms frames), Waves Tune with her own state vs LYNX Tune:
+
+    LYNX Tune as translated                     |pitch − Waves| median / mean / frames > 20 c
+    before (project key E minor, 50 ms, humanize 50 %)   6.9 / 13.2 c / 15.3 %
+    now (her scale, retune 54.2 ms, refit engine)         3.4 / 10.1 c / 10.4 %
+    (no correction at all)                               18.5 / 22.4 c / 46.0 %
+
+Tests: `tests/Tune120Tests.inc` (phrase onset, retune curve vs the Waves numbers, glide bias, Note Transition read).
+Scripts: tmp/tune120/py (mksig, ana, wtrun, sweep1, take), fx/tunerun; renders in C:\Users\kauan\lynx-test\tune120.
 
 ## 3. Auto-Tune Pro
 
-Not installed yet when this round started (only Antares Central / Auto-Tune Central); polled every 1.5 min.
+Not installed. [EXEC] No Auto-Tune Pro plug-in anywhere on C: (VST3 / VST2 / AAX folders) as of 2026-10-21 00:30;
+Auto-Tune Central's log ends with "user did not grant permission" at 23:00 — the install's Windows permission
+(UAC) prompt was refused or timed out → tmp/tune120/ASK_USER.md. The scale-list order stays [model].
 
 ## 4. LYNX Tune measured on the same test signal
 
@@ -61,5 +105,11 @@ output (YIN, 2 ms hop). LYNX Tune before this round, chromatic, retune 20 ms (fx
     octave glide         27 % of the time within 10 c of a semitone (input 19 %): the glide stays smooth
 
 ## Where I stopped
-- Done: §1 Waves Tune scale translation + tests (build-local 1 309 371 checks, 0 failures).
-- Waiting: Waves Tune Real-Time trial activation (ASK_USER), Auto-Tune Pro install.
+- Landed a4f0e55: §1 scale translation. Second landing: §2 Note Transition → retune, §2b engine refit + tests.
+- Blocked on the user (tmp/tune120/ASK_USER.md): Auto-Tune Pro install (UAC prompt refused) — its scale-list order
+  stays [model] (now supported by her Waves Tune state in luisa sonsa, E natural minor = Auto-Tune "E, 1").
+- Next, once Auto-Tune Pro loads: `texts` of its Scale / Key parameters, the X0…X92 meaning of her ParamsData, its
+  retune / humanize / flex-tune curves on in_test.wav (py/ana.py), Auto-mode screenshots → LYNX Tune editor in its
+  workflow (flex-tune / natural vibrato would be new appended parameters).
+- Ideas: compensate the detector lag on moving pitch (glide bias −8 c vs Waves −3 c); Waves Tune's Speed /
+  Tolerance / Vibrato controls (unused in her states).

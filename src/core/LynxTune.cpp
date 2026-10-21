@@ -13,6 +13,10 @@ namespace lynx::lynxtune
 namespace
 {
 constexpr double maxRate = 192000.0;
+// how far past the half-way point (semitones) a held target is kept: enough to stop a wobbly note between two
+// neighbours from flipping, small enough that a glide is not pulled back toward the note it left (round 120: 0.1
+// biased a glide's correction by ~10 c against its direction; Waves Tune Real-Time measured shows no such bias)
+constexpr double hysteresisSt = 0.03;
 
 struct RangeInfo
 {
@@ -193,12 +197,17 @@ public:
                 {
                     psola.setPitch (e.period, true);
                     sung = vocal::hzToNote (e.hz, aRef);
-                    if (unvoicedFor > 0.06)
+                    const auto newPhrase = unvoicedFor > 0.06;
+                    if (newPhrase)
                     {
                         target = -1; // a new phrase: no hysteresis toward the last note
                         noteAge = 0.0;
+                        // ... and no correction left over from the last one: the phrase starts at the sung pitch and
+                        // the retune pulls it from there (round 120: the previous phrase's correction used to bend
+                        // the first notes of the next one, by up to half a semitone the wrong way)
+                        shift = 0.0;
                     }
-                    const auto t = vocal::nearestNote (sung, mask, target, 0.1);
+                    const auto t = vocal::nearestNote (sung, mask, target, hysteresisSt);
                     if (t != target)
                     {
                         target = t;
