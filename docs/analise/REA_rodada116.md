@@ -64,12 +64,32 @@ window took 3.1–3.8 s, slower than FL. See §3.3.
 
 ### 2.2 Opening a project  [EXEC]
 
-*(in progress — the open series was interrupted by the GUI pause, see "Where I stopped")*
+GUI opens (`LYNX.exe <project.flp>` / `FL64.exe <project.flp>`), branch build (0.1.7 + this round + round 112's
+load work), 3 runs each, LYNX and FL interleaved, load average 1.3–7 (median per row). *Window* = the main window
+titled with the project and answering; *idle* = CPU over the next 10 s, transport stopped; *RAM* = private
+working set (FL: main process / whole tree with its WebView2 helpers).
 
-First run (Thief): LYNX main window with the project after **30.7 s** (load average 19), idle afterwards
-**51 % of a core** with the transport stopped, 387 MB; FL: project loaded after 8.5–11 s, 870–1030 MB.
+| project | LYNX window | FL window | LYNX idle CPU | FL idle CPU | LYNX RAM | FL RAM (main / tree) |
+|---|---|---|---|---|---|---|
+| Thief | **9.4 s** | 10.2 s | **15 %** | 19 % | **391 MB** | 818 / 998 MB |
+| Exoplanet | **4.4 s** | 6.2 s | **21 %** | 59 % | **265 MB** | 904 / 1078 MB |
+| SHINE | **3.6 s** | 6.0 s | **25 %** | 42 % | **126 MB** | 806 / 979 MB |
+| Never Out | **5.8 s** | 8.3 s | 27 % | **20 %** | **319 MB** | 930 / 1108 MB |
+| game over | 11.0 s (2/3) | — | 22 % | — | 541 MB | — |
+| kwe | 7.1 s | — | 20 % | — | 198 MB | — |
 
-Headless opens (`LYNX.exe --export`, `open_ms` / the export engine's `prepare_ms`, 3 runs):
+- LYNX opens every demo song faster than FL (0.8–2.4 s ahead) and uses **2.5–7× less RAM**. Idle CPU with the
+  project loaded is lower in 3 of 4 songs (the remaining LYNX idle cost is the UI: meters, waveforms, the
+  playlist; the audio side is parked since §3.1).
+- The 0.1.7 → branch change for Thief is round 112's (open 16 s → 3–4 s headless, 30.7 s → 9.4 s GUI).
+- **game over / kwe**: the Waves trials installed on 2026-10-20 are now loaded for real by both programs (their
+  `WaveShell` VST3 + `WavesLocalServer.exe`), which costs 10–20 s per open in LYNX (headless `open_ms` of kwe
+  1.2 s → 16–23 s). FL never reached a titled window within 240 s in 6 runs (a modal dialog the harness does not
+  know, probably a missing plugin / Waves licensing prompt) — no FL numbers. One LYNX run of each also hung
+  (kwe 237 s, game over > 240 s) — third-party plugin start-up, not measured further.
+
+Headless opens before round 112 (0.1.7, `LYNX.exe --export`, `open_ms` / the export engine's `prepare_ms`, 3 runs,
+load 12–40):
 
 | project | LYNX open_ms | LYNX prepare_ms |
 |---|---|---|
@@ -80,21 +100,48 @@ Headless opens (`LYNX.exe --export`, `open_ms` / the export engine's `prepare_ms
 | game over | 2.4 s | 1.6 s |
 | kwe | 1.2 s | 0.3 s |
 
+Same with the branch build (load 1–8): Thief 3.7 s / 1.2 s, SHINE 0.5 s / 0.07 s, Never Out 0.9 s / 0.4 s.
+
 ### 2.3 Offline render  [EXEC]
 
-*(LYNX headless done; FL's `/R` render opens FL's window, so it waits for the end of the GUI pause)*
+Whole program run, from launch to exit: `LYNX.exe --export <flp> <wav>` (headless, no window) vs
+`FL64.exe /R /Ewav /O<dir> <flp>` (FL opens its window, renders, quits). 44.1 kHz WAV, 3 runs, load 1–11, median:
+
+| project (song length) | LYNX | FL Studio | LYNX render part only |
+|---|---|---|---|
+| Thief (3:57) | **37 s** | 111 s | 32 s (7.4× real time) |
+| SHINE (1:51) | **16 s** | 32 s | 14.6 s |
+| Never Out (2:41) | **25 s** | 65 s | 23 s |
+
+LYNX renders the same songs **2–3× faster** end to end (FL's figure includes its ~6–10 s start-up, LYNX's its
+~0.5–4 s open). kwe: LYNX 8–28 s; FL took 59 minutes in one run and wrote no file in another — the Waves trial
+plugins again (not comparable). Exoplanet (7:41) was left out of the FL runs (LYNX alone: 190–280 s at load 12–34).
 
 ### 2.4 Real-time playback CPU and threads  [EXEC]
 
-First pair, Thief at 256 samples (before the fix):
-- **FL**: 87 % of a core for the main process (FL's own CPU meter showed 20 %); the UI thread
-  (`FL64.exe+0x30ed4`) 44 %, the audio thread (`FLEngine_x64.dll`) 12 %, then ~10 mixer worker threads of
-  2–3.5 % each (14–15 threads above 1 %): FL does spread the mixer over its pool.
-- **LYNX**: 51 % of a core — but the song had **not** started (a posted Space does not reach JUCE's focused
-  component, hence `--rtstress` below): the worker threads were burning **6 % each (7 workers) with the transport
-  stopped** (§3.1).
+Song playing through "FL Studio ASIO" at 256 samples (5.8 ms deadline), 20 s sampled after 5 s of playback, 3
+runs, median. LYNX plays via `--rtstress` (also reports its own callback load); FL gets a posted Space.
 
-*(series 512/256/128 × Thief / Exoplanet / game over pending, see "Where I stopped")*
+| | LYNX branch (spin 250 µs) | LYNX + §3.4 (spin 60 µs) | FL Studio 2026 |
+|---|---|---|---|
+| Thief, process CPU (% of one core) | 106–120 % | **70 %** | 70 % |
+| Exoplanet, process CPU | 114–123 % | **90 %** | 93 % |
+| audio callback average / max load (LYNX) | 14–16 % / 27–38 % | 14–15 % / 22–34 % | — |
+| callbacks over the deadline | 0 | 0 | — |
+
+Per thread (Thief): **FL** — UI thread (`FL64.exe+0x30ed4`) 28 %, audio thread (`FLEngine_x64.dll`) 12 %, ~10
+mixer workers 2.6–4.5 % each. **LYNX** — the ASIO callback thread 16 % (= the callback's own load figure), message
+thread 5–6 %, and seven render workers at **13–14 % each** with the 250 µs spin: they are awake during the
+whole callback, spinning between the parallelFor calls of a block → §3.4. With 60 µs: 6–7 % each.
+
+So during playback LYNX now costs about what FL costs (equal on Thief, ~same on Exoplanet) while its audio work
+itself (16 % of the deadline on one thread + workers) has headroom; LYNX's *idle* and *RAM* are much lower.
+
+Notes: the rtstress reports "late device calls" ≈ 140 per 30 s (2.7 % of the callbacks start more than 1.9 blocks + 2 ms
+after the previous one) for every LYNX build at every setting — the FL Studio ASIO driver (a WASAPI wrapper) delivers
+its blocks unevenly, the callbacks themselves are never over the deadline. The 128-sample series is left out:
+the FL Studio ASIO driver kept 256 samples for LYNX (`--buffer 128` was not accepted by the driver), so the "128"
+LYNX runs were 256 again; FL's 128 runs gave the same 70 / 86 % as at 256.
 
 ### 2.5 Size on disk
 
@@ -131,11 +178,34 @@ length + 3 s), it stops repainting until sound returns.
 
 ### 3.3 Start-up time (diagnosed, not changed)
 
-`LYNX_TRACE_STARTUP=1` (new, opt-in) writes `%APPDATA%\LYNX\startup.log` with the time of each start-up step
-(static init → options → audio engine + device → startup sound → main window built → revealed → first message
-loop turn). *(results pending — needs a GUI run)*
+`LYNX_TRACE_STARTUP=1` (new, opt-in) writes `%APPDATA%\LYNX\startup.log` with the time of each start-up step.
+[EXEC] Branch build, empty project, idle PC (3 runs, last one shown; window 3.2–3.3 s, first run 5.5 s):
 
-### 3.4 Not cheap, left for later
+| step | at | took |
+|---|---|---|
+| static init → options + file types | 13 ms | 13 ms |
+| splash shown, before the audio engine | 318 ms | 306 ms |
+| audio engine + ASIO device opened | 1085 ms | 766 ms |
+| start-up sound | 1108 ms | 24 ms |
+| main window built | 2004 ms | 895 ms |
+| window revealed (splash minimum reached) | 3188 ms | **1185 ms** |
+| first message loop turn | 3381 ms | 182 ms |
+
+The window is ready at 2.0 s; the splash's fixed 2.1 s minimum, counted from when the splash appears, holds it
+back for another 1.2 s — that is the whole gap to FL's 2.8 s (§2.1). Counting the minimum from process start (or
+lowering it) would reveal the window at ~2.1 s; left as a UI decision (see next).
+
+### 3.4 Workers spinning inside a playing block (fixed)
+
+[EXEC] §2.4: while a song plays, each of the 7 workers used 13–14 % of a core, as long as the callback itself —
+after each parallelFor (channel pass, each mixer layer) a worker spins up to `spinMicros` = 250 µs waiting for the
+next one, so in practice the workers never slept during a block. [EXEC] `spinMicros` 250 → **60 µs**, same
+projects, interleaved A/B runs: process CPU Thief 106 → 70 %, Exoplanet 114 → 90 % (median of 3), workers 6–8 %
+each; the callback's average load (14–15 % of the deadline) and its peaks (22–34 %) did not change, 0 callbacks
+over the deadline. Offline export (no park(), blocks back to back) is unchanged: Thief render 26.5 / 26.3 s,
+SHINE 12.1 / 12.4 s (60 / 250 µs, 2 runs each, idle PC).
+
+### 3.5 Not cheap, left for later
 
 - **DSP cost of the bit-exact FL ports** (perf on `build-local/renderwav`, Thief): Reeverb 2 12 %, Maximus
   bands 11 % + 3 %, Sytrus 17 % (postOps/perSample/filters), Parametric EQ 2 6 %, Vocodex 6 %. These are the exact
@@ -149,9 +219,17 @@ loop turn). *(results pending — needs a GUI run)*
 
 ## Where I stopped
 
-- Baseline startup series done (§2.1). Open series: 1 of 36 runs, then the coordinator's **GUI PAUSE** (user
-  installing plugins) stopped every GUI run; headless LYNX exports done.
-- Code on `feature/bench116`: worker parking, silent output monitor, startup trace, renderwav load timings,
-  test. build-local 1 308 571 checks, 0 failures. Windows build of the branch pending (build slot queue).
-- To do when `~/.cache/lynx-gui-pause` is gone: `run.sh open 3`, `run.sh render 3` (FL `/R`), `run.sh play 3`
-  for 0.1.7 and the branch build; startup trace; then fill §2.2–2.4, land, README line.
+- Done: start-up, open, render and playback series (§2.1–2.4), fixes §3.1 (worker parking), §3.2 (silent output
+  monitor), §3.4 (worker spin 250 → 60 µs), start-up trace §3.3. First landing `a589fce` (parking, monitor,
+  trace); second landing: spin 60 µs + results + README line.
+- Raw data: `tmp/bench116/res-*.jsonl`, `open3.log`, `render3.log`, `play3.log`, `spin.log`.
+
+### Next
+
+- Splash: count `SplashScreen::minimumDuration` from process start → window ~1 s sooner (UI decision).
+- Harness: close FL's missing-plugin / Waves dialogs so game over / kwe can be compared; PowerShell
+  `Start-Process -Wait` waits for `WavesLocalServer.exe` too (use the process handle instead).
+- 128-sample comparison needs a driver that takes LYNX's `--buffer 128` (FL Studio ASIO kept 256).
+- Waves trials make LYNX's open 10–20 s longer (kwe 1.2 → 16–23 s headless) — profile the VST3 shell load
+  (one WaveShell instance per plugin? parallel instantiation?).
+- DSP cost of the bit-exact ports (§3.5).

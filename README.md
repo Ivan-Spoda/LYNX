@@ -69,7 +69,7 @@ LYNX ships **native** plugins inspired by the third-party plugins producers use 
 <td width="25%" valign="top">
 
 ### ⚡ Lightweight
-Lock-free engine, channels and mixer spread across threads, idle channels skipped and long audio streamed from disk. A 125-track project renders at more than 10× real time.
+Lock-free engine, channels and mixer spread across threads, idle channels skipped and long audio streamed from disk. A 125-track project renders at more than 10× real time. Measured against FL Studio 2026 on the same PC: 2.5–7× less RAM, demo songs open faster and render 2–3× faster ([benchmark](docs/analise/REA_rodada116.md)).
 
 </td>
 <td width="25%" valign="top">
