@@ -9,12 +9,12 @@ Channel Rack, Piano Roll, Playlist and Mixer in C++20 + JUCE 8, built to run wel
 Windows, macOS and Linux.</p>
 
 <p align="center">
-  <a href="https://github.com/Ka1-S/LYNX/releases/latest"><img src="https://img.shields.io/badge/Download-0.1.8%20alpha-d9534f?style=for-the-badge" alt="Download LYNX"></a>
+  <a href="https://github.com/Ka1-S/LYNX/releases"><img src="https://img.shields.io/badge/Download-0.1.8%20alpha-d9534f?style=for-the-badge" alt="Download LYNX"></a>
 </p>
 
 <p align="center">
   <a href="https://lynx-share.com"><strong>Website</strong></a> ·
-  <a href="https://github.com/Ka1-S/LYNX/releases/latest"><strong>Download</strong></a> ·
+  <a href="https://github.com/Ka1-S/LYNX/releases"><strong>Download</strong></a> ·
   <a href="#features"><strong>Features</strong></a> ·
   <a href="#opens-fl-studio-projects">FL projects</a> ·
   <a href="docs/PLUGINS.md">Built-in plugins</a> ·
@@ -240,7 +240,7 @@ A report lists what was converted, what is approximated and what was left out. F
 
 ## Download
 
-Every release on the [latest release page](https://github.com/Ka1-S/LYNX/releases/latest) has builds for all three
+Every release on the [latest release page](https://github.com/Ka1-S/LYNX/releases) has builds for all three
 platforms (`<v>` is the version, e.g. `0.1.8-alpha`):
 
 | OS | Download | Notes |
