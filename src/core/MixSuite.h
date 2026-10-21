@@ -166,9 +166,28 @@ enum Param
     band2Style, band2Drive, band2Mix, band2Level,
     band3Style, band3Drive, band3Mix, band3Level,
     band4Style, band4Drive, band4Mix, band4Level,
+    // round 128 (Saturn parity, appended): the input gain, then per band its power, state (normal / solo / mute),
+    // tone (bass / mid / treble / presence), feedback (amount, frequency) and dynamics. Every default is the old sound.
+    inputGain,
+    band1On, band1State, band1Bass, band1Mid, band1Treble, band1Presence, band1Feedback, band1FeedbackFreq, band1Dynamics,
+    band2On, band2State, band2Bass, band2Mid, band2Treble, band2Presence, band2Feedback, band2FeedbackFreq, band2Dynamics,
+    band3On, band3State, band3Bass, band3Mid, band3Treble, band3Presence, band3Feedback, band3FeedbackFreq, band3Dynamics,
+    band4On, band4State, band4Bass, band4Mid, band4Treble, band4Presence, band4Feedback, band4FeedbackFreq, band4Dynamics,
     count
 };
 constexpr int maxBands = 4;
+// a band's round-128 parameters: field 0 power, 1 state, 2 bass, 3 mid, 4 treble, 5 presence, 6 feedback,
+// 7 feedback frequency, 8 dynamics
+constexpr int extraFields = 9;
+inline int bandExtra (int band, int field) noexcept { return band1On + std::clamp (band, 0, maxBands - 1) * extraFields + std::clamp (field, 0, extraFields - 1); }
+enum class BandState { normal, solo, mute };
+BandState bandState (float v) noexcept;
+double inputDb (float v) noexcept;      // ±24 dB before everything
+double toneDb (float v) noexcept;       // ±18 dB: bass (low shelf 120 Hz), mid (bell 800 Hz), treble (high shelf 3.5 kHz),
+                                        // presence (bell 6 kHz) on the band's saturated signal
+double feedbackAmount (float v) noexcept; // 0 … 1: the band-passed output fed back into the shaper (loop gain up to 0.9)
+double feedbackHz (float v) noexcept;   // 10 Hz … 1 kHz (log): the feedback band's centre
+double dynamicsAmount (float v) noexcept; // −1 (compress) … +1 (expand) the band's level after the drive
 enum class Style { tube, tape, transistor, fuzz };
 constexpr int styles = 4;
 Style styleOf (float v) noexcept;

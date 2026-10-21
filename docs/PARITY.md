@@ -51,7 +51,7 @@ the same things. This is where most of the "missing details" were: things a user
 | A/B compare + Copy (A→B) | header (FabFilter: A/B + Copy; Fresh Air: A > B) | ❌ | |
 | Preset browser: name, previous / next, menu, save | header (all three) | ❌ | own engines had no presets at all (the generic editors only list FL presets) |
 | Help | header (FabFilter "Help", Auto-Tune ⚙ / manual) | ⚠️ | the header shows a one-line gesture hint; no help menu |
-| Resizable / full-screen window | FabFilter ⤢ corner + full-screen button, Fresh Air corner | ⚠️ | Facet resizes; the display-first editors have a fixed size |
+| Resizable / full-screen window | FabFilter ⤢ corner + full-screen button, Fresh Air corner | ⚠️ | round 128: every display-first editor window resizes (70–200 %, scaled); Facet resizes with its own layout; no full-screen button |
 | MIDI Learn | FabFilter bottom bar | ⚠️ | per control: right-click → "Link to controller" (LYNX's automation menu); no global learn mode |
 | Right-click any control: type value / reset / automate | FabFilter: right-click menu | ✅ | right-click → Type value, Reset, automation / controller link |
 | Double-click / Alt-click = reset, Ctrl-drag = fine, wheel | FabFilter | ✅ | same contract |
@@ -77,26 +77,26 @@ range.
 | Shapes | ⚠️ | Bell, Low/High Shelf, Low/High Cut, Notch, Band Pass, Tilt Shelf (no Flat Tilt, no All Pass) |
 | Slopes | ⚠️ | 6–96 dB/oct; no 0 dB/oct, no Brickwall |
 | Floating band panel: shape, slope, FREQ, GAIN, Q, band ◀ n ▶, close | ✅ | |
-| Band panel: power button (bypass one band) | ❌ | only Remove; a band can't be switched off and kept |
-| Band panel: stereo placement (L / R / Stereo / M / S) | ❌ | every band is stereo |
+| Band panel: power button (bypass one band) | ✅ | round 128: the band's coloured power button (also in the node tip and the band menu); a band switched off keeps its settings and shows a hollow node |
+| Band panel: stereo placement (L / R / Stereo / M / S) | ✅ | round 128: placement button in the panel and the band menu, an L / R / M / S tag beside the node; in the natural / linear phase modes a placed band runs minimum phase after the FIR |
 | Dynamic EQ: range, threshold, attack, release | ⚠️ | attack / release are global (original: per band); no "auto" threshold |
 | Dynamic EQ: external side chain per band, side-chain filtering | ⚠️ | one detector switch (input / side chain) for all bands |
 | Spectral dynamics (density, tilt) | ❌ | Pro-Q 4 feature |
 | Solo band (audition) | ✅ | |
-| Hover tooltip next to a node (freq, gain, Q, power, solo) | ⚠️ | the header hint shows the band summary; no floating tip at the node |
+| Hover tooltip next to a node (freq, gain, Q, power, solo) | ✅ | read-out box at the node with power (round 128), solo and remove |
 | Right-click a node: shape, slope, dynamic range, solo, reset, remove | ✅ | |
 | Processing: Zero Latency / Natural Phase / Linear Phase | ✅ | |
 | Linear-phase resolution | ❌ | fixed |
 | Character (Clean / Subtle / Warm) | ❌ | |
 | Gain scale | ✅ | |
 | Output level | ✅ | |
-| Output pan / pan mode, phase invert | ❌ | |
-| Auto gain | ❌ | |
+| Output pan / pan mode, phase invert | ✅ | round 128: PAN in the bottom bar (left / right or mid / side), polarity in OUT's right-click menu |
+| Auto gain | ✅ | round 128: bottom-bar button; takes back the mean level change of the static curve |
 | Analyser: off / pre / post / pre+post | ✅ | |
-| Analyser range, resolution, speed, tilt, freeze, collisions, spectrum grab | ❌ | fixed tilt 4.5 dB/oct, no freeze |
-| Display range 3 / 6 / 12 / 30 dB | ✅ | |
+| Analyser range, resolution, speed, tilt, freeze, collisions, spectrum grab | ⚠️ | round 128: range 60 / 90 / 120 dB, speed (5 steps), tilt 0 – 6 dB/oct, freeze in the analyser menu (saved with the slot); no resolution, collisions or spectrum grab |
+| Display range 3 / 6 / 12 / 30 dB | ✅ | saved with the slot since round 128 |
 | EQ match (external spectrum) | ❌ | |
-| Piano display (note names on the frequency axis) | ⚠️ | note name in the hint, no piano strip |
+| Piano display (note names on the frequency axis) | ✅ | piano strip toggle at the bottom left; note name of the mouse position |
 | Output meter with peak hold | ✅ | |
 | Window size | ✅ | resizable |
 
@@ -258,19 +258,19 @@ sources, 50 modulation slots).
 | Spectrum with bands side by side, split by clicking / double-clicking | ✅ | |
 | Drag a band's handle = drive, drag a crossover | ✅ | |
 | Up to 6 bands | ⚠️ | 4 |
-| Floating band panel: power, style button, MIX, FEEDBACK + FREQ, DYNAMICS, big DRIVE, TONE faders, LEVEL | ⚠️ | style, MIX, DRIVE, LEVEL per band; tone (tilt / low cut / high cut) is global; no feedback, no dynamics |
+| Floating band panel: power, style button, MIX, FEEDBACK + FREQ, DYNAMICS, big DRIVE, TONE faders, LEVEL | ✅ | round 128: the same order — power / solo / mute, style, MIX, FEEDBACK, FREQ, DYNAMICS, DRIVE, BASS / MID / TREBLE / PRESENCE faders, LEVEL |
 | 28 styles in 6 families | ⚠️ | 4 families (tube, tape, transistor, fuzz) |
-| Per-band tone: Bass / Mid / Treble / Presence | ❌ | global tilt + low / high cut instead |
-| Per-band power, solo, mute | ❌ | |
+| Per-band tone: Bass / Mid / Treble / Presence | ✅ | round 128: ±18 dB (Saturn ±24) on the band's saturated signal — LYNX's own curves (shelf 120 Hz, bell 800 Hz, shelf 3.5 kHz, bell 6 kHz); the global tilt / cuts stay as LYNX extras in the bottom bar |
+| Per-band power, solo, mute | ✅ | round 128 (panel buttons, tags on the display) |
 | Drive pan (L / R), band pan | ❌ | |
-| Feedback amount / frequency | ❌ | |
-| Dynamics (compress / expand the band) | ❌ | |
+| Feedback amount / frequency | ✅ | round 128: a band-passed loop around the shaper (10 Hz – 1 kHz, loop gain up to 0.9) |
+| Dynamics (compress / expand the band) | ✅ | round 128: −1 … +1, the band's level follows its input level |
 | Modulation (+ Add Modulation: XLFO, EG, EF, MIDI, XY, slots) | ❌ | |
 | Crossover slope (bottom bar) | ✅ | global (original per band) |
 | Linear phase / minimum phase | ❌ | |
 | High Quality mode (oversampling) | ✅ | "Oversampling 2x / 4x / 8x" |
 | Channel mode M/S | ❌ | |
-| In / Out gain + mix | ⚠️ | Out + Dry/Wet; no input gain |
+| In / Out gain + mix | ✅ | round 128: In (±24 dB) in the bottom bar; Out; Dry / wet |
 | Auto gain | — | LYNX extra (Saturn has none; Decapitator has Auto) |
 | Decapitator: Drive, 5 styles (A, E, N, T, P), Low Cut, Tone, High Cut, Thump, Steep, Mix, Output, Auto, Punish | ⚠️ | trial not installed; Ember covers drive / tone / cuts / mix / auto gain, no Thump / Steep / Punish |
 

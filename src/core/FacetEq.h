@@ -13,6 +13,11 @@
 // behaviour) [42 + b] dynamic range of band b (0.5 = 0 dB = a static band), [50 + b] its threshold, [58] attack,
 // [59] release, [60] phase mode (zero latency / natural / linear), [61] solo band (0 = none), [62] dynamics detector
 // (the EQ's input / the slot's sidechain), [63] analyser display (editor only: off, pre, post, pre + post).
+// (round 128, Pro-Q parity, appended the same way) [64 + b] band bypass (0 = on; 1 = switched off, keeping its
+// settings — stored this way so a zeroed parameter array, e.g. Crest's side-chain EQ, has every band on), [72 + b] stereo placement (stereo, left, right, mid, side), [80] auto gain, [81] output polarity
+// inverted, [82] output pan (0.5 = centre), [83] pan mode (left / right or mid / side), and editor-only display
+// settings: [84] analyser range (60 / 90 / 120 dB), [85] analyser speed, [86] analyser tilt (0 … 6 dB/oct),
+// [87] display range (3 / 6 / 12 / 30 dB).
 //
 // Dynamic EQ (docs/analise/REA_rodada103.md §2, measured on the reference): each band with a gain (bell, shelves,
 // tilt) whose range is not 0 listens to its own region of the detector signal (band pass at the band frequency and
@@ -42,7 +47,17 @@ constexpr int phaseParam = 60;
 constexpr int soloParam = 61;
 constexpr int detectorParam = 62;
 constexpr int analyzerParam = 63;
-constexpr int paramCount = 64;
+constexpr int powerParam0 = 64;     // + band (round 128)
+constexpr int placementParam0 = 72; // + band
+constexpr int autoGainParam = 80;
+constexpr int invertParam = 81;
+constexpr int panParam = 82;
+constexpr int panModeParam = 83;
+constexpr int specRangeParam = 84;  // editor only
+constexpr int specSpeedParam = 85;  // editor only
+constexpr int specTiltParam = 86;   // editor only
+constexpr int displayRangeParam = 87; // editor only
+constexpr int paramCount = 88;
 constexpr int maxSections = 8; // 96 dB/oct = 16th order
 
 enum class Shape { off, bell, lowShelf, highShelf, lowCut, highCut, notch, bandPass, tiltShelf };
@@ -85,6 +100,24 @@ Analyzer analyzer (float v) noexcept;
 float analyzerValue (Analyzer a) noexcept;
 bool isDynamic (const EffectParams& params, int band) noexcept;
 const char* phaseName (Phase p) noexcept;
+
+// round 128 (Pro-Q parity)
+enum class Placement { stereo, left, right, mid, side };
+constexpr int placementCount = 5;
+Placement placement (float v) noexcept;
+float placementValue (Placement p) noexcept;
+const char* placementName (Placement p) noexcept;
+bool bandPower (const EffectParams& params, int band) noexcept; // the band's power switch (on by default)
+double panAmount (float v) noexcept;   // −1 (left / mid only) … +1 (right / side only)
+bool panMidSide (float v) noexcept;
+double analyzerRangeDb (float v) noexcept;  // 60 / 90 / 120
+int analyzerSpeed (float v) noexcept;       // 0 very slow … 4 very fast
+double analyzerTiltDb (float v) noexcept;   // 0 / 1.5 / 3 / 4.5 / 6 dB per octave
+double displayRangeDb (float v) noexcept;   // 3 / 6 / 12 / 30
+float displayRangeValue (double db) noexcept;
+// The level change of the EQ's static curve (dB) that auto gain takes back: the mean of the curve over log-spaced
+// frequencies (20 Hz … 20 kHz) with the dynamics at rest.
+double autoGainDb (const EffectParams& params, double sampleRate) noexcept;
 
 // The dynamic gain (dB) a band applies for a detector level (dB, sine peak): 0 below the knee, then 1 dB per dB over the
 // threshold (10 dB soft knee), clamped at the range; the sign follows the range.

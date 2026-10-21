@@ -1430,7 +1430,7 @@ private:
 class EmberEditor final : public ProEditor
 {
 public:
-    EmberEditor (AudioEngine& e, int t, int s, bool d) : ProEditor (e, t, s, EffectKind::ember, d, 860, 520)
+    EmberEditor (AudioEngine& e, int t, int s, bool d) : ProEditor (e, t, s, EffectKind::ember, d, 960, 540)
     {
         specArea = disp();
         specMinHz = 20.0;
@@ -1439,8 +1439,11 @@ public:
     }
 
 private:
-    enum { idRemove = 1, idPrev, idNext };
+    enum { idRemove = 1, idPrev, idNext, idPower, idSolo, idMute };
     int selected = 0, dragHandle = -1, dragEdge = -1, hoverHandle = -1;
+    int xp (int b, int f) const { return mixsuite::ember::bandExtra (b, f); } // round 128: a band's power, state, tone, feedback, dynamics
+    bool powered (int b) const { return v (xp (b, 0)) >= 0.5f; }
+    mixsuite::ember::BandState state (int b) const { return mixsuite::ember::bandState (v (xp (b, 1))); }
 
     juce::String title() const override { return "Ember Saturator"; }
     juce::String gestures() const override { return tr ("Double-click: split a band  -  drag a band's handle: drive  -  drag a line: crossover"); }
@@ -1450,7 +1453,7 @@ private:
     juce::Rectangle<float> panelArea() const
     {
         const auto d = disp();
-        return { d.getCentreX() - 330.0f, d.getBottom() - 176.0f, 660.0f, 168.0f };
+        return { d.getCentreX() - 420.0f, d.getBottom() - 176.0f, 840.0f, 168.0f };
     }
     int count() const { return mixsuite::ember::bandCount (v (mixsuite::ember::bands)); }
     int fp (int b, int f) const { return mixsuite::ember::bandParam (b, f); }
@@ -1495,31 +1498,52 @@ private:
         const auto a = panelArea();
         const auto b = selected;
         auto add = [&] (Ctl c) { c.colour = peqview::bandColour (b); out.push_back (c); };
-        add (menu ({ a.getX() + 70.0f, a.getY() + 10.0f, 150.0f, 26.0f }, fp (b, 0), {}, "Tube|Tape|Transistor|Fuzz"));
-        add (knob ({ a.getX() + 16.0f, a.getY() + 56.0f, 78.0f, 94.0f }, fp (b, 2), tr ("Mix")));
-        add (knob ({ a.getX() + 196.0f, a.getY() + 24.0f, 132.0f, 144.0f }, fp (b, 1), tr ("Drive"), 2));
-        add (knob ({ a.getX() + 108.0f, a.getY() + 56.0f, 78.0f, 94.0f }, fp (b, 3), tr ("Level"), 1, true));
-        out.push_back (fader ({ a.getX() + 356.0f, a.getY() + 12.0f, 54.0f, 150.0f }, tone, tr ("Tilt"), true));
-        out.push_back (fader ({ a.getX() + 416.0f, a.getY() + 12.0f, 54.0f, 150.0f }, lowCut, tr ("Low cut")));
-        out.push_back (fader ({ a.getX() + 476.0f, a.getY() + 12.0f, 54.0f, 150.0f }, highCut, tr ("High cut")));
+        // Saturn's band panel order (round 128): power, solo / mute, style | MIX, FEEDBACK, FREQ, DYNAMICS | DRIVE |
+        // the band's TONE (bass, mid, treble, presence) | LEVEL; the whole effect's auto gain and dry / wet on the right
+        out.push_back (button ({ a.getX() + 70.0f, a.getY() + 12.0f, 32.0f, 22.0f }, idPower, tr ("On"), powered (b), tr ("Band on / off: a band switched off passes clean")));
+        out.push_back (button ({ a.getX() + 106.0f, a.getY() + 12.0f, 22.0f, 22.0f }, idSolo, "S", state (b) == BandState::solo, tr ("Solo the band")));
+        out.push_back (button ({ a.getX() + 130.0f, a.getY() + 12.0f, 22.0f, 22.0f }, idMute, "M", state (b) == BandState::mute, tr ("Mute the band")));
+        add (menu ({ a.getX() + 160.0f, a.getY() + 10.0f, 150.0f, 26.0f }, fp (b, 0), {}, "Tube|Tape|Transistor|Fuzz"));
+        add (knob ({ a.getX() + 10.0f, a.getY() + 60.0f, 66.0f, 92.0f }, fp (b, 2), tr ("Mix")));
+        add (knob ({ a.getX() + 78.0f, a.getY() + 60.0f, 66.0f, 92.0f }, xp (b, 6), tr ("Feedback")));
+        add (knob ({ a.getX() + 146.0f, a.getY() + 60.0f, 66.0f, 92.0f }, xp (b, 7), tr ("Freq")));
+        add (knob ({ a.getX() + 214.0f, a.getY() + 60.0f, 70.0f, 92.0f }, xp (b, 8), tr ("Dynamics"), 1, true));
+        add (knob ({ a.getX() + 290.0f, a.getY() + 24.0f, 132.0f, 144.0f }, fp (b, 1), tr ("Drive"), 2));
+        add (fader ({ a.getX() + 432.0f, a.getY() + 14.0f, 42.0f, 148.0f }, xp (b, 2), tr ("Bass"), true));
+        add (fader ({ a.getX() + 476.0f, a.getY() + 14.0f, 42.0f, 148.0f }, xp (b, 3), tr ("Mid"), true));
+        add (fader ({ a.getX() + 520.0f, a.getY() + 14.0f, 42.0f, 148.0f }, xp (b, 4), tr ("Treble"), true));
+        add (fader ({ a.getX() + 564.0f, a.getY() + 14.0f, 42.0f, 148.0f }, xp (b, 5), tr ("Presence"), true));
+        add (knob ({ a.getX() + 612.0f, a.getY() + 60.0f, 70.0f, 92.0f }, fp (b, 3), tr ("Level"), 1, true));
         if (count() > 1)
         {
             out.push_back (button ({ a.getRight() - 72.0f, a.getY() + 10.0f, 20.0f, 20.0f }, idPrev, "<", false, tr ("Previous / next band")));
             out.push_back (button ({ a.getRight() - 50.0f, a.getY() + 10.0f, 20.0f, 20.0f }, idNext, ">", false, tr ("Previous / next band")));
             out.push_back (button ({ a.getRight() - 26.0f, a.getY() + 10.0f, 20.0f, 20.0f }, idRemove, "x", false, tr ("Remove the band (its neighbour takes its range)")));
         }
-        out.push_back (toggle ({ a.getRight() - 112.0f, a.getY() + 52.0f, 100.0f, 22.0f }, autoGain, tr ("Auto gain")));
-        out.push_back (knob ({ a.getRight() - 96.0f, a.getY() + 84.0f, 70.0f, 80.0f }, mix, tr ("Dry / wet"), 0));
+        out.push_back (toggle ({ a.getRight() - 140.0f, a.getY() + 52.0f, 128.0f, 22.0f }, autoGain, tr ("Auto gain")));
+        out.push_back (knob ({ a.getRight() - 112.0f, a.getY() + 84.0f, 70.0f, 80.0f }, mix, tr ("Dry / wet"), 0));
         const auto bar = barArea();
         const auto cy = bar.getCentreY();
-        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 190.0f, 22.0f }, xoverSlope, tr ("Crossover"), "12 dB/oct|24 dB/oct|48 dB/oct", { 0.0f, 0.5f, 1.0f }));
-        out.push_back (barMenu ({ 210.0f, cy - 11.0f, 170.0f, 22.0f }, quality, tr ("Oversampling"), "2x|4x|8x", { 0.0f, 0.5f, 1.0f }));
-        out.push_back (barMenu ({ 390.0f, cy - 11.0f, 140.0f, 22.0f }, bands, tr ("Bands"), "1|2|3|4"));
-        out.push_back (barValue ({ bar.getRight() - 150.0f, cy - 11.0f, 140.0f, 22.0f }, output, tr ("Out")));
+        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 160.0f, 22.0f }, xoverSlope, tr ("Crossover"), "12 dB/oct|24 dB/oct|48 dB/oct", { 0.0f, 0.5f, 1.0f }));
+        out.push_back (barMenu ({ 176.0f, cy - 11.0f, 140.0f, 22.0f }, quality, tr ("Oversampling"), "2x|4x|8x", { 0.0f, 0.5f, 1.0f }));
+        out.push_back (barMenu ({ 322.0f, cy - 11.0f, 100.0f, 22.0f }, bands, tr ("Bands"), "1|2|3|4"));
+        out.push_back (barValue ({ 428.0f, cy - 11.0f, 100.0f, 22.0f }, inputGain, tr ("In")));
+        out.push_back (barValue ({ 534.0f, cy - 11.0f, 90.0f, 22.0f }, tone, tr ("Tilt")));
+        out.push_back (barValue ({ 630.0f, cy - 11.0f, 110.0f, 22.0f }, lowCut, tr ("Low cut")));
+        out.push_back (barValue ({ 746.0f, cy - 11.0f, 120.0f, 22.0f }, highCut, tr ("High cut")));
+        out.push_back (barValue ({ bar.getRight() - 90.0f, cy - 11.0f, 82.0f, 22.0f }, output, tr ("Out")));
     }
 
-    // band settings as a block (style, drive, mix, level) to move bands around when splitting / removing
-    std::array<float, 4> bandValues (int b) const { return { v (fp (b, 0)), v (fp (b, 1)), v (fp (b, 2)), v (fp (b, 3)) }; }
+    // band settings as a block (style, drive, mix, level + round 128's power, state, tone, feedback, dynamics) to move
+    // bands around when splitting / removing
+    static constexpr int blockSize = 4 + mixsuite::ember::extraFields;
+    int blockParam (int b, int k) const { return k < 4 ? fp (b, k) : xp (b, k - 4); }
+    std::array<float, blockSize> bandValues (int b) const
+    {
+        std::array<float, blockSize> out {};
+        for (int k = 0; k < blockSize; ++k) out[(std::size_t) k] = v (blockParam (b, k));
+        return out;
+    }
 
     void splitAt (float x)
     {
@@ -1531,7 +1555,7 @@ private:
         std::vector<double> xo;
         for (int i = 0; i < n - 1; ++i) xo.push_back (xoHz (i));
         xo.insert (xo.begin() + at, hz);
-        std::vector<std::array<float, 4>> vals;
+        std::vector<std::array<float, blockSize>> vals;
         for (int b = 0; b < n; ++b) vals.push_back (bandValues (b));
         vals.insert (vals.begin() + at + 1, vals[(std::size_t) at]);
         apply (xo, vals);
@@ -1545,14 +1569,14 @@ private:
         std::vector<double> xo;
         for (int i = 0; i < n - 1; ++i) xo.push_back (xoHz (i));
         xo.erase (xo.begin() + juce::jmin (b, n - 2)); // the line on its right (the last band: on its left)
-        std::vector<std::array<float, 4>> vals;
+        std::vector<std::array<float, blockSize>> vals;
         for (int k = 0; k < n; ++k)
             if (k != b) vals.push_back (bandValues (k));
         apply (xo, vals);
         selected = juce::jmin (b, n - 2);
     }
 
-    void apply (const std::vector<double>& xo, const std::vector<std::array<float, 4>>& vals)
+    void apply (const std::vector<double>& xo, const std::vector<std::array<float, blockSize>>& vals)
     {
         using namespace mixsuite::ember;
         std::vector<std::pair<int, float>> c;
@@ -1560,13 +1584,17 @@ private:
         c.push_back ({ bands, (float) (n - 1) / 3.0f });
         for (int i = 0; i < (int) xo.size(); ++i) c.push_back ({ xover1 + i, crossoverValue (xo[(std::size_t) i]) });
         for (int b = 0; b < n; ++b)
-            for (int f = 0; f < 4; ++f) c.push_back ({ fp (b, f), vals[(std::size_t) b][(std::size_t) f] });
+            for (int f = 0; f < blockSize; ++f) c.push_back ({ blockParam (b, f), vals[(std::size_t) b][(std::size_t) f] });
         set (c);
     }
 
     void buttonPressed (const Ctl& c, const juce::MouseEvent&) override
     {
+        using mixsuite::ember::BandState;
         if (c.id == idRemove) removeBand (selected);
+        else if (c.id == idPower) set ({ { xp (selected, 0), powered (selected) ? 0.0f : 1.0f } });
+        else if (c.id == idSolo) set ({ { xp (selected, 1), state (selected) == BandState::solo ? 0.0f : 0.5f } });
+        else if (c.id == idMute) set ({ { xp (selected, 1), state (selected) == BandState::mute ? 0.0f : 1.0f } });
         else if (c.id == idPrev) selected = (selected + count() - 1) % count();
         else if (c.id == idNext) selected = (selected + 1) % count();
         repaint();
@@ -1666,8 +1694,11 @@ private:
             g.drawRoundedRectangle (h, 4.0f, 1.0f);
             g.setColour (colour::textPrimary);
             g.setFont (font (type::caption, true));
-            g.drawText (caps (text (fp (b, 0))) + "  " + text (fp (b, 1)), juce::Rectangle<float> (region.getX() + 2.0f, h.getY() - 18.0f, region.getWidth() - 4.0f, 14.0f),
-                        juce::Justification::centred, true);
+            juce::String tag = caps (text (fp (b, 0))) + "  " + text (fp (b, 1));
+            if (! powered (b)) tag = tr ("OFF") + "  " + tag;
+            else if (state (b) == mixsuite::ember::BandState::solo) tag = "S  " + tag;
+            else if (state (b) == mixsuite::ember::BandState::mute) tag = "M  " + tag;
+            g.drawText (tag, juce::Rectangle<float> (region.getX() + 2.0f, h.getY() - 18.0f, region.getWidth() - 4.0f, 14.0f), juce::Justification::centred, true);
         }
         for (int i = 1; i < n; ++i)
         {
@@ -1692,7 +1723,7 @@ private:
             g.setColour (colour::textSecondary);
             g.setFont (font (type::small, true));
             g.drawText (tr ("Band {0}", { juce::String (selected + 1) }), juce::Rectangle<float> (a.getX() + 12.0f, a.getY() + 10.0f, 58.0f, 26.0f), juce::Justification::centredLeft, false);
-            caption (g, { a.getX() + 352.0f, a.getY() + 2.0f, 182.0f, 12.0f }, tr ("Tone (all bands)"));
+            caption (g, { a.getX() + 432.0f, a.getY() + 2.0f, 174.0f, 12.0f }, tr ("Tone"));
             // the curve of the band's style, as a small preview
             const auto cv = juce::Rectangle<float> (a.getX() + 228.0f, a.getY() + 10.0f, 0.0f, 0.0f);
             juce::ignoreUnused (cv, fx);
@@ -1907,6 +1938,28 @@ std::unique_ptr<ProEditor> make (AudioEngine& engine, int track, int slot, bool 
     }
 }
 
+// The editor drawn at the window's size (round 128: the originals' windows can be resized): the layout is fixed, the
+// whole editor is scaled (mouse positions follow the transform), the window keeps the editor's proportions.
+class ScaledHolder final : public juce::Component
+{
+public:
+    explicit ScaledHolder (std::unique_ptr<ProEditor> e) : editor (std::move (e))
+    {
+        baseW = juce::jmax (1, editor->getWidth());
+        baseH = juce::jmax (1, editor->getHeight());
+        addAndMakeVisible (*editor);
+        setSize (baseW, baseH);
+    }
+    void resized() override
+    {
+        const auto s = juce::jmin ((float) getWidth() / (float) baseW, (float) getHeight() / (float) baseH);
+        editor->setBounds (0, 0, baseW, baseH);
+        editor->setTransform (juce::AffineTransform::scale (s));
+    }
+    std::unique_ptr<ProEditor> editor;
+    int baseW = 1, baseH = 1;
+};
+
 class ProEditorWindow final : public juce::DocumentWindow
 {
 public:
@@ -1915,7 +1968,16 @@ public:
     {
         setUsingNativeTitleBar (true);
         content = editor.get();
-        setContentOwned (editor.release(), true);
+        auto holder = std::make_unique<ScaledHolder> (std::move (editor));
+        const auto w = holder->baseW, h = holder->baseH;
+        setContentOwned (holder.release(), true);
+        setResizable (true, false);
+        if (auto* c = getConstrainer())
+        {
+            c->setFixedAspectRatio ((double) w / (double) h);
+            c->setMinimumSize (juce::roundToInt (w * 0.7), juce::roundToInt (h * 0.7));
+            c->setMaximumSize (w * 2, h * 2);
+        }
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
         keepAboveMainWindow (*this);

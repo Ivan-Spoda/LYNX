@@ -32,7 +32,57 @@ Aether ← Fresh Air, LYNX Tune ← Auto-Tune Pro (Auto mode).
   generator; Facet lacks per-band power and stereo placement.
 
 ## 3. Implementation
-(filled in per batch)
+Work split: parity128 (this branch) did Facet EQ, Ember and the resizable editor windows; sub-branches parity128a
+(Apex, Hush), parity128b (Crest, Sentry, Prism) and parity128c (LYNX Tune) are merged in (§3a–§3c). The shared
+editor header (undo / redo, A/B, presets) is round 129's (parity129 builds one PresetBar for every LYNX editor), so
+it is not duplicated here. Rules kept: new parameters are appended (projects are positional; a missing parameter
+loads at its default) and every default leaves the old output sample for sample (tests below; the fitted models of
+vmatch123/124/127 are not retuned).
+
+### 3.1 Facet EQ ← Pro-Q 4 [EXEC: tests/Parity128Tests.inc]
+- `maxEffectParams` 64 → 96 (Facet needs 88; the arrays are per slot, nothing else depends on 64).
+- Band power ([64 + b], Pro-Q's band power button): a band switched off keeps its settings and does nothing
+  (`analogSections` returns no section, `isDynamic` is false). Editor: the band's power button replaces the number dot
+  in the panel, a power icon in the node read-out, "Band on" in the band menu, a hollow node while off.
+- Stereo placement ([72 + b]: Stereo, Left, Right, Mid, Side). Zero latency: stereo bands on both channels, L / R bands
+  on theirs, then one M/S pass for the mid / side bands (M = (L + R) / 2, S = (L − R) / 2; skipped when no band needs
+  it, so the default path is the old one sample for sample). Natural / linear phase: the FIR holds the stereo bands
+  only; placed bands run as the zero-latency sections after it (minimum phase — noted in PARITY.md). Editor: placement
+  button in the panel (Pro-Q's "Stereo" button), submenu in the band menu, an L / R / M / S tag beside the node.
+- Output stage: auto gain ([80], takes back the mean of the static curve over 32 log-spaced points 20 Hz – 20 kHz),
+  polarity ([81]), pan ([82], −1 … +1, the far channel to −∞ like Pro-Q's "Left: 0 dB / Right: −INF") in left /
+  right or mid / side ([83]). Bottom bar: "Auto gain" button and PAN / M/S value; OUT's right-click menu adds
+  polarity, auto gain and the pan mode.
+- Display settings saved with the slot: analyser range 60 / 90 / 120 dB ([84]), speed in 5 steps ([85]: the fall
+  rate 0.3 … 6 dB per frame, medium = the old 1.5), tilt 0 … 6 dB/oct ([86], default 4.5 = the old fixed tilt), the
+  graph's ±3 / 6 / 12 / 30 dB ([87], was editor-only), and Freeze (editor only) in the analyser menu.
+- Tests: defaults bit-identical to a bell without the new controls; power off = flat, settings kept; Left / Right
+  leave the other channel untouched and equal the stereo band on theirs; Mid leaves a pure side signal untouched and
+  lifts a pure mid one by the gain, Side the opposite; a Left band in natural phase leaves the right channel = the
+  delayed input; auto gain = the predicted dB; polarity = −output; pan right silences the left channel; M/S pan
+  fully "side" removes a mono signal.
+
+### 3.2 Ember Saturator ← Saturn 2 [EXEC: tests/Parity128Tests.inc]
+- Appended: Input (±24 dB) and per band (×4) power, state (normal / solo / mute), tone Bass / Mid / Treble /
+  Presence (±18 dB: LYNX's own curves — low shelf 120 Hz, bell 800 Hz, high shelf 3.5 kHz, bell 6 kHz — on the
+  band's saturated signal), feedback amount + frequency (a band-pass loop around the shaper at the oversampled rate,
+  10 Hz – 1 kHz, loop gain up to 0.9), dynamics −1 … +1 (the band's level follows its input level: ±0.5 dB per dB
+  over −18 dBFS, clamped at ±18 dB). Every stage is skipped at its neutral value (old output unchanged).
+- Editor: the band panel now follows Saturn's order — power / solo / mute, style, MIX, FEEDBACK, FREQ, DYNAMICS, the
+  big DRIVE, the four TONE faders, LEVEL — with auto gain and dry / wet on its right; the global tilt / low cut /
+  high cut (LYNX extras) and In moved to the bottom bar; the window grew to 960 × 540. Bands split / removed carry
+  all their settings. The display tags switched-off / soloed / muted bands.
+- Saturn 2 translation (src/core/FabFilterStates.cpp): input gain, per-band feedback (%, Hz), dynamics, tone (dB),
+  state. Offsets 0 / 1 / 14 of each 17-value band block follow the plug-in's own VST3 parameter order [model];
+  Ember's tone curves are LYNX's, not measured against Saturn — vmatch can refine them if her states use the tone.
+- Tests: defaults; power off = the delayed input; mute = silence; a soloed high band removes a 220 Hz tone (< −20
+  dB); bass +12 dB lifts 60 Hz by 10–12.5 dB and leaves 3 kHz; presence lifts 6 kHz; input +12 dB; expansion /
+  compression; feedback bounded; translation of a Saturn state with tone / feedback / dynamics / mute.
+
+### 3.3 Resizable editor windows
+The display-first editors (Apex, Hush, Crest, Sentry, Prism, Ember, Aether) open in a resizable window that keeps
+the editor's proportions (70 % … 200 %); the editor is drawn scaled (src/ui/ProEditors.cpp `ScaledHolder`). Facet EQ
+already resized with its own layout.
 
 ## Where I stopped
 - Done: §1, §2, docs/PARITY.md (tables + before scores), Desktop page.

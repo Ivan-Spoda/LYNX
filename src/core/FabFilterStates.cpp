@@ -417,6 +417,19 @@ int fromSaturn2 (const State& s, EffectSlot& slot)
         set (bandParam (b, 3), enabled ? linValue (levelDb (s.at (base + 11)), -18.0, 18.0) : 0.0f);
         if (b < ours - 1)
             set (xover1 + b, crossoverValue (std::pow (2.0, (double) s.at (base + 15))));
+        // round 128 (Ember's per-band controls): feedback amount (%) and frequency (Hz) at 0 / 1, dynamics at 2, tone
+        // bass / mid / treble / presence (dB) at 6 … 9, state (normal, solo, mute, solo-mute) at 14. Offsets 0, 1 and
+        // 14 follow the order of the plug-in's own VST3 parameter list (17 per band) [model]; Ember's tone stages are
+        // LYNX's own curves, not measured against Saturn's.
+        set (bandExtra (b, 6), clamp01 (s.at (base + 0) / 100.0));
+        set (bandExtra (b, 7), (float) std::clamp (std::log (std::clamp ((double) s.at (base + 1), 10.0, 1000.0) / 10.0) / std::log (100.0), 0.0, 1.0));
+        set (bandExtra (b, 8), linValue (std::clamp ((double) s.at (base + 2), -1.0, 1.0), -1.0, 1.0));
+        for (int k = 0; k < 4; ++k)
+            set (bandExtra (b, 2 + k), linValue (std::clamp ((double) s.at (base + 6 + (std::size_t) k), -18.0, 18.0), -18.0, 18.0));
+        {
+            const auto st = roundIndex (s.at (base + 14));
+            set (bandExtra (b, 1), st == 1 ? 0.5f : (st == 2 || st == 3) ? 1.0f : 0.0f);
+        }
         if (b == 0)
         {
             static constexpr int slopes[5] { 12, 12, 24, 24, 48 };
@@ -425,6 +438,7 @@ int fromSaturn2 (const State& s, EffectSlot& slot)
         }
     }
     set (mix, clamp01 (s.at (5) / 100.0));
+    set (inputGain, linValue (std::clamp ((double) s.at (0), -24.0, 24.0), -24.0, 24.0)); // round 128
     set (output, linValue (s.at (2), -18.0, 18.0));
     set (autoGain, 1.0f); // Saturn compensates its level as the drive rises (§4)
     return n;

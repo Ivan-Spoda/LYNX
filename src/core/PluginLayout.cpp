@@ -1,7 +1,9 @@
 #include "core/PluginLayout.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -1714,6 +1716,45 @@ Layout emberLayout()
             k.whenParam = "Bands";
             k.whenMin = name.whenMin;
             v.push_back (k);
+        }
+    }
+
+    // round 128 (Saturn parity): the input gain and each band's power, solo / mute, tone, feedback and dynamics
+    v.push_back (dial (250, 162, 20, "Input", TR_NOOP ("Input"), bipolar));
+    l.height = 640;
+    v.push_back (section (4, 440, 512, 196, TR_NOOP ("Band character")));
+    static const char* extraHeads[] { TR_NOOP ("On"), TR_NOOP ("Solo / mute"), TR_NOOP ("Bass"), TR_NOOP ("Mid"), TR_NOOP ("Treble"),
+                                      TR_NOOP ("Presence"), TR_NOOP ("Feedback"), TR_NOOP ("Freq"), TR_NOOP ("Dynamics") };
+    static const float extraX[] { 54.0f, 84.0f, 186.0f, 230.0f, 274.0f, 318.0f, 372.0f, 420.0f, 472.0f };
+    for (int c = 0; c < 9; ++c)
+        v.push_back (label (extraX[c] - (c == 1 ? 0.0f : 24.0f), 458, c == 1 ? 72.0f : 48.0f, 14, extraHeads[c]));
+    static const char* extraFieldNames[] { "on", "state", "bass", "mid", "treble", "presence", "feedback", "fb freq.", "dynamics" };
+    static std::array<std::array<std::array<char, 24>, 9>, 4> extraNames {};
+    for (int b = 0; b < 4; ++b)
+    {
+        const auto cy = 492.0f + 36.0f * (float) b;
+        auto name = label (12, cy - 8.0f, 24, 16, rowNames[b]);
+        name.colour = b;
+        if (b > 0)
+        {
+            name.whenParam = "Bands";
+            name.whenMin = 0.17f + 0.333f * (float) (b - 1);
+        }
+        v.push_back (name);
+        for (int c = 0; c < 9; ++c)
+        {
+            auto& n = extraNames[(std::size_t) b][(std::size_t) c];
+            std::snprintf (n.data(), n.size(), "B%d %s", b + 1, extraFieldNames[c]);
+            LayoutItem item;
+            if (c == 0) item = toggle (extraX[0] - 14.0f, cy - 9.0f, 28, 18, n.data(), nullptr);
+            else if (c == 1) item = tabs (extraX[1], cy - 9.0f, 90, 18, n.data(), TR_NOOP ("-|S|M"), { 0.0f, 0.5f, 1.0f });
+            else item = knob (extraX[c], cy, 20, n.data(), nullptr, cy + 10.0f, noCaption | (c >= 2 && c <= 5 ? bipolar : 0) | (c == 8 ? bipolar : 0));
+            if (b > 0)
+            {
+                item.whenParam = "Bands";
+                item.whenMin = name.whenMin;
+            }
+            v.push_back (item);
         }
     }
     return l;

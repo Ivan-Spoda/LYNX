@@ -829,6 +829,12 @@ double crossoverHz (float v) noexcept { return logMap (v, 30.0, 18000.0); }
 float crossoverValue (double hz) noexcept { return (float) std::clamp (std::log (hz / 30.0) / std::log (600.0), 0.0, 1.0); }
 int slopeDbOct (float v) noexcept { return v < 0.25f ? 12 : (v < 0.75f ? 24 : 48); }
 double bandLevelDb (float v) noexcept { return lin (v, -18.0, 18.0); }
+BandState bandState (float v) noexcept { return (BandState) std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * 2.0f), 0, 2); }
+double inputDb (float v) noexcept { return lin (v, -24.0, 24.0); }
+double toneDb (float v) noexcept { return lin (v, -18.0, 18.0); }
+double feedbackAmount (float v) noexcept { return lin (v, 0.0, 1.0); }
+double feedbackHz (float v) noexcept { return logMap (v, 10.0, 1000.0); }
+double dynamicsAmount (float v) noexcept { return lin (v, -1.0, 1.0); }
 int bandParam (int band, int field) noexcept
 {
     if (band <= 0)
@@ -870,6 +876,84 @@ float shape (Style s, float x) noexcept
 
 namespace
 {
+// A band's round-128 stages (Saturn parity): tone after the shaper, a feedback loop around it, dynamics on its level.
+// Each is skipped while it is at its neutral setting, so the old sound is untouched.
+struct BandExtras
+{
+    std::array<Biquad, 4> tone;   // bass, mid, treble, presence
+    bool toneOn = false;
+    Biquad fbBand;                // the feedback band (at the oversampled rate)
+    double fbGain = 0.0;
+    float fbLast[2] {};
+    double dyn = 0.0, env = 0.0, envAtk = 0.0, envRel = 0.0;
+    std::array<float, 4> lastTone { -1.0f, -1.0f, -1.0f, -1.0f };
+    float lastFbHz = -1.0f;
+    int lastFactor = 0;
+
+    void reset() noexcept
+    {
+        for (auto& t : tone) t.reset();
+        fbBand.reset();
+        fbLast[0] = fbLast[1] = 0.0f;
+        env = 0.0;
+    }
+
+    void configure (const EffectParams& p, int band, double sr, int factor) noexcept
+    {
+        std::array<float, 4> tv;
+        for (int k = 0; k < 4; ++k) tv[(std::size_t) k] = p[(std::size_t) bandExtra (band, 2 + k)];
+        if (tv != lastTone)
+        {
+            tone[0].shelf (sr, 120.0, toneDb (tv[0]), false, 0.7);
+            tone[1].peaking (sr, 800.0, 0.8, toneDb (tv[1]));
+            tone[2].shelf (sr, 3500.0, toneDb (tv[2]), true, 0.7);
+            tone[3].peaking (sr, 6000.0, 1.0, toneDb (tv[3]));
+            lastTone = tv;
+        }
+        toneOn = false;
+        for (const auto v : tv) toneOn = toneOn || std::abs (toneDb (v)) > 1e-6;
+        fbGain = 0.9 * feedbackAmount (p[(std::size_t) bandExtra (band, 6)]);
+        const auto fhz = p[(std::size_t) bandExtra (band, 7)];
+        if (fbGain > 0.0 && (fhz != lastFbHz || factor != lastFactor))
+        {
+            fbBand.filter (sr * factor, 2, feedbackHz (fhz), 1.4);
+            lastFbHz = fhz;
+            lastFactor = factor;
+        }
+        dyn = dynamicsAmount (p[(std::size_t) bandExtra (band, 8)]);
+        envAtk = coef (0.005, sr);
+        envRel = coef (0.080, sr);
+    }
+
+    // the shaper with the feedback loop: the band-passed last output added to the input (channel ch)
+    float shapeWithFeedback (Style s, float x, int ch) noexcept
+    {
+        const auto y = shape (s, x + (float) fbGain * fbLast[ch]);
+        fbLast[ch] = fbBand.process (y, ch);
+        return y;
+    }
+
+    // after the shaper: the level follows the band's input level (dynamics), then the tone
+    void post (float& a, float& b, float inA, float inB) noexcept
+    {
+        if (dyn != 0.0)
+        {
+            const double x = std::max (std::abs (inA), std::abs (inB));
+            env = x > env ? envAtk * env + (1.0 - envAtk) * x : envRel * env + (1.0 - envRel) * x;
+            const double over = gainToDb (env + 1e-9) + 18.0; // dB above −18 dBFS
+            const auto g = (float) dbToGain (std::clamp (dyn * 0.5 * over, -18.0, 18.0));
+            a *= g;
+            b *= g;
+        }
+        if (toneOn)
+            for (auto& t : tone)
+            {
+                a = t.process (a, 0);
+                b = t.process (b, 1);
+            }
+    }
+};
+
 class Saturator final : public Effect
 {
 public:
@@ -907,6 +991,8 @@ public:
             d.reset();
         for (auto* x : { &split[0], &split[1], &split[2], &ap2Low, &ap3Low, &ap3Mid })
             x->reset();
+        for (auto& x : extras)
+            x.reset();
     }
 
     int latencySamples() const noexcept override { return Oversampler::latency(); }
@@ -921,6 +1007,11 @@ public:
 private:
     void chunk (float* l, float* r, int n, const EffectParams& p) noexcept
     {
+        if (const auto inDb = inputDb (p[inputGain]); std::abs (inDb) > 1e-9) // round 128: the input gain
+        {
+            const auto g = (float) dbToGain (inDb);
+            for (int i = 0; i < n; ++i) { l[i] *= g; r[i] *= g; }
+        }
         if (bandCount (p[bands]) > 1)
         {
             chunkBands (l, r, n, p);
@@ -971,9 +1062,25 @@ private:
             wr[(std::size_t) i] = b * drv;
         }
 
-        auto curve = [s] (float x) noexcept { return shape (s, x); };
-        os[0].process (wl.data(), n, curve);
-        os[1].process (wr.data(), n, curve);
+        // round 128: band 1's power, mute, feedback, dynamics and tone (single-band mode)
+        auto& ex = extras[0];
+        ex.configure (p, 0, sr, factor);
+        const bool powered = on (p[bandExtra (0, 0)]);
+        const bool muted = bandState (p[bandExtra (0, 1)]) == BandState::mute;
+        if (ex.fbGain > 0.0)
+        {
+            auto left = [&ex, s] (float x) noexcept { return ex.shapeWithFeedback (s, x, 0); };
+            auto right = [&ex, s] (float x) noexcept { return ex.shapeWithFeedback (s, x, 1); };
+            os[0].process (wl.data(), n, left);
+            os[1].process (wr.data(), n, right);
+        }
+        else
+        {
+            auto curve = [s] (float x) noexcept { return shape (s, x); };
+            os[0].process (wl.data(), n, curve);
+            os[1].process (wr.data(), n, curve);
+        }
+        const bool post = ex.toneOn || ex.dyn != 0.0;
 
         for (int i = 0; i < n; ++i)
         {
@@ -983,6 +1090,7 @@ private:
                 a = deemphasis.process (a, 0);
                 b = deemphasis.process (b, 1);
             }
+            if (post) ex.post (a, b, l[i], r[i]);
             a = tiltHi.process (tiltLo.process (a, 0), 0);
             b = tiltHi.process (tiltLo.process (b, 1), 1);
             if (hc > 0.0)
@@ -992,6 +1100,8 @@ private:
             }
             float da = l[i], db = r[i];
             dry.process (da, db);
+            if (! powered) { a = da; b = db; }  // switched off: the band passes clean
+            if (muted) { a = 0.0f; b = 0.0f; }
             l[i] = (da + (a - da) * mx) * out;
             r[i] = (db + (b - db) * mx) * out;
         }
@@ -1042,6 +1152,8 @@ private:
 
         std::array<Style, maxBands> st {};
         std::array<float, maxBands> drv {}, bmix {}, lvl {}, comp {};
+        bool anySolo = false;
+        for (int b = 0; b < nb; ++b) anySolo = anySolo || bandState (p[(std::size_t) bandExtra (b, 1)]) == BandState::solo;
         for (int b = 0; b < nb; ++b)
         {
             st[(std::size_t) b] = styleOf (p[(std::size_t) bandParam (b, 0)]);
@@ -1101,15 +1213,35 @@ private:
                 br[i] *= drv[(std::size_t) b];
             }
             const auto s = st[(std::size_t) b];
-            auto curve = [s] (float v) noexcept { return shape (s, v); };
-            bandOs[(std::size_t) b][0].process (bl, n, curve);
-            bandOs[(std::size_t) b][1].process (br, n, curve);
+            // round 128: the band's feedback, dynamics, tone, power and solo / mute
+            auto& ex = extras[(std::size_t) b];
+            ex.configure (p, b, sr, factor);
+            if (ex.fbGain > 0.0)
+            {
+                auto left = [&ex, s] (float v) noexcept { return ex.shapeWithFeedback (s, v, 0); };
+                auto right = [&ex, s] (float v) noexcept { return ex.shapeWithFeedback (s, v, 1); };
+                bandOs[(std::size_t) b][0].process (bl, n, left);
+                bandOs[(std::size_t) b][1].process (br, n, right);
+            }
+            else
+            {
+                auto curve = [s] (float v) noexcept { return shape (s, v); };
+                bandOs[(std::size_t) b][0].process (bl, n, curve);
+                bandOs[(std::size_t) b][1].process (br, n, curve);
+            }
             const auto m = bmix[(std::size_t) b], g = lvl[(std::size_t) b], k = comp[(std::size_t) b];
+            const bool post = ex.toneOn || ex.dyn != 0.0;
+            const bool powered = on (p[(std::size_t) bandExtra (b, 0)]);
+            const auto state = bandState (p[(std::size_t) bandExtra (b, 1)]);
+            const bool silent = state == BandState::mute || (anySolo && state != BandState::solo);
             for (int i = 0; i < n; ++i)
             {
-                const auto wa = bandDc[(std::size_t) b].process (bl[i], 0) * k, wb = bandDc[(std::size_t) b].process (br[i], 1) * k;
-                const auto ya = (dryBand[0][(std::size_t) i] + (wa - dryBand[0][(std::size_t) i]) * m) * g;
-                const auto yb = (dryBand[1][(std::size_t) i] + (wb - dryBand[1][(std::size_t) i]) * m) * g;
+                auto wa = bandDc[(std::size_t) b].process (bl[i], 0) * k, wb = bandDc[(std::size_t) b].process (br[i], 1) * k;
+                if (post) ex.post (wa, wb, dryBand[0][(std::size_t) i], dryBand[1][(std::size_t) i]);
+                auto ya = (dryBand[0][(std::size_t) i] + (wa - dryBand[0][(std::size_t) i]) * m) * g;
+                auto yb = (dryBand[1][(std::size_t) i] + (wb - dryBand[1][(std::size_t) i]) * m) * g;
+                if (! powered) { ya = dryBand[0][(std::size_t) i]; yb = dryBand[1][(std::size_t) i]; }
+                if (silent) { ya = 0.0f; yb = 0.0f; }
                 if (b == 0)
                 {
                     wl[(std::size_t) i] = ya;
@@ -1180,6 +1312,7 @@ private:
     std::array<OnePoleHp, maxBands> bandDc;
     std::array<std::array<std::array<float, maxBlock>, 2>, maxBands> bandBuf {};
     std::array<std::array<float, maxBlock>, 2> dryBand {};
+    std::array<BandExtras, maxBands> extras;
     Meters meters;
 };
 } // namespace
@@ -1236,7 +1369,17 @@ const EffectInfo& emberInfo()
                                      { "Crossover slope", 0.5f }, { "B1 mix", 1.0f }, { "B1 level", 0.5f },
                                      { "B2 style", 0.0f }, { "B2 drive", 0.0f }, { "B2 mix", 1.0f }, { "B2 level", 0.5f },
                                      { "B3 style", 0.0f }, { "B3 drive", 0.0f }, { "B3 mix", 1.0f }, { "B3 level", 0.5f },
-                                     { "B4 style", 0.0f }, { "B4 drive", 0.0f }, { "B4 mix", 1.0f }, { "B4 level", 0.5f } } };
+                                     { "B4 style", 0.0f }, { "B4 drive", 0.0f }, { "B4 mix", 1.0f }, { "B4 level", 0.5f },
+                                     // round 128 (Saturn parity)
+                                     { "Input", 0.5f },
+                                     { "B1 on", 1.0f }, { "B1 state", 0.0f }, { "B1 bass", 0.5f }, { "B1 mid", 0.5f }, { "B1 treble", 0.5f }, { "B1 presence", 0.5f },
+                                     { "B1 feedback", 0.0f }, { "B1 fb freq.", 0.6990f }, { "B1 dynamics", 0.5f },
+                                     { "B2 on", 1.0f }, { "B2 state", 0.0f }, { "B2 bass", 0.5f }, { "B2 mid", 0.5f }, { "B2 treble", 0.5f }, { "B2 presence", 0.5f },
+                                     { "B2 feedback", 0.0f }, { "B2 fb freq.", 0.6990f }, { "B2 dynamics", 0.5f },
+                                     { "B3 on", 1.0f }, { "B3 state", 0.0f }, { "B3 bass", 0.5f }, { "B3 mid", 0.5f }, { "B3 treble", 0.5f }, { "B3 presence", 0.5f },
+                                     { "B3 feedback", 0.0f }, { "B3 fb freq.", 0.6990f }, { "B3 dynamics", 0.5f },
+                                     { "B4 on", 1.0f }, { "B4 state", 0.0f }, { "B4 bass", 0.5f }, { "B4 mid", 0.5f }, { "B4 treble", 0.5f }, { "B4 presence", 0.5f },
+                                     { "B4 feedback", 0.0f }, { "B4 fb freq.", 0.6990f }, { "B4 dynamics", 0.5f } } };
     return info;
 }
 
@@ -1380,7 +1523,19 @@ std::string paramText (EffectKind kind, int param, float v)
             case band2Drive: case band3Drive: case band4Drive: return fmt ("%+.1f dB", driveDb (v));
             case band1Mix: case band2Mix: case band3Mix: case band4Mix: return fmt ("%.0f%%", v * 100.0);
             case band1Level: case band2Level: case band3Level: case band4Level: return fmt ("%+.1f dB", bandLevelDb (v));
-            default: return fmt ("%.2f", v);
+            case inputGain: return fmt ("%+.1f dB", inputDb (v));
+            default:
+                if (param >= band1On && param < band1On + maxBands * extraFields)
+                    switch ((param - band1On) % extraFields)
+                    {
+                        case 0: return onOff (v);
+                        case 1: { static const char* names[] = { "normal", "solo", "mute" }; return names[(int) bandState (v)]; }
+                        case 2: case 3: case 4: case 5: return fmt ("%+.1f dB", toneDb (v));
+                        case 6: return fmt ("%.0f%%", feedbackAmount (v) * 100.0);
+                        case 7: return hzText (feedbackHz (v));
+                        default: return fmt ("%+.2f", dynamicsAmount (v));
+                    }
+                return fmt ("%.2f", v);
         }
     }
     return fmt ("%.2f", v);
