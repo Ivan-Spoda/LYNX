@@ -122,7 +122,7 @@ bool substituteEffectSlot (EffectSlot& slot, const PluginIdentity& identity);
 // What the whole project says about the settings a substitute can't read from its own original (round 113): the key
 // and scale of the song, taken from the pitch correctors whose saved state is readable (Auto-Tune Pro). A pitch
 // corrector whose own key is unknown (Waves Tune, an unreadable state) then corrects to the project's key instead of
-// guessing one.
+// guessing one. Round 120: Waves Tune Real-Time states name their scale too (wavesTuneScale).
 struct SubstituteContext
 {
     int key = -1;   // 0 = C … 11 = B; −1 = unknown
@@ -139,6 +139,18 @@ bool substituteEffectSlot (EffectSlot& slot, const PluginIdentity& identity, con
 // ScaleGivenScale), as LYNX Tune's key index and scale (vocal::Scale index); nullopt when not readable or a scale
 // LYNX Tune has no equivalent for. Exposed for the tests.
 std::optional<std::pair<int, int>> autoTuneProKey (const std::vector<std::uint8_t>& state);
+// The scale a Waves Tune Real-Time state was saved with (round 120): the active setup's <Scale> element (its root and
+// the twelve note statuses above it, "x" = excluded). `scale` is the LYNX Tune scale whose notes on `key` are exactly
+// these, else vocal::Scale::custom with `mask` (bit k = pitch class k, absolute) holding them. nullopt when absent.
+struct PitchCorrectorScale
+{
+    int key = 0;
+    int scale = 0;
+    std::uint16_t mask = 0xfff;
+};
+std::optional<PitchCorrectorScale> wavesTuneScale (const std::vector<std::uint8_t>& state);
+// The key / scale of any readable pitch-corrector state (Auto-Tune Pro, Waves Tune Real-Time), as above.
+std::optional<PitchCorrectorScale> pitchCorrectorScale (const std::vector<std::uint8_t>& state);
 // Fresh Air's two "air" amounts (the two floats of its saved state, 0..1: mid and high air); nullopt when the state
 // doesn't have that layout. Exposed for the tests.
 std::optional<std::pair<float, float>> freshAirAmounts (const std::vector<std::uint8_t>& state);
