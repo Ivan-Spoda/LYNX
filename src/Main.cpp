@@ -46,6 +46,7 @@
 #include "core/EventEdit.h"
 #include "core/FacetEq.h"
 #include "ui/FacetEqEditor.h"
+#include "ui/ProEditors.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/PluginEditors.h"
 #include "core/PluginLayout.h"
@@ -1768,6 +1769,7 @@ private:
             kinds.push_back (lynx::EffectKind::maximus); // Soundgoodizer (below)
             for (const auto own : lynx::plugui::ownLayoutKinds()) // LYNX's own panels (mixing suite, round 96)
                 kinds.push_back (own);
+            kinds.push_back (lynx::EffectKind::apexLimiter); // round 114: display-first editor
             const auto database = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin database/Effects");
 
             auto maximusPasses = 0; // Maximus has its own page (first pass); the second pass shows Soundgoodizer
@@ -1817,6 +1819,8 @@ private:
                     for (const auto& [param, value] : { std::pair<const char*, float> { "HPF", 0.3f }, { "LMF gain", 0.35f }, { "HF gain", 0.7f },
                                                         { "Ratio", 0.3f }, { "Comp. threshold", 0.55f } })
                         fx.params[(std::size_t) lynx::plugui::paramIndex (kind, param)] = value;
+                if (kind == lynx::EffectKind::apexLimiter) // round 114: gain into the ceiling, so the display shows reduction
+                    fx.params[0] = 0.33f;
                 if (kind == lynx::EffectKind::ember)
                 {
                     fx.params[(std::size_t) lynx::plugui::paramIndex (kind, "Drive")] = 0.5f;
@@ -1835,6 +1839,22 @@ private:
                 song.mixer[1].effects.push_back (fx);
                 offline.setSong (std::move (song));
                 offline.dispatchPendingMessages();
+
+                if (lynx::ProEditorWindows::handles (kind)) // round 114: the display-first editors, with a demo signal
+                {
+                    auto editor = lynx::makeProEditor (offline, 1, 0, true);
+                    juce::Image image (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
+                    {
+                        juce::Graphics g (image);
+                        editor->paintEntireComponent (g, false);
+                    }
+                    const auto file = out.getChildFile (name + ".png");
+                    file.deleteFile();
+                    juce::PNGImageFormat png;
+                    if (auto stream = file.createOutputStream())
+                        png.writeImageToStream (image, *stream);
+                    continue;
+                }
 
                 const auto pages = name == "Soundgoodizer" ? 1 : juce::jmax (1, (int) lynx::plugui::layoutFor (kind).pages.size());
                 for (int page = 0; page < pages; ++page)

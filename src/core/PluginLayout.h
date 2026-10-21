@@ -49,6 +49,7 @@ enum : std::uint16_t
     alignLeft = 1 << 9,   // value / label text aligned left
     raised = 1 << 10,     // section: a lighter inset panel inside another one
     inverted = 1 << 11,   // toggle: lit while the value is off (FL's white "enabled" LEDs over mute switches)
+    captionAbove = 1 << 12, // knob: the caption above the knob and the value under it (the reference reverbs' panels, round 114)
 };
 
 struct LayoutItem
