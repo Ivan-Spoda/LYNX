@@ -1121,7 +1121,7 @@ public:
             }
             // gain −48 … 0 dB → radius 0 … 1; the dot's angle is its pan (±45° = the hard sides)
             auto dot = [&] (float pan01, float gain01, bool active, juce::Colour col, const juce::String& text) {
-                const auto a = juce::degreesToRadians ((float) panDegrees (pan01) * 2.0f);
+                const auto a = juce::degreesToRadians ((float) panDegrees (pan01)); // ±45° = the diagonals
                 const auto rr = radius * juce::jlimit (0.05f, 1.0f, gain01);
                 const auto pt = juce::Point<float> (c.x + rr * std::sin (a), c.y - rr * std::cos (a));
                 g.setColour (active ? col : colour::textDisabled);
@@ -1361,13 +1361,15 @@ public:
                 for (int db = 0; db <= 30; db += 6)
                 {
                     const auto y = well.getY() + well.getHeight() * (float) db / 30.0f;
+                    g.setColour (colour::gridBeat);
                     g.drawHorizontalLine ((int) y, well.getX(), well.getRight());
+                    g.setColour (colour::textSecondary);
                     g.drawText (juce::String (-db), juce::Rectangle<float> (well.getX(), y - 10.0f * s, 22.0f * s, 10.0f * s), juce::Justification::centredLeft, false);
                 }
                 g.setColour ((fx.enabled ? colour::accent : colour::textDisabled).withAlpha (0.85f));
                 g.fillRoundedRectangle (well.withTrimmedLeft (well.getWidth() * 0.35f).withHeight (well.getHeight() * amount), radius::sm);
                 g.setColour (colour::textSecondary);
-                g.drawText (juce::String (-amount * 30.0f, 1) + " dB", bar.withTop (bar.getBottom() - 14.0f * s), juce::Justification::centred, false);
+                g.drawText ((amount > 0.0005f ? juce::String (-amount * 30.0f, 1) : juce::String ("0.0")) + " dB", bar.withTop (bar.getBottom() - 14.0f * s), juce::Justification::centred, false);
                 return;
             }
             g.setColour (colour::gridBeat);

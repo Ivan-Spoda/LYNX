@@ -35,7 +35,9 @@ LYNX ships **native** plugins inspired by the third-party plugins producers use 
 | Waves DeEsser | **Hush De-esser** | native LYNX engine · auto-opens | Split-band or wideband de-esser with band or high-pass detection, listen mode and 2 ms lookahead. |
 | Waves Tune Real-Time | **LYNX Tune** | native LYNX engine · auto-opens | Real-time vocal pitch correction: key and scale, retune from natural to the hard robot effect, formant preserve, MIDI target notes. |
 | Waves RVerb, H-Reverb, TrueVerb | **Reeverb 2** | stand-in · auto-opens | an existing LYNX effect plays its role until a dedicated engine exists |
-| Waves H-Delay | **Fruity Delay 3** | stand-in · auto-opens | an existing LYNX effect plays its role until a dedicated engine exists |
+| Waves H-Delay | **Echoform** | native LYNX engine · auto-opens | Clean ping-pong (in pairs) or stereo echo; host sync, own BPM or ms, feedback, mix, output and filters translated from the saved state (round 119). |
+| Waves NS1 | **Quell Denoiser** | native LYNX engine · auto-opens | One-knob noise suppressor: six phase-coherent bands, each a soft-knee downward expander that follows the Amount knob; listen to what is removed. |
+| Waves Doubler | **Gemini Doubler** | native LYNX engine · auto-opens | Two pitch-shifted delay voices (gain, pan, delay, feedback, detune, LFO depth / rate, octave, source), direct rotation and align, voice shelves. |
 | Waves SuperTap | **Fruity Delay 3** | stand-in · auto-opens | an existing LYNX effect plays its role until a dedicated engine exists |
 | Waves L1, L2, L3, L4 | **Limiter** | stand-in · auto-opens | an existing LYNX effect plays its role until a dedicated engine exists |
 | Waves Renaissance Compressor | **Compressor** | stand-in · auto-opens | an existing LYNX effect plays its role until a dedicated engine exists |
@@ -254,6 +256,8 @@ oversample where they are nonlinear and never allocate on the audio thread.
 | Glow Leveler | optical levelers such as the Teletronix LA-2A (Waves CLA-2A, UA LA-2A) | feedback leveler with an electro-optical cell model: ~10 ms attack, two-stage release that lengthens after long or heavy leveling; peak reduction, gain, compress / limit, sidechain emphasis, mix |
 | Hush De-esser | de-essers (Waves DeEsser, FabFilter Pro-DS) | split-band (complementary crossover) or wideband reduction, high-pass or band detector, frequency, threshold, range, release, listen, 2 ms lookahead |
 | Aether | "air" EQs and high-frequency exciters (Slate Digital Fresh Air, Maag EQ4 air band) | broad high shelf up to +15 dB (5–20 kHz) plus a 4x-oversampled harmonic exciter on the band above its frequency, even ↔ odd character, mix |
+| Quell Denoiser | one-knob noise suppressors (Waves NS1) | six-band Linkwitz-Riley split with all-pass compensation, a soft-knee downward expander per band whose threshold, depth and trim follow Amount, fast opening and a slower close, linked stereo, listen, output |
+| Gemini Doubler | doublers (Waves Doubler) | two voices, each a pitch-shifting delay (two crossfaded grains): gain, equal-power pan, delay, feedback with a low cut, detune, triangle LFO on the pitch, octave down, source L / sum / difference; the direct signal rotated in the stereo field and aligned with the voices; first-order voice shelves |
 | Ember Saturator | analog saturators (Soundtoys Decapitator, FabFilter Saturn) | tube (asymmetric, even harmonics), tape (pre/de-emphasis, odd), transistor and fuzz curves; drive, tone tilt, low / high cut, auto gain, mix, 2x / 4x / 8x oversampling with a constant latency; since round 108 a multiband mode: up to four Linkwitz-Riley bands (12 / 24 / 48 dB/oct, summing flat) with their own style, drive, mix and level |
 
 Product names in the table are trademarks of their owners (Solid State Logic, Waves Audio, Universal Audio,
