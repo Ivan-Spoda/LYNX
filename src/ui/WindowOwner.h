@@ -14,4 +14,7 @@ void applyWindowChrome (juce::Component& window);
 
 // The LYNX logo (256 px, with transparency).
 juce::Image logoImage();
+
+// The CPU time this process has used so far, in seconds (user + kernel; --editorcpu).
+double processCpuSeconds();
 } // namespace lynx

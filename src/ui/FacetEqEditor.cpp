@@ -10,6 +10,7 @@
 #include "core/RackRenderer.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
+#include "ui/PluginSkin.h"
 #include "ui/Theme.h"
 #include "ui/ValueControl.h"
 #include "ui/WindowOwner.h"
@@ -762,20 +763,13 @@ public:
     {
         using namespace theme;
         const auto h = headerArea();
-        g.setColour (colour::bg2);
-        g.fillRect (h);
-        g.setColour (colour::border);
-        g.drawHorizontalLine ((int) h.getBottom() - 1, 0.0f, h.getRight());
-        g.setColour (fx.enabled ? colour::ledOn : colour::ledOff);
-        g.fillEllipse (juce::Rectangle<float> (8.0f, 8.0f).withCentre ({ 14.0f, h.getCentreY() }));
-        g.setColour (colour::textPrimary);
-        g.setFont (font (type::title, true));
-        g.drawText ("Facet EQ", juce::Rectangle<float> (26.0f, 0.0f, 90.0f, h.getHeight()), juce::Justification::centredLeft);
-        g.setColour (colour::accent);
-        g.fillRect (juce::Rectangle<float> (26.0f, h.getBottom() - 3.0f, 72.0f, 2.0f));
+        skin::headerBar (g, h, colour::accent);
+        skin::brandMark (g, juce::Rectangle<float> (8.0f, 0.0f, 20.0f, h.getHeight()));
+        skin::powerLed (g, { 36.0f, h.getCentreY() }, 7.0f, fx.enabled);
+        const auto w = skin::titleText (g, juce::Rectangle<float> (46.0f, 0.0f, 120.0f, h.getHeight()), "Facet EQ", colour::accent);
         g.setColour (colour::textSecondary);
         g.setFont (font (type::small));
-        g.drawText (trackName() + "  -  " + tr ("slot {0}", { juce::String (slot + 1) }), juce::Rectangle<float> (120.0f, 0.0f, 300.0f, h.getHeight()),
+        g.drawText (trackName() + "  -  " + tr ("slot {0}", { juce::String (slot + 1) }), juce::Rectangle<float> (58.0f + w, 0.0f, 300.0f, h.getHeight()),
                     juce::Justification::centredLeft, true);
         // the hint for the graph's gestures, on the right of the title bar
         g.setColour (colour::textDisabled);
@@ -788,10 +782,7 @@ public:
     {
         using namespace theme;
         const auto bar = barArea();
-        g.setColour (colour::bg2);
-        g.fillRect (bar);
-        g.setColour (colour::border);
-        g.drawHorizontalLine ((int) bar.getY(), 0.0f, bar.getRight());
+        skin::bottomBar (g, bar);
         for (const auto& c : all)
         {
             const auto hover = c.r.contains (mouse);
@@ -818,7 +809,7 @@ public:
                 }
                 if (hover)
                 {
-                    g.setColour (colour::bg4);
+                    g.setColour (juce::Colours::white.withAlpha (0.06f));
                     g.fillRoundedRectangle (c.r, radius::md);
                 }
                 g.setFont (font (type::small));
@@ -826,12 +817,17 @@ public:
                 const auto cw = juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), caption) + 6.0f;
                 g.drawText (caption, c.r.withWidth (cw).translated (6.0f, 0.0f), juce::Justification::centredLeft);
                 g.setColour (colour::textPrimary);
+                g.setFont (font (type::small, true));
                 g.drawText (value + juce::String::fromUTF8 (" \xe2\x96\xbe"), c.r.withTrimmedLeft (cw + 6.0f), juce::Justification::centredLeft, true);
             }
             else if (c.type == Ctl::output || c.type == Ctl::scale)
             {
-                g.setColour (hover ? colour::bg4 : colour::bg1);
-                g.fillRoundedRectangle (c.r, radius::md);
+                skin::valuePlate (g, c.r, radius::md);
+                if (hover)
+                {
+                    g.setColour (colour::accent.withAlpha (0.5f));
+                    g.drawRoundedRectangle (c.r.reduced (0.5f), radius::md, 1.0f);
+                }
                 g.setColour (colour::textDisabled);
                 g.setFont (font (type::caption));
                 g.drawText (c.type == Ctl::output ? tr ("OUT") : tr ("SCALE"), c.r.reduced (6.0f, 0.0f), juce::Justification::centredLeft);
@@ -856,10 +852,7 @@ public:
     {
         using namespace theme;
         const auto r = tipArea (b);
-        g.setColour (colour::bg3.withAlpha (0.94f));
-        g.fillRoundedRectangle (r, radius::lg);
-        g.setColour (bandColour (b).withAlpha (0.8f));
-        g.drawRoundedRectangle (r.reduced (0.5f), radius::lg, 1.0f);
+        skin::floatingPanel (g, r, bandColour (b), radius::lg);
         g.setFont (font (type::small, true));
         g.setColour (colour::textPrimary);
         auto t = r.reduced (8.0f, 4.0f);
@@ -897,8 +890,7 @@ public:
         using namespace theme;
         const auto area = graphArea();
         const auto plot = plotArea();
-        g.setGradientFill (juce::ColourGradient (colour::bg1, 0.0f, area.getY(), colour::bg0, 0.0f, area.getBottom(), false));
-        g.fillRect (area);
+        skin::canvas (g, area, colour::accent);
 
         // grid: frequencies (numbers or a piano keyboard along the bottom)
         g.setFont (font (type::caption));
@@ -1036,7 +1028,8 @@ public:
                 fill.lineTo (plot.getRight(), yForDb (0.0));
                 fill.lineTo (plot.getX(), yForDb (0.0));
                 fill.closeSubPath();
-                g.setColour (colour.withAlpha (solo == b ? 0.30f : 0.16f));
+                g.setGradientFill (juce::ColourGradient (colour.withAlpha (solo == b ? 0.36f : 0.22f), 0.0f, plot.getY(), colour.withAlpha (solo == b ? 0.18f : 0.06f), 0.0f,
+                                                         plot.getBottom(), false));
                 g.fillPath (fill);
             }
             if (dyn) // the range the band can move through: static curve ↔ static + range
@@ -1071,8 +1064,11 @@ public:
             else total.lineTo (x, y);
         }
         const auto curveColour = fx.enabled ? colour::textPrimary : colour::textDisabled;
-        g.setColour (colour::accent.withAlpha (fx.enabled ? 0.25f : 0.0f));
-        g.strokePath (total, juce::PathStrokeType (5.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        if (fx.enabled)
+        {
+            g.setColour (colour::accent.withAlpha (0.28f));
+            g.strokePath (total, juce::PathStrokeType (5.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
         g.setColour (curveColour);
         g.strokePath (total, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         g.restoreState();
@@ -1105,8 +1101,14 @@ public:
                 g.setColour (colour.withAlpha (0.25f));
                 g.fillEllipse (juce::Rectangle<float> (r * 3.2f, r * 3.2f).withCentre (pos));
             }
-            g.setColour (soloBand (fx.params[(std::size_t) soloParam]) == b ? colour::warning : colour);
-            g.fillEllipse (juce::Rectangle<float> (r * 2.0f, r * 2.0f).withCentre (pos));
+            const auto nodeColour = soloBand (fx.params[(std::size_t) soloParam]) == b ? colour::warning : colour;
+            const auto node = juce::Rectangle<float> (r * 2.0f, r * 2.0f).withCentre (pos);
+            g.setColour (juce::Colours::black.withAlpha (0.45f));
+            g.fillEllipse (node.translated (0.0f, 1.5f).expanded (1.0f));
+            g.setGradientFill (juce::ColourGradient (nodeColour.brighter (0.35f), pos.x, node.getY(), nodeColour.darker (0.15f), pos.x, node.getBottom(), false));
+            g.fillEllipse (node);
+            g.setColour (juce::Colours::white.withAlpha (0.35f));
+            g.drawEllipse (node.reduced (0.5f), 1.0f);
             g.setColour (colour::bg0);
             g.setFont (font (type::caption, true));
             g.drawText (juce::String (b + 1), juce::Rectangle<float> (r * 2.0f, r * 2.0f).withCentre (pos), juce::Justification::centred);
@@ -1142,20 +1144,15 @@ public:
         using namespace theme;
         const auto panel = panelArea();
         const auto colourB = bandColour (selected);
-        juce::DropShadow (juce::Colours::black.withAlpha (0.6f), 14, { 0, 4 }).drawForRectangle (g, panel.toNearestInt());
-        g.setColour (colour::bg2.withAlpha (0.97f));
-        g.fillRoundedRectangle (panel, 10.0f);
-        g.setColour (colourB.withAlpha (0.55f));
-        g.drawRoundedRectangle (panel.reduced (0.5f), 10.0f, 1.2f);
+        skin::floatingPanel (g, panel, colourB);
+        g.setColour (colourB.withAlpha (0.35f));
+        g.fillRoundedRectangle (juce::Rectangle<float> (panel.getX() + 12.0f, panel.getY() - 2.0f, 50.0f, 7.0f), 3.5f);
         g.setColour (colourB);
         g.fillRoundedRectangle (juce::Rectangle<float> (panel.getX() + 14.0f, panel.getY() - 1.0f, 46.0f, 3.0f), 1.5f);
         const auto solo = soloBand (fx.params[(std::size_t) soloParam]);
 
         auto drawButton = [&] (juce::Rectangle<float> r, const juce::String& text, bool on, juce::Colour onColour) {
-            g.setColour (on ? onColour.withAlpha (0.25f) : (r.contains (mouse) ? colour::bg5 : colour::bg4));
-            g.fillRoundedRectangle (r, radius::md);
-            g.setColour (on ? onColour : colour::borderStrong);
-            g.drawRoundedRectangle (r.reduced (0.5f), radius::md, 1.0f);
+            skin::button (g, r, on, r.contains (mouse), onColour);
             g.setColour (on ? colour::textPrimary : colour::textSecondary);
             g.setFont (font (type::small, on));
             g.drawText (text, r.reduced (6.0f, 0.0f), juce::Justification::centred, true);
@@ -1215,7 +1212,14 @@ public:
                     const auto active = dragging == Drag::control && dragParam == c.param;
                     const auto global = c.type == Ctl::attack || c.type == Ctl::release;
                     const auto knob = knobCircle (c);
-                    drawKnob (g, knob, param01 (c.param), bipolar, active ? colour::accent : (global ? colour::knobArc : colourB), c.r.contains (mouse));
+                    skin::KnobLook look;
+                    look.value = param01 (c.param);
+                    look.bipolar = bipolar;
+                    look.accent = global ? colour::accent : colourB;
+                    look.hover = c.r.contains (mouse) ? 1.0f : 0.0f;
+                    look.active = active;
+                    look.enabled = fx.enabled;
+                    skin::knob (g, knob, look);
                     if (c.type == Ctl::gain && isDynamic (fx.params, selected))
                     {
                         // the dynamic range as an outer arc from the gain, and the live position as a dot
@@ -1233,10 +1237,10 @@ public:
                         g.setColour (colour::textPrimary);
                         g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ knob.getCentreX() + rr * std::sin (ang), knob.getCentreY() - rr * std::cos (ang) }));
                     }
-                    g.setColour (colour::textDisabled);
+                    g.setColour (active ? colourB.brighter (0.3f) : skin::captionColour());
                     g.setFont (font (type::caption, true));
                     g.drawText (tr (captions.at (c.type)), c.r.withY (c.r.getBottom() - 34.0f).withHeight (14.0f), juce::Justification::centred);
-                    g.setColour (colour::textPrimary);
+                    g.setColour (skin::valueColour (c.r.contains (mouse) || active));
                     g.setFont (font (type::small));
                     g.drawText (valueText (c.param), c.r.withTop (c.r.getBottom() - 20.0f), juce::Justification::centred, true);
                     break;
@@ -1271,9 +1275,17 @@ private:
 
     void timerCallback() override
     {
+        if (! isShowing()) return; // a hidden editor costs nothing
         updateSpectrum();
-        if (isShowing()) repaint (graphArea().toNearestInt());
+        // redraw the graph only when the analyser or a dynamic band moved (an idle editor stops drawing)
+        double signature = 0.0;
+        for (const auto* v : { &specPre, &specPost })
+            for (const auto x : *v) signature += x;
+        for (int b = 0; b < bands; ++b) signature += liveDynamic (b) * (b + 1);
+        if (signature != lastSignature || demo) repaint (graphArea().toNearestInt());
+        lastSignature = signature;
     }
+    double lastSignature = 0.0;
 
     void updateSpectrum()
     {

@@ -31,6 +31,7 @@
 #include "core/PluginLayout.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
+#include "ui/PluginSkin.h"
 #include "ui/Theme.h"
 #include "ui/WaveformView.h"
 
@@ -1084,8 +1085,11 @@ public:
             layout = nullptr;
         if (layout != nullptr)
         {
+            accent = flKeys ? skin::colour::azure : boobass || transistorBass ? skin::colour::ember : harmor || sytrus || harmless || morphine ? skin::colour::violet
+                                                                                                                                           : skin::colour::crimson;
             for (auto& k : knobs)
             {
+                k->getProperties().set (skin::sliderProperty, (juce::int64) accent.getARGB());
                 const auto* item = itemFor (k->getName());
                 if (item == nullptr || (item->type != plugui::Item::knob && item->type != plugui::Item::vslider && item->type != plugui::Item::hslider))
                 {
@@ -1217,17 +1221,9 @@ public:
             switch (item.type)
             {
                 case plugui::Item::section:
-                    g.setColour ((item.style & plugui::raised) != 0 ? colour::bg3 : colour::bg1);
-                    g.fillRoundedRectangle (r, radius::md * f);
+                    skin::section (g, r, radius::lg * f, (item.style & plugui::raised) != 0);
                     if (item.label != nullptr && (item.style & plugui::boxed) == 0)
-                    {
-                        auto head = r.withHeight (16.0f * f);
-                        g.setColour (colour::bg3);
-                        g.fillRoundedRectangle (head, radius::md * f);
-                        g.setColour (colour::textSecondary);
-                        g.setFont (font (juce::jmax (8.0f, 10.5f * f), true));
-                        g.drawFittedText (caps (tr (item.label)), head.toNearestInt(), juce::Justification::centred, 1, 0.7f);
-                    }
+                        skin::sectionTitle (g, r.withHeight (16.0f * f).translated (0.0f, 1.0f * f), caps (tr (item.label)), accent, juce::jmax (8.0f, 10.0f * f));
                     break;
                 case plugui::Item::label:
                     if (item.label != nullptr && juce::String (item.label).length() <= 2 && dimmed) // big dim numbers (3x Osc rows)
@@ -1263,9 +1259,8 @@ public:
                         for (int o = 0; o < (int) labels.size(); ++o)
                         {
                             const auto cell = optionCell (item, o, (int) labels.size()).reduced (3.0f * f);
-                            g.setColour (o == chosen ? colour::bg5 : colour::bg2);
-                            g.fillRoundedRectangle (cell, radius::md * f);
-                            g.setColour (o == chosen ? colour::accent : colour::textSecondary);
+                            skin::button (g, cell, o == chosen, false, accent, radius::md * f);
+                            g.setColour (o == chosen ? accent.brighter (0.5f) : colour::textSecondary);
                             if (item.columns > 0)
                                 drawShape (g, cell.reduced (cell.getWidth() * 0.22f, cell.getHeight() * 0.3f), labels[(std::size_t) o]);
                             else
@@ -1280,8 +1275,7 @@ public:
                         if ((item.style & plugui::boxed) != 0)
                         {
                             const auto box = r.reduced (3.0f * f);
-                            g.setColour (on ? colour::accent : colour::bg2);
-                            g.fillRoundedRectangle (box, radius::md * f);
+                            skin::button (g, box, on, false, accent, radius::md * f);
                             g.setColour (on ? colour::onAccent : colour::textSecondary);
                             g.setFont (font (juce::jmax (8.0f, 11.0f * f), true));
                             g.drawText (item.label != nullptr ? item.label : "", box, juce::Justification::centred, false);
@@ -1289,8 +1283,15 @@ public:
                         else
                         {
                             const auto dot = juce::Rectangle<float> (10.0f * f, 10.0f * f).withCentre ({ r.getX() + 6.0f * f, r.getCentreY() });
-                            g.setColour (on ? colour::accent : colour::ledOff);
+                            if (on)
+                            {
+                                g.setColour (accent.withAlpha (0.3f));
+                                g.fillEllipse (dot.expanded (3.0f * f));
+                            }
+                            g.setColour (on ? accent : juce::Colour (0xff0b0c0f));
                             g.fillEllipse (dot);
+                            g.setColour (juce::Colours::white.withAlpha (on ? 0.4f : 0.08f));
+                            g.drawEllipse (dot.reduced (0.5f), 1.0f);
                             caption (item.label, r.withTrimmedLeft (14.0f * f), false, juce::Justification::centredLeft);
                         }
                     }
@@ -1301,8 +1302,7 @@ public:
                         auto box = r;
                         if (item.label != nullptr)
                             caption (item.label, box.removeFromTop (12.0f * f), false, juce::Justification::centred);
-                        g.setColour (colour::bg0);
-                        g.fillRoundedRectangle (box, radius::sm * f);
+                        skin::valuePlate (g, box, radius::sm * f);
                         g.setColour (colour::textPrimary);
                         g.setFont (font (juce::jmax (9.0f, 12.0f * f), true));
                         // oversampling orders read as FL shows them (0 → 1x … 3 → 8x)
@@ -1315,8 +1315,7 @@ public:
                     }
                     break;
                 case plugui::Item::display:
-                    g.setColour (colour::bg0);
-                    g.fillRoundedRectangle (r, radius::sm * f);
+                    skin::well (g, r, radius::md * f);
                     if (juce::String (item.display) == "xy")
                         if (auto* kx = knobFor (item.param); kx != nullptr)
                             if (auto* ky = knobFor (item.param2); ky != nullptr)
@@ -1325,7 +1324,9 @@ public:
                                 g.drawVerticalLine ((int) r.getCentreX(), r.getY(), r.getBottom());
                                 g.drawHorizontalLine ((int) r.getCentreY(), r.getX(), r.getRight());
                                 const juce::Point<float> pt { r.getX() + r.getWidth() * normalised (*kx), r.getBottom() - r.getHeight() * normalised (*ky) };
-                                g.setColour (colour::accent);
+                                g.setColour (accent.withAlpha (0.3f));
+                                g.fillEllipse (juce::Rectangle<float> (16.0f * f, 16.0f * f).withCentre (pt));
+                                g.setColour (accent);
                                 g.drawEllipse (juce::Rectangle<float> (10.0f * f, 10.0f * f).withCentre (pt), 2.0f);
                             }
                     if (juce::String (item.display) == "flkeysname")
@@ -1416,6 +1417,8 @@ public:
     void paint (juce::Graphics& g) override
     {
         g.fillAll (theme::colour::bg2);
+        if (layout != nullptr) // a plugin page in FL's arrangement: the plugin skin's canvas
+            skin::canvas (g, getLocalBounds().toFloat(), accent);
         g.setColour (theme::colour::textPrimary);
         g.setFont (theme::font (layout != nullptr ? theme::type::body : theme::type::title));
         g.drawText (drumsynth ? tr ("DrumSynth Live — FL's engine, patch on key {0}", { juce::String (editorKey) })
@@ -1476,6 +1479,7 @@ public:
 private:
     AudioEngine& engine;
     int channel;
+    juce::Colour accent { skin::colour::crimson }; // the plugin page's accent (ui/PluginSkin.h)
     bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, autogun = false, transistorBass = false, miniSynth = false, dx10 = false, kepler = false, poizone = false,
          fruitkick = false, bassdrum = false, toxic = false, threeOsc = false, simSynth = false, wasp = false, plucked = false, beepMap = false,
          sawer = false, flKeys = false, granulizer = false, drumaxx = false, slayer = false, fruityDance = false, sytrus = false, wavesFound = false;

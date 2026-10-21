@@ -484,6 +484,16 @@ public:
             return;
         }
 
+        if (args.contains ("--editorcpu"))
+        {
+            // LYNX.exe --editorcpu report.txt: opens built-in plugin editors one at a time in a small window (no audio
+            // device: a silent, idle editor) and writes the process CPU each costs while idle and while its display
+            // animates (demo signal) — round 122's check that an idle editor burns no CPU
+            const auto i = args.indexOf ("--editorcpu");
+            runEditorCpu (args[i + 1].unquoted());
+            return;
+        }
+
         if (args.contains ("--fxfuzz"))
         {
             // LYNX.exe --fxfuzz report.txt [rounds] [--drags]: every built-in effect in its editor, parameters swept (and
@@ -1998,6 +2008,83 @@ private:
 
     // LYNX.exe --snapshot prefix [project]: draws the window off-screen and writes
     // prefix-rack.png, -pianoroll.png and -playlist.png (to check the UI without touching the screen).
+    // --editorcpu: one editor after another; each phase runs 2 s to settle and 8 s measured
+    struct EditorCpuRun final : juce::Timer
+    {
+        struct Case { lynx::EffectKind kind; const char* name; int type; bool demo; }; // type 0 native, 1 display-first, 2 Facet EQ
+        std::vector<Case> cases;
+        std::size_t at = 0;
+        int phase = 0;
+        double t0 = 0.0, c0 = 0.0;
+        juce::String report;
+        juce::File out;
+        std::unique_ptr<lynx::AudioEngine> engine;
+        std::unique_ptr<juce::DocumentWindow> window;
+        std::function<void()> done;
+
+        void start()
+        {
+            engine = std::make_unique<lynx::AudioEngine> (false);
+            report << "editor\tmode\tcpu % of one core\n";
+            open();
+            startTimer (250);
+        }
+        void open()
+        {
+            window.reset();
+            if (at >= cases.size()) { out.replaceWithText (report); stopTimer(); if (done) done(); return; }
+            const auto& c = cases[at];
+            lynx::Song song;
+            song.mixer.resize (2);
+            song.mixer[0].name = "Master";
+            song.mixer[1].name = "Insert 1";
+            song.mixer[1].effects.push_back (lynx::makeEffectSlot (c.kind));
+            engine->setSong (std::move (song));
+            engine->dispatchPendingMessages();
+            lynx::setNativeEditorDemo (c.demo);
+            auto editor = c.type == 1 ? lynx::makeProEditor (*engine, 1, 0, c.demo) : c.type == 2 ? lynx::makeFacetEqEditor (*engine, 1, 0, c.demo)
+                                                                                                   : lynx::makeNativeEffectEditor (*engine, 1, 0, 1.0f, 0);
+            window = std::make_unique<juce::DocumentWindow> (juce::String ("LYNX editor CPU - ") + c.name, lynx::theme::colour::bg1, 0);
+            window->setUsingNativeTitleBar (true);
+            window->setContentOwned (editor.release(), true);
+            const auto area = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userArea;
+            window->setTopLeftPosition (area.getRight() - window->getWidth() - 8, area.getBottom() - window->getHeight() - 8);
+            window->setVisible (true);
+            phase = 0;
+            t0 = juce::Time::getMillisecondCounterHiRes();
+        }
+        void timerCallback() override
+        {
+            const auto now = juce::Time::getMillisecondCounterHiRes();
+            if (phase == 0 && now - t0 > 2000.0) { phase = 1; t0 = now; c0 = lynx::processCpuSeconds(); return; }
+            if (phase == 1 && now - t0 > 8000.0)
+            {
+                const auto cpu = (lynx::processCpuSeconds() - c0) / ((now - t0) * 0.001) * 100.0;
+                const auto& c = cases[at];
+                report << c.name << "\t" << (c.demo ? "animating" : "idle") << "\t" << juce::String (cpu, 2) << "\n";
+                ++at;
+                open();
+            }
+        }
+    };
+    std::unique_ptr<EditorCpuRun> editorCpu;
+
+    void runEditorCpu (const juce::String& path)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        editorCpu = std::make_unique<EditorCpuRun>();
+        editorCpu->out = juce::File (path);
+        using K = lynx::EffectKind;
+        for (const auto demo : { false, true })
+            for (const auto& c : std::vector<EditorCpuRun::Case> { { K::facetEq, "Facet EQ", 2, demo }, { K::crestCompressor, "Crest Compressor", 1, demo },
+                                                                  { K::apexLimiter, "Apex Limiter", 1, demo }, { K::prismMultiband, "Prism Multiband", 1, demo },
+                                                                  { K::epochVerb, "Epoch Verb", 0, demo }, { K::glowLeveler, "Glow Leveler", 0, demo },
+                                                                  { K::fruityLimiter, "Fruity Limiter", 0, demo }, { K::lynxTune, "LYNX Tune", 0, demo } })
+                editorCpu->cases.push_back (c);
+        editorCpu->done = [this] { juce::MessageManager::callAsync ([this] { editorCpu.reset(); quit(); }); };
+        editorCpu->start();
+    }
+
     void runPluginEditorSnapshots (const juce::String& folder)
     {
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
