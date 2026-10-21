@@ -449,6 +449,15 @@ vendor = Solid State Logic
 lynx = Ridge Strip
 names = SSL Native Channel Strip 2; SSL Native Channel Strip; SSL 4K E; SSL 4K B; Vocalstrip 2; SSL Native Vocalstrip 2
 
+[waves-s1-imager]
+product = S1 Imager
+vendor = Waves
+lynx = Stereo Shaper
+# round 124: the width / rotation / gain matrix measured on the official trial is set exactly on the Stereo Shaper's
+# matrix (docs/analise/REA_rodada124_extras.md §4); without a readable state the slot stays neutral
+waves = S1 Imager; S1 Imager Stereo
+translate = waves-s1-imager
+
 [waves-eqs]
 product = Waves EQ (Q10 / Renaissance EQ / SSL EQ)
 vendor = Waves
@@ -1299,8 +1308,53 @@ int translateWavesDoubler (const std::vector<std::uint8_t>& state, EffectSlot& s
     return 33;
 }
 
+// S1 Imager (RealWorld list, round 124): 0 gain dB, 1 width (0 … 3, the plug-in keeps two decimals), 4 rotation deg
+// (±45), 5 asymmetry deg (±90), 13 swap, 14 / 15 invert left / right, 16 M/S input. [EXEC] Black-box on the official
+// trial (REA_rodada124_extras §4): a frequency-flat 2 × 2 matrix, gain · rotation · width · input. Width w below 1
+// scales the side signal (mid 1, side w); above 1 the side / mid ratio is w with mid = √(0.625 + 0.375 / w²) (exact on
+// 41 measured points); rotation φ is the plain rotation [cos −sin; sin cos]. Fruity Stereo Shaper (LYNX's exact engine)
+// holds any 2 × 2 matrix, so the translation nulls the reference. Asymmetry, swap / invert and M/S input are not
+// measured beyond their neutral settings (all neutral in her states): a state that uses them is not translated.
+int translateWavesS1Imager (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    const auto rw = wavesRealWorldParams (state);
+    const auto width = wavesValue (rw, 1);
+    if (slot.kind != EffectKind::stereoShaper || ! width)
+        return 0;
+    const auto at = [&] (std::size_t i) { return wavesValue (rw, i).value_or (0.0); };
+    if (std::abs (at (5)) > 1e-6 || at (13) >= 0.5 || at (14) >= 0.5 || at (15) >= 0.5 || at (16) >= 0.5)
+        return 0;
+    const auto w = std::clamp (std::round (*width * 100.0) / 100.0, 0.0, 3.0);
+    const auto mid = w <= 1.0 ? 1.0 : std::sqrt (0.625 + 0.375 / (w * w));
+    const auto side = w * mid;
+    const auto a = 0.5 * (mid + side), b = 0.5 * (mid - side);
+    const auto phi = std::clamp (at (4), -45.0, 45.0) * 3.14159265358979323846 / 180.0;
+    const auto c = std::cos (phi), s = std::sin (phi);
+    const auto g = std::pow (10.0, std::clamp (at (0), -24.0, 0.0) / 20.0);
+    // rotation · width: [c −s; s c] · [a b; b a]
+    const double m00 = g * (c * a - s * b), m01 = g * (c * b - s * a), m10 = g * (s * a + c * b), m11 = g * (s * b + c * a);
+    // the Shaper's knob law: |gain| = (3^|x| − 1) / 2 with x = raw / 12800
+    const auto raw = [] (double gain) {
+        const auto x = std::log (2.0 * std::abs (gain) + 1.0) / std::log (3.0);
+        return std::clamp ((int) std::lround ((gain < 0.0 ? -x : x) * 12800.0), -25600, 25600);
+    };
+    const auto unit = [] (int r) { return (float) (r + 25600) / 51200.0f; };
+    auto& p = slot.params;
+    p[0] = unit (raw (m01)); // R → L
+    p[1] = unit (raw (m00)); // L
+    p[2] = unit (raw (m11)); // R
+    p[3] = unit (raw (m10)); // L → R
+    p[4] = 0.5f;             // no delay
+    p[5] = 0.5f;             // no phase
+    p[6] = 0.0f;
+    p[7] = 0.0f;
+    return 4;
+}
+
 RawTranslator rawTranslatorNamed (std::string_view name)
 {
+    if (name == "waves-s1-imager")
+        return translateWavesS1Imager;
     if (name == "waves-h-delay")
         return translateWavesHDelay;
     if (name == "waves-ns1")

@@ -143,3 +143,60 @@ TEST (pro_q4_states_translate_onto_facet_and_match_the_reference_round124)
         CHECK (n == 0);
     }
 }
+
+TEST (waves_s1_imager_translates_onto_the_stereo_shaper_matrix_round124)
+{
+    using namespace lynx;
+    // L → L, R → L, L → R, R → R of the official trial (white noise, least squares; REA_rodada124_extras §4)
+    struct Case
+    {
+        const char* values;
+        double ll, rl, lr, rr;
+    };
+    const Case cases[] {
+        { "0 1.22 1 650 0 0 * * * * * 0 0 0 0 0 0 0", 1.0395, -0.1030, -0.1030, 1.0395 },   // her state 0
+        { "0 3 1 650 0 0 * * * * * 0 0 0 0 0 0 0", 1.63299, -0.81650, -0.81650, 1.63299 }, // her state 1
+        { "0 0.38 1 650 0 0 * * * * * 0 0 0 0 0 0 0", 0.69, 0.31, 0.31, 0.69 },
+        { "0 1.88 1 650 0 0 * * * * * 0 0 0 0 0 0 0", 1.23126, -0.37622, -0.37622, 1.23126 },
+        { "0 1 1 650 22.5 0 * * * * * 0 0 0 0 0 0 0", 0.92388, -0.38268, 0.38268, 0.92388 },
+        { "0 1.88 1 650 22.5 0 * * * * * 0 0 0 0 0 0 0", 1.28151, -0.81877, 0.12360, 0.99357 },
+        { "-12 1 1 650 0 0 * * * * * 0 0 0 0 0 0 0", 0.25119, 0.0, 0.0, 0.25119 },
+    };
+    const auto slotFor = [] (const char* values, int& n) {
+        PluginIdentity id;
+        id.format = ForeignPlugin::Format::vst3;
+        id.name = "WaveShell1-VST3 16.0_x64";
+        id.state = substtest::wavesComponent ("S1 Imager", values);
+        const auto* entry = findPluginSubstitute (id, false);
+        CHECK (entry != nullptr);
+        n = -1;
+        return entry != nullptr ? makeSubstituteSlot (*entry, &id, &n) : EffectSlot {};
+    };
+    for (const auto& c : cases)
+    {
+        int n = 0;
+        const auto slot = slotFor (c.values, n);
+        CHECK (slot.kind == EffectKind::stereoShaper && n == 4);
+        auto fx = makeEffect (slot);
+        fx->prepare (48000.0);
+        fx->reset();
+        // a steady input after the gains have settled: [L, R] = [1, 0], then [0, 1]
+        double out[2][2] {};
+        for (int src = 0; src < 2; ++src)
+        {
+            std::vector<float> l (9600, src == 0 ? 1.0f : 0.0f), r (9600, src == 1 ? 1.0f : 0.0f);
+            for (int off = 0; off < 9600; off += 480)
+                fx->process (l.data() + off, r.data() + off, 480, slot.params, 120.0);
+            out[src][0] = l.back();
+            out[src][1] = r.back();
+        }
+        const auto worst = std::max ({ std::abs (out[0][0] - c.ll), std::abs (out[1][0] - c.rl), std::abs (out[0][1] - c.lr), std::abs (out[1][1] - c.rr) });
+        CHECK (worst < 2e-4);
+        if (worst >= 2e-4)
+            std::printf ("  S1 %s: L=%.5f·L%+.5f·R R=%.5f·L%+.5f·R\n", c.values, out[0][0], out[1][0], out[0][1], out[1][1]);
+    }
+    // asymmetry (not measured beyond 0) leaves the slot untranslated
+    int n = -1;
+    slotFor ("0 1.22 1 650 0 45 * * * * * 0 0 0 0 0 0 0", n);
+    CHECK (n == 0);
+}
