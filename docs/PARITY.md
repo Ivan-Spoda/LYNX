@@ -32,41 +32,75 @@ until the user starts the trial, so their tables are from the official manuals (
 
 | LYNX engine | Original (trial here) | Config before | Design before | Config after | Design after |
 |---|---|---|---|---|---|
-| Glow Leveler | CLA-2A (Waves) | 5 | 6 | … | … |
-| Ridge Strip | SSL E-Channel (Waves) | 6 | 6 | … | … |
-| Compressor (stand-in) | Renaissance Compressor (Waves) | 2 | 1 | … | … |
-| Hush De-esser | DeEsser (Waves) | 7 | 5 | … | … |
-| Quell Denoiser | NS1 (Waves) | 8 | 8 | … | … |
-| Gemini Doubler | Doubler2 / Doubler4 (Waves) | 7 / 4 | 6 | … | … |
-| Echoform | H-Delay (Waves) | 5 | 4 | … | … |
-| LYNX Tune | Waves Tune Real-Time | 4 | 5 | … | … |
-| Epoch Verb | ValhallaVintageVerb | 7 | 8 | … | … |
-| Atrium | ValhallaRoom | 7 | 6 | … | … |
-| Foil Plate | ValhallaPlate | 8 | 9 | … | … |
-| Nebula | Valhalla Supermassive | 7 | 8 | … | … |
-| Halo | ValhallaShimmer | 6 | 8 | … | … |
-| Horizon | ValhallaFutureVerb | 6 | 7 | … | … |
-| Echoform | ValhallaDelay | 6 | 6 | … | … |
-| Spiral Echo | ValhallaFreqEcho | 9 | 9 | … | … |
-| Orbit | ValhallaSpaceModulator | 7 | 7 | … | … |
-| Lattice Mod | ValhallaUberMod | 6 | 7 | … | … |
-| Ember Saturator | Decapitator (Soundtoys, manual only) | 4 | 4 | … | … |
-| Fruity Delay 3 (stand-in) | EchoBoy / PrimalTap (Soundtoys, manual only) | 2 | 2 | … | … |
-| Auto-pan (stand-in) | PanMan (Soundtoys, manual only) | 2 | 2 | … | … |
-| Reeverb 2 (stand-in) | Little Plate (Soundtoys, manual only) | 4 | 3 | … | … |
-| — | Little AlterBoy (Soundtoys, manual only) | 0 | 0 | … | … |
+| Glow Leveler | CLA-2A (Waves) | 5 | 6 | 7 | 7 |
+| Ridge Strip | SSL E-Channel (Waves) | 6 | 6 | 7 | 7 |
+| Compressor (stand-in) | Renaissance Compressor (Waves) | 2 | 1 | 4 | 5 |
+| Hush De-esser | DeEsser (Waves) | 7 | 5 | 8 | 5 |
+| Quell Denoiser | NS1 (Waves) | 8 | 8 | 9 | 8 |
+| Gemini Doubler | Doubler2 / Doubler4 (Waves) | 7 / 4 | 6 | 8 / 5 | 7 |
+| Echoform | H-Delay (Waves) | 5 | 4 | 7 | 5 |
+| LYNX Tune | Waves Tune Real-Time | 4 | 5 | 5 | 5 |
+| Epoch Verb | ValhallaVintageVerb | 7 | 8 | 9 | 8 |
+| Atrium | ValhallaRoom | 7 | 6 | 9 | 8 |
+| Foil Plate | ValhallaPlate | 8 | 9 | 9 | 9 |
+| Nebula | Valhalla Supermassive | 7 | 8 | 9 | 9 |
+| Halo | ValhallaShimmer | 6 | 8 | 7 | 8 |
+| Horizon | ValhallaFutureVerb | 6 | 7 | 7 | 7 |
+| Echoform | ValhallaDelay | 6 | 6 | 7 | 7 |
+| Spiral Echo | ValhallaFreqEcho | 9 | 9 | 9 | 9 |
+| Orbit | ValhallaSpaceModulator | 7 | 7 | 8 | 7 |
+| Lattice Mod | ValhallaUberMod | 6 | 7 | 7 | 7 |
+| Ember Saturator | Decapitator (Soundtoys, manual only) | 4 | 4 | 5 | 4 |
+| Fruity Delay 3 (stand-in) | EchoBoy / PrimalTap (Soundtoys, manual only) | 2 | 2 | 5 (Echoform) | 5 (Echoform) |
+| Auto-pan (stand-in) | PanMan (Soundtoys, manual only) | 2 | 2 | 3 | 2 |
+| Reeverb 2 (stand-in) | Little Plate (Soundtoys, manual only) | 4 | 3 | 6 (Foil Plate) | 5 (Foil Plate) |
+| — | Little AlterBoy (Soundtoys, manual only) | 0 | 0 | 0 | 0 |
+
+Scores "after" = with round 129's changes (below). The biggest single gap was the frame every original has around its
+controls — undo / redo, A / B, presets — which none of LYNX's engines had; it is now in every LYNX engine editor.
+
+## Round 129: what changed
+
+- **Every LYNX engine editor** (the generic panels and the display-first editors) has the originals' header: undo / redo
+  of that plugin's own edits, A / B with copy to the other setting, the preset name with ◀ ▶ and a menu of LYNX's
+  factory presets (90, own names and settings, in folders), the user's presets (Save preset…, Delete, Show the presets
+  folder) and "Keep the Mix when loading presets" (Valhalla's mix lock). A / B and the preset name are saved with the
+  project. LYNX Tune's presets leave its key, scale and note switches alone.
+- **Glow Leveler** (CLA-2A): the VU DISPLAY selector (input / GR / output), TRIM ±18 dB, AUTO MAKEUP, the bottom strip
+  of the reference (HF emphasis, Mix, Trim).
+- **Ridge Strip** (SSL E-Channel): the GAIN block's output fader beside an input / output meter with peak read-outs;
+  dynamics before the EQ by default, as on the reference.
+- **Compressor** (the Renaissance Compressor's stand-in): its own panel — threshold fader by the input / output
+  meters, the gain-reduction meter with the ratio under it, the gain fader, attack / release (it had a bare row of
+  knobs and no meters).
+- **Quell Denoiser** (NS1): the reduction meter now moves (the engine's meter was never published to the editor).
+- **Gemini Doubler** (Doubler): output level meters beside the output fader.
+- **Echoform** (H-Delay / ValhallaDelay): Phase L / Phase R (translated from H-Delay states), a tap-tempo pad, the
+  modulation section named after the mode (Mod / Freq / Pitch) and "Delay L" in dual / ping-pong.
+- **Atrium** (ValhallaRoom): the Early / Late controls on two tabs like the reference; "Depth" for the early / late
+  balance. **Nebula** (Supermassive): the CLEAR button. **Foil Plate**: EQ defaults 700 Hz / 10 kHz. **Halo**: the low
+  cut shows what the engine applies. **Lattice Mod**: starts with two taps like UberMod.
+- **Substitutes**: Soundtoys EchoBoy / PrimalTap → Echoform (was Fruity Delay 3 at FL's default), Little Plate → Foil
+  Plate (was Reeverb 2), PanMan's Auto-pan really sweeps (its depth was 0 %).
+
+Still missing (ranked): the per-control description line of the Valhalla panels; Doubler4's voices 3–4; H-Delay's
+own-BPM sync, LoFi switch and Analog 0–4; Ridge's Split / Dyn S.C. routing and Analog; RComp's ARC / Opto / Warm (a
+re-route to Crest needs the vocal-chain refit); Waves Tune Real-Time's Speed / Tolerance / Vibrato (LYNX Tune is being
+extended by round 128c); Decapitator's Punish / Thump / Steep and five styles; EchoBoy's Rhythm mode; PanMan's
+rhythm / trigger sources; a Little AlterBoy role. Soundtoys and the newer Waves captures need the user (iLok
+activation; the Waves shell hangs in our host since this round).
 
 ## The frame shared by every original (Waves bar, Valhalla preset row, Soundtoys control strip)
 
 | Original feature | Where in the originals | LYNX before | Note |
 |---|---|---|---|
-| Undo / Redo of the plugin's own edits | Waves bar (every Waves plugin) | ⚠️ | only the song's Ctrl+Z in the main window |
-| A/B compare (Setup A / B) + copy A→B | Waves bar; Soundtoys strip | ❌ | |
-| Preset name, ◀ ▶, menu of factory presets | Waves bar; Valhalla "PRESET: Default ◀ ▶" row; Soundtoys strip | ❌ | the generic panels listed FL Studio presets only: "(no preset)" for every LYNX engine |
-| Save / load the user's own presets | Waves Save / Load; Valhalla preset menu (save, copy); Soundtoys | ❌ | |
-| Name of the preset a project was saved with | Waves / Valhalla show it | ❌ | translated substitutes showed "(no preset)" |
+| Undo / Redo of the plugin's own edits | Waves bar (every Waves plugin) | ⚠️ → ✅ | round 129: ↶ ↷ in every LYNX engine's header |
+| A/B compare (Setup A / B) + copy A→B | Waves bar; Soundtoys strip | ❌ → ✅ | round 129: A, B and A→B / B→A, saved with the project |
+| Preset name, ◀ ▶, menu of factory presets | Waves bar; Valhalla "PRESET: Default ◀ ▶" row; Soundtoys strip | ❌ → ✅ | round 129: LYNX factory presets in folders (FL presets stay listed for FL effects) |
+| Save / load the user's own presets | Waves Save / Load; Valhalla preset menu (save, copy); Soundtoys | ❌ → ✅ | round 129: .lynxpreset files per engine |
+| Name of the preset a project was saved with | Waves / Valhalla show it | ❌ → ⚠️ | LYNX presets' names are saved; a translated original's preset name is not read yet |
 | Per-control description line inside the window | Valhalla (bottom strip) | ⚠️ | LYNX shows the hint in the main window's hint bar |
-| Mix lock (Mix stays while presets change) | Valhalla (click the MIX label) | ❌ | |
+| Mix lock (Mix stays while presets change) | Valhalla (click the MIX label) | ❌ → ✅ | round 129: in the preset menu, per engine |
 | Typed values, reset, fine drag, wheel | all | ✅ | right-click value entry, double-click / Alt-click reset, Ctrl fine, wheel |
 | MIDI learn | Waves (right-click) | ✅ | right-click → automation / controller link |
 | Resizable window | Waves ≡ menu, Valhalla corner | ✅ | the generic panels resize at a fixed aspect ratio |

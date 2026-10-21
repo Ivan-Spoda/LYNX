@@ -27,9 +27,20 @@ Soundtoys 5 trial stops on its iLok activation window → `tmp/parity129/ASK_USE
   "Plate", "6 kHz"); `keep = …` lists parameters a preset leaves alone (LYNX Tune's key, scale and note switches).
   90 presets for 16 engines. Tests: tests/ParityTests129.inc.
 
+## 3. Per-plugin changes (docs/PARITY.md "Round 129: what changed")
+Glow (VU selector, trim, auto make-up [model]), Ridge (GAIN block meter + fader, dynamics before EQ by default),
+Compressor (RComp-style panel + meters published), Quell (its meter was never published: `hasLiveMeters` now covers
+the voice tools), Gemini (output meters), Echoform (phase L / R + H-Delay translation of RealWorld 8 / 9 — [DATA] her
+40 H-Delay states all have 0 / 0, so her sound is unchanged —, tap tempo, section names), Atrium (Early / Late pages),
+Nebula (CLEAR = a "momentary" toggle style; a flip of its value resets the network), Foil EQ defaults, Halo's low-cut
+text, Lattice default taps; substitute re-routes (EchoBoy / PrimalTap → Echoform, Little Plate → Foil Plate, PanMan
+depth +50 % — vmatch127 found the same PanMan bug independently). RComp → Crest was considered (Crest has knee, auto
+release, opto style, warm character and meters) but not done: RComp → Compressor is fitted on her vocal chain (round
+113 §3c), a re-route needs that refit (vmatch's domain).
+
 ## Where I stopped
-- Done: §1 audit tables (committed first), §2 preset bar + factory presets (compile-checked, tests written).
-- Next: build-local, the Desktop HTML, land batch 1; then the per-plugin gaps (substitute re-routes: EchoBoy /
-  PrimalTap → Echoform, Little Plate → Foil Plate, PanMan depth bug, RComp → Crest; Halo low-cut display bug, Foil EQ
-  defaults, Nebula Clear, Atrium Early/Late pages, Lattice named modes, Glow trim / auto make-up / VU selector,
-  Quell meter scale, Gemini output meters, Echoform tap / phase L-R).
+- Done: §1–§3, tests/ParityTests129.inc (factory presets resolve, value text round trip, user preset files, tune
+  presets keep the key, substitute fixes, Glow trim, compressor meters, Nebula clear, Echoform phase, Atrium pages).
+- Waiting: the build queue (parity128's four worktrees hold the slots and the Windows lock), then land.
+- Next (ranked in PARITY.md "Still missing"): Valhalla description line, Doubler4 voices 3–4, H-Delay own BPM /
+  LoFi / Analog, Ridge Split / Dyn S.C. / Analog, Decapitator Punish / Thump / Steep.
