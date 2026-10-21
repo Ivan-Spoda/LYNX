@@ -208,8 +208,9 @@ juce::String describe (EffectKind kind, const char* param)
 
 PresetBar::PresetBar (AudioEngine& e, int t, int s) : engine (e), track (t), slot (s)
 {
-    if (const auto* fx = current())
-        kind = fx->kind;
+    const auto& mixer = engine.getSong().mixer;
+    if (track >= 0 && track < (int) mixer.size() && slot >= 0 && slot < (int) mixer[(std::size_t) track].effects.size())
+        kind = mixer[(std::size_t) track].effects[(std::size_t) slot].kind; // (current() checks the kind: read it directly)
 }
 
 const EffectSlot* PresetBar::current() const
