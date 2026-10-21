@@ -874,9 +874,10 @@ std::vector<std::uint8_t> granulizerNormalisedState (const std::vector<std::uint
     putI32 (out.data() + 52, p.sliceMode);
     putI32 (out.data() + 56, p.keyMode);
     putI32 (out.data() + 60, p.sync == 1 ? 1 : 0); // what the plugin saves: whether sync is on
+    const auto defaults = flvp::defaultSnapshot(); // one array: begin() and end() of two temporaries would not be a range
     const auto snap = snapshot.size() == (std::size_t) snapshotSize ? snapshot
                     : own.size() == (std::size_t) snapshotSize    ? own
-                                                                  : std::vector<std::uint8_t> (flvp::defaultSnapshot().begin(), flvp::defaultSnapshot().end());
+                                                                  : std::vector<std::uint8_t> (defaults.begin(), defaults.end());
     std::memcpy (out.data() + 64, snap.data(), (std::size_t) snapshotSize);
     return out;
 }

@@ -21,8 +21,8 @@
 #include <tuple>
 #include <vector>
 
-#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
-#include <xmmintrin.h>
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__) || defined(__aarch64__) || defined(_M_ARM64) // x86 SSE, or ARM64 through core/Simd.h (sse2neon)
+#include "core/Simd.h"
 #endif
 
 #include "core/Dither.h"
@@ -164,6 +164,58 @@ struct Register
             std::printf ("  FAILED %s:%d: %s\n", __FILE__, __LINE__, #cond);             \
         }                                                                                \
     } while (false)
+
+// Engines that compute in x87 80-bit long double (FL's own arithmetic) match their goldens to the last bit on x86. On
+// ARM64 (Apple Silicon) long double is not the x87 format, so there they hold to a looser bound (round 117).
+// LYNX_X87_TOL overrides it (measuring).
+inline float armTolerance (float x86, float arm)
+{
+#if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
+    (void) arm;
+    return x86;
+#else
+    if (const char* t = std::getenv ("LYNX_X87_TOL"))
+        return (float) std::atof (t);
+    return arm;
+#endif
+}
+inline float x87Tolerance() { return armTolerance (2.0e-7f, 2.0e-4f); }
+inline float granulizerTolerance()
+{
+#if defined(__APPLE__)
+    return 2.0e-4f;
+#else
+    return armTolerance (1.0e-6f, 1.0e-5f);
+#endif
+}
+
+// Engines whose goldens depend on the C library's sin/cos/exp/pow: Windows (mingw), glibc and musl hold the 1e-7
+// goldens, Apple's libm does not (round 117), so on macOS the per-sample bound is looser.
+inline float libmTolerance (float strict)
+{
+#if defined(__APPLE__)
+    (void) strict;
+    return 2.0e-4f;
+#else
+    return strict;
+#endif
+}
+
+// One golden sample: relative bound (with a 1e-3 floor on macOS, where near-zero samples carry libm noise); prints the
+// measured error when it fails.
+inline bool goldenSampleClose (float y, float golden, float tol)
+{
+#if defined(__APPLE__)
+    const float scale = std::max (1.0e-3f, std::abs (golden));
+#else
+    const float scale = std::max (1.0e-16f, std::abs (golden));
+#endif
+    if (std::abs (y - golden) <= tol * scale)
+        return true;
+    std::fprintf (stderr, "  golden sample %.9g vs %.9g (relative error %.3g, bound %.3g)\n", (double) y, (double) golden,
+                  (double) (std::abs (y - golden) / scale), (double) tol);
+    return false;
+}
 
 std::string realFlpDir;
 
@@ -2465,7 +2517,7 @@ TEST (live_queue_is_fifo_and_bounded)
 // every float mantissa in [1, 2) (the estimate does not depend on the exponent in the normal range)
 static bool rcpLikeReferenceCpu()
 {
-#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__) || defined(__aarch64__) || defined(_M_ARM64) // x86 SSE, or ARM64 through core/Simd.h (sse2neon)
     std::uint64_t h = 1469598103934665603ull;
     for (std::uint32_t m = 0; m < (1u << 23); m += 4)
     {
@@ -3186,6 +3238,24 @@ TEST (flp_paths_resolve_and_samplers_import)
     CHECK (lynx::resolveFlPath ("%FLStudioUserData%\\z.wav", roots) == "D:\\User\\z.wav");
     CHECK (lynx::resolveFlPath ("E:\\abs.wav", roots) == "E:\\abs.wav");
     CHECK (lynx::resolveFlPath ("%FLStudioUserData%\\z.wav", {}) == "");
+    {
+        // POSIX roots (macOS, Linux, Wine prefix): backslashes become '/', letter case follows the disk (round 117)
+        namespace fs = std::filesystem;
+        const auto base = fs::temp_directory_path() / "lynx-case-test";
+        fs::remove_all (base);
+        fs::create_directories (base / "Data" / "Patches" / "Packs");
+        { std::ofstream (base / "Data" / "Patches" / "Packs" / "Kick.WAV") << "x"; }
+        lynx::FlPathRoots posix;
+        posix.factoryData = base.string();
+        CHECK (lynx::resolveFlPath ("%FLStudioFactoryData%\\Data\\Patches\\Packs\\Kick.WAV", posix) == (base / "Data/Patches/Packs/Kick.WAV").string());
+        const auto lowerCase = lynx::resolveFlPath ("%FLStudioFactoryData%\\data\\patches\\packs\\kick.wav", posix);
+        if (fs::exists (base / "data")) // case-insensitive file system (macOS): any spelling opens the file
+            CHECK (fs::exists (lowerCase));
+        else
+            CHECK (lowerCase == (base / "Data/Patches/Packs/Kick.WAV").string());
+        CHECK (lynx::resolveFlPath ("%FLStudioFactoryData%\\Data\\missing.wav", posix) == (base / "Data/missing.wav").string());
+        fs::remove_all (base);
+    }
 
     flp::Project p;
     p.channels = { { 0, flp::ChannelType::sampler, "Kick", "", "%FLStudioData%\\k.wav", 1 },
@@ -4182,8 +4252,9 @@ TEST (mixer_routes_mutes_solos_and_meters)
 
     lynx::MeterBank meters;
     renderMixerCase ([] (lynx::Song&) {}, &meters);
-    CHECK (std::abs (meters.takePeak (1, 0) - 0.5f) < 1e-4f);
-    CHECK (std::abs (meters.takePeak (0, 1) - 1.0f) < 1e-4f);
+    // (the 24-point sinc's ringing at the sample start: its x87 kernel table rounds differently on ARM64)
+    CHECK (std::abs (meters.takePeak (1, 0) - 0.5f) < armTolerance (1e-4f, 2e-4f));
+    CHECK (std::abs (meters.takePeak (0, 1) - 1.0f) < armTolerance (1e-4f, 4e-4f));
     CHECK (meters.takePeak (1, 0) == 0.0f); // reading resets
     CHECK (meters.takePeak (3, 0) == 0.0f); // insert with no channel
 }
@@ -7795,7 +7866,10 @@ TEST (driver_kind_and_shared_mode_buffer_sizes)
     CHECK (lynx::prefs::driverKind ("ASIO") == DriverKind::asio);
     CHECK (lynx::prefs::driverKind ("LYNX ASIO") == DriverKind::lynxAsio);
     CHECK (lynx::prefs::driverKind ("DirectSound") == DriverKind::directSound);
-    CHECK (lynx::prefs::driverKind ("ALSA") == DriverKind::other);
+    CHECK (lynx::prefs::driverKind ("ALSA") == DriverKind::alsa);
+    CHECK (lynx::prefs::driverKind ("JACK") == DriverKind::jack);
+    CHECK (lynx::prefs::driverKind ("CoreAudio") == DriverKind::coreAudio);
+    CHECK (lynx::prefs::driverKind ("Some Other Driver") == DriverKind::other);
     const std::vector<int> offered { 144, 192, 256, 480, 512, 1024 };
     CHECK ((lynx::prefs::usableBufferSizes (DriverKind::wasapiShared, offered, 480) == std::vector<int> { 480, 512, 1024 }));
     CHECK (lynx::prefs::usableBufferSizes (DriverKind::wasapiExclusive, offered, 480) == offered);   // the device's real periods
@@ -10709,7 +10783,7 @@ TEST (fruity_waveshaper_and_soft_clipper)
         inR[(std::size_t) n] = (float) (((n * 53) % 170 - 85) / 50.0);
     }
     struct Gold { int i; float l, r; };
-    auto close = [] (float a, float b) { return std::abs (a - b) <= 2.0e-7f * std::max (1.0f, std::abs (b)); };
+    auto close = [] (float a, float b) { return std::abs (a - b) <= x87Tolerance() * std::max (1.0f, std::abs (b)); };
 
     // Soft Clipper: bit-exact against Fruity Soft Clipper_x64.dll
     auto clip = [&] (int thr, int post, std::initializer_list<Gold> gold) {
@@ -11223,7 +11297,7 @@ TEST (fruity_panomatic_balance_blood_overdrive)
         inR[(std::size_t) n] = (float) (((n * 53) % 170 - 85) / 50.0);
     }
     struct Gold { int i; float l, r; };
-    auto close = [] (float a, float b) { return std::abs (a - b) <= 2.0e-7f * std::max (1.0f, std::abs (b)); };
+    auto close = [] (float a, float b) { return std::abs (a - b) <= x87Tolerance() * std::max (1.0f, std::abs (b)); };
     auto check = [&] (const std::vector<float>& l, const std::vector<float>& r, std::initializer_list<Gold> gold) {
         for (const auto& g : gold)
             CHECK (close (l[(std::size_t) g.i], g.l) && close (r[(std::size_t) g.i], g.r));
@@ -12163,8 +12237,8 @@ TEST (dx10_engine)
             el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1];
         CHECK (std::abs (el - g.el) <= 1e-7 * g.el && std::abs (er - g.er) <= 1e-7 * g.er);
         for (const auto& [i, l, r] : g.at)
-            CHECK (std::abs (y[2 * (std::size_t) i] - l) <= 1e-7f * std::max (1e-16f, std::abs (l))
-                   && std::abs (y[2 * (std::size_t) i + 1] - r) <= 1e-7f * std::max (1e-16f, std::abs (r)));
+            CHECK (goldenSampleClose (y[2 * (std::size_t) i], l, libmTolerance (1e-7f))
+                   && goldenSampleClose (y[2 * (std::size_t) i + 1], r, libmTolerance (1e-7f)));
         return y;
     };
     lynx::dx10::RefOptions plain, odd;
@@ -12356,8 +12430,8 @@ TEST (threeosc_engine)
             el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1];
         CHECK (std::abs (el - g.el) <= 1e-7 * g.el && std::abs (er - g.er) <= 1e-7 * g.er);
         for (const auto& [i, l, r] : g.at)
-            CHECK (std::abs (y[2 * (std::size_t) i] - l) <= 1e-7f * std::max (1e-16f, std::abs (l))
-                   && std::abs (y[2 * (std::size_t) i + 1] - r) <= 1e-7f * std::max (1e-16f, std::abs (r)));
+            CHECK (goldenSampleClose (y[2 * (std::size_t) i], l, libmTolerance (1e-7f))
+                   && goldenSampleClose (y[2 * (std::size_t) i + 1], r, libmTolerance (1e-7f)));
         return y;
     };
     // saw / square / triangle-ish mix with pans, stereo detune and phase, random start phases (seed 12345)
@@ -13138,7 +13212,7 @@ TEST (fruity_fast_dist_flangus_flanger)
         inR[(std::size_t) n] = (float) (((n * 53) % 170 - 85) / 50.0);
     }
     struct Gold { int i; float l, r; };
-    auto close = [] (float a, float b) { return std::abs (a - b) <= 2.0e-7f * std::max (1.0f, std::abs (b)); };
+    auto close = [] (float a, float b) { return std::abs (a - b) <= x87Tolerance() * std::max (1.0f, std::abs (b)); };
 
     // Fast Dist (+ FL's host waveshaper): live and render kernels
     auto dist = [&] (lynx::fastdistfx::State s, bool render, std::initializer_list<Gold> gold) {
@@ -13363,7 +13437,7 @@ TEST (chorus_family_engines)
         inR[(std::size_t) n] = (float) (((n * 53) % 170 - 85) / 50.0) * 0.5f;
     }
     struct Gold { int i; float l, r; };
-    auto close = [] (float a, float b) { return std::abs (a - b) <= 2.0e-7f * std::max (1.0f, std::abs (b)); };
+    auto close = [] (float a, float b) { return std::abs (a - b) <= x87Tolerance() * std::max (1.0f, std::abs (b)); };
     auto run = [&] (const char* plugin, const std::vector<std::uint8_t>& st, lynx::EffectKind kind, std::initializer_list<Gold> gold) {
         const auto slot = lynx::effectFromFl (plugin, st, 120.0);
         CHECK (slot && slot->kind == kind);
@@ -14037,8 +14111,8 @@ TEST (granulizer_engine)
             el += (double) y[i] * y[i], er += (double) y[i + 1] * y[i + 1];
         CHECK (std::abs (el - g.el) <= 1e-6 * g.el && std::abs (er - g.er) <= 1e-6 * g.er);
         for (const auto& [i, l, r] : g.at)
-            CHECK (std::abs (y[2 * (std::size_t) i] - l) <= 1e-6f * std::max (1e-16f, std::abs (l))
-                   && std::abs (y[2 * (std::size_t) i + 1] - r) <= 1e-6f * std::max (1e-16f, std::abs (r)));
+            CHECK (goldenSampleClose (y[2 * (std::size_t) i], l, granulizerTolerance())
+                   && goldenSampleClose (y[2 * (std::size_t) i + 1], r, granulizerTolerance()));
     };
     lynx::granulizer::RefOptions o1, o2, o3;
     o2.block = 333, o2.seed = 777;

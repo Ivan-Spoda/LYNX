@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LYNX — a lightweight DAW with the FL Studio workflow</title>
-<meta name="description" content="LYNX is a free, open-source, lightweight DAW for Windows with the FL Studio workflow: Channel Rack, Piano Roll, Playlist and Mixer. Opens .flp projects. C++20 + JUCE 8.">
+<meta name="description" content="LYNX is a free, open-source, lightweight DAW for Windows, macOS and Linux with the FL Studio workflow: Channel Rack, Piano Roll, Playlist and Mixer. Opens .flp projects. C++20 + JUCE 8.">
 <meta property="og:title" content="LYNX — a lightweight DAW with the FL Studio workflow">
 <meta property="og:description" content="Free and open source. Channel Rack, Piano Roll, Playlist and Mixer, built to run well on any PC. Opens FL Studio projects.">
 <meta property="og:image" content="https://lynx-share.com/assets/img/hero.webp?v=0.1.7">
@@ -73,7 +73,7 @@ nav .wrap{display:flex;align-items:center;gap:28px;height:68px}
 .grid-bg{position:absolute;inset:0;z-index:0;background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:56px 56px;mask-image:radial-gradient(ellipse 70% 60% at 50% 30%,#000 10%,transparent 70%);-webkit-mask-image:radial-gradient(ellipse 70% 60% at 50% 30%,#000 10%,transparent 70%);opacity:.35}
 .hero .wrap{position:relative;z-index:2;text-align:center}
 .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 14px 6px 8px;border:1px solid var(--line);border-radius:99px;background:rgba(24,26,33,.7);backdrop-filter:blur(6px);font-size:13px;color:var(--muted)}
-.pill b{background:var(--red);color:#fff;border-radius:99px;padding:2px 9px;font-size:11px;letter-spacing:.05em}
+.pill b{background:var(--red);color:#fff;border-radius:99px;padding:2px 9px;font-size:11px;letter-spacing:.05em;white-space:nowrap}
 .pill .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 0 rgba(61,220,132,.6);animation:pulse 2s infinite}
 @keyframes pulse{70%{box-shadow:0 0 0 8px rgba(61,220,132,0)}100%{box-shadow:0 0 0 0 rgba(61,220,132,0)}}
 .hero h1{font-size:clamp(44px,8vw,96px);margin:26px auto 18px;max-width:14ch;font-weight:700}
@@ -273,6 +273,28 @@ input[type=range]{accent-color:var(--red);width:130px}
 @keyframes grow{0%{width:0;height:0;opacity:1}100%{width:1400px;height:1400px;opacity:0}}
 .req{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:30px}
 .req span{font-size:12px;border:1px solid var(--line);border-radius:99px;padding:5px 12px;color:var(--muted);background:rgba(0,0,0,.25)}
+.dl .btn small{font-weight:500;font-size:12px;opacity:.75}
+.dl-hint{max-width:640px;margin:0 auto 20px;font-size:13px;line-height:1.6;color:var(--muted);display:grid;gap:6px}
+.dl-hint:empty{display:none}
+.dl-hint b{color:var(--text);font-weight:600}
+.dl-hint code,.dl-plat code{font:500 12px "JetBrains Mono",monospace;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:#c9ccd4;overflow-wrap:anywhere;display:inline-block;max-width:100%;vertical-align:middle}
+.dl-other{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:8px;margin:0 auto 22px;font-size:13px;color:var(--dim)}
+.dl-other a{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:99px;padding:4px 12px;background:rgba(255,255,255,.03);color:var(--muted);transition:color .2s,border-color .2s}
+.dl-other a:hover{color:var(--text);border-color:var(--dim)}
+.dl-other a b{font-weight:600;color:#c9ccd4}
+.dl .cta .btn small{white-space:nowrap}
+@media (max-width:560px){.dl .cta .btn{white-space:normal;flex-wrap:wrap;justify-content:center;text-align:center;row-gap:2px}}
+.dl-plat{font-size:12px;color:var(--dim);margin:14px auto 0;max-width:620px}
+/* three OS buttons side by side (the visitor's OS gets the accent), stacked on phones */
+.os-btns{display:grid;grid-template-columns:repeat(3,minmax(0,200px));gap:12px;justify-content:center}
+.os-btns .btn{flex-direction:column;justify-content:center;gap:6px;padding:22px 14px 16px;text-align:center;white-space:normal}
+.os-btns .btn svg.os{width:28px;height:28px}
+.os-btns .btn span{font-size:15px}
+.os-btns .btn small{font-weight:500;font-size:12px;opacity:.75}
+.os-btns .btn em{position:absolute;top:7px;right:9px;font-style:normal;font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.85}
+.hero-dl{margin-bottom:14px}
+.hero-dl .btn{padding:12px 12px}
+@media (max-width:560px){.os-btns{grid-template-columns:minmax(0,320px)}.os-btns .btn{flex-direction:row;gap:10px;padding:13px 16px;justify-content:flex-start;text-align:left}.os-btns .btn small{margin-left:auto}.os-btns .btn em{display:none}.os-btns .btn svg.os{width:22px;height:22px}}
 
 /* open source */
 .os{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center}
@@ -377,7 +399,7 @@ html.shot .ft,html.shot .cl,html.shot .cl-vh,html.shot .cl-alt{opacity:1!importa
     </div>
     <div class="navbtns">
       <button class="lang" id="lang" aria-label="Language">PT</button>
-      <a class="btn btn-red btn-sm dl-link" href="https://github.com/Ka1-S/LYNX/releases"><span data-i18n="nav.download">Download</span></a>
+      <a class="btn btn-red btn-sm dl-link" href="#download"><span data-i18n="nav.download">Download</span></a>
     </div>
   </div>
 </nav>
@@ -387,14 +409,11 @@ html.shot .ft,html.shot .cl,html.shot .cl-vh,html.shot .cl-alt{opacity:1!importa
   <div class="grid-bg"></div>
   <canvas id="waves"></canvas>
   <div class="wrap">
-    <a class="pill fade-up" href="https://github.com/Ka1-S/LYNX" style="animation-delay:.1s"><b class="ver-tag">ALPHA</b><span class="dot"></span><span data-i18n="hero.pill">Free &amp; open source · Windows 10/11</span></a>
+    <a class="pill fade-up" href="https://github.com/Ka1-S/LYNX" style="animation-delay:.1s"><b class="ver-tag">ALPHA</b><span class="dot"></span><span data-i18n="hero.pill">Free &amp; open source · Windows · macOS · Linux</span></a>
     <h1 id="h1" data-i18n-words="hero.title">A lightweight DAW, fully open source.</h1>
     <p class="lead fade-up" style="animation-delay:.7s" data-i18n="hero.lead">LYNX is a lightweight, fully open-source DAW with the FL Studio workflow you already know — Channel Rack, Piano Roll, Playlist and Mixer — built in modern C++ to run smoothly on any PC. It even opens your .flp projects.</p>
-    <div class="cta fade-up" style="animation-delay:.9s">
-      <a class="btn btn-red dl-link" href="https://github.com/Ka1-S/LYNX/releases">
-        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5l7.4-1v7.1H3V5.5zm0 13l7.4 1v-7H3v6zm8.2 1.1L21 21v-8.4h-9.8v7zm0-15.2v7.2H21V3l-9.8 1.4z"/></svg>
-        <span data-i18n="cta.download">Download for Windows</span>
-      </a>
+    <div class="os-btns hero-dl fade-up" style="animation-delay:.9s" data-os-btns><a class="btn btn-red" href="https://github.com/Ka1-S/LYNX/releases/latest"><span>Download</span></a></div>
+    <div class="cta fade-up" style="animation-delay:1s">
       <a class="btn btn-ghost" href="https://github.com/Ka1-S/LYNX">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a12 12 0 00-3.8 23.4c.6.1.8-.3.8-.6v-2.1c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.2-3.1-.1-.4-.5-1.6.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 016 0C17.3 4.6 18.3 5 18.3 5c.7 1.6.2 2.8.1 3.2.8.8 1.2 1.9 1.2 3.1 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0012 .5z"/></svg>
         <span data-i18n="cta.github">View on GitHub</span>
@@ -556,13 +575,15 @@ html.shot .ft,html.shot .cl,html.shot .cl-vh,html.shot .cl-alt{opacity:1!importa
       <i class="ring"></i><i class="ring" style="animation-delay:-2s"></i><i class="ring" style="animation-delay:-4s"></i>
       <div class="eyebrow" style="position:relative">// download</div>
       <h2 style="position:relative" data-i18n="dl.title">Start making music.</h2>
-      <p style="position:relative" data-i18n="dl.lead">A per-user installer (no admin rights) or a portable zip. No account, no subscription.</p>
-      <div class="cta" style="position:relative">
-        <a class="btn btn-red dl-link" id="dlExe" href="https://github.com/Ka1-S/LYNX/releases"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 21h16"/></svg><span data-i18n="dl.exe">Download the installer</span></a>
-        <a class="btn btn-ghost" id="dlZip" href="https://github.com/Ka1-S/LYNX/releases"><span data-i18n="dl.zip">Portable (.zip)</span></a>
+      <p style="position:relative" data-i18n="dl.lead">For Windows, macOS and Linux. No account, no subscription.</p>
+      <div class="os-btns" style="position:relative;margin-bottom:22px" data-os-btns>
+        <a class="btn btn-red" href="https://github.com/Ka1-S/LYNX/releases/latest"><span>Download</span></a>
       </div>
+      <div class="dl-hint" id="dlHint" style="position:relative"></div>
+      <div class="dl-other" id="dlOther" style="position:relative"><span>Windows · macOS · Linux</span></div>
       <div class="small" style="position:relative"><span class="ver-line">Latest release</span> · <a href="https://github.com/Ka1-S/LYNX/releases" data-i18n="dl.all">all releases &amp; checksums</a></div>
-      <div class="req" style="position:relative"><span>Windows 10 / 11 · 64-bit</span><span>ASIO · WASAPI</span><span>VST3 · CLAP</span><span data-i18n="dl.alpha">Alpha — expect rough edges</span></div>
+      <div class="req" style="position:relative"><span>Windows 10 / 11 · 64-bit</span><span data-i18n="dl.reqmac">macOS 11+ · Apple Silicon / Intel</span><span>Linux x86_64 · glibc 2.39+</span><span>VST3 · CLAP</span><span data-i18n="dl.alpha">Alpha — expect rough edges</span></div>
+      <div class="dl-plat" style="position:relative" data-i18n="dl.plat">Audio Units on macOS and LV2 on Linux. VST2 hosting, ASIO and the plugin sandbox are Windows-only.</div>
     </div>
     <p class="note" data-i18n="legal">LYNX is an independent project, not affiliated with or endorsed by Image-Line. FL Studio is a trademark of Image-Line Software.</p>
     <div class="policy" id="signing">
@@ -602,9 +623,9 @@ const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAl
 /* ---------- i18n ---------- */
 const PT = {
  'nav.features':'Recursos','nav.try':'Experimente','nav.media':'Vídeo','nav.gallery':'Galeria','nav.source':'Código aberto','nav.download':'Baixar',
- 'hero.pill':'Grátis e de código aberto · Windows 10/11','hero.title':'Uma DAW leve e|totalmente open-source.',
+ 'hero.pill':'Grátis e de código aberto · Windows · macOS · Linux','hero.title':'Uma DAW leve e|totalmente open-source.',
  'hero.lead':'LYNX é uma DAW leve e totalmente open-source, com o workflow do FL Studio que você já conhece — Channel Rack, Piano Roll, Playlist e Mixer — feita em C++ moderno para rodar liso em qualquer PC. Ela até abre seus projetos .flp.',
- 'cta.download':'Baixar para Windows','cta.github':'Ver no GitHub',
+ 'cta.github':'Ver no GitHub',
  'why.title':'Tudo que você precisa. Nada te atrasando.','why.lead':'Um motor sem travas que distribui canais e pistas do mixer pelos núcleos da CPU, pula canais parados e lê áudio longo direto do disco.',
  'stat.rt':'mais rápido que o tempo real — a demo de 46 s renderiza em 0,93 s','stat.plugins':'plugins nativos do FL Studio recriados ou convertidos na importação','stat.tests':'verificações automáticas a cada build','stat.free':'grátis para sempre, código aberto sob AGPL-3.0',
  'c1.t':'Leve','c1.p':'Grafo de áudio multithread, streaming do disco e interface leve. Roda até em notebook antigo.',
@@ -622,7 +643,8 @@ const PT = {
  'media.song':'“Demo” — a música de exemplo','media.songp':'124 BPM · kick, clap, reese bass, pad, pluck e supersaw. Clique na onda para pular.',
  'gal.title':'Escura, limpa, focada.','g.ws':'O espaço de trabalho completo','g.synth':'Synth de 3 osciladores embutido','g.eq':'EQ paramétrico de 7 bandas','g.auto':'Clipes de automação','g.mix':'Mixer com sends e sidechain',
  'os.title':'Feito às claras.','os.lead':'C++20 e JUCE 8. Cada recurso vem com testes, e cada comportamento do FL Studio que reproduzimos é documentado. Dê uma estrela, abra uma issue, mande um pull request.','os.star':'Estrela no GitHub',
- 'dl.title':'Comece a fazer música.','dl.lead':'Um instalador por usuário (sem admin) ou um zip portátil. Sem conta, sem assinatura.','dl.exe':'Baixar o instalador','dl.zip':'Portátil (.zip)','dl.all':'todas as versões e checksums','dl.alpha':'Alpha — pode ter arestas',
+ 'dl.title':'Comece a fazer música.','dl.lead':'Para Windows, macOS e Linux. Sem conta, sem assinatura.','dl.reqmac':'macOS 11+ · Apple Silicon / Intel',
+ 'dl.plat':'Audio Units no macOS e LV2 no Linux. Plugins VST2, ASIO e o isolamento de plugins são só do Windows.','dl.all':'todas as versões e checksums','dl.alpha':'Alpha — pode ter arestas',
  'legal':'LYNX é um projeto independente, sem afiliação ou endosso da Image-Line. FL Studio é marca registrada da Image-Line Software.',
  'sig.title':'Política de assinatura de código','sig.pending':'aguardando aprovação',
  'sig.p1':'Assinatura de código gratuita fornecida por <a href="https://about.signpath.io">SignPath.io</a>, certificado da <a href="https://signpath.org">SignPath Foundation</a>.',
@@ -661,7 +683,7 @@ function setLang(l){
   words(d['hero.title'] || EN['hero.title']);
   $('#lang').textContent = l==='pt' ? 'EN' : 'PT';
   try { localStorage.setItem('lynx-lang', l); } catch(e){}
-  renderPlugins(); renderFeatured(); renderClassics();
+  renderPlugins(); renderFeatured(); renderClassics(); renderDownload();
 }
 
 /* ---------- built-in plugins (docs/PLUGINS.md) ---------- */
@@ -810,19 +832,80 @@ $('#clTabs').addEventListener('click', e => { const b = e.target.closest('[data-
   $$('#clTabs .pl-f').forEach(x => x.classList.toggle('on', x===b));
   $$('#clGroups .cl-v').forEach(v => { v.hidden = clVendor!=='all' && clVendor!==v.dataset.v; if (!v.hidden){ v.classList.add('in'); clSeen.add(v.dataset.v); } }); });
 $('#clGroups').addEventListener('pointermove', e => { const c = e.target.closest('.cl'); if (!c) return; const r = c.getBoundingClientRect(); c.style.setProperty('--x',(e.clientX-r.left)+'px'); c.style.setProperty('--y',(e.clientY-r.top)+'px'); });
+/* ---------- download: visitor's OS + per-OS assets (resolved from the GitHub API below) ---------- */
+const RELEASES = 'https://github.com/Ka1-S/LYNX/releases/latest';
+// main = primary package, alt = second format; tests run on asset names, newest release with a match wins
+const DL = {
+  win:  {name:'Windows', main:{re:[/setup.*\.exe$/i, /\.exe$/i], en:'Installer', pt:'Instalador', ext:'.exe'},
+         alt:{re:[/windows.*\.zip$/i], en:'Portable', pt:'Portátil', ext:'.zip'}},
+  mac:  {name:'macOS', main:{re:[/macos.*\.dmg$/i, /\.dmg$/i], en:'Universal', pt:'Universal', ext:'.dmg'}},
+  linux:{name:'Linux', main:{re:[/\.AppImage$/i], en:'AppImage', pt:'AppImage', ext:''},
+         alt:{re:[/linux.*\.tar\.gz$/i], en:'Archive', pt:'Arquivo', ext:'.tar.gz'}}
+};
+const dlUrl = {};   // 'win.main' -> browser_download_url
+function detectOS(){
+  const q = new URLSearchParams(location.search).get('os');   // ?os=win|mac|linux|any (testing)
+  if (q) return DL[q] ? q : '';
+  const uad = navigator.userAgentData, ua = navigator.userAgent || '';
+  const p = ((uad && uad.platform) || navigator.platform || '').toLowerCase();
+  if ((uad && uad.mobile) || /android|iphone|ipad|ipod/i.test(ua) || /android|iphone|ipad|ipod/.test(p)) return '';
+  if (/mac/.test(p) || /Macintosh|Mac OS X/.test(ua)) return navigator.maxTouchPoints > 1 ? '' : 'mac';   // touch "Mac" = iPadOS
+  if (/win/.test(p) || /Windows/.test(ua)) return 'win';
+  if (/cros/.test(p) || /CrOS/.test(ua)) return '';
+  if (/linux|x11|bsd/.test(p) || /Linux|X11/.test(ua)) return 'linux';
+  return '';
+}
+const userOS = detectOS();
+function renderDownload(){
+  const pt = lang==='pt';
+  const T = pt ? {for:n=>'Baixar para '+n, dl:'Baixar', more:'Mais formatos:', yours:'Seu sistema'}
+               : {for:n=>'Download for '+n, dl:'Download', more:'More formats:', yours:'Your system'};
+  const H = pt ? {
+    win:'<b>Windows 10 ou 11, 64 bits.</b> O instalador não pede admin. O executável ainda não tem assinatura de código: se o SmartScreen avisar, clique em <i>Mais informações</i> → <i>Executar assim mesmo</i>.',
+    mac:'<b>macOS 11 ou mais novo, Apple Silicon ou Intel.</b> O app ainda não é notarizado pela Apple: arraste o LYNX para Aplicativos e, na primeira vez, clique com o botão direito nele → <i>Abrir</i> → <i>Abrir</i> (no macOS 15 ou mais novo: tente abrir uma vez e depois <i>Ajustes do Sistema → Privacidade e Segurança → Abrir Mesmo Assim</i>). Ou no Terminal: <code>xattr -dr com.apple.quarantine /Applications/LYNX.app</code>',
+    linux:'<b>Linux x86_64 com glibc 2.39 ou mais novo</b> (Ubuntu 24.04, Debian 13, Fedora 40 ou mais novos). AppImage: <code>chmod +x LYNX-*.AppImage</code> e execute (algumas distros precisam do libfuse2). O .tar.gz traz um <code>install.sh</code> que instala no seu usuário com atalho no menu.'
+  } : {
+    win:'<b>Windows 10 or 11, 64-bit.</b> The installer needs no admin rights. The executable is not code-signed yet: if SmartScreen warns, choose <i>More info</i> → <i>Run anyway</i>.',
+    mac:'<b>macOS 11 or newer, Apple Silicon or Intel.</b> The app is not notarized by Apple yet: drag LYNX to Applications, then the first time right-click it → <i>Open</i> → <i>Open</i> (on macOS 15 or newer: try to open it once, then <i>System Settings → Privacy &amp; Security → Open Anyway</i>). Or in Terminal: <code>xattr -dr com.apple.quarantine /Applications/LYNX.app</code>',
+    linux:'<b>Linux x86_64 with glibc 2.39 or newer</b> (Ubuntu 24.04, Debian 13, Fedora 40 or newer). AppImage: <code>chmod +x LYNX-*.AppImage</code>, then run it (some distros need libfuse2). The .tar.gz has an <code>install.sh</code> that installs for your user with a menu entry.'
+  };
+  const url = (os,k) => dlUrl[os+'.'+k] || RELEASES;
+  const fmt = f => (pt ? f.pt : f.en) + (f.ext ? ' (' + f.ext + ')' : '');
+  const OSICON = {
+    win:'<svg class="os" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.6l7.4-1v7H3zM11.4 4.4L21 3v8.6h-9.6zM3 12.4h7.4v7.1L3 18.4zM11.4 12.4H21V21l-9.6-1.4z"/></svg>',
+    mac:'<svg class="os" viewBox="0 0 24 24" fill="currentColor"><path d="M16.4 12.7c0-2.4 2-3.5 2.1-3.6-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.6.9-.8 0-1.9-.8-3.1-.8-1.6 0-3.1.9-3.9 2.4-1.7 2.9-.4 7.3 1.2 9.7.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8 1.5 0 1.9.8 3.2.8 1.3 0 2.1-1.2 2.9-2.4.9-1.3 1.3-2.6 1.3-2.7-.1 0-2.7-1-2.7-4zM14.1 5.6c.7-.8 1.1-1.9 1-3-1 0-2.1.6-2.8 1.4-.6.7-1.2 1.8-1 2.9 1.1.1 2.2-.5 2.8-1.3z"/></svg>',
+    linux:'<svg class="os" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M12 2c-2.3 0-3.7 1.8-3.7 4.3 0 1.3.3 2.2-.6 3.6C6.4 11.7 5 13.9 5 16.4c0 .9.2 1.6.5 2.2-.9.3-1.6.9-1.6 1.6 0 1.1 1.7 1.4 3.3 1.6 1 .1 1.9.6 2.8.6.8 0 1.4-.5 2-.5s1.2.5 2 .5c.9 0 1.8-.5 2.8-.6 1.6-.2 3.3-.5 3.3-1.6 0-.7-.7-1.3-1.6-1.6.3-.6.5-1.3.5-2.2 0-2.5-1.4-4.7-2.7-6.5-.9-1.4-.6-2.3-.6-3.6C15.7 3.8 14.3 2 12 2zm-1.6 3.4a.9 1.1 0 110 2.2.9 1.1 0 010-2.2zm3.2 0a.9 1.1 0 110 2.2.9 1.1 0 010-2.2zM12 11c-2 0-3.4 2.3-3.4 5.2 0 1.5.6 2.6 1.6 3h3.6c1-.4 1.6-1.5 1.6-3 0-2.9-1.4-5.2-3.4-5.2z"/></svg>'
+  };
+  const chip = (os,k) => `<a href="${url(os,k)}"><b>${DL[os].name}</b>${fmt(DL[os][k])}</a>`;
+  // always all three platforms side by side; the visitor's OS only gets the accent
+  const btns = Object.keys(DL).map(o => `<a class="btn ${o===userOS ? 'btn-red' : 'btn-ghost'}" href="${url(o,'main')}"${o===userOS ? ' aria-current="true"' : ''}>`
+      + `${OSICON[o]}<span>${DL[o].name}</span><small>${fmt(DL[o].main)}</small>${o===userOS ? `<em>${T.yours}</em>` : ''}</a>`).join('');
+  const hint = userOS ? `<div>${H[userOS]}</div>` : Object.keys(DL).map(o => `<div>${H[o]}</div>`).join('');
+  const alts = Object.keys(DL).filter(o => DL[o].alt);
+  if (userOS) alts.sort((a,b) => (b===userOS) - (a===userOS));
+  const row = `<span>${T.more}</span>` + alts.map(o => chip(o,'alt')).join('');
+  $$('[data-os-btns]').forEach(e => e.innerHTML = btns);
+  $('#dlHint').innerHTML = hint; $('#dlOther').innerHTML = row;
+}
 $('#lang').onclick = () => setLang(lang==='pt' ? 'en' : 'pt');
 setLang(lang);
 
 /* ---------- latest release from GitHub ---------- */
-fetch('https://api.github.com/repos/Ka1-S/LYNX/releases?per_page=5').then(r=>r.ok?r.json():null).then(rs=>{
-  if (!rs || !rs.length) return;
-  const r = rs.find(x=>!x.draft) || rs[0];
-  const exe = r.assets.find(a=>/setup.*\.exe$/i.test(a.name)) || r.assets.find(a=>/\.exe$/i.test(a.name)), zip = r.assets.find(a=>/\.zip$/i.test(a.name));
-  const v = r.tag_name.replace(/^v/,'');
+fetch('https://api.github.com/repos/Ka1-S/LYNX/releases?per_page=10').then(r=>r.ok?r.json():null).then(rs=>{
+  if (!Array.isArray(rs) || !rs.length) return;
+  rs = rs.filter(x=>!x.draft); if (!rs.length) return;
+  const r = rs[0], v = r.tag_name.replace(/^v/,'');
   $$('.ver-line').forEach(e=>e.textContent = 'v'+v + (r.published_at ? ' · ' + new Date(r.published_at).toLocaleDateString(lang==='pt'?'pt-BR':'en') : ''));
   $$('.ver-tag').forEach(e=>e.textContent = v.toUpperCase());
-  if (exe) $$('.dl-link').forEach(a=>a.href = exe.browser_download_url);
-  if (zip) $('#dlZip').href = zip.browser_download_url;
+  // per OS and format: the newest release that has a matching file (releases up to 0.1.7 are Windows-only)
+  Object.keys(DL).forEach(os => ['main','alt'].forEach(k => {
+    const f = DL[os][k]; if (!f) return;
+    for (const re of f.re) for (const rel of rs){
+      const a = (rel.assets||[]).find(x => re.test(x.name));
+      if (a){ dlUrl[os+'.'+k] = a.browser_download_url; return; }
+    }
+  }));
+  renderDownload();
 }).catch(()=>{});
 
 /* ---------- nav + progress ---------- */
@@ -840,7 +923,7 @@ addEventListener('scroll', onScroll, {passive:true}); onScroll();
 screen.addEventListener('pointermove', e => { const r = screen.getBoundingClientRect(); screen.style.setProperty('--mx', (e.clientX-r.left)+'px'); screen.style.setProperty('--my', (e.clientY-r.top)+'px'); });
 
 /* ---------- marquee ---------- */
-const items = ['Channel Rack','Piano Roll','Playlist','Mixer','Sidechain','VST3 · CLAP','ASIO','Automation clips','.flp import','Disk streaming','Parametric EQ','Time-stretch','MIDI controllers','Stems export','Sampler','3x Osc synth'];
+const items = ['Channel Rack','Piano Roll','Playlist','Mixer','Sidechain','VST3 · CLAP','ASIO','Automation clips','.flp import','Disk streaming','Parametric EQ','Time-stretch','MIDI controllers','Stems export','Sampler','3x Osc synth','Windows · macOS · Linux'];
 const half = items.map(t=>`<span>${t}</span>`).join(''); $('#track').innerHTML = half + half;
 
 /* ---------- reveal + counters ---------- */

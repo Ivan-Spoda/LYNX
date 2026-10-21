@@ -6,8 +6,8 @@
 #include <cstdio>
 #include <cstring>
 
-#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
- #include <xmmintrin.h>
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__) || defined(__aarch64__) || defined(_M_ARM64) // x86 SSE, or ARM64 through core/Simd.h (sse2neon)
+ #include "core/Simd.h"
 #endif
 
 // Clean-room implementation of docs/analise/REA_rodada54.md. Comments name the behaviour, not FL's code.
@@ -42,14 +42,14 @@ class Ftz
 public:
     Ftz() noexcept
     {
-#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__) || defined(__aarch64__) || defined(_M_ARM64) // x86 SSE, or ARM64 through core/Simd.h (sse2neon)
         saved = _mm_getcsr();
         _mm_setcsr (saved | 0x8040u);
 #endif
     }
     ~Ftz()
     {
-#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__) || defined(__aarch64__) || defined(_M_ARM64) // x86 SSE, or ARM64 through core/Simd.h (sse2neon)
         _mm_setcsr (saved);
 #endif
     }

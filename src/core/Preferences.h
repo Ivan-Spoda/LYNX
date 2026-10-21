@@ -59,6 +59,9 @@ enum class DriverKind
     directSound,
     asio,
     lynxAsio, // LYNX ASIO loaded by LYNX itself, without registration (REA round 106)
+    coreAudio, // macOS
+    alsa,      // Linux
+    jack,      // Linux (JACK, or PipeWire through pipewire-jack)
     other
 };
 DriverKind driverKind (const std::string& typeName);

@@ -7,7 +7,7 @@
 
 extern "C"
 {
-#include "wavpack.h"
+#include <wavpack.h> // third_party/wavpack (angle brackets: core/WavPack.h has the same name on case-insensitive file systems)
 }
 
 namespace lynx

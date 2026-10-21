@@ -1,4 +1,5 @@
 #include "ui/WaveformView.h"
+#include "platform/Paths.h"
 
 #include <algorithm>
 #include <cmath>
@@ -142,7 +143,7 @@ WaveformCache::~WaveformCache()
 
 juce::File WaveformCache::diskFolder()
 {
-    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/wavecache");
+    return lynx::platform::cacheFolder ("wavecache");
 }
 
 std::shared_ptr<const wave::Summary> WaveformCache::find (const juce::String& path, const Source& source)

@@ -1,6 +1,7 @@
 #include "ui/ProjectLoading.h"
 #include "core/LoadTrace.h"
 #include "ui/MainComponent.h"
+#include "platform/Paths.h"
 #include "ui/SetupWizard.h"
 #include "core/FlPluginDb.h"
 
@@ -2598,7 +2599,7 @@ void MainComponent::startSession()
         sessionLock.reset(); // another LYNX window is running: it owns the marker
         return;
     }
-    sessionMarker = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/session-running.txt");
+    sessionMarker = lynx::platform::settingsFile ("session-running.txt");
     if (sessionMarker.existsAsFile())
     {
         const auto previousStart = juce::Time (sessionMarker.loadFileAsString().trim().getLargeIntValue());

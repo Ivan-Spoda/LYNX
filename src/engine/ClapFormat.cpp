@@ -1,6 +1,7 @@
 #include "engine/ClapFormat.h"
 #include "engine/Vst2Format.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <map>
@@ -11,9 +12,8 @@
 
 #include <clap/clap.h>
 
-#if JUCE_WINDOWS
- #include <windows.h>
-#endif
+#include "platform/NativeEmbed.h"
+#include "platform/Paths.h"
 
 namespace lynx
 {
@@ -25,6 +25,24 @@ namespace
 class ClapModule
 {
 public:
+    // The file to load: the .clap itself (Windows DLL, Linux .so), or on macOS the executable inside the .clap bundle
+    // (Contents/MacOS/<name>); clap_entry.init still gets the bundle path, as the CLAP spec asks.
+    static juce::String binaryOf (const juce::String& path)
+    {
+       #if JUCE_MAC
+        const juce::File bundle (path);
+        if (bundle.isDirectory())
+        {
+            const auto macos = bundle.getChildFile ("Contents/MacOS");
+            if (const auto named = macos.getChildFile (bundle.getFileNameWithoutExtension()); named.existsAsFile())
+                return named.getFullPathName();
+            for (const auto& f : macos.findChildFiles (juce::File::findFiles, false))
+                return f.getFullPathName();
+        }
+       #endif
+        return path;
+    }
+
     static std::shared_ptr<ClapModule> open (const juce::String& path)
     {
         static std::mutex mutex;
@@ -36,7 +54,7 @@ public:
 
         auto module = std::shared_ptr<ClapModule> (new ClapModule());
 
-        if (! module->library.open (path))
+        if (! module->library.open (binaryOf (path)))
             return nullptr;
 
         const auto* entry = static_cast<const clap_plugin_entry_t*> (module->library.getFunction ("clap_entry"));
@@ -258,7 +276,7 @@ public:
         inputChannels = mainPortChannels (true, description.isInstrument ? 0 : 2);
         outputChannels = juce::jmax (1, mainPortChannels (false, 2));
 
-        if (gui != nullptr && ! gui->is_api_supported (plugin, CLAP_WINDOW_API_WIN32, false))
+        if (gui != nullptr && ! gui->is_api_supported (plugin, platform::NativeEmbed::clapWindowApi(), false))
             gui = nullptr;
 
         if (params != nullptr)
@@ -286,6 +304,12 @@ public:
     ~ClapInstance() override
     {
         *alive = false;
+        timers.clear();
+       #if JUCE_LINUX || JUCE_BSD
+        for (const auto fd : fds)
+            juce::LinuxEventLoop::unregisterFdCallback (fd);
+        fds.clear();
+       #endif
 
         if (active)
         {
@@ -620,6 +644,10 @@ private:
             if (std::strcmp (id, CLAP_EXT_STATE) == 0) return &self->hostState;
             if (std::strcmp (id, CLAP_EXT_LATENCY) == 0) return &self->hostLatency;
             if (std::strcmp (id, CLAP_EXT_GUI) == 0) return &self->hostGui;
+            if (std::strcmp (id, CLAP_EXT_TIMER_SUPPORT) == 0) return &self->hostTimers;
+           #if JUCE_LINUX || JUCE_BSD
+            if (std::strcmp (id, CLAP_EXT_POSIX_FD_SUPPORT) == 0) return &self->hostFds;
+           #endif
             return nullptr;
         };
         h.request_restart = [] (const clap_host_t* hh) {
@@ -681,6 +709,70 @@ private:
         [] (const clap_host_t*) {}
     };
     clap_host_state_t hostState { [] (const clap_host_t*) {} };
+    // timer-support: plugin GUIs (on Linux above all) repaint and poll from host timers, on the main thread
+    struct PluginTimer final : juce::Timer
+    {
+        PluginTimer (ClapInstance& o, clap_id i) : owner (o), id (i) {}
+        void timerCallback() override
+        {
+            if (const auto* ext = static_cast<const clap_plugin_timer_support_t*> (owner.plugin->get_extension (owner.plugin, CLAP_EXT_TIMER_SUPPORT)))
+                ext->on_timer (owner.plugin, id);
+        }
+        ClapInstance& owner;
+        clap_id id;
+    };
+    std::map<clap_id, std::unique_ptr<PluginTimer>> timers;
+    clap_id nextTimer = 1;
+    clap_host_timer_support_t hostTimers {
+        [] (const clap_host_t* hh, uint32_t periodMs, clap_id* timerId) {
+            auto* self = from (hh);
+            if (timerId == nullptr || ! juce::MessageManager::existsAndIsCurrentThread())
+                return false;
+            const auto id = self->nextTimer++;
+            auto timer = std::make_unique<PluginTimer> (*self, id);
+            timer->startTimer ((int) juce::jlimit<uint32_t> (1, 10000, periodMs));
+            self->timers[id] = std::move (timer);
+            *timerId = id;
+            return true;
+        },
+        [] (const clap_host_t* hh, clap_id timerId) {
+            return from (hh)->timers.erase (timerId) > 0;
+        }
+    };
+   #if JUCE_LINUX || JUCE_BSD
+    // posix-fd-support: X11/Wayland plugin GUIs watch their own sockets through the host's event loop
+    std::vector<int> fds;
+    static short pollMask (clap_posix_fd_flags_t flags)
+    {
+        return (short) (((flags & CLAP_POSIX_FD_READ) != 0 ? 0x001 /*POLLIN*/ : 0) | ((flags & CLAP_POSIX_FD_WRITE) != 0 ? 0x004 /*POLLOUT*/ : 0)
+                        | ((flags & CLAP_POSIX_FD_ERROR) != 0 ? 0x008 /*POLLERR*/ : 0));
+    }
+    static bool watchFd (ClapInstance* self, int fd, clap_posix_fd_flags_t flags)
+    {
+        juce::LinuxEventLoop::unregisterFdCallback (fd);
+        juce::LinuxEventLoop::registerFdCallback (fd, [self, flags] (int f) {
+            if (const auto* ext = static_cast<const clap_plugin_posix_fd_support_t*> (self->plugin->get_extension (self->plugin, CLAP_EXT_POSIX_FD_SUPPORT)))
+                ext->on_fd (self->plugin, f, flags);
+        }, pollMask (flags));
+        if (std::find (self->fds.begin(), self->fds.end(), fd) == self->fds.end())
+            self->fds.push_back (fd);
+        return true;
+    }
+    clap_host_posix_fd_support_t hostFds {
+        [] (const clap_host_t* hh, int fd, clap_posix_fd_flags_t flags) { return watchFd (from (hh), fd, flags); },
+        [] (const clap_host_t* hh, int fd, clap_posix_fd_flags_t flags) { return watchFd (from (hh), fd, flags); },
+        [] (const clap_host_t* hh, int fd) {
+            auto* self = from (hh);
+            juce::LinuxEventLoop::unregisterFdCallback (fd);
+            const auto it = std::find (self->fds.begin(), self->fds.end(), fd);
+            if (it == self->fds.end())
+                return false;
+            self->fds.erase (it);
+            return true;
+        }
+    };
+   #endif
+
     clap_host_latency_t hostLatency { [] (const clap_host_t* hh) {
         auto* self = from (hh);
         self->onMainThread ([self] {
@@ -718,7 +810,7 @@ juce::String ClapParameter::getText (float v, int) const
     return owner.paramText (id, toPlain (v));
 }
 
-// The plugin's native UI inside a child window (HWND) embedded in the component.
+// The plugin's native UI inside a native child view (platform/NativeEmbed: HWND, NSView or X11 window).
 class ClapEditor final : public juce::AudioProcessorEditor,
                          private juce::Timer
 {
@@ -730,7 +822,7 @@ public:
         const auto scale = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->scale;
         setSize (480, 320);
 
-        if (owner.gui != nullptr && owner.gui->create (owner.plugin, CLAP_WINDOW_API_WIN32, false))
+        if (owner.gui != nullptr && owner.gui->create (owner.plugin, platform::NativeEmbed::clapWindowApi(), false))
         {
             created = true;
             owner.gui->set_scale (owner.plugin, scale);
@@ -740,7 +832,7 @@ public:
                 setSize (juce::roundToInt (w / scale), juce::roundToInt (h / scale));
         }
 
-        addAndMakeVisible (holder);
+        addAndMakeVisible (embed);
         owner.editor = this;
         startTimer (20);
     }
@@ -754,16 +846,9 @@ public:
             owner.gui->hide (owner.plugin);
             owner.gui->destroy (owner.plugin);
         }
-
-        holder.setHWND (nullptr);
-
-       #if JUCE_WINDOWS
-        if (container != nullptr)
-            DestroyWindow ((HWND) container);
-       #endif
     }
 
-    void resized() override { holder.setBounds (getLocalBounds()); }
+    void resized() override { embed.setBounds (getLocalBounds()); }
 
     void paint (juce::Graphics& g) override
     {
@@ -778,34 +863,29 @@ public:
 private:
     void timerCallback() override
     {
-       #if JUCE_WINDOWS
-        // the child window needs a real window as parent: wait until on screen
-        auto* peer = getPeer();
-
-        if (! created || peer == nullptr || container != nullptr)
+        // the native view needs a real window as parent: wait until on screen
+        if (! created)
+        {
+            stopTimer();
+            return;
+        }
+        if (! embed.create())
             return;
 
         stopTimer();
-        const auto scale = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->scale;
-        container = CreateWindowExW (0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0, 0,
-                                     juce::roundToInt (getWidth() * scale), juce::roundToInt (getHeight() * scale),
-                                     (HWND) peer->getNativeHandle(), nullptr, nullptr, nullptr);
-        holder.setHWND (container);
-        holder.setBounds (getLocalBounds());
-
         clap_window_t window {};
-        window.api = CLAP_WINDOW_API_WIN32;
-        window.win32 = container;
+        window.api = platform::NativeEmbed::clapWindowApi();
+       #if JUCE_LINUX || JUCE_BSD
+        window.x11 = embed.x11Window();
+       #else
+        window.ptr = embed.nativeHandle();
+       #endif
         owner.gui->set_parent (owner.plugin, &window);
         owner.gui->show (owner.plugin);
-       #else
-        stopTimer();
-       #endif
     }
 
     ClapInstance& owner;
-    juce::HWNDComponent holder;
-    void* container = nullptr;
+    platform::NativeEmbed embed;
     bool created = false;
 };
 
@@ -868,11 +948,12 @@ juce::StringArray ClapPluginFormat::searchPathsForPlugins (const juce::FileSearc
 
 juce::FileSearchPath ClapPluginFormat::getDefaultLocationsToSearch()
 {
+    // the CLAP folders among this OS's standard plugin folders (platform/Paths)
     juce::FileSearchPath paths;
-   #if JUCE_WINDOWS
-    paths.add (juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory).getChildFile ("Common Files/CLAP"));
-    paths.add (juce::File::getSpecialLocation (juce::File::windowsLocalAppData).getChildFile ("Programs/Common/CLAP"));
-   #endif
+    const auto all = platform::standardPluginFolders();
+    for (int i = 0; i < all.getNumPaths(); ++i)
+        if (all[i].getFileName().equalsIgnoreCase ("CLAP") || all[i].getFileName() == ".clap" || all[i].getFileName() == "clap")
+            paths.add (all[i]);
     return paths;
 }
 

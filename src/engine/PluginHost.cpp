@@ -1,4 +1,5 @@
 #include "engine/PluginHost.h"
+#include "platform/Paths.h"
 
 #include <algorithm>
 
@@ -502,23 +503,12 @@ PluginHost::~PluginHost()
 
 juce::File PluginHost::settingsFolder()
 {
-    auto folder = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX");
-    folder.createDirectory();
-    return folder;
+    return platform::settingsFolder();
 }
 
 juce::FileSearchPath PluginHost::defaultSearchPath()
 {
-    juce::FileSearchPath paths;
-    // Same locations JUCE/Steinberg use by default on Windows.
-    paths.add (juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory).getChildFile ("Common Files/VST3"));
-    // VST2 (Vst2Format): the usual folders installers use
-    for (const auto* sub : { "VSTPlugins", "Steinberg/VSTPlugins", "Common Files/VST2", "Common Files/Steinberg/VST2" })
-        paths.add (juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory).getChildFile (sub));
-    paths.add (juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory).getChildFile ("Common Files/CLAP"));
-    paths.add (juce::File::getSpecialLocation (juce::File::windowsLocalAppData).getChildFile ("Programs/Common/CLAP"));
-    paths.add (settingsFolder().getChildFile ("Plugins"));
-    return paths;
+    return platform::standardPluginFolders();
 }
 
 juce::FileSearchPath PluginHost::suggestedFolders()
@@ -646,7 +636,7 @@ bool scanResultComplete (const juce::File& result)
 // why a plugin file was not described (%APPDATA%\LYNX\scan-failures.log), so a "missing" plugin can be explained
 void logScanFailure (const juce::String& file, const juce::String& why, juce::uint32 elapsedMs)
 {
-    const auto log = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX").getChildFile ("scan-failures.log");
+    const auto log = lynx::platform::settingsFile ("scan-failures.log");
     if (log.getSize() > 256 * 1024)
         log.deleteFile();
     log.appendText (juce::Time::getCurrentTime().toISO8601 (true) + " | " + file + " | " + why + " | " + juce::String (elapsedMs / 1000.0, 1) + " s\n");
@@ -1054,7 +1044,11 @@ std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlu
     }
     // 2) the file FL Studio uses for it on this PC (its plugin database), or the very file the project saved
     auto sameFile = [&] (const std::string& path) -> const juce::PluginDescription* {
+       #if JUCE_WINDOWS
         const auto p = juce::String::fromUTF8 (path.c_str()).replaceCharacter ('/', '\\');
+       #else
+        const auto p = juce::String::fromUTF8 (path.c_str());
+       #endif
         if (p.isEmpty() || ! juce::File::isAbsolutePath (p))
             return nullptr;
         const juce::File file (p);
@@ -1131,10 +1125,15 @@ juce::StringArray PluginHost::filesToScanFor (const std::vector<FlpPluginUse>& u
         return files;
 
     auto hosted = [] (const juce::String& path) {
-        return path.endsWithIgnoreCase (".vst3") || path.endsWithIgnoreCase (".clap") || path.endsWithIgnoreCase (".dll");
+        return path.endsWithIgnoreCase (".vst3") || path.endsWithIgnoreCase (".clap") || path.endsWithIgnoreCase (".dll")
+            || path.endsWithIgnoreCase (".component") || path.endsWithIgnoreCase (".lv2");
     };
     auto addExisting = [&] (const std::string& path) {
+       #if JUCE_WINDOWS
         const auto p = juce::String::fromUTF8 (path.c_str()).replaceCharacter ('/', '\\');
+       #else
+        const auto p = juce::String::fromUTF8 (path.c_str());
+       #endif
         if (p.isNotEmpty() && juce::File::isAbsolutePath (p) && hosted (p) && juce::File (p).exists())
             files.addIfNotAlreadyThere (juce::File (p).getFullPathName(), true);
     };

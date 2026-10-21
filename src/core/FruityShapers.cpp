@@ -44,9 +44,16 @@ struct X87Mode
     X87Mode& operator= (const X87Mode&) = delete;
 };
 #else
+// no x87 (ARM64): conversions follow the kernel's rounding direction (arithmetic stays round-to-nearest; precision
+// is the platform's long double)
+inline thread_local bool x87Truncate = false; // the conversions below follow it (arithmetic stays round-to-nearest)
 struct X87Mode
 {
-    explicit X87Mode (bool) noexcept {}
+    bool saved;
+    explicit X87Mode (bool truncate) noexcept : saved (x87Truncate) { x87Truncate = truncate; }
+    ~X87Mode() { x87Truncate = saved; }
+    X87Mode (const X87Mode&) = delete;
+    X87Mode& operator= (const X87Mode&) = delete;
 };
 #endif
 
@@ -82,10 +89,10 @@ inline long double x87Round (long double v) noexcept
 // (float) v in the current rounding mode, stored
 inline void x87Store (float* p, long double v) noexcept { asm ("fstps %0" : "=m"(*p) : "t"(v) : "st"); }
 #else
-inline long long x87Int (long double v) noexcept { return (long long) std::nearbyint (v); }
+inline long long x87Int (long double v) noexcept { return x87Truncate ? (long long) std::trunc (v) : (long long) std::nearbyint (v); }
 inline long double x87Load (const float* p) noexcept { return *p; }
 inline long double x87Load (const std::int16_t* p) noexcept { return *p; }
-inline long double x87Round (long double v) noexcept { return std::nearbyint (v); }
+inline long double x87Round (long double v) noexcept { return x87Truncate ? std::trunc (v) : std::nearbyint (v); }
 inline void x87Store (float* p, long double v) noexcept { *p = (float) v; }
 #endif
 

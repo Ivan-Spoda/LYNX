@@ -19,8 +19,8 @@
 
 #include "core/Inflate.h"
 
-#if defined(__SSE2__) || defined(_M_X64)
- #include <emmintrin.h>
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__) || defined(__aarch64__) || defined(_M_ARM64) // x86 SSE2, or ARM64 through core/Simd.h (sse2neon)
+ #include "core/Simd.h"
 #endif
 
 // the DLL rounds every float32 product and sum separately: no fused multiply-adds in this file
@@ -47,7 +47,7 @@ inline double rne (double x) noexcept
 {
     if (! (std::abs (x) < 2251799813685248.0))
         return x;
-#if defined(__SSE2__) || defined(_M_X64)
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__) || defined(__aarch64__) || defined(_M_ARM64) // x86 SSE2, or ARM64 through core/Simd.h (sse2neon)
     return (double) _mm_cvtsd_si64 (_mm_set_sd (x)); // cvtsd2si: the MXCSR mode, round-to-nearest-even in LYNX and FL
 #else
     volatile double big = 6755399441055744.0; // not folded by the optimiser
@@ -3893,7 +3893,7 @@ struct Engine::Impl
             }
         const auto* t = o.table;
         const auto mask = o.N - 1;
-#if defined(__SSE2__) || defined(_M_X64)
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__) || defined(__aarch64__) || defined(_M_ARM64) // x86 SSE2, or ARM64 through core/Simd.h (sse2neon)
         // 4 lanes in one register: truncation, fraction, two table reads per lane, interpolation and volume — the
         // same float operations in the same order as the scalar form
         auto x4 = _mm_loadu_ps (lanes);

@@ -5,10 +5,11 @@
 <h1 align="center">LYNX</h1>
 
 <p align="center"><strong>A lightweight DAW with the FL Studio workflow.</strong><br>
-Channel Rack, Piano Roll, Playlist and Mixer in C++20 + JUCE 8, built to run well on any PC.</p>
+Channel Rack, Piano Roll, Playlist and Mixer in C++20 + JUCE 8, built to run well on any PC.<br>
+Windows, macOS and Linux.</p>
 
 <p align="center">
-  <a href="https://github.com/Ka1-S/LYNX/releases/latest"><img src="https://img.shields.io/badge/Download%20for%20Windows-0.1.7%20alpha-d9534f?style=for-the-badge&logo=windows&logoColor=white" alt="Download LYNX for Windows"></a>
+  <a href="https://github.com/Ka1-S/LYNX/releases/latest"><img src="https://img.shields.io/badge/Download-0.1.8%20alpha-d9534f?style=for-the-badge" alt="Download LYNX"></a>
 </p>
 
 <p align="center">
@@ -27,6 +28,8 @@ Channel Rack, Piano Roll, Playlist and Mixer in C++20 + JUCE 8, built to run wel
   <img src="https://img.shields.io/badge/C%2B%2B-20-ef7b22" alt="C++20">
   <img src="https://img.shields.io/badge/JUCE-8-8a8a8a" alt="JUCE 8">
   <img src="https://img.shields.io/badge/Windows-10%20%C2%B7%2011-24292f" alt="Windows 10 and 11">
+  <img src="https://img.shields.io/badge/macOS-11%2B%20%C2%B7%20Apple%20Silicon%20%C2%B7%20Intel-24292f" alt="macOS 11 or newer, Apple Silicon and Intel">
+  <img src="https://img.shields.io/badge/Linux-x86__64-24292f" alt="Linux x86_64">
   <img src="https://img.shields.io/badge/VST3%20%C2%B7%20CLAP-supported-d9534f" alt="VST3 and CLAP">
   <img src="https://img.shields.io/badge/status-alpha-f0ad4e" alt="Alpha">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-5cb85c" alt="AGPL-3.0 license"></a>
@@ -158,7 +161,7 @@ Any knob or fader (channel, mixer, effect, plugin parameter) becomes a clip with
 - 3-oscillator synth with an evolving harmonics oscillator, SVF or 4-pole ladder filter and a vintage chorus
 - Sampler with zones, slices, time-stretch (WSOLA) and disk streaming
 - Built-in drums (kick, snare, hat, clap)
-- VST3 and CLAP plugins, optionally sandboxed in a separate process
+- VST3 and CLAP plugins on every OS, plus Audio Units on macOS and LV2 on Linux; on Windows optionally sandboxed in a separate process
 
 </td>
 <td width="33%" valign="top">
@@ -179,7 +182,7 @@ Any knob or fader (channel, mixer, effect, plugin parameter) becomes a clip with
 - Exports WAV 16/24/32f, FLAC and OGG, song or pattern, with dither
 - Note recording (PC keyboard and MIDI) and audio input recording
 - Undo/redo on every edit
-- Audio drivers: Windows Audio (WASAPI), DirectSound and ASIO
+- Audio drivers: Windows Audio (WASAPI), DirectSound and ASIO on Windows; Core Audio on macOS; ALSA and JACK on Linux
 
 </td>
 </tr>
@@ -237,13 +240,58 @@ A report lists what was converted, what is approximated and what was left out. F
 
 ## Download
 
-Grab `LYNX-x.y.z-setup-x64.exe` from the [latest release](https://github.com/Ka1-S/LYNX/releases/latest) (Windows 10/11,
-64-bit): a per-user installer that needs no admin rights, adds Start-menu/desktop shortcuts, opens `.lynx` projects and
-offers LYNX in *Open with* for `.flp` without changing FL Studio's default. Prefer no installer? The portable `.zip` is
-still there: extract it and run `LYNX.exe`. Both include a demo project (`Demo.lynx`). The executable is not code-signed
-yet, so SmartScreen may warn on first launch (*More info* → *Run anyway*); see [Code signing policy](#code-signing-policy).
+Every release on the [latest release page](https://github.com/Ka1-S/LYNX/releases/latest) has builds for all three
+platforms (`<v>` is the version, e.g. `0.1.8-alpha`):
+
+| OS | Download | Notes |
+|---|---|---|
+| **Windows** 10 / 11, 64-bit | `LYNX-<v>-setup-x64.exe` (installer) or `LYNX-<v>-windows-x64.zip` (portable) | per-user installer, no admin rights |
+| **macOS** 11 Big Sur or newer | `LYNX-<v>-macos-universal.dmg` | universal: Apple Silicon and Intel |
+| **Linux** x86_64, glibc 2.39+ | `LYNX-<v>-linux-x86_64.AppImage` or `LYNX-<v>-linux-x86_64.tar.gz` | Ubuntu 24.04+, Debian 13+, Fedora 40+, current Arch / Manjaro |
+
 Release files are built from the tagged source by GitHub Actions ([`release.yml`](.github/workflows/release.yml)) and
-listed with their SHA-256 in `SHA256SUMS.txt`.
+listed with their SHA-256 in `SHA256SUMS.txt`. Releases up to 0.1.7 are Windows-only.
+
+**Windows.** Run the installer: it needs no admin rights, adds Start-menu/desktop shortcuts, opens `.lynx` projects and
+offers LYNX in *Open with* for `.flp` without changing FL Studio's default. Prefer no installer? Extract the portable
+`.zip` and run `LYNX.exe`. Both include a demo project (`Demo.lynx`). The executable is not code-signed yet, so
+SmartScreen may warn on first launch (*More info* → *Run anyway*); see [Code signing policy](#code-signing-policy).
+
+**macOS.** Open the `.dmg` and drag LYNX to *Applications*. The app is not notarized by Apple and has no Developer ID
+signature (ad-hoc only), so the first launch needs one extra step: right-click (Control-click) LYNX in *Applications*
+→ *Open* → *Open*. On macOS 15 Sequoia or newer, try to open it once, then go to *System Settings* → *Privacy &
+Security* and click *Open Anyway*. Or, in Terminal:
+
+```
+xattr -dr com.apple.quarantine /Applications/LYNX.app
+```
+
+macOS asks for microphone access the first time you record.
+
+**Linux.** Needs X11 or XWayland, and audio through ALSA, JACK or PipeWire (through its JACK or ALSA layer). For the
+AppImage:
+
+```
+chmod +x LYNX-*.AppImage
+./LYNX-*.AppImage
+```
+
+Some distributions need libfuse2 to run AppImages (`libfuse2t64` on Ubuntu 24.04, `fuse2` on Arch, `fuse-libs` on Fedora); otherwise
+use the `.tar.gz`: extract it and run `./install.sh`, which installs LYNX for your user under `~/.local` with a menu
+entry, an icon and the `.lynx` file type (`./install.sh --uninstall` removes it again).
+
+### Platform notes
+
+| | Windows | macOS | Linux |
+|---|---|---|---|
+| Plugin formats | VST3, CLAP, VST2 | VST3, CLAP, Audio Units | VST3, CLAP, LV2 |
+| Audio drivers | Windows Audio (WASAPI), DirectSound, ASIO, built-in LYNX ASIO driver | Core Audio | ALSA, JACK (PipeWire via `pipewire-jack`) |
+| Out-of-process plugin sandbox | optional | – | – |
+| FL Studio integration (factory samples, plugin database) | FL Studio installation | FL Studio app bundle is looked for (untested) | Windows FL Studio under Wine (`~/.wine` or `$WINEPREFIX`) |
+| Settings folder | `%APPDATA%\LYNX` | `~/Library/Application Support/LYNX` | `~/.config/LYNX` (`$XDG_CONFIG_HOME`) |
+
+Opening FL Studio projects (`.flp`) works on every OS; the FL Studio integration only adds FL's own samples and plugin
+paths when an installation is found.
 
 On first start a short setup wizard (skippable; *Options > Setup wizard* reopens it) picks the language, tests the audio
 device and lists the plugin folders — the standard VST3/CLAP folders plus the ones FL Studio uses on the same PC — and
@@ -253,7 +301,8 @@ plugin database) and find samples in FL's folders; a plugin LYNX doesn't know ye
 
 ## Command line
 
-`LYNX.exe` also runs headless, which is how everything is verified without opening windows:
+`LYNX.exe` also runs headless, which is how everything is verified without opening windows. On macOS and Linux the
+binary is `LYNX` (`/Applications/LYNX.app/Contents/MacOS/LYNX` on macOS); the options are the same:
 
 ```
 LYNX.exe project.lynx                          open a project (.lynx, .flp or .mid)
@@ -303,6 +352,31 @@ Requires Visual Studio 2022 Build Tools ("Desktop development with C++"), CMake 
 cmake -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ```
+
+### Linux
+
+Ubuntu 24.04 dependencies:
+
+```
+sudo apt install build-essential cmake ninja-build pkg-config libasound2-dev libjack-jackd2-dev libx11-dev \
+  libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev libxcomposite-dev libfreetype-dev libfontconfig1-dev libgl-dev
+```
+
+```
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+### macOS
+
+Needs the Xcode command line tools (`xcode-select --install`), CMake and Ninja (e.g. `brew install cmake ninja`).
+
+```
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+cmake --build build
+```
+
+`CMAKE_OSX_ARCHITECTURES="arm64;x86_64"` produces a universal app; leave it out to build for the current Mac only.
 
 ### Core tests (any C++20 compiler, no JUCE)
 
@@ -360,7 +434,8 @@ Built with [JUCE](https://juce.com), [CLAP](https://github.com/free-audio/clap),
 
 Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
 [SignPath Foundation](https://signpath.org). *(Pending approval: until the application is accepted, release
-binaries are not signed.)*
+binaries are not signed.)* This covers the Windows binaries. The macOS app has an ad-hoc signature only (no Apple
+Developer ID, not notarized); Linux packages are not signed.
 
 - Release binaries are built only from this repository by GitHub Actions
   ([`.github/workflows/release.yml`](.github/workflows/release.yml)); nothing built on a personal machine is signed.

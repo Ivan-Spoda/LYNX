@@ -1,4 +1,5 @@
 #include "engine/SampleLibrary.h"
+#include "platform/Paths.h"
 
 #include <condition_variable>
 #include <mutex>
@@ -387,7 +388,7 @@ std::shared_ptr<const SampleData> SampleLibrary::load (const juce::String& path)
 
 std::shared_ptr<const SampleData> SampleLibrary::decode (const juce::String& path)
 {
-    const juce::File file (path);
+    const auto file = platform::localFile (path); // FL's Windows spelling on macOS/Linux (platform/Paths.h)
 
     if (! file.existsAsFile())
         return nullptr;

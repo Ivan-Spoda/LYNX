@@ -1,4 +1,5 @@
 #include "ui/ExportDialog.h"
+#include "platform/Paths.h"
 #include "ui/WindowOwner.h"
 
 #include "engine/Exporter.h"
@@ -150,7 +151,7 @@ private:
 
 juce::File exportSettingsFile()
 {
-    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/export-settings.txt");
+    return lynx::platform::settingsFile ("export-settings.txt");
 }
 
 // A row of buttons where exactly one is on (the output format).

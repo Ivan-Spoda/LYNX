@@ -1,4 +1,5 @@
 #include "ui/SettingsPages.h"
+#include "platform/Paths.h"
 
 #include "core/ToolbarLayout.h"
 #include "engine/AudioEngine.h"
@@ -12,7 +13,7 @@ using namespace settingsui;
 
 juce::File autosaveFolder()
 {
-    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/autosave");
+    return lynx::platform::settingsFile ("autosave");
 }
 
 namespace
@@ -531,6 +532,9 @@ private:
             case prefs::DriverKind::directSound:      return tr ("DirectSound (legacy)");
             case prefs::DriverKind::asio:             return "ASIO";
             case prefs::DriverKind::lynxAsio:         return tr ("LYNX ASIO (built in)");
+            case prefs::DriverKind::coreAudio:        return "Core Audio";
+            case prefs::DriverKind::alsa:             return "ALSA";
+            case prefs::DriverKind::jack:             return tr ("JACK / PipeWire");
             case prefs::DriverKind::other:            break;
         }
         return typeName;
@@ -561,6 +565,12 @@ private:
             case prefs::DriverKind::lynxAsio:
                 return tr ("LYNX's own ASIO driver, with any device: playback and recording (microphone) at low latency. \"Driver settings...\" chooses shared or exclusive mode, the output and input devices and shows the latency. "
                            "For other programs, run \"Register LYNX ASIO\" in LYNX's folder once.");
+            case prefs::DriverKind::coreAudio:
+                return tr ("macOS's own audio system: low latency with any device, shared with other programs.");
+            case prefs::DriverKind::alsa:
+                return tr ("Talks to the sound card directly. Choose \"default\" or \"pipewire\" to share the device with other programs; a \"hw:\" device gives the lowest latency but takes the card for LYNX alone.");
+            case prefs::DriverKind::jack:
+                return tr ("Low latency, shared with other programs and routable. On current distributions PipeWire answers as JACK (package pipewire-jack); otherwise start a JACK server first.");
             case prefs::DriverKind::other:
                 break;
         }

@@ -7,8 +7,10 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <immintrin.h>
-#include <cpuid.h>
+#include "core/Simd.h"
+#if LYNX_X86
+ #include <cpuid.h>
+#endif
 
 #pragma clang fp contract(off)
 #pragma STDC FENV_ACCESS ON
@@ -20,6 +22,7 @@ inline double dfrom (std::uint64_t u) { double v; std::memcpy (&v, &u, 8); retur
 inline std::uint32_t fbits (float v) { std::uint32_t u; std::memcpy (&u, &v, 4); return u; }
 inline float ffrom (std::uint32_t u) { float v; std::memcpy (&v, &u, 4); return v; }
 
+#if LYNX_X86
 inline bool cpuHasFma()
 {
     static const bool f = [] {
@@ -32,13 +35,21 @@ inline bool cpuHasFma()
     }();
     return f;
 }
+#else
+inline bool cpuHasFma() { return true; } // ARM64 always has a fused multiply-add (same IEEE result as x86 FMA)
+#endif
 extern bool forceNoFma; // test switch (false: follow the CPU)
 inline bool useFma() { return cpuHasFma() && ! forceNoFma; }
 
+#if LYNX_X86
 __attribute__ ((target ("fma"))) inline double fmaD (double a, double b, double c)
 { return _mm_cvtsd_f64 (_mm_fmadd_sd (_mm_set_sd (a), _mm_set_sd (b), _mm_set_sd (c))); }
 __attribute__ ((target ("fma"))) inline float fmaF (float a, float b, float c)
 { return _mm_cvtss_f32 (_mm_fmadd_ss (_mm_set_ss (a), _mm_set_ss (b), _mm_set_ss (c))); }
+#else
+inline double fmaD (double a, double b, double c) { return std::fma (a, b, c); }
+inline float fmaF (float a, float b, float c) { return std::fmaf (a, b, c); }
+#endif
 inline int cvtD2I (double v) { return _mm_cvtsd_si32 (_mm_set_sd (v)); }   // current rounding mode
 inline int cvttD2I (double v) { return _mm_cvttsd_si32 (_mm_set_sd (v)); } // truncation
 inline float d2f (double v) { return _mm_cvtss_f32 (_mm_cvtsd_ss (_mm_setzero_ps(), _mm_set_sd (v))); }

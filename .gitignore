@@ -6,5 +6,7 @@ out/
 build-local/
 build-win/
 build-asan/
+build-linux/
+build-mac/
 dist/
 __pycache__/

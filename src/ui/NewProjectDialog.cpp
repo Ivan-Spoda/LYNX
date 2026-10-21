@@ -1,4 +1,5 @@
 #include "ui/NewProjectDialog.h"
+#include "platform/Paths.h"
 
 #include "core/Preferences.h"
 #include "core/Templates.h"
@@ -16,7 +17,7 @@ using namespace settingsui;
 
 juce::File newProjectSettingsFile()
 {
-    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/new-project.txt");
+    return lynx::platform::settingsFile ("new-project.txt");
 }
 
 struct Remembered
