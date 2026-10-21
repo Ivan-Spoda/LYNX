@@ -22,3 +22,9 @@ from their official sources and checks their SHA-256.
 
 VST and ASIO are trademarks of Steinberg Media Technologies GmbH. FL Studio is a registered trademark of
 Image-Line Software; LYNX is not affiliated with Image-Line.
+
+## sse2neon (MIT)
+
+`third_party/sse2neon/sse2neon.h` v1.8.0 — https://github.com/DLTcollab/sse2neon. Translates the SSE intrinsics of the
+exact FL engines to NEON in the Apple Silicon (arm64) build. Copyright (c) 2015-2024 SSE2NEON Contributors; MIT
+licence in `third_party/sse2neon/LICENSE`.

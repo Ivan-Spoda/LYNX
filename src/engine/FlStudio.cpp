@@ -16,6 +16,36 @@ juce::String registryValue (const juce::String& key)
     return {};
 }
 
+#if JUCE_LINUX || JUCE_BSD
+// drive C: of the Wine prefix ($WINEPREFIX, else ~/.wine), where a Windows FL Studio would be installed on Linux
+juce::File wineDriveC()
+{
+    const auto prefix = juce::SystemStats::getEnvironmentVariable ("WINEPREFIX", {});
+    const auto root = prefix.isNotEmpty() && juce::File::isAbsolutePath (prefix) ? juce::File (prefix)
+                                                                                 : juce::File::getSpecialLocation (juce::File::userHomeDirectory).getChildFile (".wine");
+    return root.getChildFile ("drive_c");
+}
+#endif
+
+// The "FL Studio*" folders that may hold an installation (each must contain Data to count). FL data is only
+// looked for where it can exist: Program Files on Windows, the app bundles on macOS (layout not confirmed), a Wine
+// prefix on Linux.
+juce::Array<juce::File> flStudioCandidates()
+{
+    juce::Array<juce::File> dirs;
+   #if JUCE_WINDOWS
+    const auto imageLine = juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory).getChildFile ("Image-Line");
+    dirs.addArray (imageLine.findChildFiles (juce::File::findDirectories, false, "FL Studio*"));
+   #elif JUCE_MAC
+    for (const auto& app : juce::File ("/Applications").findChildFiles (juce::File::findDirectories, false, "FL Studio*.app"))
+        dirs.add (app.getChildFile ("Contents/Resources/FL"));
+   #elif JUCE_LINUX || JUCE_BSD
+    for (const auto* programs : { "Program Files/Image-Line", "Program Files (x86)/Image-Line" })
+        dirs.addArray (wineDriveC().getChildFile (programs).findChildFiles (juce::File::findDirectories, false, "FL Studio*"));
+   #endif
+    return dirs;
+}
+
 juce::File existingFolder (const juce::String& path)
 {
     if (path.isEmpty() || ! juce::File::isAbsolutePath (path))
@@ -30,12 +60,14 @@ FlStudioInstall findFlStudio()
     FlStudioInstall fl;
 
     // installation: where FL says it is, else the newest "FL Studio*" under Program Files\Image-Line
-    fl.installDir = existingFolder (registryValue ("Software\\Image-Line\\Shared\\Paths\\Install path"));
+    // LYNX_FL_INSTALL=<folder> points at an installation anywhere (another Wine prefix, a copy, tests)
+    fl.installDir = existingFolder (juce::SystemStats::getEnvironmentVariable ("LYNX_FL_INSTALL", {}));
+    if (! fl.installDir.getChildFile ("Data").isDirectory())
+        fl.installDir = existingFolder (registryValue ("Software\\Image-Line\\Shared\\Paths\\Install path"));
     if (! fl.installDir.getChildFile ("Data").isDirectory())
     {
         fl.installDir = juce::File();
-        const auto imageLine = juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory).getChildFile ("Image-Line");
-        for (const auto& dir : imageLine.findChildFiles (juce::File::findDirectories, false, "FL Studio*"))
+        for (const auto& dir : flStudioCandidates())
             if (dir.getChildFile ("Data").isDirectory() && dir.getFileName() > fl.installDir.getFileName())
                 fl.installDir = dir;
     }
@@ -52,6 +84,16 @@ FlStudioInstall findFlStudio()
     if (! fl.userData.isDirectory())
         if (const auto user = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Image-Line/FL Studio"); user.isDirectory())
             fl.userData = user;
+   #if JUCE_LINUX || JUCE_BSD
+    // FL Studio under Wine keeps its user data in the prefix's Documents
+    if (! fl.userData.isDirectory())
+        for (const auto& users : { wineDriveC().getChildFile ("users/" + juce::SystemStats::getLogonName()), wineDriveC().getChildFile ("users/steamuser") })
+            if (const auto user = users.getChildFile ("Documents/Image-Line/FL Studio"); user.isDirectory())
+            {
+                fl.userData = user;
+                break;
+            }
+   #endif
 
     // plugin folders FL was told about
     for (const auto* key : { "Software\\Image-Line\\Shared\\Paths\\VST plugins", "Software\\Image-Line\\Shared\\Plugins\\FL Studio\\VstDir64",
@@ -85,7 +127,10 @@ FlPluginDb readFlPluginDatabase (const FlStudioInstall& fl, int* files)
                     FlPluginDbEntry e;
                     e.source = file.getFullPathName().toStdString();
                     const auto path = e.source;
-                    e.role = path.find ("\\Generators\\") != std::string::npos ? 2 : path.find ("\\Effects\\") != std::string::npos ? 1 : 0;
+                    const auto under = [&path] (const char* folder) { // either separator (Windows path or a Wine prefix on Linux)
+                        return path.find (std::string ("\\") + folder + "\\") != std::string::npos || path.find (std::string ("/") + folder + "/") != std::string::npos;
+                    };
+                    e.role = under ("Generators") ? 2 : under ("Effects") ? 1 : 0;
                     if (file.loadFileAsData (data)
                         && parseFlPluginFst ({ static_cast<const std::uint8_t*> (data.getData()), data.getSize() }, e))
                         db.add (e);

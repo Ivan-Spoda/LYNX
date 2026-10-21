@@ -12,12 +12,14 @@
   #define NOMINMAX
  #endif
  #include <windows.h>
+#elif defined(__APPLE__)
+ #include <dispatch/dispatch.h>
 #else
- #include <semaphore>
+ #include <semaphore.h>
 #endif
 
 #if defined(__SSE2__) || defined(_M_X64) || defined(__x86_64__)
- #include <immintrin.h>
+ #include "core/Simd.h"
 #endif
 
 namespace lynx
@@ -47,12 +49,37 @@ struct WorkerPool::Semaphore
     void acquire() noexcept { WaitForSingleObject (handle, INFINITE); }
     HANDLE handle;
 };
-#else
+#elif defined(__APPLE__)
+// libdispatch semaphore: a Mach semaphore underneath, woken by the kernel at once
 struct WorkerPool::Semaphore
 {
-    void release (int n) noexcept { s.release (n); }
-    void acquire() noexcept { s.acquire(); }
-    std::counting_semaphore<0x7fffffff> s { 0 };
+    Semaphore() : handle (dispatch_semaphore_create (0)) {}
+    ~Semaphore() { dispatch_release (handle); }
+    void release (int n) noexcept
+    {
+        for (int i = 0; i < n; ++i)
+            dispatch_semaphore_signal (handle);
+    }
+    void acquire() noexcept { dispatch_semaphore_wait (handle, DISPATCH_TIME_FOREVER); }
+    dispatch_semaphore_t handle;
+};
+#else
+// POSIX semaphore: glibc implements it on a futex (uncontended post/wait stay in user space, a sleeper is woken
+// by the kernel at once)
+struct WorkerPool::Semaphore
+{
+    Semaphore() { sem_init (&handle, 0, 0); }
+    ~Semaphore() { sem_destroy (&handle); }
+    void release (int n) noexcept
+    {
+        for (int i = 0; i < n; ++i)
+            sem_post (&handle);
+    }
+    void acquire() noexcept
+    {
+        while (sem_wait (&handle) != 0) {} // EINTR: a signal interrupted the wait
+    }
+    sem_t handle;
 };
 #endif
 

@@ -9,6 +9,7 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 
 #include "core/FlWrapper.h"
+#include "platform/NativeEmbed.h"
 
 #if JUCE_WINDOWS
  #include <windows.h>
@@ -627,7 +628,7 @@ std::intptr_t hostCallback (abi::Effect* effect, std::int32_t opcode, std::int32
     return 0;
 }
 
-// The plugin's own window inside a child HWND (like the CLAP editor).
+// The plugin's own window inside a native child view (platform/NativeEmbed, like the CLAP editor).
 class Vst2Editor final : public juce::AudioProcessorEditor,
                          private juce::Timer
 {
@@ -642,7 +643,7 @@ public:
         owner.effect->dispatcher (owner.effect, abi::editGetRect, 0, 0, &rect, 0.0f);
         if (rect != nullptr && rect->right > rect->left && rect->bottom > rect->top)
             setSize (juce::roundToInt ((rect->right - rect->left) / scale), juce::roundToInt ((rect->bottom - rect->top) / scale));
-        addAndMakeVisible (holder);
+        addAndMakeVisible (embed);
         owner.editor = this;
         startTimer (20);
     }
@@ -652,14 +653,9 @@ public:
         stopTimer();
         if (opened)
             owner.effect->dispatcher (owner.effect, abi::editClose, 0, 0, nullptr, 0.0f);
-        holder.setHWND (nullptr);
-       #if JUCE_WINDOWS
-        if (container != nullptr)
-            DestroyWindow ((HWND) container);
-       #endif
     }
 
-    void resized() override { holder.setBounds (getLocalBounds()); }
+    void resized() override { embed.setBounds (getLocalBounds()); }
 
 private:
     void timerCallback() override
@@ -669,31 +665,20 @@ private:
             owner.effect->dispatcher (owner.effect, abi::editIdle, 0, 0, nullptr, 0.0f);
             return;
         }
-       #if JUCE_WINDOWS
-        auto* peer = getPeer();
-        if (peer == nullptr)
-            return;
+        if (! embed.create())
+            return; // not on screen yet
         const auto scale = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->scale;
-        container = CreateWindowExW (0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0, 0,
-                                     juce::roundToInt (getWidth() * scale), juce::roundToInt (getHeight() * scale),
-                                     (HWND) peer->getNativeHandle(), nullptr, nullptr, nullptr);
-        holder.setHWND (container);
-        holder.setBounds (getLocalBounds());
-        owner.effect->dispatcher (owner.effect, abi::editOpen, 0, 0, container, 0.0f);
+        owner.effect->dispatcher (owner.effect, abi::editOpen, 0, 0, embed.nativeHandle(), 0.0f);
         opened = true;
         // some plugins only know their size once open
         abi::Rect* rect = nullptr;
         owner.effect->dispatcher (owner.effect, abi::editGetRect, 0, 0, &rect, 0.0f);
         if (rect != nullptr && rect->right > rect->left && rect->bottom > rect->top)
             setSize (juce::roundToInt ((rect->right - rect->left) / scale), juce::roundToInt ((rect->bottom - rect->top) / scale));
-       #else
-        stopTimer();
-       #endif
     }
 
     Vst2Instance& owner;
-    juce::HWNDComponent holder;
-    void* container = nullptr;
+    platform::NativeEmbed embed;
     bool opened = false;
 };
 

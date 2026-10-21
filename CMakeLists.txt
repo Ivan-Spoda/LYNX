@@ -1,9 +1,25 @@
 cmake_minimum_required(VERSION 3.22)
 
+# macOS: Big Sur or newer (universal builds pass -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"); set before project()
+set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
+
 project(LYNX VERSION 0.1.7 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# The same float results with every compiler and CPU: no fused multiply-add contraction (arm64 and newer x86 have
+# FMA; the exact FL engines rely on the plain operation order, as the Windows build compiles them)
+if(NOT MSVC)
+    add_compile_options(-ffp-contract=off)
+endif()
+
+# FL Slayer's exact engine (x87 arithmetic under its own control word): with GCC 15 at -O1 and above, inlining in this
+# file breaks it (some presets silent or NaN against the DLL goldens; Clang and GCC -O0 / -fno-inline are exact; root
+# cause not isolated, REA round 117). Linux GCC builds compile it without inlining (Slayer about 1.7x slower there).
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i.86")
+    set_source_files_properties(src/core/Slayer.cpp PROPERTIES COMPILE_OPTIONS "-fno-inline")
+endif()
 
 # ---------------------------------------------------------------------------
 # JUCE-free core: model, sequencer, built-in instruments and .flp reader
@@ -114,7 +130,7 @@ add_library(lynx_core STATIC
     src/core/Sawer.cpp
     src/core/Inflate.cpp
     src/core/WavPack.cpp)
-target_include_directories(lynx_core PUBLIC src)
+target_include_directories(lynx_core PUBLIC src third_party/sse2neon)
 
 # workflow shell (key map, workspace layout, rack operations)
 target_sources(lynx_core PRIVATE
@@ -201,11 +217,22 @@ if(LYNX_BUILD_APP)
         PRODUCT_NAME "LYNX"
         COMPANY_NAME "Ka1-S"
         COMPANY_COPYRIGHT "Copyright (C) 2026 Ka1-S. Licensed under the GNU AGPL-3.0."
-        DESCRIPTION "LYNX digital audio workstation")
+        DESCRIPTION "LYNX digital audio workstation"
+        # macOS bundle (Info.plist, .icns made from the 1024 px badge); ignored elsewhere
+        BUNDLE_ID "com.ka1-s.lynx"
+        ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/resources/lynx_badge.png"
+        ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/resources/lynx_icon_256.png"
+        MICROPHONE_PERMISSION_ENABLED TRUE
+        MICROPHONE_PERMISSION_TEXT "LYNX records audio from your microphone or audio interface when you arm a track and press Record."
+        DOCUMENT_EXTENSIONS lynx flp mid
+        HARDENED_RUNTIME_ENABLED FALSE
+        PLIST_TO_MERGE "<plist><dict><key>LSMinimumSystemVersion</key><string>11.0</string><key>NSHighResolutionCapable</key><true/></dict></plist>")
 
     target_sources(LYNX PRIVATE
         src/Main.cpp
         src/platform/FileTypes.cpp
+        src/platform/Paths.cpp
+        src/platform/NativeEmbed.cpp
         src/engine/AudioEngine.cpp
         src/engine/ChannelRackProcessor.cpp
         src/engine/Metronome.cpp
@@ -280,16 +307,26 @@ if(LYNX_BUILD_APP)
         src/ui/TouchKeyboard.cpp
         src/ui/QuickAddPalette.cpp)
 
-    target_include_directories(LYNX PRIVATE third_party/asiosdk/common)
+    target_include_directories(LYNX PRIVATE third_party/clap/include)
 
     target_compile_definitions(LYNX PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_PLUGINHOST_VST3=1
-        JUCE_ASIO=1                      # ASIO SDK headers in third_party/asiosdk (GPLv3 option)
         JUCE_USE_MP3AUDIOFORMAT=1
         JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:LYNX,JUCE_PRODUCT_NAME>"
         JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:LYNX,JUCE_VERSION>")
+
+    # per-platform audio drivers and plugin formats (docs/PLATFORMS.md)
+    if(WIN32)
+        target_include_directories(LYNX PRIVATE third_party/asiosdk/common)
+        target_compile_definitions(LYNX PRIVATE JUCE_ASIO=1) # ASIO SDK headers in third_party/asiosdk (GPLv3 option)
+    elseif(APPLE)
+        target_compile_definitions(LYNX PRIVATE JUCE_PLUGINHOST_AU=1)
+    else()
+        # ALSA (linked) + JACK (loaded at run time; PipeWire serves JACK clients through pipewire-jack)
+        target_compile_definitions(LYNX PRIVATE JUCE_ALSA=1 JUCE_JACK=1 JUCE_PLUGINHOST_LV2=1)
+    endif()
 
     target_link_libraries(LYNX
         PRIVATE
@@ -299,8 +336,12 @@ if(LYNX_BUILD_APP)
             juce::juce_dsp
         PUBLIC
             juce::juce_recommended_config_flags
-            juce::juce_recommended_lto_flags
-            juce::juce_recommended_warning_flags)
+            juce::juce_recommended_lto_flags)
+endif()
+
+if(LYNX_BUILD_APP AND UNIX AND NOT APPLE)
+    # one binary for many distributions: the C++ runtime goes inside (glibc and the desktop libraries stay shared)
+    target_link_options(LYNX PRIVATE -static-libstdc++ -static-libgcc)
 endif()
 
 # LYNX ASIO: universal ASIO driver on WASAPI (REA round 97), an in-process COM DLL registered with regsvr32

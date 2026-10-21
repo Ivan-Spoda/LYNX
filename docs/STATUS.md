@@ -4,6 +4,12 @@ Last updated: 2026-10-18 (release 0.1.7 alpha). Everything below is verified by 
 app's self-test (`LYNX.exe --selftest`), off-screen UI snapshots (`--snapshot`) and a regression run that
 exports the 30 demo projects shipped with FL Studio 2026.
 
+## Platforms (round 117)
+
+Windows x64, macOS 11+ (universal: Apple Silicon + Intel) and Linux x86_64 build from the same source; CI builds and
+self-tests the app on all three (`docs/PLATFORMS.md`). Windows-only: ASIO and the LYNX ASIO driver, VST2 hosting, the
+out-of-process plugin sandbox. macOS adds Audio Units, Linux LV2; drivers Core Audio / ALSA + JACK (PipeWire).
+
 ## What works
 
 ### Editing

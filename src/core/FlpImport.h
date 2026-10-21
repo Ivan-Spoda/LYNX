@@ -21,6 +21,8 @@ struct FlPathRoots
 };
 
 std::string resolveFlPath (const std::string& flPath, const FlPathRoots& roots);
+// `path` with its letter case as on disk (POSIX file systems), or unchanged; used for FL's Windows-spelled paths.
+std::string existingPathIgnoringCase (const std::string& path);
 
 // What the import did with each FL thing that isn't "notes and samples": so the user knows why
 // something sounds different.

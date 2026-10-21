@@ -1,4 +1,5 @@
 #include "engine/AudioEngine.h"
+#include "platform/Paths.h"
 #include "engine/FlStudio.h"
 
 #include <map>
@@ -21,6 +22,12 @@
 
 #if JUCE_WINDOWS
  #include <windows.h>
+#elif JUCE_MAC
+ #include <pthread.h>
+ #include <sys/qos.h>
+#elif JUCE_LINUX || JUCE_BSD
+ #include <pthread.h>
+ #include <sched.h>
 #endif
 
 namespace lynx
@@ -48,7 +55,8 @@ FlPathRoots findFlStudioRoots()
 
 namespace
 {
-// Audio workers with real-time priority (MMCSS "Pro Audio" on Windows, like the driver).
+// Audio workers with real-time priority (MMCSS "Pro Audio" on Windows, like the driver; QoS class on macOS; SCHED_FIFO
+// on Linux when allowed).
 void raiseAudioThreadPriority()
 {
    #if JUCE_WINDOWS
@@ -74,6 +82,15 @@ void raiseAudioThreadPriority()
     }
     else
         SetThreadPriority (GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+   #elif JUCE_MAC
+    // the highest quality-of-service class: scheduled like the UI's own interactive work, on the performance cores
+    pthread_set_qos_class_self_np (QOS_CLASS_USER_INTERACTIVE, 0);
+   #elif JUCE_LINUX || JUCE_BSD
+    // real-time FIFO scheduling when the user may have it (audio group / rtkit limits, as JACK and PipeWire set up);
+    // below the usual JACK/PipeWire audio thread priorities. Without the permission the thread stays as it is.
+    sched_param param {};
+    param.sched_priority = juce::jlimit (sched_get_priority_min (SCHED_FIFO), sched_get_priority_max (SCHED_FIFO), 70);
+    pthread_setschedparam (pthread_self(), SCHED_FIFO, &param);
    #endif
 }
 
@@ -1161,8 +1178,8 @@ namespace
 bool rootReachable (const std::string& root)
 {
     auto result = std::make_shared<std::atomic<int>> (-1);
-    std::thread ([result, path = juce::String::fromUTF8 (root.c_str())] {
-        result->store (juce::File (path).isDirectory() ? 1 : 0);
+    std::thread ([result, root] {
+        result->store (platform::localFile (root).isDirectory() ? 1 : 0); // FL's "C:\" spelling on macOS/Linux too
     }).detach();
     const auto started = juce::Time::getMillisecondCounter();
     while (result->load() < 0 && juce::Time::getMillisecondCounter() - started < 2000)
@@ -1210,7 +1227,7 @@ void AudioEngine::prepareFlpImport (const juce::File& file, const std::map<std::
             if (! roots->rootAvailable (path))
                 return false;
             const auto t = std::chrono::steady_clock::now();
-            const auto exists = juce::File (juce::String::fromUTF8 (path.c_str())).existsAsFile();
+            const auto exists = platform::localFile (path).existsAsFile();
             loadtrace::add ("probe_file", loadtrace::msSince (t));
             return exists;
         };
@@ -1219,7 +1236,7 @@ void AudioEngine::prepareFlpImport (const juce::File& file, const std::map<std::
                 return std::vector<std::uint8_t> {};
             const auto t = std::chrono::steady_clock::now();
             juce::MemoryBlock data;
-            juce::File (juce::String::fromUTF8 (path.c_str())).loadFileAsData (data);
+            platform::localFile (path).loadFileAsData (data);
             const auto* bytes = static_cast<const std::uint8_t*> (data.getData());
             loadtrace::add ("read_aux_file", loadtrace::msSince (t));
             return std::vector<std::uint8_t> (bytes, bytes + data.getSize());

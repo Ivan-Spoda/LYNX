@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-lynx-project">
+    <comment>LYNX project</comment>
+    <comment xml:lang="pt_BR">Projeto do LYNX</comment>
+    <icon name="lynx"/>
+    <glob pattern="*.lynx"/>
+  </mime-type>
+</mime-info>

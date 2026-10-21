@@ -10,8 +10,8 @@
 #include <cstring>
 #include <limits>
 
-#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__)
-    #include <xmmintrin.h>
+#if defined(__SSE__) || defined(_M_X64) || defined(__x86_64__) // x86 only: rcpps cannot be reproduced through NEON; ARM64 takes the plain path
+    #include "core/Simd.h"
     #define LYNX_GB_SSE 1
 #endif
 

@@ -1,4 +1,5 @@
 #include <juce_gui_basics/juce_gui_basics.h>
+#include "platform/Paths.h"
 
 #include "core/LoadTrace.h"
 #include "core/Effects.h"
@@ -79,7 +80,7 @@ struct StartupTrace
         const auto ms = [] (clock::duration d) { return std::chrono::duration<double, std::milli> (d).count(); };
         text << juce::String (ms (now - t0), 1).paddedLeft (' ', 8) << " ms  +" << juce::String (ms (now - last), 1).paddedLeft (' ', 7) << "  " << step << "\n";
         last = now;
-        juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/startup.log").replaceWithText (text);
+        lynx::platform::settingsFile ("startup.log").replaceWithText (text);
     }
 };
 StartupTrace startupTrace;
@@ -87,7 +88,7 @@ StartupTrace startupTrace;
 // Crashed: try to save the project and write the backtrace (like FL's "emergency save").
 void onCrash (void*)
 {
-    const auto folder = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/autosave");
+    const auto folder = lynx::platform::settingsFile ("autosave");
     folder.createDirectory();
     const auto stamp = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S");
     folder.getChildFile ("crash " + stamp + ".txt").replaceWithText (juce::SystemStats::getStackBacktrace());
@@ -1968,10 +1969,10 @@ private:
                     project.channels.front().type = flp::ChannelType::native;
                     lynx::FlpImportOptions options;
                     options.roots = roots;
-                    options.fileExists = [] (const std::string& path) { return juce::File (juce::String::fromUTF8 (path.c_str())).existsAsFile(); };
+                    options.fileExists = [] (const std::string& path) { return lynx::platform::localFile (path).existsAsFile(); };
                     options.readFile = [] (const std::string& path) {
                         juce::MemoryBlock block;
-                        juce::File (juce::String::fromUTF8 (path.c_str())).loadFileAsData (block);
+                        lynx::platform::localFile (path).loadFileAsData (block);
                         const auto* b = static_cast<const std::uint8_t*> (block.getData());
                         return std::vector<std::uint8_t> (b, b + block.getSize());
                     };
