@@ -2808,3 +2808,6 @@ countries: br
 "H" = "H"
 "1" = "1"
 "2" = "2"
+"Continue without it" = "Continuar sem ele"
+"Starting {0}..." = "Iniciando {0}..."
+"{0} is slow to start ({1} s): its vendor's service is starting. You can wait or continue without it." = "{0} está demorando para iniciar ({1} s): o serviço do fabricante está iniciando. Você pode esperar ou continuar sem ele."

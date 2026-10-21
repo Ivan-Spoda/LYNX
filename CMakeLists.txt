@@ -31,6 +31,7 @@ add_library(lynx_core STATIC
     src/core/Instruments.cpp
     src/core/RackRenderer.cpp
     src/core/LoadTrace.cpp
+    src/core/ModuleWarmup.cpp
     src/core/FlpImport.cpp
     src/core/Effects.cpp
     src/core/NoteEdit.cpp

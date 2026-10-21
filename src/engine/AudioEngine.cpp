@@ -1481,6 +1481,16 @@ bool AudioEngine::finishFlpImport (PreparedFlp&& prepared, bool asEdit)
 
 bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error, const std::map<std::string, std::string>& relocations, bool asEdit)
 {
+    // a slow plugin module (a Waves shell) starts on its own thread while the samples decode (round 121)
+    if (juce::MemoryBlock data; file.loadFileAsData (data))
+        try
+        {
+            PluginHost::newOpen();
+            plugins.startModulesFor (flpForeignPlugins (flp::parseProject ({ static_cast<const std::uint8_t*> (data.getData()), data.getSize() })));
+        }
+        catch (const flp::Error&)
+        {
+        }
     PreparedFlp prepared;
     prepareFlpImport (file, relocations, samples, prepared);
     if (! prepared.ok)

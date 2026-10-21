@@ -2,6 +2,8 @@
 #include "platform/Paths.h"
 
 #include <algorithm>
+#include <chrono>
+#include <thread>
 
 #include "core/Preferences.h"
 #include "core/PluginScanPolicy.h"
@@ -22,6 +24,11 @@
 
 namespace lynx
 {
+namespace
+{
+modulewarm::Registry& warmup(); // (slow modules started ahead, round 121: below)
+} // namespace
+
 void preparePlugin (juce::AudioPluginInstance& plugin, double sampleRate, int blockSize)
 {
     // Try stereo output; plugins that don't accept it keep whatever layout they have.
@@ -1007,6 +1014,9 @@ std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlu
     // entries whose file is gone (a plugin moved to another folder by its installer keeps a stale entry until the next
     // full scan) go last: the same class ID found at the old path would load nothing ("no compatible plug-in format")
     std::stable_partition (types.begin(), types.end(), [this] (const juce::PluginDescription& d) { return fileStillThere (d.fileOrIdentifier); });
+    // a module the user chose not to wait for (round 121): its plugins are missing for this open (substitutes play)
+    types.erase (std::remove_if (types.begin(), types.end(), [] (const juce::PluginDescription& d) { return warmup().skipped (d.fileOrIdentifier.toStdString()); }),
+                 types.end());
     auto found = [how] (const juce::PluginDescription& d, const char* reason) {
         if (how != nullptr)
             *how = reason;
@@ -1024,9 +1034,8 @@ std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlu
     }
     // a list entry whose file is gone (an uninstalled older version next to the current one, round 113) never matches:
     // loading it fails and the slot would play nothing
-    auto present = [] (const juce::PluginDescription& d) {
-        return ! juce::File::isAbsolutePath (d.fileOrIdentifier) || juce::File (d.fileOrIdentifier).exists();
-    };
+    // (cached per open: a Waves shell is ~600 entries with the same file, asked for every slot — 0.6 s of file checks)
+    auto present = [this] (const juce::PluginDescription& d) { return fileStillThere (d.fileOrIdentifier); };
     // 1) the same plugin, by its format identifier
     for (const auto& d : types)
     {
@@ -1476,6 +1485,12 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const Plu
         return nullptr;
     }
 
+    // a module still starting ahead on its own thread (round 121): wait for it here rather than enter it from two
+    // threads at once (the open's panel waits without blocking before it gets here; this is for anything else)
+    for (const auto until = std::chrono::steady_clock::now() + std::chrono::minutes (3);
+         warmup().state (description->fileOrIdentifier.toStdString()) == modulewarm::State::warming && std::chrono::steady_clock::now() < until;)
+        std::this_thread::sleep_for (std::chrono::milliseconds (5));
+
     loadedAny.store (true); // (even a failed load may leave the module mapped)
     juce::String message;
     if (pluginSandboxEnabled() || ref.separateProcess)
@@ -1511,6 +1526,114 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const Plu
     }
 
     return instance;
+}
+
+// --- slow modules started ahead (round 121) -------------------------------------------------------------------------
+namespace
+{
+#if JUCE_WINDOWS
+// The two calls needed from a VST3 factory, declared by their place in the interface (the VST3 ABI: FUnknown's three,
+// then getFactoryInfo, countClasses). No SDK header here: JUCE keeps its copy private to its own module.
+struct FactoryCalls
+{
+    virtual long __stdcall queryInterface (const char*, void**) = 0;
+    virtual unsigned long __stdcall addRef() = 0;
+    virtual unsigned long __stdcall release() = 0;
+    virtual long __stdcall getFactoryInfo (void*) = 0;
+    virtual int __stdcall countClasses() = 0;
+};
+
+struct StartedModule
+{
+    HMODULE module = nullptr;
+    FactoryCalls* factory = nullptr;
+};
+
+std::mutex startedLock;
+std::vector<StartedModule>& startedModules()
+{
+    static auto* list = new std::vector<StartedModule>(); // kept for the session (never torn down: round 111)
+    return *list;
+}
+
+// What JUCE's VST3 host does first, on this thread: load the module, its entry point, its factory, the class count.
+// The factory is kept: JUCE's later GetPluginFactory gets the same, already listed one.
+bool loadModuleAhead (const std::string& path)
+{
+    juce::File file (juce::String::fromUTF8 (path.c_str()));
+    if (file.isDirectory()) // a bundle folder
+        file = file.getChildFile ("Contents").getChildFile ("x86_64-win").getChildFile (file.getFileName());
+    const auto module = LoadLibraryW (file.getFullPathName().toWideCharPointer());
+    if (module == nullptr)
+        return false;
+    if (auto* entry = (bool (*)()) (void*) GetProcAddress (module, "InitDll"); entry != nullptr && ! entry())
+    {
+        FreeLibrary (module);
+        return false;
+    }
+    auto* getFactory = (FactoryCalls* (*)()) (void*) GetProcAddress (module, "GetPluginFactory");
+    auto* factory = getFactory != nullptr ? getFactory() : nullptr;
+    if (factory == nullptr)
+    {
+        if (auto* exit = (bool (*)()) (void*) GetProcAddress (module, "ExitDll"))
+            exit();
+        FreeLibrary (module);
+        return false;
+    }
+    factory->countClasses(); // the slow part (a Waves shell: its service, its plugin list)
+    const std::scoped_lock l (startedLock);
+    startedModules().push_back ({ module, factory });
+    return true;
+}
+#endif
+
+modulewarm::Registry& warmup()
+{
+   #if JUCE_WINDOWS
+    static modulewarm::Registry registry (loadModuleAhead);
+   #else
+    static modulewarm::Registry registry ([] (const std::string&) { return true; }, {}, false); // (nothing slow known)
+   #endif
+    return registry;
+}
+
+void startModuleOf (const juce::PluginDescription& d)
+{
+    if (pluginSandboxEnabled())
+        return;
+    if (modulewarm::worthStartingAhead (d.pluginFormatName.toStdString(), d.fileOrIdentifier.toStdString()))
+        warmup().start (d.fileOrIdentifier.toStdString());
+}
+} // namespace
+
+void PluginHost::startModulesFor (const std::vector<FlpPluginUse>& uses)
+{
+    for (const auto& u : uses)
+        if (const auto d = findForeign (u.plugin, u.instrument))
+            startModuleOf (*d);
+}
+
+void PluginHost::startModulesFor (const std::vector<PluginRef>& refs)
+{
+    for (const auto& ref : refs)
+        if (! ref.separateProcess && ! ref.id.empty())
+            if (const auto d = find (juce::String::fromUTF8 (ref.id.c_str())))
+                startModuleOf (*d);
+}
+
+modulewarm::Waiting PluginHost::modulesStarting()
+{
+    return warmup().waiting();
+}
+
+void PluginHost::skipStartingModules()
+{
+    warmup().skipWaiting();
+}
+
+void PluginHost::newOpen()
+{
+    warmup().newOpen();
 }
 
 namespace

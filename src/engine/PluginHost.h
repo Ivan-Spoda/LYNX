@@ -15,6 +15,7 @@
 #include "core/FlPluginDb.h"
 #include "core/PluginSubstitutes.h"
 #include "core/Instruments.h"
+#include "core/ModuleWarmup.h"
 
 namespace lynx
 {
@@ -247,6 +248,18 @@ public:
     int preloadedCount() const;
     // Called on the message thread just before a hosted plugin is created (the progress panel names it and repaints).
     std::function<void (const juce::String& name)> onInstantiate;
+
+    // Slow modules started ahead, on a thread of their own (round 121, core/ModuleWarmup.h): a Waves shell's first
+    // factory call waits ~10 s for the vendor's service. Call as soon as an open knows its plugins (any thread);
+    // the panel then waits for `modulesStarting()` without blocking. Not with the plugin sandbox (the child loads it).
+    void startModulesFor (const std::vector<FlpPluginUse>& uses);
+    void startModulesFor (const std::vector<PluginRef>& refs);
+    static modulewarm::Waiting modulesStarting();
+    // "Continue without it": the modules still starting are left out of this open (their slots get substitutes)
+    static void skipStartingModules();
+    static void newOpen(); // a new project open: forgets the skips
+    // (the modules started ahead stay loaded for the session: a process that loaded plugins ends without their
+    // teardown, round 111)
 
     // Targeted scans on open (round 112): a project plugin that one targeted scan could not find is not searched
     // again on every open (it walked the plugin folders and rescanned files each time); a full scan, or a week,
