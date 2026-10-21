@@ -551,7 +551,7 @@ TEST (lynx_tune_editor_layout_round95)
     for (const auto& item : l.items)
     {
         inside = inside && item.x >= 0 && item.y >= 0 && item.x + item.w <= (float) l.width + 0.5f && item.y + item.h <= (float) l.height + 0.5f;
-        if (lynx::plugui::isValueControl (item.type))
+        if (lynx::plugui::isValueControl (item.type) && (item.style & lynx::plugui::pageTabs) == 0) // (round 128: page tabs)
         {
             const auto p = lynx::plugui::paramIndex (lynx::EffectKind::lynxTune, item.param);
             CHECK (p >= 0);
