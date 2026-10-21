@@ -74,6 +74,8 @@ struct StartupTrace
     juce::String text;
     clock::time_point last = t0;
 
+    double seconds() const { return std::chrono::duration<double> (clock::now() - t0).count(); } // since the process started
+
     void mark (const char* step)
     {
         if (! on)
@@ -605,13 +607,16 @@ public:
 
             splash->setStatus (lynx::tr ("Loading the workspace..."));
             splash->startClock();
+            // the minimum counts from the process start (the audio device took part of it already)
+            splashDuration = lynx::SplashScreen::remainingDuration (startupTrace.seconds());
+            splash->setBarDuration (splashDuration);
 
             juce::Timer::callAfterDelay (1050, [this] {
                 if (splash == nullptr || engine == nullptr)
                     return;
 
                 createMainWindow();
-                const auto wait = juce::jmax (0.0, lynx::SplashScreen::minimumDuration - splash->getElapsed());
+                const auto wait = juce::jmax (0.0, splashDuration - splash->getElapsed());
 
                 juce::Timer::callAfterDelay ((int) (wait * 1000.0), [this] {
                     if (splash == nullptr || mainWindow == nullptr)
@@ -644,6 +649,19 @@ public:
         if (startupOptions.sound)
             engine->previewSample (lynx::makeStartupSample());
         startupTrace.mark ("startup sound");
+
+        // a project given on the command line: its slow plugin modules (a Waves shell) start now, on their own
+        // thread, while the splash and the main window come up (round 121)
+        if (fileToOpen.hasFileExtension ("flp"))
+            if (juce::MemoryBlock data; fileToOpen.loadFileAsData (data))
+                try
+                {
+                    engine->getPluginHost().startModulesFor (lynx::flpForeignPlugins (flp::parseProject ({ static_cast<const std::uint8_t*> (data.getData()), data.getSize() })));
+                    startupTrace.mark ("plugin modules started ahead");
+                }
+                catch (const flp::Error&)
+                {
+                }
     }
 
     void createMainWindow()
@@ -3356,6 +3374,7 @@ private:
     }
     std::unique_ptr<MainWindow> mainWindow;
     std::unique_ptr<lynx::SplashScreen> splash;
+    double splashDuration = lynx::SplashScreen::minimumDuration; // seconds of its clock (round 121: from the process start)
     lynx::StartupOptions startupOptions;
     juce::File fileToOpen;
 };

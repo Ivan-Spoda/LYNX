@@ -15,6 +15,7 @@
 #include "core/FlPluginDb.h"
 #include "core/PluginSubstitutes.h"
 #include "core/Instruments.h"
+#include "core/ModuleWarmup.h"
 
 namespace lynx
 {
@@ -248,6 +249,18 @@ public:
     // Called on the message thread just before a hosted plugin is created (the progress panel names it and repaints).
     std::function<void (const juce::String& name)> onInstantiate;
 
+    // Slow modules started ahead, on a thread of their own (round 121, core/ModuleWarmup.h): a Waves shell's first
+    // factory call waits ~10 s for the vendor's service. Call as soon as an open knows its plugins (any thread);
+    // the panel then waits for `modulesStarting()` without blocking. Not with the plugin sandbox (the child loads it).
+    void startModulesFor (const std::vector<FlpPluginUse>& uses);
+    void startModulesFor (const std::vector<PluginRef>& refs);
+    static modulewarm::Waiting modulesStarting();
+    // "Continue without it": the modules still starting are left out of this open (their slots get substitutes)
+    static void skipStartingModules();
+    static void newOpen(); // a new project open: forgets the skips
+    // (the modules started ahead stay loaded for the session: a process that loaded plugins ends without their
+    // teardown, round 111)
+
     // Targeted scans on open (round 112): a project plugin that one targeted scan could not find is not searched
     // again on every open (it walked the plugin folders and rescanned files each time); a full scan, or a week,
     // forgets this. Files a scan described with no plugin at all are skipped until they change on disk.
@@ -298,6 +311,11 @@ private:
 // Settings → "Substitute missing plugins with LYNX equivalents" (default on; %APPDATA%\LYNX\substitutes.txt).
 bool pluginSubstitutesEnabled();
 void setPluginSubstitutesEnabled (bool enabled);
+
+// createPluginInstance, checked: a VST3 shell that hands out another of its plugins than the one asked for (a Waves
+// shell's first instance in a process, round 121) is created once more.
+std::unique_ptr<juce::AudioPluginInstance> createRightInstance (juce::AudioPluginFormatManager& formats, const juce::PluginDescription& description,
+                                                                double sampleRate, int blockSize, juce::String& error);
 
 // Stereo layout (if the plugin accepts it), rate and block size; calls prepareToPlay.
 void preparePlugin (juce::AudioPluginInstance& plugin, double sampleRate, int blockSize);

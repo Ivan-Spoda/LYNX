@@ -33,6 +33,12 @@ public:
         setBounds (parent.getLocalBounds());
         grabKeyboardFocus();
         engine.stop();
+        skipButton.setButtonText (tr ("Continue without it"));
+        skipButton.onClick = [this] {
+            PluginHost::skipStartingModules(); // its plugins become missing: LYNX substitutes play their slots
+            skipButton.setVisible (false);
+        };
+        addChildComponent (skipButton);
         startScan();
         startTimerHz (30);
     }
@@ -72,14 +78,18 @@ public:
         g.fillRoundedRectangle (bar.withWidth (juce::jmax (8.0f, bar.getWidth() * (float) fraction)), 4.0f);
         area.removeFromTop (10);
 
-        auto line = area.removeFromTop (18);
+        auto line = area.removeFromTop (slowWait ? 36 : 18);
         g.setFont (juce::Font (theme::font (theme::type::small)));
         g.setColour (theme::colour::textSecondary);
-        g.drawText (juce::String (juce::roundToInt (fraction * 100.0)) + " %", line.removeFromRight (48), juce::Justification::centredRight);
-        g.drawFittedText (statusText, line, juce::Justification::centredLeft, 1);
+        g.drawText (juce::String (juce::roundToInt (fraction * 100.0)) + " %", line.removeFromRight (48).removeFromTop (18), juce::Justification::centredRight);
+        g.drawFittedText (statusText, line, juce::Justification::topLeft, slowWait ? 2 : 1);
     }
 
-    void resized() override {}
+    void resized() override
+    {
+        const auto box = panelBounds().reduced (20, 16);
+        skipButton.setBounds (box.getRight() - 170, box.getBottom() - 26, 170, 26);
+    }
     void mouseDown (const juce::MouseEvent&) override {}
     bool keyPressed (const juce::KeyPress&) override { return true; } // nothing reaches the project being replaced
 
@@ -88,6 +98,7 @@ private:
     {
         scanning,
         preparing,
+        modules, // slow plugin modules still starting on their own thread (round 121)
         plugins,
         finishing,
         finished
@@ -95,7 +106,7 @@ private:
 
     juce::Rectangle<int> panelBounds() const
     {
-        return juce::Rectangle<int> (0, 0, juce::jmin (480, getWidth() - 32), 104).withCentre (getLocalBounds().getCentre());
+        return juce::Rectangle<int> (0, 0, juce::jmin (480, getWidth() - 32), slowWait ? 158 : 104).withCentre (getLocalBounds().getCentre());
     }
 
     // 1. the project's plugins LYNX doesn't know yet, and has not searched for already: a scan of just their files
@@ -113,6 +124,10 @@ private:
                 {
                 }
             auto& host = engine.getPluginHost();
+            // a Waves shell's first call waits for its vendor's service: started now, on its own thread (round 121)
+            PluginHost::newOpen();
+            allUses = uses;
+            host.startModulesFor (uses);
             uses.erase (std::remove_if (uses.begin(), uses.end(),
                                         [&host] (const FlpPluginUse& u) { return host.findForeign (u.plugin, u.instrument) || host.recentlyMissed (u); }),
                         uses.end());
@@ -160,6 +175,7 @@ private:
             worker.join();
         if (resumeBackground)
             engine.getPluginHost().startBackgroundScan();
+        engine.getPluginHost().startModulesFor (allUses); // (the ones the targeted scan just found)
         resumeBackground = false;
         step = Step::preparing;
         stageDone = false;
@@ -183,8 +199,34 @@ private:
                 finish (false, prepared.error);
                 return;
             }
-            step = Step::plugins;
+            step = Step::modules;
+            modulesWaitStarted = std::chrono::steady_clock::now();
             loadtrace::stage (0.55, 0.90, TR_NOOP ("Loading plugins..."), TR_NOOP ("Loading {0}... {1}/{2}"));
+            refresh();
+            return;
+        }
+        else if (step == Step::modules)
+        {
+            // the message thread stays free while a slow module starts: the panel says which, and after a while
+            // offers to continue without it
+            if (const auto w = PluginHost::modulesStarting(); w.modules > 0)
+            {
+                const auto slow = w.seconds >= modulewarm::Registry::slowSeconds;
+                if (slow != slowWait)
+                {
+                    slowWait = slow;
+                    skipButton.setVisible (slow);
+                    resized();
+                }
+                statusText = tr (modulewarm::waitTemplate (w).c_str(),
+                                 { juce::String::fromUTF8 (modulewarm::displayName (w.file).c_str()), juce::String (juce::roundToInt (w.seconds)) });
+                repaint();
+                return;
+            }
+            loadtrace::add ("modules_wait", loadtrace::msSince (modulesWaitStarted));
+            slowWait = false;
+            skipButton.setVisible (false);
+            step = Step::plugins;
             // each hosted plugin named as it is created (also the ones the VST3 automation remap creates first)
             engine.getPluginHost().onInstantiate = [this] (const juce::String& name) {
                 const auto total = juce::jmax ((int) (prepared.adopted ? prepared.pluginQueue.size() : prepared.uses.size()), created + 1);
@@ -255,6 +297,10 @@ private:
     bool resumeBackground = false;
     Step step = Step::scanning;
     double shown = 0.0;
+    std::vector<FlpPluginUse> allUses;
+    juce::TextButton skipButton;
+    bool slowWait = false;
+    std::chrono::steady_clock::time_point modulesWaitStarted = std::chrono::steady_clock::now();
     int created = 0; // hosted plugins created so far
     juce::String statusText;
 };

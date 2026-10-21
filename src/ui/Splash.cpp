@@ -116,6 +116,11 @@ void SplashScreen::startClock()
     time = 0.0;
 }
 
+double SplashScreen::remainingDuration (double sinceProcessStart, double landing)
+{
+    return juce::jmax (landing, minimumDuration - juce::jmax (0.0, sinceProcessStart));
+}
+
 double SplashScreen::getElapsed() const
 {
     return clockStartMs < 0.0 ? 0.0 : (juce::Time::getMillisecondCounterHiRes() - clockStartMs) / 1000.0;
@@ -280,7 +285,7 @@ void SplashScreen::paint (juce::Graphics& g)
         g.setColour (colour::bg4);
         g.fillRoundedRectangle (bar, 1.5f);
         g.setColour (colour::accent);
-        g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * (float) easeOutCubic (t / minimumDuration)), 1.5f);
+        g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * (float) easeOutCubic (juce::jmin (1.0, t / juce::jmax (0.1, barDuration)))), 1.5f);
         g.setColour (colour::textDisabled);
         g.setFont (font (type::small));
         g.drawText (status, juce::Rectangle<float> (24.0f, bar.getY() - 24.0f, card.getWidth() - 48.0f, 18.0f), juce::Justification::centredLeft);

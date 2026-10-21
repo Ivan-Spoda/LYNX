@@ -32,7 +32,14 @@ public:
     ~SplashScreen() override;
 
     static constexpr int width = 560, height = 340;
-    static constexpr double minimumDuration = 2.1; // seconds on screen before it may close
+    // seconds from the start of the process before it may close (round 121: counted from the process start, not from
+    // when the card appeared — the window comes ~1 s sooner)
+    static constexpr double minimumDuration = 2.1;
+    // How long the card stays given that the process started `sinceProcessStart` seconds before its clock: the rest of
+    // minimumDuration, but at least `landing` (the pepper's drop, after which the main window is built).
+    static double remainingDuration (double sinceProcessStart, double landing = 1.05);
+    // the progress bar fills over this (default minimumDuration)
+    void setBarDuration (double seconds) { barDuration = seconds; }
     static constexpr double fadeOutTime = 0.25;
 
     // Shows the card centred on the main display, above other windows (the clock has not started yet).
@@ -57,6 +64,7 @@ private:
     juce::String status;
     double time = 0.0;
     double clockStartMs = -1.0, fadeStartMs = -1.0;
+    double barDuration = minimumDuration;
     std::function<void()> onGone;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SplashScreen)

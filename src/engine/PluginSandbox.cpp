@@ -579,7 +579,7 @@ private:
         blockSize = juce::jlimit (16, SharedBlock::maxFrames, (int) message["blockSize"]);
         PluginHost host (false);
         juce::String error;
-        plugin = host.getFormats().createPluginInstance (description, sampleRate, blockSize, error);
+        plugin = createRightInstance (host.getFormats(), description, sampleRate, blockSize, error);
         if (plugin == nullptr)
             return fail (error.isEmpty() ? juce::String ("the plugin failed to open") : error);
 
