@@ -975,11 +975,7 @@ public:
             const auto litColour = accent.interpolatedWith (juce::Colours::white, tipSeg ? 0.55f : 0.12f * std::abs (u));
             g.setColour (lit ? (fx.enabled ? litColour : colour::textDisabled) : juce::Colour (0xff22252c));
             g.strokePath (seg, juce::PathStrokeType ((outer - inner) * 0.8f));
-            if (! lit)
-            {
-                g.setColour (juce::Colours::white.withAlpha (0.035f));
-                g.strokePath (seg, juce::PathStrokeType ((outer - inner) * 0.3f));
-            }
+
         }
         g.setColour (colour::gridBar);
         g.drawLine (c.x, c.y - outer, c.x, c.y - inner, 1.5f);

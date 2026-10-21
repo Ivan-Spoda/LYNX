@@ -769,12 +769,6 @@ private:
         fillLevel (g, inP, inColour(), p, 0.42f, 0.12f);
         g.setColour (outColour().withAlpha (0.9f));
         g.strokePath (outLine, juce::PathStrokeType (1.2f));
-        // round 126: the gain reduction burns in the LYNX red with a glow (two strokes: cheap at 100 columns a second)
-        if (fx.enabled && ! skin::reducedEffects())
-        {
-            g.setColour (colour::accent.withAlpha (0.22f));
-            g.strokePath (grLine, juce::PathStrokeType (6.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-        }
         g.setColour (colour::accent.withAlpha (fx.enabled ? 1.0f : 0.3f));
         g.strokePath (grLine, juce::PathStrokeType (2.0f));
         // threshold

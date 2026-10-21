@@ -172,13 +172,31 @@ void playOpenAnimation (juce::Component& content)
     new OpenAnimation (content); // deletes itself when done (or when the content goes away)
 }
 
+// a bloom is a cached sprite per colour and strength (a radial gradient is costly per pixel; a blit is not)
 void bloom (juce::Graphics& g, juce::Point<float> c, float radius, juce::Colour colour, float alpha)
 {
     if (reduced || radius <= 0.5f || alpha <= 0.002f) return;
-    juce::ColourGradient grad (colour.withAlpha (alpha), c.x, c.y, colour.withAlpha (0.0f), c.x + radius, c.y, true);
-    grad.addColour (0.45, colour.withAlpha (alpha * 0.42f));
-    g.setGradientFill (grad);
-    g.fillEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (c));
+    const auto level = juce::jlimit (1, 64, (int) std::lround (alpha * 64.0f));
+    const auto key = (std::uint64_t) colour.withAlpha ((juce::uint8) 255).getARGB() * 67u + (std::uint64_t) level;
+    static std::unordered_map<std::uint64_t, juce::Image> sprites;
+    auto it = sprites.find (key);
+    if (it == sprites.end())
+    {
+        if (sprites.size() > 400) sprites.clear();
+        constexpr int n = 96;
+        juce::Image img (juce::Image::ARGB, n, n, true);
+        {
+            juce::Graphics ig (img);
+            const auto a = (float) level / 64.0f;
+            juce::ColourGradient grad (colour.withAlpha (a), n * 0.5f, n * 0.5f, colour.withAlpha (0.0f), (float) n, n * 0.5f, true);
+            grad.addColour (0.45, colour.withAlpha (a * 0.42f));
+            ig.setGradientFill (grad);
+            ig.fillEllipse (0.0f, 0.0f, (float) n, (float) n);
+        }
+        it = sprites.emplace (key, img).first;
+    }
+    g.setOpacity (1.0f);
+    g.drawImage (it->second, juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (c), juce::RectanglePlacement::stretchToFit);
 }
 
 // --- surfaces ------------------------------------------------------------------------------------

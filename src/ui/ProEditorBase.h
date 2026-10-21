@@ -684,12 +684,6 @@ protected:
     {
         g.setGradientFill (juce::ColourGradient (c.withAlpha (top), 0.0f, r.getY(), c.withAlpha (bottom), 0.0f, r.getBottom(), false));
         g.fillPath (p);
-        // round 126: the level's edge lit in its colour
-        g.saveState();
-        g.reduceClipRegion (r.withTrimmedBottom (1.0f).toNearestInt());
-        g.setColour (c.withAlpha (juce::jmin (1.0f, top + 0.25f)));
-        g.strokePath (p, juce::PathStrokeType (1.0f));
-        g.restoreState();
     }
 
     static void caption (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& t, juce::Justification j = juce::Justification::centred)
