@@ -177,3 +177,128 @@ TEST (lynx_tune_glide_is_not_pulled_back_round120)
         sum += tune120::correctionAt (x, y, latency, fs, t);
     CHECK (std::abs (sum / n) < 10.0);
 }
+
+// --- Auto-Tune Pro (round 120 §5) ------------------------------------------------------------------------------------
+
+namespace tune120
+{
+// JUCE MemoryBlock::toBase64Encoding of `raw` ("<size>.<chars>", 6 bits per char, LSB first)
+std::string juceBase64 (const std::string& raw)
+{
+    static constexpr const char* alphabet = ".ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+";
+    std::string out = std::to_string (raw.size()) + ".";
+    const auto bits = raw.size() * 8;
+    for (std::size_t b = 0; b < bits; b += 6)
+    {
+        unsigned v = 0;
+        for (int k = 0; k < 6 && b + (std::size_t) k < bits; ++k)
+            if (((unsigned char) raw[(b + (std::size_t) k) >> 3] >> ((b + (std::size_t) k) & 7)) & 1u)
+                v |= 1u << k;
+        out += alphabet[v];
+    }
+    return out;
+}
+
+// an Auto-Tune Pro component state with real ParamsData (as her projects save it)
+std::vector<std::uint8_t> autoTuneState (int key, int scale, double retune, double humanize, double flex)
+{
+    char p[512];
+    std::snprintf (p, sizeof p, "<?xml version=\"1.0\" encoding=\"UTF-8\"?> <ActualParams><Parameter X0=\"0.0\"/><Parameter X1=\"%d.0\"/>"
+                                "<Parameter X2=\"%d.0\"/><Parameter X4=\"%g\"/><Parameter X31=\"19.99999809265137\"/><Parameter X61=\"%g\"/>"
+                                "<Parameter X62=\"0.0\"/><Parameter X90=\"%g\"/><Parameter X92=\"100.0\"/></ActualParams>",
+                   scale, key, retune, humanize, flex);
+    const std::string body (p);
+    std::string params ("VC2!");
+    for (int i = 0; i < 4; ++i)
+        params += (char) (body.size() >> (8 * i));
+    params += body;
+    const auto xml = std::string ("<?xml version=\"1.0\" encoding=\"UTF-8\"?> <SessionChunkData><ChunkForVersion ChunkVersion=\"10.0.0\">")
+                     + "<Parameters ParamsData=\"" + juceBase64 (params) + "\" IsUnencrypted=\"1\"/><Custom RAND_ID=\"12316\" ScaleGivenKey=\""
+                     + std::to_string (key) + "\" ScaleGivenScale=\"" + std::to_string (scale) + "\" ScaleGivenDetune=\"0\"/></ChunkForVersion></SessionChunkData>";
+    std::vector<std::uint8_t> c { 'V', 'C', '2', '!' };
+    for (int i = 0; i < 4; ++i)
+        c.push_back ((std::uint8_t) (xml.size() >> (8 * i)));
+    c.insert (c.end(), xml.begin(), xml.end());
+    return c;
+}
+} // namespace tune120
+
+TEST (auto_tune_pro_params_are_read_round120)
+{
+    using namespace lynx;
+    // her luisa sonsa state: E minor, Retune Speed 8.46 ms, Humanize 100, Flex-Tune 20
+    const auto state = tune120::autoTuneState (4, 1, 8.46, 100.0, 20.0);
+    const auto x = autoTuneProParams (state);
+    CHECK (x.size() == 9);
+    CHECK (x.count (4) && std::abs (x.at (4) - 8.46) < 1e-4);
+    CHECK (x.count (61) && x.at (61) == 100.0);
+    CHECK (x.count (90) && x.at (90) == 20.0);
+    CHECK (autoTuneProParams (subst113::autoTuneState (9, 1)).empty()); // "4....." is no ParamsData
+    CHECK (autoTuneProParams (tune120::wavesTuneComponent (4, tune120::major, 4, tune120::major)).empty());
+
+    const auto at = subst113::autoTune (state);
+    auto slot = subst113::pluginSlot (at);
+    CHECK (substituteEffectSlot (slot, pluginIdentity (at)));
+    CHECK (lynxtune::keyIndex (slot.params[lynxtune::key]) == 4);
+    CHECK (vocal::Scale (lynxtune::scaleIndex (slot.params[lynxtune::scale])) == vocal::Scale::minor);
+    CHECK (std::abs (lynxtune::retuneMs (slot.params[lynxtune::retune]) - (1.36 * 8.46 - 3.0)) < 0.05);
+    CHECK (std::abs (slot.params[lynxtune::humanize] - 1.0f) < 1e-6f);
+    CHECK (std::abs (slot.params[lynxtune::flexTune] - 0.2f) < 1e-6f);
+    // retune 0 (the hard effect) stays 0
+    auto hard = subst113::pluginSlot (subst113::autoTune (tune120::autoTuneState (9, 1, 0.0, 0.0, 0.0)));
+    CHECK (substituteEffectSlot (hard, pluginIdentity (hard.plugin.foreign)));
+    CHECK (lynxtune::retuneMs (hard.params[lynxtune::retune]) == 0.0);
+}
+
+TEST (lynx_tune_flex_tune_round120)
+{
+    // [EXEC] Auto-Tune Pro, Flex-Tune 50, instant retune, chromatic: a note 10 c off is corrected fully, 30 c off by
+    // 20 c (min (d, (50 − d))), 45 c off by 5 c
+    const double fs = 44100.0;
+    const double offs[3] { 10.0, 30.0, 45.0 }, want[3] { 0.0, 10.0, 40.0 };
+    for (int k = 0; k < 3; ++k)
+    {
+        const auto x = r95::vowel (fs, (int) (fs * 0.8), [&] (double) { return 220.0 * std::exp2 (offs[k] / 1200.0); });
+        auto p = r95::tuneDefaults();
+        p[lynx::lynxtune::scale] = 0.0f;
+        p[lynx::lynxtune::retune] = 0.0f;
+        p[lynx::lynxtune::flexTune] = 0.5f;
+        int latency = 0;
+        const auto y = r95::runTune (x, fs, p, latency);
+        const auto out = r95::cents (r95::measureHz (y, (int) (0.5 * fs) + latency, 2048, fs), 220.0);
+        CHECK (std::abs (out - want[k]) < 3.0);
+    }
+    // in a scale the distance counts in the gap to the next target: E minor, F +20 c (80 c below F#, gap 200 c) at
+    // Flex-Tune 50: corrected by (50 − 40) / 40 × 80 = 20 c toward F# (Auto-Tune Pro: 23 c)
+    const auto x = r95::vowel (fs, (int) (fs * 0.8), [] (double) { return 174.6141 * std::exp2 (20.0 / 1200.0); });
+    auto p = r95::tuneDefaults();
+    p[lynx::lynxtune::key] = 4.0f / 11.0f;
+    p[lynx::lynxtune::scale] = 2.0f / (float) (lynx::vocal::scaleCount - 1);
+    p[lynx::lynxtune::retune] = 0.0f;
+    p[lynx::lynxtune::flexTune] = 0.5f;
+    int latency = 0;
+    const auto y = r95::runTune (x, fs, p, latency);
+    CHECK (std::abs (r95::cents (r95::measureHz (y, (int) (0.5 * fs) + latency, 2048, fs), 174.6141) - 40.0) < 4.0);
+}
+
+TEST (lynx_tune_humanize_slows_only_sustained_notes_round120)
+{
+    // [EXEC] Auto-Tune Pro, retune 5 ms: a note held steady 0.8 s that then goes 30 c sharp is pulled back slowly with
+    // Humanize 100 (50 % at ~104 ms), fast without it (4 ms) and fast when the note was not steady (a ±10 c vibrato)
+    const double fs = 44100.0;
+    auto run = [fs] (double vib, float human) {
+        const auto x = r95::vowel (fs, (int) (fs * 1.4), [vib] (double t) {
+            return 220.0 * std::exp2 (((t < 0.8 ? 0.0 : 30.0) + vib * std::sin (2.0 * r95::pi * 5.5 * t)) / 1200.0);
+        });
+        auto p = r95::tuneDefaults();
+        p[lynx::lynxtune::scale] = 0.0f;
+        p[lynx::lynxtune::retune] = (float) std::sqrt ((1.36 * 5.0 - 3.0) / 400.0);
+        p[lynx::lynxtune::humanize] = human;
+        int latency = 0;
+        const auto y = r95::runTune (x, fs, p, latency);
+        return -tune120::correctionAt (x, y, latency, fs, 0.8 + 0.1); // correction 100 ms after the move (of 30 c)
+    };
+    CHECK (run (0.0, 0.0f) > 26.0);
+    CHECK (run (0.0, 1.0f) < 20.0);
+    CHECK (run (10.0, 1.0f) > 22.0);
+}

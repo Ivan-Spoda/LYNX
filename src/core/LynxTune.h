@@ -9,7 +9,7 @@
 // nearest note of the key/scale (with hysteresis), or the nearest pitch class held on a MIDI source channel — and
 // the wanted correction (target − sung pitch, in semitones) is followed with the retune time constant (0 ms =
 // instant, the hard "robot" effect; slower keeps the singer's own slides and vibrato). Humanize lengthens the retune
-// time on sustained notes. TD-PSOLA shifts the voice by the correction (+ transpose) with the formants preserved, or
+// time on sustained notes; flex-tune leaves notes far from their target as sung. TD-PSOLA shifts the voice by the correction (+ transpose) with the formants preserved, or
 // moved with the pitch when formant preserve is off; formant shift moves them on its own.
 //
 // Latency: a constant number of samples set by the voice range and the low-latency switch (two longest periods, or
@@ -43,7 +43,8 @@ enum Param : int
     mix,             // dry / wet
     tracking,        // detector strictness (YIN threshold 0.05 … 0.30)
     noteC,           // 12 note switches (C … B): a note that is off is never a target
-    count = noteC + 12
+    flexTune = noteC + 12, // 0…100 %: notes far from their target are left as sung (round 120)
+    count
 };
 
 constexpr int rangeCount = 4;

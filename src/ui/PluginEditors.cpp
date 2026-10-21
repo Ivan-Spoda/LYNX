@@ -92,7 +92,7 @@ public:
         for (const auto& item : l.items) // live meters and graphs (mixing suite, LYNX Tune's pitch, round 108's dynamics): 30 Hz
             if (item.type == Item::display && item.display != nullptr
                 && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "pitchgraph") == 0
-                    || dynui::isLive (item.display)))
+                    || std::strcmp (item.display, "pitchtrace") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)))
             {
                 startTimerHz (30);
                 break;
@@ -762,7 +762,7 @@ public:
 
     // LYNX Tune's live display: the read-out on the left (note, cents, Hz, target, correction meter), the last 8 s of
     // sung (white) and corrected (accent) pitch on the right over the key's note lines
-    void paintPitchDisplay (juce::Graphics& g, juce::Rectangle<float> r, const EffectSlot& fx)
+    void paintPitchDisplay (juce::Graphics& g, juce::Rectangle<float> r, const EffectSlot& fx, bool readout = true)
     {
         using namespace theme;
         const auto s = scale();
@@ -782,50 +782,54 @@ public:
             }
 
         const auto last = history.empty() ? PitchPoint { 0.0f, 0.0f, 0.0f } : history.back();
-        const auto voiced = last.sung > 0.5f;
-        const auto ref = lynxtune::referenceHz (fx.params[(std::size_t) lynxtune::reference]);
+        [[maybe_unused]] const auto voiced = last.sung > 0.5f;
+        [[maybe_unused]] const auto ref = lynxtune::referenceHz (fx.params[(std::size_t) lynxtune::reference]);
 
-        // --- read-out
-        auto left = r.removeFromLeft (juce::jmin (176.0f * s, r.getWidth() * 0.34f)).reduced (8.0f * s, 6.0f * s);
-        const auto noteArea = left.removeFromTop (left.getHeight() * 0.42f);
-        g.setFont (font (juce::jmax (12.0f, 34.0f * s), true));
-        g.setColour (voiced ? colour::textPrimary : colour::textDisabled);
-        const auto nearest = (int) std::lround (last.sung);
-        g.drawText (voiced ? noteText (nearest) : juce::String ("--"), noteArea.withTrimmedRight (noteArea.getWidth() * 0.4f), juce::Justification::centredLeft);
-        g.setFont (font (juce::jmax (8.0f, 12.0f * s)));
-        g.setColour (colour::textSecondary);
-        if (voiced)
+        if (readout)
         {
-            const auto cents = (int) std::lround ((last.sung - (float) nearest) * 100.0f);
-            const auto hzNow = ref * std::exp2 ((last.sung - 69.0f) / 12.0f);
-            const auto side = noteArea.withTrimmedLeft (noteArea.getWidth() * 0.6f);
-            g.drawText ((cents > 0 ? "+" : "") + juce::String (cents) + " c", side.withHeight (side.getHeight() * 0.5f), juce::Justification::bottomLeft);
-            g.drawText (juce::String (hzNow, 1) + " Hz", side.withTrimmedTop (side.getHeight() * 0.5f), juce::Justification::topLeft);
-        }
-        auto row = [&] (const juce::String& caption, const juce::String& value, juce::Colour c) {
-            auto line = left.removeFromTop (juce::jmax (12.0f, 18.0f * s));
-            g.setColour (colour::textDisabled);
-            g.setFont (font (juce::jmax (7.0f, 10.0f * s), true));
-            g.drawText (caption, line, juce::Justification::centredLeft);
-            g.setColour (c);
-            g.setFont (font (juce::jmax (8.0f, 12.0f * s), true));
-            g.drawText (value, line, juce::Justification::centredRight);
-        };
-        row (caps (tr ("Target")), voiced && last.target > 0.5f ? noteText ((int) std::lround (last.target)) : juce::String ("--"), colour::accent);
-        const auto corrCents = (int) std::lround (last.shift * 100.0f);
-        row (caps (tr ("Correction")), voiced ? (corrCents > 0 ? "+" : "") + juce::String (corrCents) + " c" : juce::String ("--"), colour::textPrimary);
-        // the correction meter: ±100 cents from the centre
-        auto bar = left.removeFromTop (juce::jmax (6.0f, 9.0f * s)).reduced (0.0f, 1.0f);
-        g.setColour (colour::bg3);
-        g.fillRoundedRectangle (bar, radius::sm);
-        g.setColour (colour::gridBar);
-        g.drawVerticalLine ((int) bar.getCentreX(), bar.getY() - 2.0f, bar.getBottom() + 2.0f);
-        if (voiced)
-        {
-            const auto amount = juce::jlimit (-1.0f, 1.0f, last.shift);
-            const auto x0 = bar.getCentreX(), x1 = bar.getCentreX() + bar.getWidth() * 0.5f * amount;
-            g.setColour ((fx.enabled ? colour::accent : colour::textDisabled).withAlpha (0.9f));
-            g.fillRoundedRectangle (juce::Rectangle<float> (juce::jmin (x0, x1), bar.getY(), std::abs (x1 - x0) + 1.0f, bar.getHeight()), radius::sm);
+            // --- read-out
+            auto left = r.removeFromLeft (juce::jmin (176.0f * s, r.getWidth() * 0.34f)).reduced (8.0f * s, 6.0f * s);
+            const auto noteArea = left.removeFromTop (left.getHeight() * 0.42f);
+            g.setFont (font (juce::jmax (12.0f, 34.0f * s), true));
+            g.setColour (voiced ? colour::textPrimary : colour::textDisabled);
+            const auto nearest = (int) std::lround (last.sung);
+            g.drawText (voiced ? noteText (nearest) : juce::String ("--"), noteArea.withTrimmedRight (noteArea.getWidth() * 0.4f), juce::Justification::centredLeft);
+            g.setFont (font (juce::jmax (8.0f, 12.0f * s)));
+            g.setColour (colour::textSecondary);
+            if (voiced)
+            {
+                const auto cents = (int) std::lround ((last.sung - (float) nearest) * 100.0f);
+                const auto hzNow = ref * std::exp2 ((last.sung - 69.0f) / 12.0f);
+                const auto side = noteArea.withTrimmedLeft (noteArea.getWidth() * 0.6f);
+                g.drawText ((cents > 0 ? "+" : "") + juce::String (cents) + " c", side.withHeight (side.getHeight() * 0.5f), juce::Justification::bottomLeft);
+                g.drawText (juce::String (hzNow, 1) + " Hz", side.withTrimmedTop (side.getHeight() * 0.5f), juce::Justification::topLeft);
+            }
+            auto row = [&] (const juce::String& caption, const juce::String& value, juce::Colour c) {
+                auto line = left.removeFromTop (juce::jmax (12.0f, 18.0f * s));
+                g.setColour (colour::textDisabled);
+                g.setFont (font (juce::jmax (7.0f, 10.0f * s), true));
+                g.drawText (caption, line, juce::Justification::centredLeft);
+                g.setColour (c);
+                g.setFont (font (juce::jmax (8.0f, 12.0f * s), true));
+                g.drawText (value, line, juce::Justification::centredRight);
+            };
+            row (caps (tr ("Target")), voiced && last.target > 0.5f ? noteText ((int) std::lround (last.target)) : juce::String ("--"), colour::accent);
+            const auto corrCents = (int) std::lround (last.shift * 100.0f);
+            row (caps (tr ("Correction")), voiced ? (corrCents > 0 ? "+" : "") + juce::String (corrCents) + " c" : juce::String ("--"), colour::textPrimary);
+            // the correction meter: ±100 cents from the centre
+            auto bar = left.removeFromTop (juce::jmax (6.0f, 9.0f * s)).reduced (0.0f, 1.0f);
+            g.setColour (colour::bg3);
+            g.fillRoundedRectangle (bar, radius::sm);
+            g.setColour (colour::gridBar);
+            g.drawVerticalLine ((int) bar.getCentreX(), bar.getY() - 2.0f, bar.getBottom() + 2.0f);
+            if (voiced)
+            {
+                const auto amount = juce::jlimit (-1.0f, 1.0f, last.shift);
+                const auto x0 = bar.getCentreX(), x1 = bar.getCentreX() + bar.getWidth() * 0.5f * amount;
+                g.setColour ((fx.enabled ? colour::accent : colour::textDisabled).withAlpha (0.9f));
+                g.fillRoundedRectangle (juce::Rectangle<float> (juce::jmin (x0, x1), bar.getY(), std::abs (x1 - x0) + 1.0f, bar.getHeight()), radius::sm);
+            }
+
         }
 
         // --- graph
@@ -903,6 +907,71 @@ public:
         g.drawText (tr ("input"), graph.removeFromTop (14.0f * s).removeFromRight (120.0f * s).withTrimmedRight (6.0f), juce::Justification::centredLeft);
         g.setColour (colour::accent);
         g.drawText (tr ("corrected"), graph.withHeight (14.0f * s).withY (graph.getY() - 14.0f * s).removeFromRight (64.0f * s), juce::Justification::centredLeft);
+    }
+
+    // LYNX Tune's correction meter (round 120, the centre of the auto-mode workflow): a ring of segments from −100 to
+    // +100 cents lit from the top toward the correction being applied, the target note's name in the middle and the
+    // sung pitch's offset under it
+    void paintPitchRing (juce::Graphics& g, juce::Rectangle<float> r, const EffectSlot& fx)
+    {
+        using namespace theme;
+        const auto s = scale();
+        static const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        PitchPoint last { 0.0f, 0.0f, 0.0f };
+        if (! pitchHistory.empty())
+            last = pitchHistory.back();
+        else if (demoDisplays)
+            last = { 63.62f, 64.0f, 0.38f };
+        const auto voiced = last.sung > 0.5f;
+        const auto side = juce::jmin (r.getWidth(), r.getHeight());
+        auto dial = r.withSizeKeepingCentre (side, side).reduced (4.0f * s);
+        const auto c = dial.getCentre();
+        const auto outer = dial.getWidth() * 0.5f, inner = outer * 0.74f;
+        g.setColour (colour::bg1);
+        g.fillEllipse (dial);
+        // 50 segments over 300° (−100 … +100 c), the top = 0
+        constexpr int segments = 50;
+        const auto sweep = juce::MathConstants<float>::pi * 5.0f / 3.0f;
+        const auto corr = juce::jlimit (-1.0f, 1.0f, voiced ? last.shift : 0.0f);
+        for (int k = 0; k < segments; ++k)
+        {
+            const auto u = ((float) k + 0.5f) / (float) segments * 2.0f - 1.0f; // −1 … +1
+            const auto a = u * sweep * 0.5f;
+            const auto lit = voiced && ((corr > 0.0f && u > 0.0f && u <= corr) || (corr < 0.0f && u < 0.0f && u >= corr));
+            g.setColour (lit ? (fx.enabled ? colour::accent : colour::textDisabled) : colour::bg3);
+            juce::Path seg;
+            const auto w = sweep / (float) segments * 0.35f;
+            seg.addCentredArc (c.x, c.y, (outer + inner) * 0.5f, (outer + inner) * 0.5f, 0.0f, a - w, a + w, true);
+            g.strokePath (seg, juce::PathStrokeType ((outer - inner) * 0.8f));
+        }
+        g.setColour (colour::gridBar);
+        g.drawLine (c.x, c.y - outer, c.x, c.y - inner, 1.5f);
+        // scale marks
+        g.setFont (font (juce::jmax (7.0f, 9.0f * s)));
+        g.setColour (colour::textDisabled);
+        for (const int m : { -100, -50, 0, 50, 100 })
+        {
+            const auto a = (float) m / 100.0f * sweep * 0.5f;
+            const auto rr = outer + 9.0f * s;
+            const juce::Point<float> pt { c.x + rr * std::sin (a), c.y - rr * std::cos (a) };
+            g.drawText ((m > 0 ? "+" : "") + juce::String (m), juce::Rectangle<float> (28.0f * s, 12.0f * s).withCentre (pt), juce::Justification::centred);
+        }
+        // the note and the offset
+        const auto target = (int) std::lround (last.target);
+        g.setColour (voiced ? (fx.enabled ? colour::accent : colour::textSecondary) : colour::textDisabled);
+        g.setFont (font (juce::jmax (14.0f, inner * 0.62f), true));
+        g.drawText (voiced && last.target > 0.5f ? juce::String (names[((target % 12) + 12) % 12]) : juce::String ("--"),
+                    juce::Rectangle<float> (inner * 1.6f, inner * 0.8f).withCentre (c.translated (0.0f, -inner * 0.08f)), juce::Justification::centred);
+        g.setFont (font (juce::jmax (8.0f, 11.0f * s)));
+        g.setColour (colour::textSecondary);
+        if (voiced)
+        {
+            const auto cents = (int) std::lround ((last.sung - (float) target) * 100.0f);
+            g.drawText ((cents > 0 ? "+" : "") + juce::String (cents) + " c  " + juce::String (target / 12 - 1),
+                        juce::Rectangle<float> (inner * 1.4f, 16.0f * s).withCentre (c.translated (0.0f, inner * 0.5f)), juce::Justification::centred);
+        }
+        else
+            g.drawText (tr ("no pitch"), juce::Rectangle<float> (inner * 1.4f, 16.0f * s).withCentre (c.translated (0.0f, inner * 0.5f)), juce::Justification::centred);
     }
 
     // the live meter `output` of this slot's effect (published by the audio thread; 0 when not playing)
@@ -1311,6 +1380,16 @@ public:
         else if (id == "pitchgraph") // LYNX Tune: detected pitch, target, correction and the scrolling pitch graph
         {
             paintPitchDisplay (g, r, fx);
+            return;
+        }
+        else if (id == "pitchtrace") // LYNX Tune (round 120): the scrolling pitch graph alone
+        {
+            paintPitchDisplay (g, r, fx, false);
+            return;
+        }
+        else if (id == "pitchring") // LYNX Tune (round 120): the correction meter
+        {
+            paintPitchRing (g, r, fx);
             return;
         }
         else if (id == "grmeter") // live gain reduction of the mixing suite (0..30 dB, from the right like a VU's GR)
@@ -2413,7 +2492,7 @@ private:
         bool history = false;
         for (const auto& item : activeLayout().items)
         {
-            if (item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "pitchgraph") == 0 && visible (item))
+            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "pitchgraph") == 0 || std::strcmp (item.display, "pitchtrace") == 0) && visible (item))
             {
                 // LYNX Tune's pitch history (30 points a second)
                 pitchHistory.push_back ({ liveMeter (0) * 127.0f, liveMeter (1) * 127.0f, (liveMeter (2) - 0.5f) * 4.0f });
@@ -2421,7 +2500,7 @@ private:
                     pitchHistory.erase (pitchHistory.begin(), pitchHistory.begin() + (std::ptrdiff_t) (pitchHistory.size() - pitchHistoryLength));
                 repaint (rectOf (item).getSmallestIntegerContainer());
             }
-            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || dynui::isLive (item.display)) && visible (item))
+            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)) && visible (item))
             {
                 history = history || std::strcmp (item.display, "grhistory") == 0;
                 repaint (rectOf (item).getSmallestIntegerContainer());

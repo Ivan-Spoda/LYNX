@@ -60,14 +60,15 @@ TEST (auto_tune_pro_key_and_scale_are_read_round113)
     CHECK (! autoTuneProKey (subst113::autoTuneState (12, 1))); // not a key
     CHECK (! autoTuneProKey (substtest::juceXmlComponent ("<AutoTune/>")));
 
-    // the substitute: A minor, 20 ms retune, no humanize
+    // the substitute: A minor; its parameters unreadable here: Auto-Tune's default 20 ms retune (round 120: = LYNX's
+    // time constant 1.36 x 20 - 3 ms), no humanize
     const auto at = subst113::autoTune (subst113::autoTuneState (9, 1));
     auto slot = subst113::pluginSlot (at);
     CHECK (substituteEffectSlot (slot, pluginIdentity (at)));
     CHECK (slot.kind == EffectKind::lynxTune);
     CHECK (lynxtune::keyIndex (slot.params[lynxtune::key]) == 9);
     CHECK (vocal::Scale (lynxtune::scaleIndex (slot.params[lynxtune::scale])) == vocal::Scale::minor);
-    CHECK (std::abs (lynxtune::retuneMs (slot.params[lynxtune::retune]) - 20.0) < 0.1);
+    CHECK (std::abs (lynxtune::retuneMs (slot.params[lynxtune::retune]) - 24.2) < 0.1);
     CHECK (slot.params[lynxtune::humanize] == 0.0f);
 
     // unreadable: chromatic, gentle (50 ms, humanize 50 %) instead of C major at 20 ms

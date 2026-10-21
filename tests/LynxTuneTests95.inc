@@ -308,14 +308,15 @@ TEST (lynx_tune_retune_speed_and_humanize_round95)
     p[lynx::lynxtune::retune] = 1.0f; // 400 ms
     const auto slow = spread (r95::runTune (x, fs, p, latency), latency);
     p[lynx::lynxtune::retune] = 0.1f; // 4 ms
-    p[lynx::lynxtune::humanize] = 1.0f; // a held note relaxes toward +250 ms
+    p[lynx::lynxtune::humanize] = 1.0f; // (a sustained note would relax by +135 ms)
     const auto human = spread (r95::runTune (x, fs, p, latency), latency);
     p[lynx::lynxtune::humanize] = 0.0f;
     const auto fast = spread (r95::runTune (x, fs, p, latency), latency);
     CHECK (inSpread > 40.0);
     CHECK (hard < 0.2 * inSpread);
     CHECK (slow > 0.6 * inSpread);
-    CHECK (human > fast * 2.0);
+    // round 120: humanize slows only sustained (steady) notes, as measured on Auto-Tune Pro — a vibrato note is not one
+    CHECK (human < fast * 1.5 + 2.0);
 }
 
 TEST (lynx_tune_formants_round95)

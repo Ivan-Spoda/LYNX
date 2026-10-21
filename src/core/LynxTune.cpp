@@ -72,6 +72,7 @@ const EffectInfo& info()
                      { "Tracking", 0.4f } };
         for (const auto* n : keyNames)
             e.params.push_back ({ n, 1.0f });
+        e.params.push_back ({ "Flex-Tune", 0.0f });
         return e;
     }();
     return i;
@@ -87,6 +88,7 @@ std::string paramText (int param, float v)
         case scale: return vocal::scaleName ((vocal::Scale) scaleIndex (v));
         case retune: std::snprintf (t, sizeof t, "%.0f ms", retuneMs (v)); return t;
         case humanize:
+        case flexTune:
         case mix: std::snprintf (t, sizeof t, "%.0f%%", 100.0 * v); return t;
         case tracking: std::snprintf (t, sizeof t, "%.0f%%", 100.0 * v); return t;
         case formantPreserve:
@@ -176,6 +178,7 @@ public:
         const auto aRef = referenceHz (p[reference]);
         const auto tau = retuneMs (p[retune]) * 0.001;
         const auto human = std::clamp ((double) p[humanize], 0.0, 1.0);
+        const auto flex = std::clamp ((double) p[flexTune], 0.0, 1.0);
         const auto trans = (double) transposeSemitones (p[transpose]);
         const auto fShift = std::exp2 (formantSemitones (p[formantShift]) / 12.0);
         const auto preserve = p[formantPreserve] >= 0.5f;
@@ -198,10 +201,32 @@ public:
                     psola.setPitch (e.period, true);
                     sung = vocal::hzToNote (e.hz, aRef);
                     const auto newPhrase = unvoicedFor > 0.06;
+                    // steadiness (humanize): how long the sung pitch has stayed within a few cents of its own recent
+                    // average. [EXEC] Auto-Tune Pro (round 120 §5): even a ±5 c vibrato is not a sustained note
+                    // A single move (the singer settles on another pitch) keeps the note sustained; another move 30 …
+                    // 150 ms later (a vibrato, a wobble) makes it unsteady.
+                    sinceJump += hop;
+                    if (newPhrase)
+                    {
+                        steadyRef = sung;
+                        noteAge = 0.0;
+                        sinceJump = 1.0;
+                    }
+                    else if (std::abs (sung - steadyRef) > 0.04)
+                    {
+                        steadyRef = sung;
+                        if (sinceJump >= 0.03 && sinceJump < 0.15) // (estimates < 30 ms apart: the same move)
+                            noteAge = 0.0;
+                        sinceJump = 0.0;
+                    }
+                    else
+                    {
+                        steadyRef += (1.0 - std::exp (-hop / 0.05)) * (sung - steadyRef);
+                        noteAge += hop;
+                    }
                     if (newPhrase)
                     {
                         target = -1; // a new phrase: no hysteresis toward the last note
-                        noteAge = 0.0;
                         // ... and no correction left over from the last one: the phrase starts at the sung pitch and
                         // the retune pulls it from there (round 120: the previous phrase's correction used to bend
                         // the first notes of the next one, by up to half a semitone the wrong way)
@@ -213,9 +238,20 @@ public:
                         target = t;
                         noteAge = 0.0;
                     }
-                    else
-                        noteAge += hop;
                     wanted = (double) target - sung;
+                    // flex-tune: a note far from its target is left as sung. [EXEC] Auto-Tune Pro (round 120 §5): the
+                    // correction of a note d cents from its target is min (d, (1 − F) / F · (50 − d)) cents, d measured
+                    // in hundredths of the gap to the next target on the sung side (a semitone in chromatic)
+                    if (flex > 0.0)
+                    {
+                        const auto up = sung > (double) target;
+                        int gap = 1;
+                        while (gap < 12 && mask != 0 && ((mask >> (((target + (up ? gap : -gap)) % 12 + 12) % 12)) & 1u) == 0)
+                            ++gap;
+                        const auto d = std::abs (wanted) * 100.0 / (double) gap;
+                        const auto keep = d > 1e-6 ? std::clamp ((1.0 - flex) / flex * (50.0 - d) / d, 0.0, 1.0) : 1.0;
+                        wanted *= keep;
+                    }
                     if (unvoicedFor > 0.06 && tau <= 0.0)
                         shift = wanted;
                     unvoicedFor = 0.0;
@@ -229,12 +265,14 @@ public:
                 }
             }
 
-            // retune: the applied correction follows the wanted one; humanize relaxes it on held notes
+            // retune: the applied correction follows the wanted one; humanize slows it on sustained (steady) notes.
+            // [EXEC] Auto-Tune Pro (round 120 §5): a note held steady for ~0.6 s is retuned as if the retune speed were
+            // longer by the humanize amount (100 % = +100 ms of its speed = +135 ms of LYNX's time constant)
             auto t = tau;
             if (human > 0.0)
             {
-                const auto x = std::clamp ((noteAge - 0.12) / 0.3, 0.0, 1.0);
-                t += human * 0.25 * x * x * (3.0 - 2.0 * x);
+                const auto x = std::clamp ((noteAge - 0.2) / 0.4, 0.0, 1.0);
+                t += human * 0.135 * x * x * (3.0 - 2.0 * x);
             }
             shift += (t > 0.0 ? 1.0 - std::exp (-dt / t) : 1.0) * (wanted - shift);
 
@@ -300,7 +338,7 @@ private:
     vocal::Psola psola;
     std::vector<float> dry;
     std::int64_t dryPos = 0;
-    double shift = 0.0, wanted = 0.0, noteAge = 0.0, unvoicedFor = 1e9, sung = -1.0;
+    double shift = 0.0, wanted = 0.0, noteAge = 0.0, steadyRef = 0.0, sinceJump = 1.0, unvoicedFor = 1e9, sung = -1.0;
     int target = -1;
     const NoteMask* held = nullptr;
     int heldCount = 0;
