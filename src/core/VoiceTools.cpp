@@ -243,6 +243,21 @@ struct Line
         if (++pos == (int) buf.size())
             pos = 0;
     }
+    // d samples ago, linearly interpolated (the measured reference's voices)
+    float linear (double d) const noexcept
+    {
+        const auto size = (int) buf.size();
+        d = std::clamp (d, 1.0, (double) size - 4.0);
+        const auto di = (int) d;
+        const auto f = (float) (d - di);
+        auto i0 = pos - di;
+        if (i0 < 0)
+            i0 += size;
+        auto i1 = i0 - 1;
+        if (i1 < 0)
+            i1 += size;
+        return buf[(std::size_t) i0] + f * (buf[(std::size_t) i1] - buf[(std::size_t) i0]);
+    }
     // d samples ago (d ≥ 1: the sample pushed last is 1 ago)
     float at (double d) const noexcept
     {
@@ -281,6 +296,8 @@ public:
         for (auto& v : voice)
         {
             v.line.clear();
+            v.offset = 495.0;
+            v.second = -1.0;
             v.phase = 0.0;
             v.lfo = 0.0;
             v.last = 0.0f;
@@ -307,7 +324,8 @@ public:
         // [EXEC] measured: with Align the direct signal comes 6.67 ms late and every pass through a voice takes its
         // delay + 10.3 ms (the repeats too); without it a voice takes its delay alone
         const bool aligned = on (p[align]);
-        const auto alignSamples = aligned ? sr / 150.0 : 0.0; // 6.67 ms (320 samples at 48 kHz)
+        // [EXEC] round 124: 320 samples at 44.1 and 48 kHz alike (a fixed sample count, not a time)
+        const auto alignSamples = aligned ? 320.0 : 0.0;
         const auto voiceExtra = (aligned ? 0.0103 * sr : 0.0) - 0.5 * window;
         const bool lowOnV = on (p[lowOn]), highOnV = on (p[highOn]);
 
@@ -361,6 +379,46 @@ public:
                 auto ratio = std::pow (2.0, (s.cents + s.depth * tri) / 1200.0);
                 if (s.octave)
                     ratio *= 0.5;
+                if (! s.octave && aligned)
+                {
+                    // [EXEC] round 124 (official trial, impulse trains at ±1 … ±100 cents, 44.1 / 48 kHz): ONE read head
+                    // at delay + offset, the offset starting at 495 samples (so 0 cents = delay + 495 exactly) and
+                    // drifting by (1 − ratio) per sample inside a 496-sample range; at the range's end the head fades
+                    // out over 1.3 samples of offset, jumps back by the range and fades in again (pitch down), or a
+                    // second head enters at the top while the first finishes at the bottom (pitch up); linear reads
+                    const auto drift = 1.0 - ratio;
+                    float y = 0.0f;
+                    if (drift >= 0.0)
+                    {
+                        v.offset += drift;
+                        if (v.offset >= downMax)
+                            v.offset -= downMax - downMin;
+                        const auto g = std::min ({ 1.0, (downMax - v.offset) / fade, (v.offset - downMin) / fade });
+                        y = (float) std::max (0.0, g) * v.line.linear (1.0 + s.delay + v.offset);
+                        v.second = -1.0;
+                    }
+                    else
+                    {
+                        v.offset += drift;
+                        if (v.second < 0.0 && v.offset <= upMin + upOverlap)
+                            v.second = v.offset + (upMax - upMin - upOverlap);
+                        if (v.second >= 0.0)
+                            v.second += drift;
+                        if (v.offset <= upMin)
+                        {
+                            v.offset = v.second >= 0.0 ? v.second : v.offset + (upMax - upMin);
+                            v.second = -1.0;
+                        }
+                        const auto gIn = std::clamp ((upMax - v.offset) / upFadeIn, 0.0, 1.0);
+                        y = (float) gIn * v.line.linear (1.0 + s.delay + v.offset);
+                        if (v.second >= 0.0)
+                            y += (float) std::clamp ((upMax - v.second) / upFadeIn, 0.0, 1.0) * v.line.linear (1.0 + s.delay + v.second);
+                    }
+                    v.last = y;
+                    wetL += s.gl * y;
+                    wetR += s.gr * y;
+                    continue;
+                }
                 // two read taps half a window apart sweep the window at (1 − ratio) samples per sample
                 v.phase += (1.0 - ratio) / window;
                 v.phase -= std::floor (v.phase);
@@ -410,8 +468,17 @@ private:
         // +4.5 at 3 kHz); the low shelf mirrors it (corners f0 / max (g, 1/g) and f0)
         firstOrderShelf (lowShelf, freqHz (p[lowFreq]), shelfDb (p[lowGain]), false);
         firstOrderShelf (highShelf, freqHz (p[highFreq]), shelfDb (p[highGain]), true);
+        // [EXEC] round 124: the feedback low cut is a first-order (bilinear) high-pass — 16 Hz: -3.0 dB / +45° at
+        // 16 Hz, first sample 0.99895 of a repeat's impulse
+        const auto k = std::tan (pi * std::min (freqHz (p[feedbackCut]), 0.45 * sr) / sr);
         for (auto& v : voice)
-            v.fbHp.filter (sr, 1, std::max (10.0, freqHz (p[feedbackCut])), 0.7071);
+        {
+            v.fbHp.b0 = 1.0 / (1.0 + k);
+            v.fbHp.b1 = -v.fbHp.b0;
+            v.fbHp.b2 = 0.0;
+            v.fbHp.a1 = (k - 1.0) / (k + 1.0);
+            v.fbHp.a2 = 0.0;
+        }
     }
 
     // H(s) = k (1 + s/wz) / (1 + s/wp), bilinear with the corners pre-warped
@@ -438,9 +505,14 @@ private:
         b.a2 = 0.0;
     }
 
+    // the measured read-head range (samples of offset over the voice's delay; REA_rodada124 §4)
+    static constexpr double downMin = 79.4, downMax = 575.7, fade = 1.3;
+    static constexpr double upMin = 62.0, upMax = 558.4, upOverlap = 4.2, upFadeIn = 0.7;
+
     struct Voice
     {
         Line line;
+        double offset = 495.0, second = -1.0;
         double phase = 0.0, lfo = 0.0;
         float last = 0.0f;
         Biquad fbHp;

@@ -2820,3 +2820,6 @@ countries: br
 "PITCH GRAPH" = "GRÁFICO DE AFINAÇÃO"
 "INPUT" = "ENTRADA"
 "no pitch" = "sem afinação"
+# round 124: Echoform's hybrid engine
+"Hybrid" = "Híbrido"
+"Off|Clean|Analog" = "Desligado|Limpo|Analógico"

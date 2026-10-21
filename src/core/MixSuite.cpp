@@ -715,6 +715,134 @@ double exciterHz (float v) noexcept { return logMap (v, 1000.0, 12000.0); }
 
 namespace
 {
+// ---- the dynamic air model (round 124) ------------------------------------------------------------------------------
+// Black-box measurements of the official Fresh Air trial (docs/analise/REA_rodada124.md §3), our own code:
+//   y = s(mid, high) * x + kMid(mid) * gMid(t) * HPmid(x) + kHigh(high) * gHigh(t) * HPhigh(x)
+// HPmid / HPhigh: RBJ 2nd-order high-passes (2993 Hz, Q 0.629 / 9000 Hz, Q 0.707; the same analog corners at 44.1
+// and 48 kHz); s, kMid, kHigh: measured on a 0.025 grid (small-signal transfer functions, residual < 0.4 %).
+// gMid: a linked peak detector (instant attack, 5 ms hold, 96 ms release) of the band, 4:1 above -30.1 dBFS,
+// released through a 7.7 ms one-pole. gHigh: two 4:1 stages — a peak detector with 2-pole gain smoothing, then a
+// feedback stage on the band after the first one, whose threshold rises as High air goes down (T + c (1 - high)^2).
+namespace dyn
+{
+constexpr double gridMidS[41] { 1.00237, 1.02960, 1.04368, 1.05483, 1.06431, 1.07263, 1.08006, 1.08676, 1.09284, 1.09838, 1.10343,
+    1.10804, 1.11224, 1.11606, 1.11952, 1.12264, 1.12542, 1.12788, 1.13004, 1.13189, 1.13345, 1.13472, 1.13571, 1.13642, 1.13685,
+    1.13700, 1.13689, 1.13650, 1.13584, 1.13492, 1.13373, 1.13227, 1.13055, 1.12855, 1.12629, 1.12376, 1.12097, 1.11790, 1.11456,
+    1.11095, 1.10707 };
+constexpr double gridMidK[41] { 0.00000, 0.13781, 0.22533, 0.30473, 0.38070, 0.45506, 0.52874, 0.60230, 0.67608, 0.75035, 0.82529,
+    0.90102, 0.97767, 1.05531, 1.13403, 1.21388, 1.29491, 1.37717, 1.46071, 1.54556, 1.63175, 1.71932, 1.80829, 1.89870, 1.99056,
+    2.08391, 2.17877, 2.27515, 2.37309, 2.47260, 2.57371, 2.67643, 2.78079, 2.88681, 2.99451, 3.10390, 3.21501, 3.32786, 3.44246,
+    3.55884, 3.67701 };
+constexpr double gridHighS[41] { 1.00237, 1.03339, 1.04999, 1.06349, 1.07527, 1.08587, 1.09559, 1.10462, 1.11306, 1.12100, 1.12851,
+    1.13562, 1.14238, 1.14881, 1.15493, 1.16077, 1.16634, 1.17166, 1.17673, 1.18156, 1.18616, 1.19055, 1.19472, 1.19867, 1.20242,
+    1.20597, 1.20932, 1.21247, 1.21543, 1.21820, 1.22077, 1.22316, 1.22535, 1.22736, 1.22918, 1.23082, 1.23227, 1.23353, 1.23461,
+    1.23550, 1.23620 };
+constexpr double gridHighK[41] { 0.00000, 0.26995, 0.45609, 0.63358, 0.81042, 0.98969, 1.17298, 1.36128, 1.55524, 1.75537, 1.96206,
+    2.17564, 2.39639, 2.62458, 2.86045, 3.10422, 3.35611, 3.61634, 3.88510, 4.16260, 4.44906, 4.74466, 5.04961, 5.36411, 5.68837,
+    6.02260, 6.36699, 6.72176, 7.08712, 7.46329, 7.85048, 8.24890, 8.65879, 9.08036, 9.51384, 9.95946, 10.41747, 10.88807, 11.37154,
+    11.86810, 12.37801 };
+inline double grid (const double (&t)[41], double v) noexcept
+{
+    const auto x = std::clamp (v, 0.0, 1.0) * 40.0;
+    const auto i = std::min (39, (int) x);
+    return t[i] + (t[i + 1] - t[i]) * (x - i);
+}
+// the dry gain with both bands at 0
+constexpr double baseGain = 1.00237;
+
+// the fitted dynamics (REA_rodada124 §3)
+struct Tuning
+{
+    double midThreshold = -30.13, midHoldMs = 5.0, midReleaseMs = 96.03, midGainReleaseMs = 7.706;
+    double highThreshold = -38.03, highReleaseMs = 0.5354, highGainAttackMs = 2.1428, highGainReleaseMs = 55.52;
+    double high2ReleaseMs = 0.0190, high2GainAttackMs = 56.73, high2GainReleaseMs = 53.45, high2Slope = 8.257;
+    double high2Threshold = -41.13, high2Curve = 15.585;
+};
+
+class Engine
+{
+public:
+    void prepare (double rate) noexcept
+    {
+        sr = rate;
+        mid.hp (rate, 2993.0, 0.6291);
+        high.hp (rate, 9000.0, 0.7069);
+        reset();
+    }
+    void reset() noexcept
+    {
+        mid.reset();
+        high.reset();
+        envM = holdM = gM = envH = g1a = g1b = env2 = g2a = g2b = 0.0;
+    }
+    // processes in place; `out` is the output gain (linear)
+    void process (float* l, float* r, int n, double midAmount, double highAmount, double out) noexcept
+    {
+        const Tuning t;
+        const auto c = [this] (double ms) { return ms <= 0.0 ? 0.0 : std::exp (-1000.0 / (ms * sr)); };
+        const auto s = (grid (gridMidS, midAmount) + grid (gridHighS, highAmount) - baseGain) * out;
+        const auto km = grid (gridMidK, midAmount) * out, kh = grid (gridHighK, highAmount) * out;
+        const auto mRel = c (t.midReleaseMs), mGr = c (t.midGainReleaseMs), mHold = t.midHoldMs * sr / 1000.0;
+        const auto hRel = c (t.highReleaseMs), h1a = c (t.highGainAttackMs), h1r = c (t.highGainReleaseMs);
+        const auto h2Rel = c (t.high2ReleaseMs), h2a = c (t.high2GainAttackMs), h2r = c (t.high2GainReleaseMs);
+        const auto t2 = t.high2Threshold + t.high2Curve * (1.0 - highAmount) * (1.0 - highAmount);
+        for (int i = 0; i < n; ++i)
+        {
+            const double xl = l[i], xr = r[i];
+            const double ml = mid.process ((float) xl, 0), mr = mid.process ((float) xr, 1);
+            const double hl = high.process ((float) xl, 0), hr = high.process ((float) xr, 1);
+            // mid: peak with hold, 4:1
+            const auto pm = std::max (std::fabs (ml), std::fabs (mr));
+            if (pm >= envM) { envM = pm; holdM = mHold; }
+            else if (holdM > 0.0) holdM -= 1.0;
+            else envM = pm + (envM - pm) * mRel;
+            const auto gmTarget = -0.75 * std::max (0.0, 20.0 * std::log10 (envM + 1e-30) - t.midThreshold);
+            gM = gmTarget < gM ? gmTarget : gmTarget + (gM - gmTarget) * mGr;
+            // high, stage 1: peak, 4:1, 2-pole gain smoothing
+            const auto ph = std::max (std::fabs (hl), std::fabs (hr));
+            envH = ph > envH ? ph : ph + (envH - ph) * hRel;
+            const auto g1Target = -0.75 * std::max (0.0, 20.0 * std::log10 (envH + 1e-30) - t.highThreshold);
+            const auto k1 = g1Target < g1b ? h1a : h1r;
+            g1a = g1Target + (g1a - g1Target) * k1;
+            g1b = g1a + (g1b - g1a) * k1;
+            const auto g1 = std::pow (10.0, g1b / 20.0);
+            // high, stage 2: feedback (detector after both stages), peak, 2-pole gain smoothing
+            const auto g2 = std::pow (10.0, g2b / 20.0);
+            const auto p2 = ph * g1 * g2;
+            env2 = p2 >= env2 ? p2 : p2 + (env2 - p2) * h2Rel;
+            const auto g2Target = -t.high2Slope * std::max (0.0, 20.0 * std::log10 (env2 + 1e-30) - t2);
+            const auto k2 = g2Target < g2b ? h2a : h2r;
+            g2a = g2Target + (g2a - g2Target) * k2;
+            g2b = g2a + (g2b - g2a) * k2;
+            const auto gm = km * std::pow (10.0, gM / 20.0), gh = kh * g1 * g2;
+            l[i] = (float) (s * xl + gm * ml + gh * hl);
+            r[i] = (float) (s * xr + gm * mr + gh * hr);
+        }
+    }
+    float reductionDb() const noexcept { return (float) std::min (gM, g1b + g2b); }
+
+private:
+    struct Hp2 : Biquad
+    {
+        void hp (double rate, double fc, double q) noexcept
+        {
+            const auto w = 2.0 * 3.14159265358979323846 * fc / rate, a = std::sin (w) / (2.0 * q), cw = std::cos (w);
+            set ((1.0 + cw) / 2.0, -(1.0 + cw), (1.0 + cw) / 2.0, 1.0 + a, -2.0 * cw, 1.0 - a);
+        }
+        double process (float x, int ch) noexcept
+        {
+            const auto y = b0 * x + z1[ch];
+            z1[ch] = b1 * x - a1 * y + z2[ch];
+            z2[ch] = b2 * x - a2 * y;
+            return y;
+        }
+    };
+    double sr = 48000.0;
+    Hp2 mid, high;
+    double envM = 0, holdM = 0, gM = 0, envH = 0, g1a = 0, g1b = 0, env2 = 0, g2a = 0, g2b = 0;
+};
+} // namespace dyn
+
 class Air final : public Effect
 {
 public:
@@ -728,6 +856,7 @@ public:
     {
         sr = rate;
         dry.setLength (Oversampler::latency());
+        dynEngine.prepare (rate);
         reset();
     }
 
@@ -739,18 +868,46 @@ public:
         shelf.reset();
         pre.reset();
         post.reset();
+        dynEngine.reset();
     }
 
-    int latencySamples() const noexcept override { return Oversampler::latency(); }
+    // the dynamic model has no latency (as the measured reference); the exciter path is oversampled
+    int latencySamples() const noexcept override { return dynamicMode ? 0 : Oversampler::latency(); }
     float controlOutput (int k) const noexcept override { return meters.read (k); }
 
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
+        const bool dynamicNow = p[dynamic] >= 0.5f;
+        if (dynamicNow != dynamicMode)
+        {
+            dynamicMode = dynamicNow;
+            reset();
+        }
         for (int off = 0; off < n; off += maxBlock)
-            chunk (l + off, r + off, std::min (maxBlock, n - off), p);
+            if (dynamicMode)
+                dynamicChunk (l + off, r + off, std::min (maxBlock, n - off), p);
+            else
+                chunk (l + off, r + off, std::min (maxBlock, n - off), p);
     }
 
 private:
+    void dynamicChunk (float* l, float* r, int n, const EffectParams& p) noexcept
+    {
+        const auto inPeak = Meters::peak (l, r, n);
+        const auto mx = std::clamp (p[mix], 0.0f, 1.0f);
+        if (mx < 1.0f)
+            for (int i = 0; i < n; ++i)
+                hl[(std::size_t) i] = l[i], hr[(std::size_t) i] = r[i];
+        dynEngine.process (l, r, n, std::clamp (p[midAir], 0.0f, 1.0f), std::clamp (p[highAir], 0.0f, 1.0f), dbToGain (lin (p[output], -12.0, 12.0)));
+        if (mx < 1.0f)
+            for (int i = 0; i < n; ++i)
+            {
+                l[i] = hl[(std::size_t) i] + (l[i] - hl[(std::size_t) i]) * mx;
+                r[i] = hr[(std::size_t) i] + (r[i] - hr[(std::size_t) i]) * mx;
+            }
+        meters.set (0.0f, -dynEngine.reductionDb(), inPeak, Meters::peak (l, r, n));
+    }
+
     void chunk (float* l, float* r, int n, const EffectParams& p) noexcept
     {
         const auto inPeak = Meters::peak (l, r, n);
@@ -808,6 +965,8 @@ private:
     std::array<Oversampler, 2> os;
     Delay2<256> dry;
     Biquad shelf, pre, post;
+    dyn::Engine dynEngine;
+    bool dynamicMode = false;
     std::array<float, maxBlock> hl {}, hr {};
     Meters meters;
 };
@@ -1223,7 +1382,8 @@ const EffectInfo& aetherInfo()
 {
     static const EffectInfo info { "Aether",
                                    { { "Air", 0.0f }, { "Air freq.", 0.62f }, { "Harmonics", 0.0f }, { "Exciter freq.", 0.56f },
-                                     { "Character", 0.5f }, { "Mix", 1.0f }, { "Output", 0.5f } } };
+                                     { "Character", 0.5f }, { "Mix", 1.0f }, { "Output", 0.5f },
+                                     { "Dynamic", 0.0f }, { "Mid air", 0.0f }, { "High air", 0.0f } } };
     return info;
 }
 
@@ -1348,6 +1508,7 @@ std::string paramText (EffectKind kind, int param, float v)
             case exciterFreq: return hzText (exciterHz (v));
             case character: return v < 0.05f ? "even" : (v > 0.95f ? "odd" : fmt ("%.0f%% odd", v * 100.0));
             case output: return fmt ("%+.1f dB", lin (v, -12.0, 12.0));
+            case dynamic: return onOff (v);
             default: return fmt ("%.0f%%", v * 100.0);
         }
     }

@@ -231,9 +231,10 @@ TEST (waves_h_delay_ns1_doubler_translate_round119)
         CHECK (n > 0 && s.kind == EffectKind::echoform);
         CHECK (e::styleOf (s.params[e::style]) == e::Style::pingPong && s.params[e::pairs] == 1.0f);
         CHECK (std::abs (e::sideMs (s.params, false, 120.0) - 1000.0) < 0.01 && std::abs (e::sideMs (s.params, true, 90.0) - 60000.0 / 90.0 * 2.0) < 0.01);
-        CHECK (std::abs (e::feedbackGain (s.params[e::feedback]) - 0.93 * 0.36) < 1e-3);
-        CHECK (s.params[e::mix] == 1.0f && std::abs (e::outputDb (s.params[e::output]) + 1.4) < 0.01);
-        CHECK (e::modeOf (s.params[e::mode]) == e::Mode::clean && s.params[e::lowCut] == 0.0f && s.params[e::highCut] == 1.0f);
+        // round 124: the hybrid engine (analog), H-Delay's own feedback (0.6) and output (0 dB)
+        CHECK (e::hybridOf (s.params[e::hybrid]) == 2);
+        CHECK (std::abs (e::feedbackGain (s.params[e::feedback]) - 0.6) < 1e-3);
+        CHECK (s.params[e::mix] == 1.0f && std::abs (e::outputDb (s.params[e::output])) < 0.01);
     }
     // its own BPM (1/8 dotted at 125 = 360 ms), stereo mode, +8.2 dB, mix 41
     {
@@ -242,8 +243,9 @@ TEST (waves_h_delay_ns1_doubler_translate_round119)
         namespace e = echosuite::echoform;
         CHECK (e::styleOf (s.params[e::style]) == e::Style::single && s.params[e::pairs] == 0.0f);
         CHECK (std::abs (e::sideMs (s.params, false, 90.0) - 360.0) < 2.0);
-        CHECK (std::abs (e::feedbackGain (s.params[e::feedback]) - 0.98 * 0.4) < 1e-3);
-        CHECK (std::abs (s.params[e::mix] - 0.41f) < 1e-4f && std::abs (e::outputDb (s.params[e::output]) - 7.8) < 0.01);
+        CHECK (e::hybridOf (s.params[e::hybrid]) == 1); // Analog off
+        CHECK (std::abs (e::feedbackGain (s.params[e::feedback]) - 0.4) < 1e-3);
+        CHECK (std::abs (s.params[e::mix] - 0.41f) < 1e-4f && std::abs (e::outputDb (s.params[e::output]) - 8.2) < 0.01);
     }
     // NS1: value 229 is the knob
     {

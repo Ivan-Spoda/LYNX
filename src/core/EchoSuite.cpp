@@ -395,6 +395,8 @@ double pitchSemis (float v) noexcept { return 24.0 * bipolar (v); }
 double lowCutHz (float v) noexcept { return 10.0 + 1990.0 * clamp01 (v); }
 double highCutHz (float v) noexcept { return 200.0 + 19800.0 * clamp01 (v); }
 double outputDb (float v) noexcept { return -18.0 + 36.0 * clamp01 (v); }
+int hybridOf (float v) noexcept { return v < 0.25f ? 0 : (v < 0.75f ? 1 : 2); }
+float hybridValue (int h) noexcept { return h <= 0 ? 0.0f : (h == 1 ? 0.5f : 1.0f); }
 Mode modeOf (float v) noexcept { return (Mode) std::clamp ((int) std::floor (clamp01 (v) * (float) modeCount), 0, modeCount - 1); }
 float modeValue (Mode m) noexcept { return ((float) m + 0.5f) / (float) modeCount; }
 Style styleOf (float v) noexcept { return (Style) std::clamp ((int) std::floor (clamp01 (v) * (float) styleCount), 0, styleCount - 1); }
@@ -459,12 +461,19 @@ public:
         steep.reset();
         lfoPhase = 0.0;
         envelope = 0.0f;
+        hyb.dirty = true;
     }
 
     void process (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept override
     {
         if (ch[0].line.buf.empty())
             prepare (sr);
+        if (hybridOf (p[hybrid]) != 0)
+        {
+            hybridProcess (l, r, n, p, bpm);
+            return;
+        }
+        hyb.dirty = true;
 
         const auto md = modeOf (p[mode]);
         const auto st = styleOf (p[style]);
@@ -822,6 +831,83 @@ private:
             s.held = (float) (std::round ((double) u * q) / q);
         }
         return s.held;
+    }
+
+    // ---- the hybrid echo (round 124) -----------------------------------------------------------------------------
+    // [EXEC] black-box measurement of the official H-Delay trial (docs/analise/REA_rodada124.md §5), our own code:
+    // - ping-pong: the left line takes (L + R)/√2 plus fb² × the right echo; the right line takes the left echo; the left
+    //   echo comes T after the input, every later pass T + 1 (single-sample impulses land exactly there);
+    // - each write into a line goes through y = v·g, g = min (1 / (1 + |v|), released toward 1 with a 10 ms time
+    //   constant): a lone impulse of 1/√2 comes back as 0.41421 = x / (1 + x), the next pass 0.29289 = f (0.41421);
+    // - stereo: each side its own line, fb × its echo, the same gain on every write;
+    // - analog: the same loop between an input gain and an output gain (fitted on impulses at -66 … +6 dBFS and her takes)
+    //   and a gentle low tilt on the echoes; its hiss (≈ -85 dBFS) is not reproduced.
+    struct HybridState
+    {
+        Line a, b;
+        double ga = 1.0, gb = 1.0, aPrev = 0.0, bPrev = 0.0;
+        Biquad tilt;
+        bool dirty = true;
+    } hyb;
+    static constexpr double analogIn = 0.8866, analogOut = 0.9776;
+
+    static inline double linkedGain (double level, double& g, double rel) noexcept
+    {
+        const auto inst = 1.0 / (1.0 + level);
+        g = std::min (inst, 1.0 - (1.0 - g) * rel);
+        return g;
+    }
+
+    void hybridProcess (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept
+    {
+        if (hyb.a.buf.empty() || hyb.dirty)
+        {
+            if (hyb.a.buf.empty())
+            {
+                hyb.a.allocate (sr * 3.6 + 8.0);
+                hyb.b.allocate (sr * 3.6 + 8.0);
+            }
+            hyb.a.clear();
+            hyb.b.clear();
+            hyb.ga = hyb.gb = 1.0;
+            hyb.aPrev = hyb.bPrev = 0.0;
+            hyb.tilt.reset();
+            hyb.dirty = false;
+        }
+        const bool analog = hybridOf (p[hybrid]) == 2;
+        const bool pp = styleOf (p[style]) == Style::pingPong;
+        const auto t = std::clamp ((int) std::lround (sideMs (p, false, bpm) * sr / 1000.0), 1, (int) hyb.a.maxDelay());
+        const auto fb = feedbackGain (p[feedback]); // H-Delay's feedback / 100 (0 … 2)
+        const auto fbPair = fb * fb;
+        float dryGain = 1.0f, wetGain = 0.0f;
+        equalPowerMix (p[mix], dryGain, wetGain);
+        wetGain *= (float) std::pow (10.0, outputDb (p[output]) / 20.0);
+        const auto rel = std::exp (-1.0 / (0.010 * sr));
+        const auto inGain = analog ? analogIn : 1.0, outGain = analog ? analogOut : 1.0;
+        if (analog)
+            hyb.tilt.shelf (sr, 942.0, 0.63, false, 0.5);
+        constexpr double invSqrt2 = 0.70710678118654752;
+        for (int i = 0; i < n; ++i)
+        {
+            const double xl = l[i], xr = r[i];
+            const double aOut = hyb.a.tap (t), bOut = hyb.b.tap (t);
+            // the two lines share one gain (a loud left pass also turns the right one down)
+            const auto va = pp ? inGain * (xl + xr) * invSqrt2 + fbPair * hyb.bPrev : inGain * xl + fb * hyb.aPrev;
+            const auto vb = pp ? hyb.aPrev : inGain * xr + fb * hyb.bPrev;
+            const auto g = linkedGain (std::max (std::fabs (va), std::fabs (vb)), hyb.ga, rel);
+            hyb.a.push ((float) (va * g));
+            hyb.b.push ((float) (vb * g));
+            hyb.aPrev = aOut;
+            hyb.bPrev = bOut;
+            float el = (float) (aOut * outGain), er = (float) (bOut * outGain);
+            if (analog)
+            {
+                el = hyb.tilt.process (el, 0);
+                er = hyb.tilt.process (er, 1);
+            }
+            l[i] = dryGain * (float) xl + wetGain * el;
+            r[i] = dryGain * (float) xr + wetGain * er;
+        }
     }
 
     double sr = 48000.0;
@@ -1344,7 +1430,8 @@ const EffectInfo& echoformInfo()
                                      { "Diffusion", 0.0f }, { "Diffusion size", 1.0f }, { "Low cut", 0.0f }, { "High cut", 1.0f },
                                      { "Mod rate", 0.2738341f }, { "Mod depth", 0.5f }, { "Wow", 0.5f }, { "Flutter", 0.5f },
                                      { "Shift", 0.5f }, { "Shift detune", 0.58f }, { "Pitch", 0.5f }, { "Pitch detune", 0.5f },
-                                     { "Mode", 0.5f / 12.0f }, { "Ducking", 0.0f }, { "Output", 0.5f }, { "Pairs", 0.0f } } };
+                                     { "Mode", 0.5f / 12.0f }, { "Ducking", 0.0f }, { "Output", 0.5f }, { "Pairs", 0.0f },
+                                     { "Hybrid", 0.0f } } };
     return info;
 }
 
@@ -1428,6 +1515,7 @@ std::string paramText (EffectKind kind, int param, float v)
             case mode: return modeName (modeOf (v));
             case output: return fmt ("%+.1f dB", outputDb (v));
             case pairs: return v >= 0.5f ? "pairs" : "alternate";
+            case hybrid: return hybridOf (v) == 0 ? "off" : (hybridOf (v) == 1 ? "clean" : "analog");
             default: return fmt ("%.2f", v);
         }
     }

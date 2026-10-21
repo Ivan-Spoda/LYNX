@@ -490,8 +490,8 @@ product = Fresh Air
 vendor = Slate Digital
 lynx = Aether
 names = Fresh Air; FreshAir
-# round 113: its two air amounts are read from the state (freshAirAmounts) and set Aether's air shelf through laws
-# measured on the official trial
+# round 113: its two air amounts are read from the state (freshAirAmounts); round 124: they drive Aether's dynamic
+# air model, measured black-box on the official trial to match it sample for sample (REA_rodada124 §3)
 translate = fresh-air
 
 [soundtoys-decapitator]
@@ -995,22 +995,28 @@ int translateWavesTune (const std::vector<std::uint8_t>& state, EffectSlot& slot
     return n;
 }
 
-// Fresh Air: its two air amounts become Aether's air shelf. [EXEC] Black-box measurement of the official trial
-// (fxmeasure, pink noise at -20 dBFS RMS, 48 kHz; docs/analise/REA_rodada113.md §3b): each setting's response above
-// 2 kHz is fitted by one high shelf (RBJ, S = 0.6, Aether's); gain and frequency follow these least-squares laws of
-// (mid, high), within 0.5 dB RMS of the measured curves for the settings her projects use. The exciter stays off.
+// Fresh Air: its two air amounts drive Aether's dynamic air model (round 124), which reproduces the official trial
+// measured black-box (docs/analise/REA_rodada124.md §3): the same two parallel compressed high-passed bands, the same
+// amount laws, so the amounts map one to one; Trim (the float at 2526 of the state, -12 … 0 dB) becomes the output.
+// (Round 113 fitted a static shelf; the original is level-dependent: quiet highs get up to +12 dB, loud ones +3.)
 int translateFreshAir (const std::vector<std::uint8_t>& state, EffectSlot& slot)
 {
+    namespace a = mixsuite::aether;
     const auto air = freshAirAmounts (state);
     if (! air || slot.kind != EffectKind::aether)
         return 0;
-    const auto m = (double) air->first, h = (double) air->second;
-    const auto gainDb = std::clamp (10.345 * m + 20.548 * h - 2.32 * m * m - 7.75 * h * h - 11.673 * m * h, 0.0, 15.0);
-    const auto hz = std::clamp (std::exp2 (12.8069 - 0.7108 * m + 0.6746 * h - 0.5369 * m * h), 5000.0, 20000.0);
-    slot.params[mixsuite::aether::air] = (float) (gainDb / 15.0);
-    slot.params[mixsuite::aether::airFreq] = (float) (std::log (hz / 5000.0) / std::log (4.0));
-    slot.params[mixsuite::aether::harmonics] = 0.0f;
-    return 2;
+    slot.params[a::dynamic] = 1.0f;
+    slot.params[a::midAir] = air->first;
+    slot.params[a::highAir] = air->second;
+    slot.params[a::air] = 0.0f;
+    slot.params[a::harmonics] = 0.0f;
+    slot.params[a::mix] = 1.0f;
+    float trimDb = 0.0f;
+    std::memcpy (&trimDb, state.data() + 2526, 4);
+    if (! std::isfinite (trimDb) || trimDb < -12.0f || trimDb > 0.0f)
+        trimDb = 0.0f;
+    slot.params[a::output] = (trimDb + 12.0f) / 24.0f;
+    return 3;
 }
 
 // --- Waves RealWorld lists (round 113). [EXEC] Black-box measurement of the official trials (WaveShell 17.1, tools/
@@ -1212,6 +1218,17 @@ int translateWavesHDelay (const std::vector<std::uint8_t>& state, EffectSlot& sl
             p[(std::size_t) side] = e::timeValue (ms);
     }
     const auto f = std::max (0.0, *fb) / 100.0;
+    // round 124: the hybrid engine reproduces the trial's loop exactly (REA_rodada124 §5) when the state uses no
+    // filter, modulation or lo-fi (every state of her corpus); otherwise the round-119 approximation below
+    const auto hp0 = wavesValue (rw, 17).value_or (19.0), lp0 = wavesValue (rw, 15).value_or (20100.0);
+    if (hp0 <= 19.5 && lp0 >= 20000.0 && wavesValue (rw, 19).value_or (0.0) <= 0.0 && wavesValue (rw, 21).value_or (0.0) < 0.5)
+    {
+        p[e::hybrid] = e::hybridValue (analog ? 2 : 1);
+        p[e::feedback] = (float) std::clamp (f / 2.0, 0.0, 1.0);
+        p[e::mix] = (float) std::clamp (wavesValue (rw, 6).value_or (100.0) / 100.0, 0.0, 1.0);
+        p[e::output] = linNorm (wavesValue (rw, 14).value_or (0.0), -18.0, 18.0);
+        return 9;
+    }
     const auto loop = pingPong ? 0.93 * f * f : 0.98 * f;
     p[e::feedback] = (float) std::clamp (loop / 2.0, 0.0, 1.0);
     p[e::mix] = (float) std::clamp (wavesValue (rw, 6).value_or (100.0) / 100.0, 0.0, 1.0);
