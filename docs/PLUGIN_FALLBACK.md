@@ -131,17 +131,17 @@ matches by name).
 | ValhallaUberMod | Lattice Mod (round 101) | VST3 class ID [derived], name | all but DelaySync and InputPan (meaning not confirmed) |
 | Waves L1/L2/L3/L4 | Limiter | Waves name | — |
 | FabFilter Pro-L | Apex Limiter (round 99) | names | — |
-| Waves RComp, CLA-76, CLA-3A, C1, SSLComp, API-2500 | Compressor (2:1 above −15 dBFS, auto gain; round 113) | VST3 class ID [DATA], Waves names | — |
+| Waves RComp, CLA-76, CLA-3A, C1, SSLComp, API-2500 | Compressor (2:1 above −15 dBFS, auto gain; round 113) | VST3 class ID [DATA], Waves names | RComp: threshold, ratio, attack, release (ARC), gain, laws measured on the official trial [EXEC] (round 113 §3c) |
 | FabFilter Pro-C (2 / 3) | Crest Compressor (round 108) | names | Pro-C 3: style, threshold, ratio, knee, range, attack, release, hold, look-ahead, character, side-chain EQ (3 bands), levels, mix, oversampling [EXEC layout] |
 | FabFilter Pro-MB | Prism Multiband (round 108) | names | enabled bands laid out on Prism's four, threshold, ratio, range, mode, knee, attack / release, level, solo, look-ahead, mix [EXEC layout] |
 | FabFilter Pro-G | Sentry Gate (round 108) | names | every control [EXEC layout] |
-| Waves CLA-2A | Glow Leveler (peak reduction 30 %, gain +2 dB; round 113) | VST3 class ID [DATA], Waves name | — |
-| Waves SSL E-Channel, SSL Native Channel Strip / 4K E / 4K B / Vocalstrip | Ridge Strip (neutral; round 96) | VST3 class ID [DATA], Waves name, names | — |
+| Waves CLA-2A | Glow Leveler (peak reduction 30 %, gain +2 dB; round 113) | VST3 class ID [DATA], Waves name | gain, peak reduction, comp / limit, laws measured on the official trial [EXEC] (round 113 §3c) |
+| Waves SSL E-Channel, SSL Native Channel Strip / 4K E / 4K B / Vocalstrip | Ridge Strip (neutral; round 96) | VST3 class ID [DATA], Waves name, names | SSL E-Channel: filters, 4-band EQ, compressor, output, band laws measured on the official trial [EXEC] (round 113 §3c) |
 | Waves Q10, REQ, SSLEQ | Parametric EQ (flat) | Waves names | — |
 | FabFilter Pro-Q | Facet EQ (flat, round 99) | names | — |
-| Waves DeEsser | Hush De-esser (5.5 kHz, −20 dBFS, 4 dB; round 113) | Waves name | frequency (RealWorld value 0, the only one in Hz) [model] |
+| Waves DeEsser | Hush De-esser (5.5 kHz, −20 dBFS, 4 dB; round 113) | Waves name | frequency, threshold, split / wideband, side-chain filter, monitor, laws measured on the official trial [EXEC] (round 113 §3c) |
 | FabFilter Pro-DS, Harrison De-Esser | Hush De-esser (default; round 96) | names | — |
-| Slate Digital Fresh Air | Aether (neutral without a state; round 96) | name | mid / high air amounts → exciter / air shelf (at most +6 dB, a conservative reading) [DATA layout, model gain] (round 113) |
+| Slate Digital Fresh Air | Aether (neutral without a state; round 96) | name | Mid / High Air → Aether's air shelf gain and frequency, laws measured on the official trial (within 0.5 dB RMS for her settings) [EXEC] (round 113) |
 | Soundtoys Decapitator, FabFilter Saturn | Ember Saturator (drive +1.4 dB, auto gain; round 113) | names | Saturn 2: multiband mode — bands, crossovers, style family, drive, mix, level (round 108) [EXEC layout] |
 | Soundtoys PanMan | Auto-pan (depth 50 %; round 113) | VST2 ID [DATA], name | — |
 
@@ -155,6 +155,7 @@ De-esser, Aether, Ember Saturator) took over the channel strip, CLA-2A, de-esser
 [DATA] = read from FL wrapper records of real projects (identifiers and state layouts only; no plugin code was read).
 [derived] = Steinberg's VST2-compatible VST3 UID ("VST" + the VST2 ID read from the plugin's own state header + the first nine letters of
 its lower-case name, in FL's byte order); the rule reproduces ValhallaVintageVerb's [DATA] ID exactly.
-Waves states hold readable "RealWorld" parameter lists, but which value is which control is not confirmed, so no
-Waves parameter is translated except DeEsser's frequency (the only value in Hz). Unreadable settings fall back to
+Waves states hold readable "RealWorld" parameter lists; for RComp, DeEsser, CLA-2A and SSL E-Channel which value is
+which control was measured on the official trials (black box, round 113 §3c) and they are translated; the other
+Waves plugins' lists are not. Unreadable settings fall back to
 gentle presets (round 113: chosen by rendering her vocal takes, docs/analise/REA_rodada113.md §3). Soundtoys states are encoded (not translated).

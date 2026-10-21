@@ -136,9 +136,12 @@ TEST (fresh_air_amounts_become_a_gentle_air_band_round113)
     auto slot = subst113::pluginSlot (fa);
     CHECK (substituteEffectSlot (slot, pluginIdentity (fa)));
     CHECK (slot.kind == EffectKind::aether);
+    // the measured law (official trial, round 113 §3b): mid 0.488 / high 0.374 -> about +8.9 dB from about 6.3 kHz
     const auto airDb = mixsuite::aether::airDb (slot.params[mixsuite::aether::air]);
-    CHECK (airDb > 2.0 && airDb < 2.5); // 0.374 of at most +6 dB
-    CHECK (std::abs (slot.params[mixsuite::aether::harmonics] - 0.122f) < 1e-3f);
+    const auto airHz = mixsuite::aether::airHz (slot.params[mixsuite::aether::airFreq]);
+    CHECK (airDb > 8.5 && airDb < 9.3);
+    CHECK (airHz > 6000.0 && airHz < 6600.0);
+    CHECK (slot.params[mixsuite::aether::harmonics] == 0.0f);
 }
 
 TEST (gentle_defaults_of_unreadable_vocal_substitutes_round113)
@@ -161,7 +164,10 @@ TEST (gentle_defaults_of_unreadable_vocal_substitutes_round113)
         id.state = substtest::wavesComponent ("DeEsser", "8000 2 -24.2 7");
         int translated = 0;
         const auto slot = makeSubstituteSlot (*e, &id, &translated);
-        CHECK (translated == 1 && std::abs (mixsuite::hush::hz (slot.params[mixsuite::hush::frequency]) - 8000.0) < 10.0);
+        // round 113 §3c: 0.81 x the frequency, threshold +5 dB, 12 dB range (measured on the official trial)
+        CHECK (translated == 2 && std::abs (mixsuite::hush::hz (slot.params[mixsuite::hush::frequency]) - 6480.0) < 10.0);
+        CHECK (std::abs (mixsuite::hush::thresholdDb (slot.params[mixsuite::hush::threshold]) + 19.2) < 0.1);
+        CHECK (std::abs (mixsuite::hush::rangeDb (slot.params[mixsuite::hush::range]) - 12.0) < 0.1);
         const auto plain = makeSubstituteSlot (*e);
         CHECK (std::abs (mixsuite::hush::hz (plain.params[mixsuite::hush::frequency]) - 5500.0) < 60.0);
         CHECK (std::abs (mixsuite::hush::thresholdDb (plain.params[mixsuite::hush::threshold]) + 20.0) < 0.1);
@@ -180,6 +186,63 @@ TEST (gentle_defaults_of_unreadable_vocal_substitutes_round113)
         CHECK (e != nullptr && e->effect == EffectKind::compressor);
         const auto slot = makeSubstituteSlot (*e);
         CHECK (std::abs (slot.params[0] - 0.75f) < 1e-6f && std::abs (slot.params[1] - 0.0526f) < 1e-6f && slot.params[5] >= 0.5f);
+    }
+}
+
+TEST (waves_vocal_states_translated_round113)
+{
+    using namespace lynx;
+    auto slotFor = [] (const char* waves, const char* values, int& translated) {
+        PluginIdentity id;
+        id.format = ForeignPlugin::Format::vst3;
+        id.name = "WaveShell1-VST3 16.0_x64";
+        id.state = substtest::wavesComponent (waves, values);
+        const auto* e = findPluginSubstitute (id, false);
+        CHECK (e != nullptr);
+        return e != nullptr ? makeSubstituteSlot (*e, &id, &translated) : EffectSlot {};
+    };
+    // her Renaissance Compressor: release 160 ms (ARC), -15 dB, gain 0, attack 0.5 ms, 2.95:1
+    {
+        int n = 0;
+        const auto s = slotFor ("RComp", "160.31 -15 0 * * * * * 0.5 2.96 56.23 10 0 0 149.62 120 0 0 1 0.4 0 1.5 0 * * * 100 0", n);
+        CHECK (n == 5 && s.kind == EffectKind::compressor);
+        // Compressor: threshold -60 + 60 v dB, ratio 1 + 19 v, attack 0.1 .. 100 ms, release 10 .. 1000 ms (log)
+        CHECK (std::abs (s.params[0] - 40.0f / 60.0f) < 1e-4f && std::abs (s.params[1] - 1.96f / 19.0f) < 1e-4f);
+        CHECK (std::abs (s.params[2] - (float) (std::log (5.0) / std::log (1000.0))) < 1e-4f);
+        CHECK (std::abs (s.params[3] - (float) (std::log (30.0) / std::log (100.0))) < 1e-4f);
+        CHECK (s.params[4] == 0.0f && s.params[5] == 0.0f); // no auto gain: RComp at gain 0 does not make up
+    }
+    // her DeEsser: 5506 Hz, -24.2 dB, high-pass side chain, split, output
+    {
+        int n = 0;
+        const auto s = slotFor ("DeEsser", "5506 2 -24.2 7 0.5 10 * * * * 0 3.98 32 1 0", n);
+        namespace h = mixsuite::hush;
+        CHECK (n == 5 && s.kind == EffectKind::hushDeEsser);
+        CHECK (std::abs (h::hz (s.params[h::frequency]) - 4460.0) < 10.0 && std::abs (h::thresholdDb (s.params[h::threshold]) + 19.2) < 0.1);
+        CHECK (s.params[h::mode] == 0.0f && s.params[h::detector] == 0.0f && s.params[h::listen] == 0.0f);
+    }
+    // her SSL E-Channel: comp -1.3 dB 1.8:1 fast 0.35 s, HP 116 Hz, LF -6 dB 60 Hz, HMF +3 dB 3.5 kHz Q 1.5, HF +4.8 dB 10.16 kHz
+    {
+        int n = 0;
+        const auto s = slotFor ("SSLChannel", "-1.3 1.8 1 0.35 * -30 0 0 0 0.2 * 0 0 0 -6 60 0 0.5 2.5 3 3.5 1.5 0 4.8 10.16 0 0 116 30 1 0 0 * * 1 * * 7 -18 0 0 * * * * * * -18 -18 -18 -18 -18 -18 -18 -18 0 0", n);
+        namespace r = mixsuite::ridge;
+        CHECK (n == 20 && s.kind == EffectKind::ridgeStrip);
+        CHECK (std::abs (r::hpfHz (s.params[r::hpf]) - 99.0) < 1.0 && std::abs (r::hfHz (s.params[r::hfFreq]) - 3658.0) < 5.0);
+        CHECK (std::abs (r::bandGainDb (s.params[r::hfGain], false) - 3.84) < 0.01 && std::abs (r::bandGainDb (s.params[r::hmfGain], false) - 2.4) < 0.01);
+        CHECK (std::abs (r::compThresholdDb (s.params[r::compThreshold]) + 17.0) < 0.01 && s.params[r::order] == 1.0f && s.params[r::compFastAttack] == 1.0f);
+        CHECK (std::abs (r::trimDb (s.params[r::output]) - 0.9) < 0.01 && s.params[r::eqOn] == 1.0f && s.params[r::dynOn] == 1.0f);
+    }
+    // her CLA-2A: gain 48.96 (+15.5 dB below the threshold), peak reduction 62.6, comp
+    {
+        std::string values;
+        for (int i = 0; i < 208; ++i)
+            values += i == 38 ? "48.96 " : i == 74 ? "62.6 " : "0 ";
+        int n = 0;
+        const auto s = slotFor ("CLA-2A", values.c_str(), n);
+        namespace g = mixsuite::glow;
+        CHECK (n == 3 && s.kind == EffectKind::glowLeveler);
+        CHECK (std::abs (g::gainDb (s.params[g::gain]) - 17.0) < 0.05 && std::abs (s.params[g::peakReduction] - 0.8746f) < 0.001f);
+        CHECK (s.params[g::mode] == 0.0f);
     }
 }
 

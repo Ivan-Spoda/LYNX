@@ -113,6 +113,7 @@
 #include "core/TimeStretch.h"
 #include "core/WorkerPool.h"
 #include "core/RtStats.h"
+#include "core/FixedBlock.h"
 #include "core/ParametricEqLinear.h"
 #include "core/Song.h"
 #include "core/NoteEdit.h"
@@ -7791,6 +7792,33 @@ TEST (worker_pool_wakes_sleeping_workers)
     CHECK (failures == 0);
     CHECK (pool.wakeUps() > 0);
     CHECK (pool.indicesRunByWorkers() > 0);
+}
+
+TEST (worker_pool_park_sends_spinning_workers_to_sleep)
+{
+    // round 116: after park() (end of an audio block) the workers sleep at once instead of spinning for spinMicros, so
+    // the next parallelFor, well inside the spin window, has to wake them; and work right after park() still runs once
+    lynx::WorkerPool pool (3);
+    std::vector<std::atomic<int>> hits (8);
+    int failures = 0;
+    const auto before = pool.wakeUps();
+    for (int r = 0; r < 40; ++r)
+    {
+        for (auto& h : hits)
+            h.store (0);
+        auto fn = [&] (int i) {
+            std::this_thread::sleep_for (std::chrono::microseconds (100));
+            hits[(std::size_t) i].fetch_add (1);
+        };
+        pool.parallelFor (8, fn);
+        pool.park();
+        if (r % 2 == 0)
+            std::this_thread::sleep_for (std::chrono::microseconds (lynx::WorkerPool::spinMicros / 5));
+        for (auto& h : hits)
+            failures += h.load() != 1;
+    }
+    CHECK (failures == 0);
+    CHECK (pool.wakeUps() - before >= 20); // parked workers were woken, not found spinning
 }
 
 TEST (realtime_stats_count_deadline_misses_and_late_calls)
@@ -15713,5 +15741,6 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Substitutes113Tests.inc"
 #include "EchoSuiteTests101.inc"
 #include "FruitySendTests105.inc"
+#include "FixedBlockTests118.inc"
 #include "UiFl115Tests.inc"
 #include "LoadTraceTests112.inc"

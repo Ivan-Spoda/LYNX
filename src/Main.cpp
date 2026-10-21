@@ -54,9 +54,35 @@
 #include "ui/WaveformView.h"
 #include "ui/WindowOwner.h"
 
+#include <chrono>
+#include <cstdlib>
+
 namespace
 {
 lynx::AudioEngine* crashEngine = nullptr;
+
+// Startup trace (REA round 116): with LYNX_TRACE_STARTUP set, the time of each startup step since the C++ runtime
+// started is written to %APPDATA%\LYNX\startup.log (the loader's own time before that is not included).
+struct StartupTrace
+{
+    using clock = std::chrono::steady_clock;
+    const clock::time_point t0 = clock::now(); // static initialisation: no JUCE yet, standard library only
+    const bool on = std::getenv ("LYNX_TRACE_STARTUP") != nullptr;
+    juce::String text;
+    clock::time_point last = t0;
+
+    void mark (const char* step)
+    {
+        if (! on)
+            return;
+        const auto now = clock::now();
+        const auto ms = [] (clock::duration d) { return std::chrono::duration<double, std::milli> (d).count(); };
+        text << juce::String (ms (now - t0), 1).paddedLeft (' ', 8) << " ms  +" << juce::String (ms (now - last), 1).paddedLeft (' ', 7) << "  " << step << "\n";
+        last = now;
+        juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/startup.log").replaceWithText (text);
+    }
+};
+StartupTrace startupTrace;
 
 // Crashed: try to save the project and write the backtrace (like FL's "emergency save").
 void onCrash (void*)
@@ -470,9 +496,11 @@ public:
             return;
         }
 
+        startupTrace.mark ("initialise (normal start)");
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         startupOptions = lynx::StartupOptions::load();
         lynx::registerFileTypes();
+        startupTrace.mark ("options + file types");
         // Double-clicking a .lynx/.flp opens LYNX with the file as an argument.
         if (args.size() > 0 && juce::File::isAbsolutePath (args[0].unquoted()))
             fileToOpen = juce::File (args[0].unquoted());
@@ -482,7 +510,10 @@ public:
             startEngine();
             createMainWindow();
             mainWindow->reveal();
+            startupTrace.mark ("window revealed");
             openStartupFile();
+            startupTrace.mark ("startup file opened");
+            juce::MessageManager::callAsync ([] { startupTrace.mark ("first message loop turn"); });
             return;
         }
 
@@ -512,9 +543,12 @@ public:
                         return;
 
                     mainWindow->reveal();
+                    startupTrace.mark ("window revealed (after the splash)");
                     splash->toFront (false);
                     splash->finish ([this] { splash = nullptr; });
                     openStartupFile();
+                    startupTrace.mark ("startup file opened");
+                    juce::MessageManager::callAsync ([] { startupTrace.mark ("first message loop turn"); });
                     // first run: language, audio, plugin folders (FL Studio's included) and a background scan
                     if (! lynx::setupWizardDone())
                         mainWindow->showSetupWizard();
@@ -525,18 +559,22 @@ public:
 
     void startEngine()
     {
+        startupTrace.mark ("before the audio engine");
         engine = std::make_unique<lynx::AudioEngine>();
+        startupTrace.mark ("audio engine + device");
         crashEngine = engine.get();
         addDriverFileDeviceType();
 
         if (startupOptions.sound)
             engine->previewSample (lynx::makeStartupSample());
+        startupTrace.mark ("startup sound");
     }
 
     void createMainWindow()
     {
         mainWindow = std::make_unique<MainWindow> (getApplicationName(), *engine);
         lynx::setMainWindowForOwnership (mainWindow.get());
+        startupTrace.mark ("main window built");
     }
 
     void openStartupFile()

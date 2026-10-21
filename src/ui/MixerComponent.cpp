@@ -3449,6 +3449,16 @@ void EffectsPanel::showSlotMenu (int slot)
     });
     if ((*slots())[(std::size_t) slot].kind == EffectKind::plugin)
     {
+        auto* live = dynamic_cast<PluginEffect*> (engine.getEffect (track, slot).get());
+        menu.addSubMenu (tr ("Processing"), pluginProcessingMenu (engine, (*slots())[(std::size_t) slot].plugin, live != nullptr ? &live->getInstance() : nullptr,
+                                                                [t = track, slot] (Song& song) -> PluginRef* {
+                                                                    if (t >= (int) song.mixer.size() || slot >= (int) song.mixer[(std::size_t) t].effects.size())
+                                                                        return nullptr;
+                                                                    return &song.mixer[(std::size_t) t].effects[(std::size_t) slot].plugin;
+                                                                }));
+    }
+    if ((*slots())[(std::size_t) slot].kind == EffectKind::plugin)
+    {
         if (auto* p = dynamic_cast<PluginEffect*> (engine.getEffect (track, slot).get()))
             addPluginParameterItems (menu, engine, p->getInstance(), { AutomationTargetKind::effectParam, track, slot, 0 });
     }

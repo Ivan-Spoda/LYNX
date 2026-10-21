@@ -11,6 +11,10 @@
 // the Windows libc++ build has no platform wait and falls back to Sleep() polling with growing intervals, so an
 // idle worker woke 1–8 ms late — later than a whole audio block — and the audio thread ended up doing all the
 // work alone.
+//
+// Parking (REA round 116): the spin only pays off between the parallelFor calls of one block. After the block's last
+// one, park() sends the spinning workers to sleep at once; otherwise every worker burned ~250 µs per audio block
+// (7 workers × 172 blocks/s at 256 samples ≈ 30 % of a core) even with the transport stopped.
 
 #include <atomic>
 #include <cstdint>
@@ -41,6 +45,10 @@ public:
         run (count, &fn, [] (void* f, int i) { (*static_cast<Fn*> (f)) (i); });
     }
 
+    // The caller's block is finished (no more parallelFor until the next audio callback): spinning workers go to
+    // sleep now instead of polling until spinMicros runs out. Wait-free; the next parallelFor wakes them as usual.
+    void park() noexcept { parkedGeneration.store (generation, std::memory_order_release); }
+
     // How long a worker keeps polling for new work after finishing before it sleeps (microseconds).
     static constexpr int spinMicros = 250;
 
@@ -55,6 +63,7 @@ private:
     void run (int count, void* context, Call call) noexcept;
     bool work (bool isWorker) noexcept;
     bool hasWork() const noexcept;
+    bool isParked() const noexcept;
     void workerLoop (std::function<void()> onStart);
 
     struct Semaphore; // OS semaphore (WorkerPool.cpp)
@@ -62,6 +71,9 @@ private:
     std::vector<std::thread> threads;
     std::atomic<bool> quit { false };
     std::atomic<int> sleeping { 0 }; // workers blocked (or about to block) on `wake`
+    // the generation (see `ticket`) of the last parallelFor before park(); while the ticket still carries it,
+    // the pool is parked and a worker without work sleeps instead of spinning
+    std::atomic<std::uint64_t> parkedGeneration { ~std::uint64_t (0) };
 
     // current work (published before `ticket`). The ticket packs generation (bits 40+), count (bits 20…39) and the
     // next index (bits 0…19), so an index taken by a late worker always carries its own round's count: a worker

@@ -7,7 +7,8 @@
 //   fxmeasure.exe script.txt          (one command per line; '#' starts a comment)
 //
 // Commands:
-//   load <file.vst3> [rate] [block]   load the first effect in the file (default 48000 Hz, 512 samples)
+//   load <file.vst3> [rate] [block] [name]   load the first effect in the file (default 48000 Hz, 512 samples), or in a
+//                                     shell (Waves) the one called <name>; name "?" lists the shell's plugins
 //   rate <hz> [block]                 re-prepare at another sample rate / block size
 //   sidechain on|off                  enable every input bus (main + sidechain) or only the main one
 //   nonrealtime 0|1                   AudioProcessor::setNonRealtime
@@ -22,6 +23,7 @@
 //   process <in.wav> <out.wav> [sc.wav]   run the input (and optional sidechain) through, write a 32-bit float WAV
 //   latency                           print the reported latency in samples
 //   savestate <file> / loadstate <file>
+//   savecomponent <file> / loadcomponent <file>   the raw VST3 component state (as a DAW project stores it)
 //   pump <ms>                         deliver the plugin's pending Win32 messages for a while
 //   editor <out.png> [ms] [x y]       open the plugin's own editor in a window, let it draw (default 1500 ms), optionally
 //                                     click at (x, y) as a user would (a trial's "Evaluate"), save a PNG (PrintWindow)
@@ -381,13 +383,36 @@ struct Host
                 if (a.size() > 2) rate = a[2].getDoubleValue();
                 if (a.size() > 3) block = a[3].getIntValue();
                 juce::OwnedArray<juce::PluginDescription> types;
-                for (auto* f : formats.getFormats())
-                    if (f->fileMightContainThisPluginType (a[1])) f->findAllTypesForFile (types, a[1]);
+                // a big shell takes many minutes to describe: the descriptions are cached in fxmeasure-cache.xml (cwd)
+                const juce::File cache = juce::File::getCurrentWorkingDirectory().getChildFile ("fxmeasure-cache.xml");
+                juce::KnownPluginList known;
+                if (auto xml = juce::parseXML (cache)) known.recreateFromXml (*xml);
+                for (const auto& t : known.getTypes())
+                    if (t.fileOrIdentifier == a[1]) types.add (new juce::PluginDescription (t));
+                if (types.isEmpty())
+                {
+                    for (auto* f : formats.getFormats())
+                        if (f->fileMightContainThisPluginType (a[1])) f->findAllTypesForFile (types, a[1]);
+                    for (auto* t : types) known.addType (*t);
+                    if (auto xml = known.createXml()) xml->writeTo (cache);
+                }
                 if (types.isEmpty()) { log ("error: no plugin in " + a[1]); continue; }
+                // a shell (one file, many plugins: Waves) — `load <file> <rate> <block> <name>` picks the plugin whose
+                // name equals <name> (else the first one containing it); `list` prints them all
+                if (a.size() > 4 && a[4] == "?") { for (auto* t : types) log ("plugin " + t->name + " | " + t->createIdentifierString()); continue; }
+                int pick = 0;
+                if (a.size() > 4)
+                {
+                    const auto want = line.fromFirstOccurrenceOf (a[3], false, false).fromFirstOccurrenceOf (" ", false, false).trim().unquoted();
+                    pick = -1;
+                    for (int i = 0; i < types.size() && pick < 0; ++i) if (types[i]->name.equalsIgnoreCase (want)) pick = i;
+                    for (int i = 0; i < types.size() && pick < 0; ++i) if (types[i]->name.containsIgnoreCase (want)) pick = i;
+                    if (pick < 0) { log ("error: no plugin named " + want + " in " + a[1] + " (" + juce::String (types.size()) + " plugins)"); continue; }
+                }
                 juce::String err;
-                plugin = formats.createPluginInstance (*types[0], rate, block, err);
+                plugin = formats.createPluginInstance (*types[pick], rate, block, err);
                 if (plugin == nullptr) { log ("error: " + err); continue; }
-                log ("loaded " + types[0]->name + " by " + types[0]->manufacturerName + " v" + types[0]->version + " params=" + juce::String (plugin->getParameters().size())
+                log ("loaded " + types[pick]->name + " by " + types[pick]->manufacturerName + " v" + types[pick]->version + " params=" + juce::String (plugin->getParameters().size())
                      + " inBuses=" + juce::String (plugin->getBusCount (true)) + " outBuses=" + juce::String (plugin->getBusCount (false)));
                 prepare();
                 continue;
@@ -439,6 +464,34 @@ struct Host
                 juce::File (a[1]).loadFileAsData (m);
                 plugin->setStateInformation (m.getData(), (int) m.getSize());
                 log ("loadstate");
+            }
+            else if (cmd == "savecomponent" || cmd == "loadcomponent")
+            {
+                // the raw VST3 component state (what a DAW project stores), inside JUCE's VST3PluginState wrapper
+                juce::MemoryBlock m;
+                plugin->getStateInformation (m);
+                auto xml = juce::AudioProcessor::getXmlFromBinary (m.getData(), (int) m.getSize());
+                if (xml == nullptr) { log ("error: no VST3 state"); continue; }
+                auto* comp = xml->getChildByName ("IComponent");
+                if (comp == nullptr) { log ("error: no IComponent"); continue; }
+                juce::MemoryBlock raw;
+                if (cmd == "savecomponent")
+                {
+                    raw.fromBase64Encoding (comp->getAllSubText());
+                    juce::File (a[1]).replaceWithData (raw.getData(), raw.getSize());
+                    log ("savecomponent " + juce::String ((int) raw.getSize()) + " bytes");
+                }
+                else
+                {
+                    juce::File (a[1]).loadFileAsData (raw);
+                    comp->deleteAllTextElements();
+                    comp->addTextElement (raw.toBase64Encoding());
+                    if (auto* ctl = xml->getChildByName ("IEditController")) xml->removeChildElement (ctl, true);
+                    juce::MemoryBlock out;
+                    juce::AudioProcessor::copyXmlToBinary (*xml, out);
+                    plugin->setStateInformation (out.getData(), (int) out.getSize());
+                    log ("loadcomponent " + juce::String ((int) raw.getSize()) + " bytes");
+                }
             }
             else log ("error: unknown command " + cmd);
         }
