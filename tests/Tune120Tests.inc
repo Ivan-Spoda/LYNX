@@ -91,3 +91,89 @@ TEST (waves_tune_substitute_takes_its_own_scale_round120)
     for (int k = 0; k < 12; ++k)
         CHECK ((odd.params[(std::size_t) (lynxtune::noteC + k)] >= 0.5f) == (k == 2 || k == 3 || k == 9));
 }
+
+TEST (waves_tune_note_transition_becomes_the_retune_round120)
+{
+    using namespace lynx;
+    // RealWorld 20 = Speed 21.4 ms, 21 = Note Transition 54.2 ms (her most common state): LYNX Tune's retune = 54.2 ms
+    auto c = tune120::wavesTuneComponent (4, tune120::naturalMinor, 4, tune120::naturalMinor);
+    const std::string from = "80 900 6 0 * 3 * 4 0 0\n", to = "80 900 6 0 * 3 * 4 0 0\n* * * * * 1 0 80 1 1\n21.4 54.2 100 0 0 0 600 0 0 30\n";
+    const auto at = std::search (c.begin(), c.end(), from.begin(), from.end());
+    CHECK (at != c.end());
+    c.erase (at, at + (std::ptrdiff_t) from.size());
+    c.insert (c.begin() + (at - c.begin()), to.begin(), to.end());
+    const auto wt = tune120::wavesTune (c);
+    auto slot = subst113::pluginSlot (wt);
+    CHECK (substituteEffectSlot (slot, pluginIdentity (wt), SubstituteContext {}));
+    CHECK (std::abs (lynxtune::retuneMs (slot.params[lynxtune::retune]) - 54.2) < 0.5);
+    CHECK (slot.params[lynxtune::humanize] == 0.0f);
+    CHECK (lynxtune::keyIndex (slot.params[lynxtune::key]) == 4);
+}
+
+namespace tune120
+{
+// output pitch minus the sung pitch (cents) around `t` seconds of a LYNX Tune run
+double correctionAt (const std::vector<float>& x, const std::vector<float>& y, int latency, double fs, double t)
+{
+    const auto at = (int) (t * fs) - 512;
+    return r95::cents (r95::measureHz (y, at + latency, 1024, fs, 150.0, 500.0), r95::measureHz (x, at, 1024, fs, 150.0, 500.0));
+}
+} // namespace tune120
+
+TEST (lynx_tune_phrase_starts_without_the_last_correction_round120)
+{
+    // phrase 1: A3 +45 c (pulled down ~45 c); 0.3 s of silence; phrase 2: A3 −45 c. The second phrase starts at the sung
+    // pitch and is pulled UP from there (it used to start with phrase 1's −45 c correction still applied)
+    const double fs = 44100.0;
+    auto x = r95::vowel (fs, (int) (fs * 1.6), [] (double t) { return 220.0 * std::exp2 ((t < 0.8 ? 45.0 : -45.0) / 1200.0); });
+    for (int i = (int) (0.6 * fs); i < (int) (0.9 * fs); ++i)
+        x[(std::size_t) i] = 0.0f;
+    auto p = r95::tuneDefaults();
+    p[lynx::lynxtune::scale] = 0.0f;
+    p[lynx::lynxtune::retune] = (float) std::sqrt (120.0 / 400.0);
+    int latency = 0;
+    const auto y = r95::runTune (x, fs, p, latency);
+    CHECK (tune120::correctionAt (x, y, latency, fs, 0.55) < -35.0); // phrase 1 corrected
+    const auto early = tune120::correctionAt (x, y, latency, fs, 0.95);
+    CHECK (early > -5.0 && early < 25.0); // not −45…−90 c
+    CHECK (tune120::correctionAt (x, y, latency, fs, 1.5) > 38.0);
+}
+
+TEST (lynx_tune_retune_curve_matches_waves_tune_round120)
+{
+    // [EXEC] Waves Tune Real-Time at Note Transition 54.2 ms on a held A3 +30 c from silence: 50 % of the correction at
+    // ~50 ms, 90 % at ~144 ms. LYNX Tune at retune 54.2 ms: the same first-order curve (onset at the sung pitch)
+    const double fs = 44100.0;
+    auto x = r95::vowel (fs, (int) (fs * 1.0), [] (double) { return 220.0 * std::exp2 (30.0 / 1200.0); });
+    for (int i = 0; i < (int) (0.2 * fs); ++i)
+        x[(std::size_t) i] = 0.0f;
+    auto p = r95::tuneDefaults();
+    p[lynx::lynxtune::scale] = 0.0f;
+    p[lynx::lynxtune::retune] = (float) std::sqrt (54.2 / 400.0);
+    int latency = 0;
+    const auto y = r95::runTune (x, fs, p, latency);
+    const auto at60 = -tune120::correctionAt (x, y, latency, fs, 0.2 + 0.06);
+    const auto at200 = -tune120::correctionAt (x, y, latency, fs, 0.2 + 0.2);
+    const auto late = -tune120::correctionAt (x, y, latency, fs, 0.9);
+    CHECK (at60 > 6.0 && at60 < 24.0);
+    CHECK (at200 > 24.0);
+    CHECK (late > 29.0 && late < 31.0);
+}
+
+TEST (lynx_tune_glide_is_not_pulled_back_round120)
+{
+    // an octave glide in 2 s at retune 120 ms: the correction averages near zero (Waves Tune RT: −3 c), not ~−15 c
+    // against the glide's direction (the 0.1 st target hysteresis did that)
+    const double fs = 44100.0;
+    const auto x = r95::vowel (fs, (int) (fs * 2.0), [] (double t) { return 196.0 * std::exp2 (t / 2.0); });
+    auto p = r95::tuneDefaults();
+    p[lynx::lynxtune::scale] = 0.0f;
+    p[lynx::lynxtune::retune] = (float) std::sqrt (120.0 / 400.0);
+    int latency = 0;
+    const auto y = r95::runTune (x, fs, p, latency);
+    double sum = 0.0;
+    int n = 0;
+    for (double t = 0.3; t < 1.8; t += 0.01, ++n)
+        sum += tune120::correctionAt (x, y, latency, fs, t);
+    CHECK (std::abs (sum / n) < 10.0);
+}

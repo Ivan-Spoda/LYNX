@@ -536,7 +536,7 @@ vendor = Waves
 lynx = LYNX Tune
 waves = WavesTune Real-Time; Waves Tune Real-Time; WavesTune
 names = WavesTune Real-Time; Waves Tune Real-Time
-# round 120: its saved scale (root + note statuses) is read; speed / note transition not yet (see translateWavesTune)
+# round 120: its saved scale (root + note statuses) and its Note Transition time (= LYNX Tune's retune, measured)
 translate = waves-tune
 preset = Scale=0; Retune=0.3536; Humanize=0.5
 mix = 1
@@ -924,20 +924,35 @@ int translateAutoTunePro (const std::vector<std::uint8_t>& state, EffectSlot& sl
 }
 
 // Waves Tune Real-Time: the key and scale saved in its state (wavesTuneScale; [DATA] every one of the 11 distinct
-// states of her corpus names its scale — "Natural Minor" / "Major" — with the root and the twelve note statuses).
-// A scale LYNX Tune has no name for becomes its custom scale with the same notes. Its speed / note-transition values
-// are not translated yet (the official trial does not load as itself in a VST3 host here: REA round 120): the entry's
-// gentle retune stays.
+// states of her corpus names its scale — "Natural Minor" / "Major" — with the root and the twelve note statuses);
+// a scale LYNX Tune has no name for becomes its custom scale with the same notes. RealWorld 20 = Speed, 21 = Note
+// Transition (ms). [EXEC] Black-box (official trial, REA round 120 §2): a held mistuned note is pulled to the target
+// along a first-order curve whose time constant is the Note Transition time (50 % / 90 % at 12 ms + 0.69 / 2.3 x NT for
+// NT = 21 … 250 ms), which is LYNX Tune's retune law at retune = NT; Speed barely changes anything on sung notes (only
+// below ~5 ms, slightly less vibrato), so it is not translated; no humanize.
+std::optional<double> wavesValue (const std::vector<double>& rw, std::size_t i);
+
 int translateWavesTune (const std::vector<std::uint8_t>& state, EffectSlot& slot)
 {
-    const auto sc = wavesTuneScale (state);
-    if (! sc || slot.kind != EffectKind::lynxTune)
+    if (slot.kind != EffectKind::lynxTune)
         return 0;
-    slot.params[lynxtune::key] = (float) sc->key / 11.0f;
-    slot.params[lynxtune::scale] = (float) sc->scale / (float) (vocal::scaleCount - 1);
-    for (int k = 0; k < 12; ++k)
-        slot.params[(std::size_t) (lynxtune::noteC + k)] = sc->scale != (int) vocal::Scale::custom || ((sc->mask >> k) & 1u) != 0 ? 1.0f : 0.0f;
-    return 2;
+    int n = 0;
+    if (const auto sc = wavesTuneScale (state))
+    {
+        slot.params[lynxtune::key] = (float) sc->key / 11.0f;
+        slot.params[lynxtune::scale] = (float) sc->scale / (float) (vocal::scaleCount - 1);
+        for (int k = 0; k < 12; ++k)
+            slot.params[(std::size_t) (lynxtune::noteC + k)] = sc->scale != (int) vocal::Scale::custom || ((sc->mask >> k) & 1u) != 0 ? 1.0f : 0.0f;
+        n += 2;
+    }
+    const auto rw = wavesRealWorldParams (state);
+    if (const auto transition = wavesValue (rw, 21); transition && *transition >= 0.0)
+    {
+        slot.params[lynxtune::retune] = (float) std::sqrt (std::clamp (*transition, 0.0, 400.0) / 400.0);
+        slot.params[lynxtune::humanize] = 0.0f;
+        n += 2;
+    }
+    return n;
 }
 
 // Fresh Air: its two air amounts become Aether's air shelf. [EXEC] Black-box measurement of the official trial
