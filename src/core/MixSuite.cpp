@@ -1213,7 +1213,7 @@ const EffectInfo& ridgeInfo()
                                      { "Ratio", 0.0f }, { "Comp. threshold", 1.0f }, { "Comp. release", 0.29f }, { "Fast attack", 0.0f },
                                      { "Gate range", 0.0f }, { "Gate threshold", 0.25f }, { "Gate release", 0.29f }, { "Gate fast", 0.0f },
                                      { "Expander", 0.0f }, { "Dynamics on", 1.0f },
-                                     { "Order", 0.0f }, { "Filters to SC", 0.0f }, { "Output", 0.5f }, { "Phase", 0.0f }, { "Comp. mix", 1.0f } } };
+                                     { "Order", 1.0f }, { "Filters to SC", 0.0f }, { "Output", 0.5f }, { "Phase", 0.0f }, { "Comp. mix", 1.0f } } };
     return info;
 }
 

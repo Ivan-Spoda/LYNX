@@ -1970,7 +1970,8 @@ Layout geminiDoubler()
         v.push_back (tabs (540, cy - 11, 136, 22, names[k][9], k == 0 ? TR_NOOP ("L|L+R|L-R") : TR_NOOP ("R|R+L|R-L"), { 1.0f / 6.0f, 0.5f, 5.0f / 6.0f }));
     }
     v.push_back (section (690, 264, 106, 192, TR_NOOP ("Output")));
-    v.push_back (slider (Item::vslider, 724, 290, 38, 150, "Output", nullptr));
+    v.push_back (slider (Item::vslider, 698, 290, 30, 150, "Output", nullptr));
+    v.push_back (display (730, 276, 62, 172, "iometer")); // round 129: the reference's output meters
     return l;
 }
 

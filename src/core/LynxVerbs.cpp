@@ -1383,7 +1383,9 @@ std::string paramText (EffectKind kind, int param, float v, double bpm)
             switch (param)
             {
                 case 1: return fmt ("%+.1f st", haloShiftSemis (v));
-                case 5: return hz (10.0 + 990.0 * v); // the reference reads 10 Hz at 0 (its editor)
+                // round 129: what the engine applies (0 … 250 Hz, off below 5 Hz; configure()) — the display said
+                // 10 … 1000 Hz, the reference editor's range, while the filter never went above 250 Hz
+                case 5: return 250.0 * v < 5.0 ? std::string ("off") : hz (250.0 * v);
                 case 6: return hz (100.0 + 14900.0 * v);
                 case 7: return fmt ("%.2f Hz", 0.05 + 4.95 * v);
                 case 9: return haloModes[choice (v, 3)].name;
