@@ -247,16 +247,17 @@ struct Line
     float at (double d) const noexcept
     {
         const auto size = (int) buf.size();
-        d = std::clamp (d, 1.0, (double) size - 2.0);
+        d = std::clamp (d, 1.0, (double) size - 4.0);
         const auto di = (int) d;
         const auto f = (float) (d - di);
         auto i0 = pos - di;
         if (i0 < 0)
             i0 += size;
-        auto i1 = i0 - 1;
-        if (i1 < 0)
-            i1 += size;
-        return buf[(std::size_t) i0] + f * (buf[(std::size_t) i1] - buf[(std::size_t) i0]);
+        // 4-point Hermite between the samples d and d + 1 ago (keeps the top octave of a fractional delay)
+        const auto at = [this, size] (int i) { i %= size; return buf[(std::size_t) (i < 0 ? i + size : i)]; };
+        const auto xm1 = at (i0 + 1), x0 = at (i0), x1 = at (i0 - 1), x2 = at (i0 - 2);
+        const auto c1 = 0.5f * (x1 - xm1), c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2, c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
+        return ((c3 * f + c2) * f + c1) * f + x0;
     }
 };
 
@@ -368,8 +369,8 @@ public:
                 {
                     auto ph = v.phase + 0.5 * t;
                     ph -= std::floor (ph);
-                    const auto w = (float) std::sin (pi * ph);
-                    y += w * w * v.line.at (1.0 + s.delay + voiceExtra + ph * window);
+                    const auto w = (float) std::sin (pi * ph); // power-complementary crossfade of the two grains
+                    y += w * v.line.at (1.0 + s.delay + voiceExtra + ph * window);
                 }
                 v.last = y;
                 wetL += s.gl * y;
@@ -404,10 +405,37 @@ private:
             return;
         std::copy (key, key + 5, lastKey);
         designed = true;
-        lowShelf.shelf (sr, freqHz (p[lowFreq]), shelfDb (p[lowGain]), false, 1.0);
-        highShelf.shelf (sr, freqHz (p[highFreq]), shelfDb (p[highGain]), true, 1.0);
+        // [EXEC] measured: first-order shelves; a high shelf of gain g at f0 has its corners at f0 and f0 · max (g, 1/g)
+        // (-12 dB at 3538 Hz: -2.1 dB at 3.5 kHz, -6.8 at 8 kHz, -11.9 at 16 kHz; +6 dB at 1306 Hz: +2.6 at 1.5 kHz,
+        // +4.5 at 3 kHz); the low shelf mirrors it (corners f0 / max (g, 1/g) and f0)
+        firstOrderShelf (lowShelf, freqHz (p[lowFreq]), shelfDb (p[lowGain]), false);
+        firstOrderShelf (highShelf, freqHz (p[highFreq]), shelfDb (p[highGain]), true);
         for (auto& v : voice)
             v.fbHp.filter (sr, 1, std::max (10.0, freqHz (p[feedbackCut])), 0.7071);
+    }
+
+    // H(s) = k (1 + s/wz) / (1 + s/wp), bilinear with the corners pre-warped
+    void firstOrderShelf (Biquad& b, double f0, double db, bool high) const noexcept
+    {
+        const auto g = dbToGain (db);
+        const auto r = std::max (g, 1.0 / g);
+        const auto lo = high ? f0 : f0 / r, up = high ? f0 * r : f0;
+        // high boost: zero lo, pole up; high cut: pole lo, zero up; low boost: pole lo, zero up, × r; low cut: zero lo, pole up, ÷ r
+        double fz, fp, k;
+        if (high)
+            fz = g >= 1.0 ? lo : up, fp = g >= 1.0 ? up : lo, k = 1.0;
+        else
+            fz = g >= 1.0 ? up : lo, fp = g >= 1.0 ? lo : up, k = g >= 1.0 ? r : 1.0 / r;
+        const auto warp = [this] (double f) { return std::tan (pi * std::min (f, 0.49 * sr) / sr); };
+        const auto wz = warp (fz), wp = warp (fp);
+        // s → (1 − z⁻¹)/(1 + z⁻¹) with s/w: (1 + s/wz) → ((wz + 1) + (wz − 1) z⁻¹) / (wz (1 + z⁻¹))
+        const auto n0 = k * (wz + 1.0) / wz, n1 = k * (wz - 1.0) / wz;
+        const auto d0 = (wp + 1.0) / wp, d1 = (wp - 1.0) / wp;
+        b.b0 = n0 / d0;
+        b.b1 = n1 / d0;
+        b.b2 = 0.0;
+        b.a1 = d1 / d0;
+        b.a2 = 0.0;
     }
 
     struct Voice

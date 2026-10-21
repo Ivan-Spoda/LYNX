@@ -207,7 +207,7 @@ lynx = Echoform
 vst3 = 48545356444268532d64656c61792073
 waves = H-Delay
 translate = waves-h-delay
-preset = Mix=1; Style=0.9; Sync L=0.625; Note L=0.45; Sync R=0.625; Note R=0.45; Feedback=0.0465; Mode=0.5417; Age=0; Mod depth=0; Width=1; Pairs=1; Output=0.5306
+preset = Mix=1; Style=0.9; Sync L=0.625; Note L=0.45; Sync R=0.625; Note R=0.45; Feedback=0.0465; Mode=0.5417; Age=0; Mod depth=0; Width=1; Pairs=1; Output=0.4611
 
 [waves-supertap]
 product = SuperTap
@@ -1169,7 +1169,9 @@ int translateWavesHDelay (const std::vector<std::uint8_t>& state, EffectSlot& sl
     const auto loop = pingPong ? 0.93 * f * f : 0.98 * f;
     p[e::feedback] = (float) std::clamp (loop / 2.0, 0.0, 1.0);
     p[e::mix] = (float) std::clamp (wavesValue (rw, 6).value_or (100.0) / 100.0, 0.0, 1.0);
-    const auto level = pingPong ? (analog ? 1.1 : 2.5) : (analog ? -1.9 : -0.4);
+    // the analog modes also compress loud input (1 kHz bursts: +3 dB at -34 dBFS, 0 at -10, -2.3 at -4): on her
+    // three vocal takes the echoes of the reference are 2.5 dB under the small-signal gain, hence -1.4 instead of +1.1
+    const auto level = pingPong ? (analog ? -1.4 : 2.5) : (analog ? -4.4 : -0.4);
     p[e::output] = linNorm (wavesValue (rw, 14).value_or (0.0) + level, -18.0, 18.0);
     p[e::mode] = e::modeValue (e::Mode::clean);
     p[e::age] = 0.0f;
