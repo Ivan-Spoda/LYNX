@@ -226,8 +226,7 @@ private:
     {
         const auto d = display();
         const auto p = plot();
-        g.setColour (colour::bg0);
-        g.fillRect (bodyArea());
+        displayBackground (g, bodyArea());
         // the history, newest at the right edge
         const auto n = (int) p.getWidth();
         const auto gain = (float) gainDb();
@@ -249,14 +248,10 @@ private:
         outPath.lineTo (p.getX(), p.getBottom());
         grPath.lineTo (p.getX(), p.getY());
         for (auto* path : { &inPath, &outPath, &grPath }) path->closeSubPath();
-        g.setColour (inColour().withAlpha (0.55f));
-        g.fillPath (inPath);
-        g.setColour (outColour().withAlpha (0.45f));
-        g.fillPath (outPath);
-        g.setColour (colour::textPrimary.withAlpha (0.55f));
-        g.strokePath (outLine, juce::PathStrokeType (1.0f));
-        g.setColour (colour::accent.withAlpha (fx.enabled ? 0.55f : 0.2f));
-        g.fillPath (grPath);
+        fillLevel (g, inPath, inColour(), p, 0.55f, 0.22f);
+        fillLevel (g, outPath, outColour(), p, 0.7f, 0.18f);
+        skin::glowStroke (g, outLine, colour::textPrimary.withAlpha (0.7f), 1.0f, 0.5f);
+        fillLevel (g, grPath, colour::accent, p, fx.enabled ? 0.8f : 0.25f, fx.enabled ? 0.35f : 0.1f);
         scaleLabels (g, scale, p, d.getRight() + 6.0f, { 0.0f, -3.0f, -6.0f, -9.0f, -12.0f, -15.0f, -24.0f, -36.0f });
 
         // the biggest reductions, tagged (one tag per 1.5 s at most)
@@ -309,15 +304,9 @@ private:
         const auto outR = m.withWidth (22.0f);
         const auto grR = m.withTrimmedLeft (28.0f);
         const auto newest = columnBack (0);
-        g.setColour (colour::bg1);
-        g.fillRect (outR);
         const auto outY = scale.y (newest.out, p);
-        g.setColour (outColour().withAlpha (0.85f));
-        g.fillRect (outR.withTop (outY));
-        g.setColour (colour::bg1);
-        g.fillRect (grR);
-        g.setColour (colour::accent);
-        g.fillRect (grR.withBottom (scale.y (-newest.gr, p)));
+        skin::meterSolid (g, outR, (outR.getBottom() - outY) / outR.getHeight(), outColour(), false);
+        skin::meterSolid (g, grR, (scale.y (-newest.gr, p) - grR.getY()) / grR.getHeight(), colour::accent, true);
         g.setColour (colour::bg0.withAlpha (0.5f));
         for (auto y = m.getY() + 3.0f; y < m.getBottom(); y += 3.0f) g.drawHorizontalLine ((int) y, m.getX(), m.getRight());
         g.setFont (font (type::caption, true));
@@ -513,8 +502,7 @@ private:
     void paintBody (juce::Graphics& g, const EffectSlot& fx) override
     {
         const auto w = wave();
-        g.setColour (colour::bg0);
-        g.fillRect (bodyArea());
+        displayBackground (g, bodyArea());
         g.setColour (colour::bg1);
         g.fillRect (w);
         g.setColour (colour::gridBeat);
@@ -528,9 +516,9 @@ private:
             inP.addRectangle (x, waveY (c.in, true), 1.0f, juce::jmax (1.0f, waveY (c.in, false) - waveY (c.in, true)));
             outP.addRectangle (x, waveY (c.out, true), 1.0f, juce::jmax (1.0f, waveY (c.out, false) - waveY (c.out, true)));
         }
-        g.setColour (colour::accent.withAlpha (fx.enabled ? 0.75f : 0.25f)); // the reduction = input − output
+        g.setColour (colour::accent.withAlpha (fx.enabled ? 0.8f : 0.25f)); // the reduction = input − output
         g.fillPath (inP);
-        g.setColour (inColour().withAlpha (0.9f));
+        g.setGradientFill (juce::ColourGradient (accent.withAlpha (0.95f), 0.0f, w.getY(), juce::Colour (0xffc8ccd6).withAlpha (0.9f), 0.0f, w.getCentreY(), true));
         g.fillPath (outP);
         // threshold lines
         const auto dashes = std::array<float, 2> { 6.0f, 4.0f };
@@ -761,8 +749,7 @@ private:
     {
         const auto m = main();
         const auto p = plot();
-        g.setColour (colour::bg0);
-        g.fillRect (bodyArea());
+        displayBackground (g, bodyArea());
         scaleLabels (g, scale, p, p.getRight() + 8.0f, { 0.0f, -6.0f, -12.0f, -18.0f, -24.0f, -30.0f, -42.0f, -60.0f });
         const auto n = (int) p.getWidth();
         juce::Path inP, outLine, grLine;
@@ -778,12 +765,9 @@ private:
         }
         inP.lineTo (p.getX(), p.getBottom());
         inP.closeSubPath();
-        g.setColour (inColour().withAlpha (0.28f));
-        g.fillPath (inP);
-        g.setColour (outColour().withAlpha (0.85f));
-        g.strokePath (outLine, juce::PathStrokeType (1.2f));
-        g.setColour (colour::accent.withAlpha (fx.enabled ? 1.0f : 0.3f));
-        g.strokePath (grLine, juce::PathStrokeType (2.0f));
+        fillLevel (g, inP, inColour(), p, 0.42f, 0.12f);
+        skin::glowStroke (g, outLine, outColour().withAlpha (0.9f), 1.2f, 0.6f);
+        skin::glowStroke (g, grLine, colour::accent.withAlpha (fx.enabled ? 1.0f : 0.3f), 2.0f, fx.enabled ? 1.0f : 0.0f);
         // threshold
         const auto ty = scale.y ((float) thresholdDb(), p);
         const auto dashes = std::array<float, 2> { 7.0f, 5.0f };
@@ -979,10 +963,8 @@ private:
     {
         using namespace dyn::sentry;
         const auto d = disp();
-        g.setColour (colour::bg1);
-        g.fillRect (bodyArea());
-        g.setColour (colour::bg0);
-        g.fillRoundedRectangle (d.expanded (4.0f), 6.0f);
+        skin::canvas (g, bodyArea(), accent);
+        skin::well (g, d.expanded (4.0f), 6.0f);
         // the input level scrolling behind (newest at the right), on the vertical dB scale
         const auto n = (int) d.getWidth();
         juce::Path in;
@@ -991,8 +973,7 @@ private:
             in.lineTo (d.getRight() - (float) k, yDb (columnBack (k / 2).in));
         in.lineTo (d.getX(), d.getBottom());
         in.closeSubPath();
-        g.setColour (inColour().withAlpha (0.35f));
-        g.fillPath (in);
+        fillLevel (g, in, inColour(), d, 0.45f, 0.12f);
         // grid and labels
         g.setFont (font (type::caption));
         for (int db = 0; db >= -60; db -= 10)
@@ -1014,8 +995,14 @@ private:
             if (i == 0) curve.startNewSubPath (pt);
             else curve.lineTo (pt);
         }
-        g.setColour (fx.enabled ? colour::textPrimary : colour::textDisabled);
-        g.strokePath (curve, juce::PathStrokeType (2.2f));
+        skin::glowStroke (g, curve, fx.enabled ? colour::textPrimary : colour::textDisabled, 2.2f, 0.0f);
+        if (fx.enabled)
+        {
+            g.setColour (accent.withAlpha (0.25f));
+            g.strokePath (curve, juce::PathStrokeType (6.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour (colour::textPrimary);
+            g.strokePath (curve, juce::PathStrokeType (2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
         // the live input on the curve
         const auto now = columnBack (0).in;
         if (now > -66.0f)
@@ -1326,8 +1313,7 @@ private:
     {
         using namespace dyn::prism;
         const auto p = plot();
-        g.setColour (colour::bg0);
-        g.fillRect (bodyArea());
+        displayBackground (g, bodyArea());
         frequencyLabels (g, p, p.getBottom() + 12.0f);
         // the analyser
         if (analyzer == 1 || analyzer == 3)
@@ -1387,8 +1373,7 @@ private:
             if (i == 0) resp.startNewSubPath (x, gainY (db));
             else resp.lineTo (x, gainY (db));
         }
-        g.setColour (fx.enabled ? colour::warning : colour::textDisabled);
-        g.strokePath (resp, juce::PathStrokeType (2.0f));
+        skin::glowStroke (g, resp, fx.enabled ? colour::warning : colour::textDisabled, 2.0f, fx.enabled ? 1.0f : 0.0f);
         // the nodes
         for (int b = 0; b < bands; ++b)
         {
@@ -1656,8 +1641,7 @@ private:
     {
         using namespace mixsuite::ember;
         const auto d = disp();
-        g.setColour (colour::bg0);
-        g.fillRect (bodyArea());
+        displayBackground (g, bodyArea());
         frequencyLabels (g, d, d.getBottom() + 12.0f);
         paintSpectrum (g, specPost, [this] (float db) { return specY (db); }, inColour().withAlpha (0.14f), inColour().withAlpha (0.45f));
         const auto n = count();
@@ -1818,8 +1802,7 @@ private:
     void paintBody (juce::Graphics& g, const EffectSlot& fx) override
     {
         const auto d = display();
-        g.setColour (colour::bg0);
-        g.fillRect (bodyArea());
+        displayBackground (g, bodyArea());
         juce::ColourGradient bg (colour::bg1.brighter (0.06f), d.getCentreX(), d.getY(), colour::bg0, d.getCentreX(), d.getBottom(), false);
         g.setGradientFill (bg);
         g.fillRect (d);
@@ -1839,6 +1822,8 @@ private:
         // the track and the lit part (blue, red above −6 dB)
         juce::Path track;
         track.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, a0, a1, true);
+        g.setColour (juce::Colour (0xff08090b));
+        g.strokePath (track, juce::PathStrokeType (13.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         g.setColour (colour::bg4);
         g.strokePath (track, juce::PathStrokeType (10.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         if (level > -119.0f)
@@ -1846,7 +1831,9 @@ private:
             const auto split = angleOf (-6.0f), now = angleOf (level);
             juce::Path lit;
             lit.addCentredArc (centre.x, centre.y, radius, radius, 0.0f, a0, juce::jmin (now, split), true);
-            g.setColour (colour::info.withAlpha (0.9f));
+            g.setColour (accent.withAlpha (0.14f));
+            g.strokePath (lit, juce::PathStrokeType (24.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setGradientFill (juce::ColourGradient (colour::info, centre.x - radius, centre.y, accent, centre.x + radius * 0.4f, centre.y - radius, false));
             g.strokePath (lit, juce::PathStrokeType (10.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
             if (now > split)
             {

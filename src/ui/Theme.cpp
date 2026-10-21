@@ -1,6 +1,7 @@
 #include "ui/Theme.h"
 
 #include "ui/Icons.h"
+#include "ui/PluginSkin.h"
 
 namespace lynx::theme
 {
@@ -457,6 +458,18 @@ void LookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, 
 {
     const auto bipolar = slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0
                          && std::abs (slider.getMinimum() + slider.getMaximum()) < 1e-6 * (slider.getMaximum() - slider.getMinimum());
+    if (const auto* skinned = slider.getProperties().getVarPointer (skin::sliderProperty)) // a plugin page's knob (ui/PluginSkin.h)
+    {
+        skin::KnobLook look;
+        look.value = pos;
+        look.bipolar = bipolar;
+        look.accent = juce::Colour ((juce::uint32) (juce::int64) *skinned);
+        look.hover = slider.isMouseOverOrDragging() ? 1.0f : 0.0f;
+        look.active = slider.isMouseButtonDown();
+        look.enabled = slider.isEnabled();
+        skin::knob (g, juce::Rectangle<int> (x, y, width, height).toFloat(), look);
+        return;
+    }
     auto arc = slider.findColour (juce::Slider::rotarySliderFillColourId);
     if (! slider.isEnabled())
         arc = textDisabled;
@@ -484,6 +497,15 @@ void LookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int width, 
 
     const auto vertical = slider.isVertical();
     const auto bounds = juce::Rectangle<int> (x, y, width, height).toFloat();
+    if (const auto* skinned = slider.getProperties().getVarPointer (skin::sliderProperty)) // a plugin page's fader
+    {
+        const auto v = vertical ? (bounds.getBottom() - sliderPos) / juce::jmax (1.0f, bounds.getHeight()) : (sliderPos - bounds.getX()) / juce::jmax (1.0f, bounds.getWidth());
+        const auto track = vertical ? bounds.withSizeKeepingCentre (4.0f, bounds.getHeight()) : bounds.withSizeKeepingCentre (bounds.getWidth(), 4.0f);
+        const auto bip = slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0;
+        skin::slider (g, track, v, vertical, bip, juce::Colour ((juce::uint32) (juce::int64) *skinned), slider.isMouseOverOrDragging(), slider.isEnabled(),
+                      juce::jmin (vertical ? bounds.getWidth() - 2.0f : bounds.getHeight() - 2.0f, 26.0f), 12.0f);
+        return;
+    }
     const auto trackWidth = 4.0f;
     const auto active = slider.isMouseOverOrDragging();
     const auto trackColour = slider.isEnabled() ? slider.findColour (juce::Slider::trackColourId) : textDisabled;

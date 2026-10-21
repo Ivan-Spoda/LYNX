@@ -19,6 +19,7 @@
 #include "engine/AudioEngine.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
+#include "ui/PluginSkin.h"
 #include "ui/Theme.h"
 #include "ui/ValueControl.h"
 
@@ -39,8 +40,9 @@ class ProEditor : public juce::Component,
 {
 public:
     ProEditor (AudioEngine& e, int t, int s, EffectKind k, bool demoMode, int width, int height)
-        : engine (e), track (t), slot (s), kind (k), demo (demoMode), fft (fftOrder)
+        : engine (e), track (t), slot (s), kind (k), demo (demoMode), accent (skin::accentFor (k)), fft (fftOrder)
     {
+        anim.onFrame = [this] { repaint(); };
         history.assign (historyLength, Column {});
         fftData.assign ((std::size_t) fftSize * 2, 0.0f);
         window.resize ((std::size_t) fftSize);
@@ -446,13 +448,22 @@ protected:
     {
         mouse = e.position;
         bodyMove (e.position);
+        anim.setHot (controlIndexAt (e.position));
         repaint();
     }
     void mouseExit (const juce::MouseEvent&) override
     {
         mouse = { -1.0f, -1.0f };
         bodyMove (mouse);
+        anim.setHot (-1);
         repaint();
+    }
+    int controlIndexAt (juce::Point<float> p) const
+    {
+        const auto all = controls();
+        for (int i = (int) all.size(); --i >= 0;)
+            if (all[(std::size_t) i].r.contains (p)) return i;
+        return -1;
     }
 
     ui::Hint hintAt (juce::Point<int> position) override
@@ -476,7 +487,7 @@ protected:
     void paint (juce::Graphics& g) override
     {
         using namespace theme;
-        g.fillAll (colour::bg0);
+        skin::canvas (g, getLocalBounds().toFloat(), accent);
         const auto* fx = current();
         if (fx == nullptr)
         {
@@ -487,12 +498,10 @@ protected:
         }
         paintBody (g, *fx);
         paintHeader (g, *fx);
-        g.setColour (colour::bg2);
-        g.fillRect (barArea());
-        g.setColour (colour::border);
-        g.drawHorizontalLine ((int) barArea().getY(), 0.0f, (float) getWidth());
-        for (const auto& c : controls())
-            paintControl (g, c);
+        skin::bottomBar (g, barArea());
+        const auto all = controls();
+        for (int i = 0; i < (int) all.size(); ++i)
+            paintControl (g, all[(std::size_t) i], i);
         paintOverlay (g, *fx);
     }
 
@@ -500,32 +509,31 @@ protected:
     {
         using namespace theme;
         const auto h = headerArea();
-        g.setColour (colour::bg2);
-        g.fillRect (h);
-        g.setColour (colour::border);
-        g.drawHorizontalLine ((int) h.getBottom() - 1, 0.0f, h.getRight());
-        g.setColour (fx.enabled ? colour::ledOn : colour::ledOff);
-        g.fillEllipse (juce::Rectangle<float> (8.0f, 8.0f).withCentre ({ 14.0f, h.getCentreY() }));
-        g.setColour (colour::textPrimary);
-        g.setFont (font (type::title, true));
+        skin::headerBar (g, h, accent);
+        skin::brandMark (g, juce::Rectangle<float> (8.0f, 0.0f, 20.0f, h.getHeight()));
+        skin::powerLed (g, { 36.0f, h.getCentreY() }, 7.0f, fx.enabled);
         const auto name = title();
-        const auto w = juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), name);
-        g.drawText (name, juce::Rectangle<float> (26.0f, 0.0f, w + 8.0f, h.getHeight()), juce::Justification::centredLeft);
-        g.setColour (colour::accent);
-        g.fillRect (juce::Rectangle<float> (26.0f, h.getBottom() - 3.0f, w, 2.0f));
+        const auto w = skin::titleText (g, juce::Rectangle<float> (46.0f, 0.0f, 300.0f, h.getHeight()), name, accent);
         g.setColour (colour::textSecondary);
         g.setFont (font (type::small));
-        g.drawText (trackName() + "  -  " + tr ("slot {0}", { juce::String (slot + 1) }), juce::Rectangle<float> (40.0f + w, 0.0f, 220.0f, h.getHeight()),
+        g.drawText (trackName() + "  -  " + tr ("slot {0}", { juce::String (slot + 1) }), juce::Rectangle<float> (58.0f + w, 0.0f, 220.0f, h.getHeight()),
                     juce::Justification::centredLeft, true);
         g.setColour (colour::textDisabled);
         g.setFont (font (type::caption));
-        g.drawText (gestures(), h.withTrimmedLeft (w + 250.0f).withTrimmedRight (12.0f), juce::Justification::centredRight, true);
+        g.drawText (gestures(), h.withTrimmedLeft (w + 270.0f).withTrimmedRight (12.0f), juce::Justification::centredRight, true);
     }
 
-    void paintControl (juce::Graphics& g, const Ctl& c)
+    // the colour a control is drawn in: the plugin's accent unless the editor gave it its own
+    juce::Colour tint (const Ctl& c) const { return c.colour == theme::colour::accent ? accent : c.colour; }
+
+    void paintControl (juce::Graphics& g, const Ctl& c, int index = -1)
     {
         using namespace theme;
         const auto hover = c.r.contains (mouse);
+        const auto hot = index >= 0 ? anim.level (index) : (hover ? 1.0f : 0.0f);
+        const auto ac = tint (c);
+        const auto* fx = current();
+        const auto on = fx == nullptr || fx->enabled;
         switch (c.type)
         {
             case K::knob:
@@ -534,15 +542,22 @@ protected:
                                            : juce::jmin (c.r.getWidth() - 10.0f, c.r.getHeight() - 34.0f);
                 const auto knobR = juce::Rectangle<float> (c.r.getCentreX() - d / 2.0f, c.r.getY() + 2.0f, d, d);
                 const auto active = dragCtl == c.param && c.param >= 0;
-                drawKnob (g, knobR, v (c.param), c.bipolar, active ? colour::accent : c.colour, hover);
-                g.setColour (colour::textSecondary);
+                skin::KnobLook look;
+                look.value = v (c.param);
+                look.bipolar = c.bipolar;
+                look.accent = ac;
+                look.hover = hot;
+                look.active = active;
+                look.enabled = on;
+                skin::knob (g, knobR, look);
+                g.setColour (active ? ac.brighter (0.3f) : skin::captionColour().interpolatedWith (colour::textPrimary, hot * 0.5f));
                 g.setFont (font (c.size == 2 ? type::small : type::caption, true));
                 g.drawText (caps (c.caption), juce::Rectangle<float> (c.r.getX() - 14.0f, knobR.getBottom() + 3.0f, c.r.getWidth() + 28.0f, 14.0f),
                             juce::Justification::centred, false);
                 if (c.showValue)
                 {
-                    g.setColour (active || hover ? colour::textPrimary : colour::textSecondary.brighter (0.2f));
-                    g.setFont (font (type::small));
+                    g.setColour (skin::valueColour (active || hover));
+                    g.setFont (font (c.size == 2 ? type::body : type::small, c.size == 2));
                     g.drawText (text (c.param), juce::Rectangle<float> (c.r.getX() - 14.0f, knobR.getBottom() + 17.0f, c.r.getWidth() + 28.0f, 14.0f),
                                 juce::Justification::centred, false);
                 }
@@ -552,45 +567,38 @@ protected:
             {
                 const auto track = juce::Rectangle<float> (c.r.getCentreX() - 2.0f, c.r.getY() + 6.0f, 4.0f, c.r.getHeight() - 42.0f);
                 const auto active = dragCtl == c.param && c.param >= 0;
-                g.setColour (colour::knobTrack);
-                g.fillRoundedRectangle (track, 2.0f);
-                const auto y = track.getBottom() - track.getHeight() * v (c.param);
-                const auto from = c.bipolar ? track.getCentreY() : track.getBottom();
-                g.setColour ((active ? colour::accent : c.colour).withAlpha (0.8f));
-                g.fillRect (track.withTop (juce::jmin (y, from)).withBottom (juce::jmax (y, from)));
-                const auto thumb = juce::Rectangle<float> (26.0f, 12.0f).withCentre ({ track.getCentreX(), y });
-                g.setColour (hover || active ? colour::bg6.brighter (0.2f) : colour::bg6);
-                g.fillRoundedRectangle (thumb, 3.0f);
-                g.setColour (active ? colour::accent : colour::borderStrong.brighter (0.3f));
-                g.drawRoundedRectangle (thumb, 3.0f, 1.0f);
-                g.setColour (colour::textSecondary);
+                skin::slider (g, track, v (c.param), true, c.bipolar, ac, active || hot > 0.5f, on, 26.0f, 12.0f);
+                g.setColour (active ? ac.brighter (0.3f) : skin::captionColour());
                 g.setFont (font (type::caption, true));
                 g.drawText (caps (c.caption), juce::Rectangle<float> (c.r.getX() - 12.0f, track.getBottom() + 8.0f, c.r.getWidth() + 24.0f, 13.0f), juce::Justification::centred, false);
-                g.setColour (active || hover ? colour::textPrimary : colour::textSecondary.brighter (0.2f));
+                g.setColour (skin::valueColour (active || hover));
                 g.setFont (font (type::caption));
                 g.drawText (text (c.param), juce::Rectangle<float> (c.r.getX() - 12.0f, track.getBottom() + 21.0f, c.r.getWidth() + 24.0f, 13.0f), juce::Justification::centred, false);
                 break;
             }
             case K::toggle:
             {
-                const auto on = v (c.param) >= 0.5f;
-                g.setColour (hover ? colour::bg5 : colour::bg4);
-                g.fillRoundedRectangle (c.r, radius::md);
-                g.setColour (on ? c.colour : colour::borderStrong);
-                g.drawRoundedRectangle (c.r.reduced (0.5f), radius::md, 1.0f);
-                g.setColour (on ? c.colour : colour::ledOff);
-                g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ c.r.getX() + 11.0f, c.r.getCentreY() }));
-                g.setColour (on ? colour::textPrimary : colour::textSecondary);
-                g.setFont (font (type::small, on));
+                const auto lit = v (c.param) >= 0.5f;
+                skin::button (g, c.r, false, hover, ac);
+                skin::powerLed (g, { c.r.getX() + 11.0f, c.r.getCentreY() }, 6.0f, false);
+                if (lit)
+                {
+                    const auto led = juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ c.r.getX() + 11.0f, c.r.getCentreY() });
+                    g.setColour (ac.withAlpha (0.35f));
+                    g.fillEllipse (led.expanded (3.5f));
+                    g.setColour (ac);
+                    g.fillEllipse (led);
+                    g.setColour (ac.withAlpha (0.7f));
+                    g.drawRoundedRectangle (c.r.reduced (0.5f), radius::md, 1.0f);
+                }
+                g.setColour (lit ? colour::textPrimary : colour::textSecondary);
+                g.setFont (font (type::small, lit));
                 g.drawText (c.caption, c.r.withTrimmedLeft (20.0f).withTrimmedRight (4.0f), juce::Justification::centred, true);
                 break;
             }
             case K::button:
             {
-                g.setColour (c.lit ? c.colour.withAlpha (0.28f) : (hover ? colour::bg5 : colour::bg4));
-                g.fillRoundedRectangle (c.r, radius::md);
-                g.setColour (c.lit ? c.colour : colour::borderStrong);
-                g.drawRoundedRectangle (c.r.reduced (0.5f), radius::md, 1.0f);
+                skin::button (g, c.r, c.lit, hover, ac);
                 g.setColour (c.lit || hover ? colour::textPrimary : colour::textSecondary);
                 g.setFont (font (type::small, c.lit));
                 g.drawText (c.caption, c.r.reduced (4.0f, 0.0f), juce::Justification::centred, true);
@@ -598,17 +606,19 @@ protected:
             }
             case K::menu:
             {
-                g.setColour (hover ? colour::bg6 : colour::bg5);
-                g.fillRoundedRectangle (c.r, radius::lg);
-                g.setColour (colour::borderStrong.brighter (0.2f));
-                g.drawRoundedRectangle (c.r.reduced (0.5f), radius::lg, 1.0f);
+                skin::selector (g, c.r, hover);
                 g.setColour (colour::textPrimary);
                 g.setFont (font (type::body, true));
                 const auto i = optionIndex (c);
-                g.drawText (tr (c.options[i]) + juce::String::fromUTF8 (" \xe2\x96\xbe"), c.r.reduced (6.0f, 0.0f), juce::Justification::centred, true);
+                g.drawText (tr (c.options[i]), c.r.reduced (12.0f, 0.0f).withTrimmedRight (6.0f), juce::Justification::centred, true);
+                juce::Path tri;
+                const auto ax = c.r.getRight() - 11.0f, ay = c.r.getCentreY();
+                tri.addTriangle (ax - 3.5f, ay - 1.5f, ax + 3.5f, ay - 1.5f, ax, ay + 2.5f);
+                g.setColour (hover ? ac : colour::textSecondary);
+                g.fillPath (tri);
                 if (c.caption.isNotEmpty())
                 {
-                    g.setColour (colour::textDisabled);
+                    g.setColour (skin::captionColour());
                     g.setFont (font (type::caption, true));
                     g.drawText (caps (c.caption), c.r.translated (0.0f, c.r.getHeight() + 1.0f).withHeight (13.0f), juce::Justification::centred, false);
                 }
@@ -618,24 +628,20 @@ protected:
             {
                 const auto n = juce::jmax (1, c.options.size());
                 const auto sel = optionIndex (c);
-                g.setColour (colour::bg1);
-                g.fillRoundedRectangle (c.r, radius::md);
+                skin::valuePlate (g, c.r, radius::md);
                 for (int i = 0; i < n; ++i)
                 {
                     const auto cell = juce::Rectangle<float> (c.r.getX() + c.r.getWidth() * (float) i / (float) n, c.r.getY(), c.r.getWidth() / (float) n, c.r.getHeight()).reduced (1.5f);
-                    const auto on = i == sel;
-                    if (on || cell.contains (mouse))
+                    const auto sel1 = i == sel;
+                    if (sel1)
+                        skin::button (g, cell, true, cell.contains (mouse), ac, radius::sm);
+                    else if (cell.contains (mouse))
                     {
-                        g.setColour (on ? colour::bg6 : colour::bg4);
+                        g.setColour (colour::bg4);
                         g.fillRoundedRectangle (cell, radius::sm);
                     }
-                    if (on)
-                    {
-                        g.setColour (c.colour);
-                        g.fillRect (cell.withTrimmedTop (cell.getHeight() - 2.0f).reduced (4.0f, 0.0f));
-                    }
-                    g.setColour (on ? colour::textPrimary : colour::textSecondary);
-                    g.setFont (font (type::small, on));
+                    g.setColour (sel1 ? colour::textPrimary : colour::textSecondary);
+                    g.setFont (font (type::small, sel1));
                     g.drawText (caps (tr (c.options[i])), cell, juce::Justification::centred, true);
                 }
                 break;
@@ -644,7 +650,7 @@ protected:
             {
                 if (hover)
                 {
-                    g.setColour (colour::bg4);
+                    g.setColour (juce::Colours::white.withAlpha (0.06f));
                     g.fillRoundedRectangle (c.r, radius::md);
                 }
                 g.setFont (font (type::small));
@@ -652,7 +658,8 @@ protected:
                 const auto cap = c.caption + ":";
                 const auto cw = juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), cap) + 6.0f;
                 g.drawText (cap, c.r.withWidth (cw).translated (6.0f, 0.0f), juce::Justification::centredLeft);
-                g.setColour (dragCtl == c.param && c.param >= 0 ? colour::accent : colour::textPrimary);
+                g.setColour (dragCtl == c.param && c.param >= 0 ? ac : colour::textPrimary);
+                g.setFont (font (type::small, true));
                 const auto value = c.type == K::barMenu ? tr (c.options[optionIndex (c)]) + juce::String::fromUTF8 (" \xe2\x96\xbe") : text (c.param);
                 g.drawText (value, c.r.withTrimmedLeft (cw + 6.0f), juce::Justification::centredLeft, true);
                 break;
@@ -664,12 +671,23 @@ protected:
     // a floating panel (the knob panels over the display)
     static void drawPanel (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour edge = theme::colour::borderStrong)
     {
-        using namespace theme;
-        juce::DropShadow (juce::Colours::black.withAlpha (0.55f), 14, { 0, 4 }).drawForRectangle (g, r.toNearestInt());
-        g.setColour (colour::bg2.withAlpha (0.94f));
-        g.fillRoundedRectangle (r, 10.0f);
-        g.setColour (edge.withAlpha (0.8f));
-        g.drawRoundedRectangle (r.reduced (0.5f), 10.0f, 1.2f);
+        skin::floatingPanel (g, r, edge);
+    }
+
+    // the background of a display (the level history, the analyser): deep, with the accent pooling under the header
+    void displayBackground (juce::Graphics& g, juce::Rectangle<float> r) const
+    {
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff15171c), 0.0f, r.getY(), juce::Colour (0xff08090b), 0.0f, r.getBottom(), false));
+        g.fillRect (r);
+        juce::ColourGradient pool (accent.withAlpha (0.06f), r.getCentreX(), r.getY(), accent.withAlpha (0.0f), r.getCentreX(), r.getY() + r.getWidth() * 0.4f, true);
+        g.setGradientFill (pool);
+        g.fillRect (r.withHeight (juce::jmin (r.getHeight(), r.getWidth() * 0.4f)));
+    }
+    // a level area filled with a vertical gradient of `c` (strong at the top, fading down)
+    static void fillLevel (juce::Graphics& g, const juce::Path& p, juce::Colour c, juce::Rectangle<float> r, float top, float bottom)
+    {
+        g.setGradientFill (juce::ColourGradient (c.withAlpha (top), 0.0f, r.getY(), c.withAlpha (bottom), 0.0f, r.getBottom(), false));
+        g.fillPath (p);
     }
 
     static void caption (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& t, juce::Justification j = juce::Justification::centred)
@@ -690,6 +708,7 @@ protected:
 
     void pushColumn (Column c)
     {
+        silentRun = c.in < -90.0f && c.out < -90.0f && c.gr < 0.05f ? silentRun + 1 : 0;
         history[(std::size_t) historyPos] = c;
         historyPos = (historyPos + 1) % historyLength;
     }
@@ -736,15 +755,15 @@ protected:
     // a vertical level meter (peak with a slow fall), from `lo` dB at the bottom to 0 dB at the top
     static void drawMeter (juce::Graphics& g, juce::Rectangle<float> r, float db, float lo, juce::Colour c)
     {
-        using namespace theme;
-        g.setColour (colour::bg1);
-        g.fillRect (r);
         const auto f = juce::jlimit (0.0f, 1.0f, (db - lo) / -lo);
-        auto lit = r.withTop (r.getBottom() - r.getHeight() * f);
-        g.setColour (c);
-        g.fillRect (lit);
-        g.setColour (colour::bg0.withAlpha (0.55f));
-        for (auto y = r.getBottom() - 3.0f; y > r.getY(); y -= 3.0f) g.drawHorizontalLine ((int) y, r.getX(), r.getRight());
+        if (c.getHue() > 0.25f && c.getHue() < 0.45f && c.getSaturation() > 0.4f) // the green level meters: the lit gradient
+        {
+            skin::meter (g, r, f, 0.0f, true);
+            return;
+        }
+        skin::meterSolid (g, r, f, c.withAlpha (1.0f), false);
+        g.setColour (juce::Colour (0xff08090b).withAlpha (0.55f));
+        for (auto y = r.getBottom() - 3.0f; y > r.getBottom() - r.getHeight() * f; y -= 3.0f) g.drawHorizontalLine ((int) y, r.getX(), r.getRight());
     }
 
     // --- spectrum analyser (the slot's input / output through the analyser tap) ----------------------
@@ -862,6 +881,9 @@ protected:
     int track, slot;
     EffectKind kind;
     bool demo = false;
+    juce::Colour accent;   // the plugin family's accent (ui/PluginSkin.h)
+    skin::Animator anim;   // hover fades (runs only while something moves)
+    int silentRun = 0;     // consecutive silent history columns (an idle display is not repainted)
     juce::Point<float> mouse { -1.0f, -1.0f };
     int dragCtl = -1;
     Ctl pressed;
@@ -878,11 +900,24 @@ private:
 
     void timerCallback() override
     {
+        if (! isShowing()) return; // a hidden editor costs nothing
         if (usesHistory()) pullHistory();
         if (usesSpectrum()) updateSpectrum();
         tick();
-        if (isShowing()) repaint();
+        // repaint only while the display can change: signal in the visible history, a spectrum above the floor,
+        // live meters moving (an idle editor on a silent track stops drawing)
+        auto live = usesHistory() && silentRun < historyLength;
+        if (usesSpectrum())
+            for (const auto* sp : { &specPre, &specPost })
+                for (const auto x : *sp)
+                    if (x > -119.0f) { live = true; break; }
+        float meters = grDb();
+        for (int k = 0; k < 6; ++k) meters += liveMeter (k) * (float) (k + 1);
+        if (std::abs (meters - lastMeters) > 1e-5f) live = true;
+        lastMeters = meters;
+        if (live || demo) repaint();
     }
+    float lastMeters = 0.0f;
 
     juce::dsp::FFT fft;
     std::vector<float> fftData, window;

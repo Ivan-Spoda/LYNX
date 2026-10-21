@@ -30,6 +30,7 @@
 #include "ui/FacetEqEditor.h"
 #include "ui/ProEditors.h"
 #include "ui/ParametricEqEditor.h"
+#include "ui/PluginSkin.h"
 #include "ui/Theme.h"
 #include "ui/ValueControl.h"
 #include "ui/WindowOwner.h"
@@ -78,6 +79,8 @@ public:
                     layout = &plugui::soundgoodizerLayout();
         }
 
+        accent = skin::accentFor (kind);
+        anim.onFrame = [this] { repaint(); };
         page = initialPage;
         if (kind == EffectKind::equo && initialPage == 0)
             page = 3; // bank 1, volume (FL opens EQUO on its first bank)
@@ -306,7 +309,7 @@ public:
     void paint (juce::Graphics& g) override
     {
         using namespace theme;
-        g.fillAll (colour::bg1);
+        skin::canvas (g, getLocalBounds().toFloat(), accent);
         const auto* fx = current();
 
         if (fx == nullptr)
@@ -339,37 +342,36 @@ public:
     {
         using namespace theme;
         const auto area = headerArea();
-        g.setColour (colour::bg3);
-        g.fillRect (area);
-        g.setColour (colour::border);
-        g.drawHorizontalLine ((int) area.getBottom() - 1, 0.0f, area.getRight());
+        skin::headerBar (g, area, accent);
 
         // options menu (FL's arrow at the left of the plugin's title)
-        drawArrow (g, menuButton(), 0.0f, hoverHeader == 1 ? colour::textPrimary : colour::textSecondary);
+        drawArrow (g, menuButton(), 0.0f, hoverHeader == 1 ? accent : colour::textSecondary);
 
-        // bypass LED + name + where it is
-        const auto led = juce::Rectangle<float> (8.0f, 8.0f).withCentre ({ menuButton().getRight() + 9.0f, area.getCentreY() });
-        g.setColour (fx.enabled ? colour::ledOn : colour::ledOff);
-        g.fillEllipse (led);
-        auto text = area.withLeft (led.getRight() + 8.0f).withRight (presetBox().getX() - 6.0f);
+        // LYNX's mark, bypass LED, name, where it is
+        skin::brandMark (g, juce::Rectangle<float> (menuButton().getRight() + 2.0f, 0.0f, 18.0f, area.getHeight()));
+        const auto ledC = juce::Point<float> (menuButton().getRight() + 30.0f, area.getCentreY());
+        skin::powerLed (g, ledC, 7.0f, fx.enabled);
+        auto text = area.withLeft (ledC.x + 10.0f).withRight (presetBox().getX() - 6.0f);
         const auto name = layout == &plugui::soundgoodizerLayout() ? juce::String ("Soundgoodizer") : utf8 (effectInfo (kind).name);
-        g.setFont (font (type::body, true));
-        g.setColour (colour::textPrimary);
-        const auto nameWidth = juce::jmin (text.getWidth(), juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), name) + 2.0f);
-        g.drawText (name, text.removeFromLeft (nameWidth), juce::Justification::centredLeft, true);
+        const auto nameWidth = skin::titleText (g, text.withHeight (area.getHeight()), name, accent);
+        text.removeFromLeft (nameWidth);
         g.setFont (font (type::small));
         g.setColour (colour::textSecondary);
-        g.drawText ("(" + trackName() + ")", text.withTrimmedLeft (6.0f), juce::Justification::centredLeft, true);
+        g.drawText ("(" + trackName() + ")", text.withTrimmedLeft (8.0f), juce::Justification::centredLeft, true);
 
         // presets: name, previous, next
         const auto box = presetBox();
-        g.setColour (hoverHeader == 2 ? colour::bg5 : colour::bg2);
-        g.fillRoundedRectangle (box, radius::sm);
-        g.setColour (colour::textSecondary);
-        g.setFont (font (type::small));
+        skin::valuePlate (g, box, radius::md);
+        if (hoverHeader == 2)
+        {
+            g.setColour (accent.withAlpha (0.5f));
+            g.drawRoundedRectangle (box.reduced (0.5f), radius::md, 1.0f);
+        }
+        g.setColour (presetName.isNotEmpty() ? colour::textPrimary : colour::textSecondary);
+        g.setFont (font (type::small, presetName.isNotEmpty()));
         g.drawText (presetName.isNotEmpty() ? presetName : tr ("(no preset)"), box.reduced (8.0f, 0.0f), juce::Justification::centredRight, true);
-        drawArrow (g, prevButton(), juce::MathConstants<float>::pi, hoverHeader == 3 ? colour::accent : colour::textSecondary);
-        drawArrow (g, nextButton(), 0.0f, hoverHeader == 4 ? colour::accent : colour::textSecondary);
+        drawArrow (g, prevButton(), juce::MathConstants<float>::pi, hoverHeader == 3 ? accent : colour::textSecondary);
+        drawArrow (g, nextButton(), 0.0f, hoverHeader == 4 ? accent : colour::textSecondary);
     }
 
     static void drawArrow (juce::Graphics& g, juce::Rectangle<float> r, float angle, juce::Colour c)
@@ -385,7 +387,7 @@ public:
     {
         if (! fx.enabled)
             return theme::colour::textDisabled;
-        return colourIndex >= 0 ? peqview::bandColour (colourIndex) : theme::colour::knobArc;
+        return colourIndex >= 0 ? peqview::bandColour (colourIndex) : accent;
     }
 
     void caption (juce::Graphics& g, const LayoutItem& item, juce::Rectangle<float> r, juce::Justification j = juce::Justification::centred)
@@ -393,7 +395,7 @@ public:
         using namespace theme;
         if (item.label == nullptr || *item.label == 0)
             return;
-        g.setColour (hasStyle (item, plugui::dim) ? colour::textDisabled : colour::textSecondary);
+        g.setColour (hasStyle (item, plugui::dim) ? colour::textDisabled : skin::captionColour());
         g.setFont (font (juce::jmax (8.0f, 9.5f * scale()), true));
         g.drawFittedText (caps (tr (item.label)), r.toNearestInt(), j, 1, 0.7f);
     }
@@ -406,23 +408,15 @@ public:
         const auto param = paramOf (item);
         const auto value = valueOf (param);
         const auto hot = index == hoverItem || index == dragItem;
+        const auto glow = index == dragItem ? 1.0f : anim.level (index);
 
         switch (item.type)
         {
             case Item::section:
             {
-                g.setColour (hasStyle (item, plugui::raised) ? colour::bg3 : colour::bg2);
-                g.fillRoundedRectangle (r, radius::md * s);
+                skin::section (g, r, radius::lg * s, hasStyle (item, plugui::raised));
                 if (item.label != nullptr && *item.label != 0 && ! hasStyle (item, plugui::boxed))
-                {
-                    auto head = r.withHeight (16.0f * s);
-                    g.setColour (colour::bg3);
-                    g.fillRoundedRectangle (head, radius::md * s);
-                    g.fillRect (head.withTrimmedTop (head.getHeight() * 0.5f));
-                    g.setColour (colour::textSecondary);
-                    g.setFont (font (juce::jmax (8.0f, 10.5f * s), true));
-                    g.drawFittedText (caps (tr (item.label)), head.toNearestInt(), juce::Justification::centred, 1, 0.7f);
-                }
+                    skin::sectionTitle (g, r.withHeight (16.0f * s).translated (0.0f, 1.0f * s), caps (tr (item.label)), accent, juce::jmax (8.0f, 10.0f * s));
                 break;
             }
 
@@ -437,20 +431,14 @@ public:
                     break;
                 }
                 if (hasStyle (item, plugui::boxed))
-                {
-                    g.setColour (colour::bg3);
-                    g.fillRoundedRectangle (r, radius::sm * s);
-                }
+                    skin::section (g, r, radius::sm * s, true);
                 caption (g, item, r, hasStyle (item, plugui::captionLeft | plugui::alignLeft) ? juce::Justification::centredLeft : juce::Justification::centred);
                 break;
 
             case Item::value:
                 if (hasStyle (item, plugui::boxed)) // a read-out plate (FL's value boxes)
-                {
-                    g.setColour (colour::bg0);
-                    g.fillRoundedRectangle (r, radius::sm * s);
-                }
-                g.setColour (hot ? colour::accent : (fx.enabled ? colour::textPrimary : colour::textDisabled));
+                    skin::valuePlate (g, r, radius::sm * s);
+                g.setColour (hot ? accent : (fx.enabled ? colour::textPrimary : colour::textDisabled));
                 g.setFont (font (juce::jmax (8.0f, 11.0f * s)));
                 g.drawFittedText (valueText (param, value), r.toNearestInt(),
                                   hasStyle (item, plugui::alignLeft) ? juce::Justification::centredLeft : juce::Justification::centred, 1, 0.7f);
@@ -459,29 +447,19 @@ public:
             case Item::knob:
             {
                 const auto circle = knobCircle (item);
-                drawKnob (g, circle, value, hasStyle (item, plugui::bipolar), arcColour (fx, item.colour), hot && item.colour < 0);
-                if (circle.getWidth() > 56.0f) // big knobs: a body that fills the ring (the theme's body stops at 22 px)
-                {
-                    const auto size = circle.getWidth() - 2.0f;
-                    const auto thickness = juce::jlimit (2.0f, 4.0f, size * 0.09f);
-                    const auto radius = size * 0.5f - thickness * 2.2f;
-                    const auto centre = circle.getCentre();
-                    const auto body = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre);
-                    g.setGradientFill (juce::ColourGradient (hot ? colour::bg6 : colour::bg5, centre.x, body.getY(), colour::bg4, centre.x, body.getBottom(), false));
-                    g.fillEllipse (body);
-                    g.setColour (colour::borderStrong);
-                    g.drawEllipse (body, 1.0f);
-                    const auto angle = -juce::MathConstants<float>::pi * 0.75f + juce::MathConstants<float>::pi * 1.5f * juce::jlimit (0.0f, 1.0f, value);
-                    const juce::Point<float> dir { std::sin (angle), -std::cos (angle) };
-                    g.setColour (hot ? colour::accent : colour::textPrimary);
-                    g.drawLine ({ centre + dir * (radius * 0.55f), centre + dir * (radius * 0.88f) }, juce::jmax (2.0f, size * 0.035f));
-                }
+                skin::KnobLook look;
+                look.value = value;
+                look.bipolar = hasStyle (item, plugui::bipolar);
+                look.accent = item.colour >= 0 ? peqview::bandColour (item.colour) : accent;
+                look.hover = glow;
+                look.active = index == dragItem;
+                look.enabled = fx.enabled;
+                skin::knob (g, circle, look);
                 auto below = r.withTop (circle.getBottom() + 1.0f * s);
                 if (hasStyle (item, plugui::valueAbove))
                 {
                     const auto box = r.withHeight (13.0f * s).reduced (juce::jmax (0.0f, (r.getWidth() - 40.0f * s) * 0.5f), 0.0f);
-                    g.setColour (colour::bg0);
-                    g.fillRoundedRectangle (box, radius::sm);
+                    skin::valuePlate (g, box, radius::sm);
                     g.setColour (hot ? colour::textPrimary : colour::textSecondary);
                     g.setFont (font (juce::jmax (8.0f, 9.0f * s)));
                     g.drawFittedText (valueText (param, value), box.toNearestInt(), juce::Justification::centred, 1, 0.6f);
@@ -489,7 +467,7 @@ public:
                 if (hasStyle (item, plugui::captionAbove))
                 {
                     caption (g, item, r.withHeight (13.0f * s).expanded (10.0f * s, 0.0f));
-                    g.setColour (hot ? colour::accent : colour::textPrimary);
+                    g.setColour (hot ? look.accent.brighter (0.3f) : skin::valueColour (false));
                     g.setFont (font (juce::jmax (8.0f, 10.5f * s)));
                     g.drawFittedText (valueText (param, value), below.withHeight (13.0f * s).expanded (10.0f * s, 0.0f).toNearestInt(), juce::Justification::centred, 1, 0.7f);
                 }
@@ -498,7 +476,7 @@ public:
                     caption (g, item, below.withHeight (12.0f * s));
                     if (hasStyle (item, plugui::showValue))
                     {
-                        g.setColour (hot ? colour::accent : colour::textPrimary);
+                        g.setColour (hot ? look.accent.brighter (0.3f) : skin::valueColour (false));
                         g.setFont (font (juce::jmax (8.0f, 10.5f * s)));
                         g.drawFittedText (valueText (param, value), below.withTrimmedTop (12.0f * s).withHeight (13.0f * s).toNearestInt(),
                                           juce::Justification::centred, 1, 0.7f);
@@ -524,36 +502,8 @@ public:
                 const auto thick = juce::jmax (3.0f, 4.0f * s);
                 const auto trackRect = vertical ? area.withSizeKeepingCentre (thick, area.getHeight() - 10.0f * s)
                                                 : area.withSizeKeepingCentre (area.getWidth() - 8.0f * s, thick);
-                g.setColour (colour::bg0);
-                g.fillRoundedRectangle (trackRect, thick * 0.5f);
-                const auto bip = hasStyle (item, plugui::bipolar);
-                juce::Rectangle<float> fill;
-                juce::Point<float> thumb;
-                if (vertical)
-                {
-                    const auto y = trackRect.getBottom() - trackRect.getHeight() * value;
-                    const auto from = bip ? trackRect.getCentreY() : trackRect.getBottom();
-                    fill = { trackRect.getX(), juce::jmin (y, from), trackRect.getWidth(), std::abs (from - y) };
-                    thumb = { trackRect.getCentreX(), y };
-                }
-                else
-                {
-                    const auto x = trackRect.getX() + trackRect.getWidth() * value;
-                    const auto from = bip ? trackRect.getCentreX() : trackRect.getX();
-                    fill = { juce::jmin (x, from), trackRect.getY(), std::abs (from - x), trackRect.getHeight() };
-                    thumb = { x, trackRect.getCentreY() };
-                }
-                g.setColour (hot && item.colour < 0 ? colour::accent : arcColour (fx, item.colour));
-                g.fillRoundedRectangle (fill, thick * 0.5f);
-                const auto thumbRect = vertical ? juce::Rectangle<float> (juce::jmin (area.getWidth(), 20.0f * s), 9.0f * s).withCentre (thumb)
-                                                : juce::Rectangle<float> (9.0f * s, juce::jmin (area.getHeight(), 16.0f * s)).withCentre (thumb);
-                g.setColour (hot ? colour::bg6 : colour::bg5);
-                g.fillRoundedRectangle (thumbRect, radius::sm);
-                g.setColour (hot ? colour::accent : colour::textSecondary);
-                if (vertical)
-                    g.drawHorizontalLine ((int) thumb.y, thumbRect.getX() + 3.0f, thumbRect.getRight() - 3.0f);
-                else
-                    g.drawVerticalLine ((int) thumb.x, thumbRect.getY() + 3.0f, thumbRect.getBottom() - 3.0f);
+                skin::slider (g, trackRect, value, vertical, hasStyle (item, plugui::bipolar), item.colour >= 0 ? peqview::bandColour (item.colour) : accent,
+                              hot, fx.enabled, vertical ? juce::jmin (area.getWidth(), 20.0f * s) : juce::jmin (area.getHeight(), 16.0f * s), 9.0f * s);
                 break;
             }
 
@@ -564,16 +514,16 @@ public:
                 const auto texts = optionTexts (item);
                 if (item.columns > 0) // a grid of named cells (Gross Beat's slots)
                 {
-                    const auto accent = item.colour >= 0 ? colour::info : colour::accent;
+                    const auto cellAccent = item.colour >= 0 ? colour::info : accent;
                     g.setFont (font (juce::jmax (8.0f, 10.0f * s)));
                     for (int o = 0; o < (int) texts.size(); ++o)
                     {
                         const auto cell = gridCell (item, o, (int) texts.size()).reduced (0.5f);
-                        g.setColour (o == chosen ? accent.withAlpha (0.22f) : ((o / item.columns) % 2 == 0 ? colour::bg0 : colour::bg1));
+                        g.setColour (o == chosen ? cellAccent.withAlpha (0.22f) : ((o / item.columns) % 2 == 0 ? colour::bg0 : colour::bg1));
                         g.fillRect (cell);
                         if (o == chosen)
                         {
-                            g.setColour (fx.enabled ? accent : colour::textSecondary);
+                            g.setColour (fx.enabled ? cellAccent : colour::textSecondary);
                             g.drawRect (cell, 1.0f);
                         }
                         g.setColour (o == chosen ? colour::textPrimary : colour::textSecondary);
@@ -587,8 +537,18 @@ public:
                 {
                     const auto row = juce::Rectangle<float> (r.getX(), r.getY() + rowH * (float) o, r.getWidth(), rowH);
                     const auto dot = juce::Rectangle<float> (7.0f * s, 7.0f * s).withCentre ({ row.getX() + 5.0f * s, row.getCentreY() });
-                    g.setColour (o == chosen ? (fx.enabled ? colour::accent : colour::textSecondary) : colour::ledOff);
+                    if (o == chosen && fx.enabled)
+                    {
+                        g.setColour (accent.withAlpha (0.3f));
+                        g.fillEllipse (dot.expanded (2.5f * s));
+                    }
+                    g.setColour (o == chosen ? (fx.enabled ? accent : colour::textSecondary) : juce::Colour (0xff0b0c0f));
                     g.fillEllipse (dot);
+                    if (o != chosen)
+                    {
+                        g.setColour (colour::borderStrong);
+                        g.drawEllipse (dot, 1.0f);
+                    }
                     g.setColour (o == chosen ? colour::textPrimary : (hot ? colour::textSecondary : colour::textDisabled));
                     g.setFont (font (juce::jmax (8.0f, 9.5f * s)));
                     g.drawFittedText (texts[(std::size_t) o], row.withTrimmedLeft (12.0f * s).toNearestInt(),
@@ -607,8 +567,7 @@ public:
                 const auto count = (float) juce::jmax (1, (int) labels.size());
                 const auto w = vertical ? r.getWidth() : r.getWidth() / count;
                 const auto h = vertical ? r.getHeight() / count : r.getHeight();
-                g.setColour (colour::bg0);
-                g.fillRoundedRectangle (r, radius::sm);
+                skin::valuePlate (g, r, radius::md);
                 for (int o = 0; o < (int) labels.size(); ++o)
                 {
                     const auto cell = (vertical ? juce::Rectangle<float> (r.getX(), r.getY() + h * (float) o, w, h)
@@ -619,13 +578,8 @@ public:
                         g.fillRect (cell.withWidth (juce::jmax (2.0f, 3.0f * s)));
                     }
                     if (o == chosen)
-                    {
-                        g.setColour (colour::bg6);
-                        g.fillRoundedRectangle (vertical ? cell.withTrimmedLeft (juce::jmax (2.0f, 3.0f * s)) : cell, radius::sm);
-                        g.setColour (colour::accent);
-                        if (! vertical)
-                            g.fillRect (cell.withTop (cell.getBottom() - juce::jmax (1.5f, 2.0f * s)).reduced (3.0f * s, 0.0f));
-                    }
+                        skin::button (g, vertical ? cell.withTrimmedLeft (juce::jmax (2.0f, 3.0f * s)) : cell, true, false,
+                                      vertical ? peqview::bandColour (o) : (fx.enabled ? accent : colour::textSecondary), radius::sm);
                     g.setColour (o == chosen ? colour::textPrimary : colour::textSecondary);
                     g.setFont (font (juce::jmax (8.0f, 10.0f * s), true));
                     g.drawFittedText (caps (texts[(std::size_t) o]), cell.toNearestInt(),
@@ -639,8 +593,16 @@ public:
                 const auto on = (value >= 0.5f) != hasStyle (item, plugui::inverted);
                 if (hasStyle (item, plugui::boxed)) // a small lit button with its letter (FL's T / L buttons)
                 {
-                    g.setColour (on ? (fx.enabled ? colour::accent : colour::textSecondary) : (hot ? colour::bg6 : colour::bg5));
-                    g.fillRoundedRectangle (r, radius::sm);
+                    if (on)
+                    {
+                        const auto c = fx.enabled ? accent : colour::textSecondary;
+                        g.setColour (c.withAlpha (0.3f));
+                        g.fillRoundedRectangle (r.expanded (1.5f), radius::sm + 1.5f);
+                        g.setGradientFill (juce::ColourGradient (c.brighter (0.2f), 0.0f, r.getY(), c.darker (0.15f), 0.0f, r.getBottom(), false));
+                        g.fillRoundedRectangle (r, radius::sm);
+                    }
+                    else
+                        skin::button (g, r, false, hot, accent, radius::sm);
                     g.setColour (on ? colour::onAccent : colour::textSecondary);
                     g.setFont (font (juce::jmax (8.0f, r.getHeight() * 0.8f), true));
                     if (item.label != nullptr)
@@ -648,12 +610,7 @@ public:
                     break;
                 }
                 const auto box = juce::Rectangle<float> (16.0f * s, 9.0f * s).withCentre ({ r.getX() + 9.0f * s, r.getCentreY() });
-                g.setColour (on ? (fx.enabled ? colour::accent : colour::textSecondary) : colour::bg0);
-                g.fillRoundedRectangle (box, box.getHeight() * 0.5f);
-                g.setColour (on ? colour::onAccent : colour::bg5);
-                const auto knobD = box.getHeight() - 2.0f;
-                g.fillEllipse (juce::Rectangle<float> (knobD, knobD).withCentre ({ on ? box.getRight() - knobD * 0.5f - 1.0f : box.getX() + knobD * 0.5f + 1.0f,
-                                                                                   box.getCentreY() }));
+                skin::switchPill (g, box, on, accent, fx.enabled);
                 auto text = r.withTrimmedLeft (21.0f * s);
                 g.setColour (on ? colour::textPrimary : (hot ? colour::textSecondary : colour::textDisabled));
                 g.setFont (font (juce::jmax (8.0f, 9.5f * s), true));
@@ -667,8 +624,12 @@ public:
                 auto box = r;
                 if (item.label != nullptr && ! hasStyle (item, plugui::noCaption))
                     caption (g, item, box.removeFromTop (12.0f * s));
-                g.setColour (hot ? colour::bg5 : colour::bg0);
-                g.fillRoundedRectangle (box, radius::sm);
+                skin::valuePlate (g, box, radius::sm);
+                if (hot)
+                {
+                    g.setColour (accent.withAlpha (0.5f));
+                    g.drawRoundedRectangle (box.reduced (0.5f), radius::sm, 1.0f);
+                }
                 auto arrows = box.removeFromRight (juce::jmin (12.0f * s, box.getWidth() * 0.4f));
                 g.setColour (colour::textSecondary);
                 drawSmallArrow (g, arrows.removeFromTop (arrows.getHeight() * 0.5f), true);
@@ -696,11 +657,16 @@ public:
                                       r.reduced (2.0f * s, 0.0f).toNearestInt(), juce::Justification::centred, 2, 0.6f);
                     break;
                 }
-                const auto c = item.colour >= 0 ? peqview::bandColour (item.colour) : colour::bg5;
                 const auto chosen = plugui::optionAt (item, value);
                 const auto off = chosen == 0 && kind == EffectKind::parametricEq;
-                g.setColour ((fx.enabled && ! off ? c : c.withSaturation (0.0f).darker (0.6f)).withAlpha (hot ? 1.0f : 0.85f));
-                g.fillRoundedRectangle (r, radius::sm * s);
+                if (item.colour >= 0)
+                {
+                    const auto c = peqview::bandColour (item.colour);
+                    g.setColour ((fx.enabled && ! off ? c : c.withSaturation (0.0f).darker (0.6f)).withAlpha (hot ? 1.0f : 0.85f));
+                    g.fillRoundedRectangle (r, radius::sm * s);
+                }
+                else
+                    skin::selector (g, r, hot, radius::md * s);
                 g.setColour (colour::bg0);
                 if (kind == EffectKind::parametricEq)
                     drawBandShape (g, r.reduced (2.0f * s, 4.0f * s), chosen);
@@ -980,10 +946,9 @@ public:
     {
         using namespace theme;
         const auto s = scale();
-        g.setColour (colour::bg0);
-        g.fillRoundedRectangle (r, radius::md * s);
+        skin::well (g, r, radius::md * s);
         const juce::String id (item.display != nullptr ? item.display : "");
-        const auto curveColour = fx.enabled ? colour::accent : colour::textDisabled;
+        const auto curveColour = fx.enabled ? accent : colour::textDisabled;
         const auto inner = r.reduced (6.0f * s);
         if (dynui::paint (g, id, r, s, fx, [this] (int k) { return liveMeter (k); }, dynHistory)) // the dynamics suite
             return;
@@ -1015,11 +980,10 @@ public:
                 fill.lineTo (area.getRight(), area.getBottom());
                 fill.lineTo (area.getX(), area.getBottom());
                 fill.closeSubPath();
-                g.setColour (curveColour.withAlpha (0.14f));
+                g.setGradientFill (juce::ColourGradient (curveColour.withAlpha (0.28f), 0.0f, area.getY(), curveColour.withAlpha (0.02f), 0.0f, area.getBottom(), false));
                 g.fillPath (fill);
             }
-            g.setColour (curveColour);
-            g.strokePath (p, juce::PathStrokeType (juce::jmax (1.5f, 2.0f * s)));
+            skin::glowStroke (g, p, curveColour, juce::jmax (1.5f, 2.0f * s), fx.enabled ? 1.0f : 0.0f);
         };
 
         if (id == "limiter" || id == "compressor" || id == "dynamics")
@@ -1931,6 +1895,7 @@ public:
         {
             hoverHeader = h;
             hoverItem = i;
+            anim.setHot (i);
             repaint();
         }
         setMouseCursor (i >= 0 || h > 0 ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
@@ -1940,6 +1905,7 @@ public:
     {
         hoverHeader = 0;
         hoverItem = -1;
+        anim.setHot (-1);
         mouseAt = { -1.0f, -1.0f };
         repaint();
     }
@@ -2437,6 +2403,13 @@ private:
 
     void timerCallback() override
     {
+        if (! isShowing()) return; // a hidden editor costs nothing
+        // an idle display (silent track: meters unchanged for longer than the longest history) is not redrawn
+        float meters = 0.0f;
+        for (int k = 0; k < 6; ++k) meters += liveMeter (k) * (float) (k + 1);
+        quietFrames = std::abs (meters - lastMeters) > 1e-6f ? 0 : quietFrames + 1;
+        lastMeters = meters;
+        if (quietFrames > 300 && ! demoDisplays) return;
         bool history = false;
         for (const auto& item : activeLayout().items)
         {
@@ -2464,6 +2437,10 @@ private:
     const plugui::Layout* layout = nullptr;
     int page = 0;
     int hoverItem = -1, hoverHeader = 0, dragItem = -1;
+    juce::Colour accent { skin::colour::crimson }; // the plugin family's accent (ui/PluginSkin.h)
+    skin::Animator anim;                            // hover fades (runs only while something moves)
+    int quietFrames = 0;
+    float lastMeters = 0.0f;
     ui::ValueDrag drag;
     juce::String presetName;
     int eqSelected = -1;

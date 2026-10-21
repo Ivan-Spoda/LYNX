@@ -288,9 +288,9 @@ public:
 
         text = newText;
         const auto f = juce::Font (theme::font (theme::type::small, true));
-        const auto width = juce::GlyphArrangement::getStringWidthInt (f, text) + 16;
+        const auto width = juce::GlyphArrangement::getStringWidthInt (f, text) + 22;
         const auto r = top->getLocalArea (&over, control);
-        auto b = juce::Rectangle<int> (width, 20).withCentre ({ r.getCentreX(), r.getY() - 13 });
+        auto b = juce::Rectangle<int> (width, 23).withCentre ({ r.getCentreX(), r.getY() - 14 });
 
         if (b.getY() < 2) // no room above: below the control
             b.setY (r.getBottom() + 3);
@@ -315,13 +315,17 @@ public:
     void paint (juce::Graphics& g) override
     {
         using namespace theme;
-        const auto r = getLocalBounds().toFloat().reduced (0.5f);
-        g.setColour (juce::Colours::black.withAlpha (0.35f));
-        g.fillRoundedRectangle (r.translated (0.0f, 1.0f), radius::sm);
-        g.setColour (colour::bg3);
-        g.fillRoundedRectangle (r, radius::sm);
-        g.setColour (colour::borderStrong);
-        g.drawRoundedRectangle (r, radius::sm, 1.0f);
+        // a small glassy pill with an accent edge (round 122: the value pop-up while dragging)
+        const auto r = getLocalBounds().toFloat().reduced (1.0f, 1.5f);
+        const auto corner = r.getHeight() * 0.5f;
+        g.setColour (juce::Colours::black.withAlpha (0.4f));
+        g.fillRoundedRectangle (r.translated (0.0f, 1.5f), corner);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff30333c), 0.0f, r.getY(), juce::Colour (0xff1e2026), 0.0f, r.getBottom(), false));
+        g.fillRoundedRectangle (r, corner);
+        g.setColour (colour::accent.withAlpha (0.75f));
+        g.drawRoundedRectangle (r.reduced (0.5f), corner, 1.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.10f));
+        g.drawHorizontalLine ((int) r.getY() + 1, r.getX() + corner, r.getRight() - corner);
         g.setColour (colour::textPrimary);
         g.setFont (font (type::small, true));
         g.drawText (text, getLocalBounds(), juce::Justification::centred, false);
