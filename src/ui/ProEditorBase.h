@@ -883,7 +883,7 @@ protected:
     bool demo = false;
     juce::Colour accent;   // the plugin family's accent (ui/PluginSkin.h)
     skin::Animator anim;   // hover fades (runs only while something moves)
-    int silentRun = 0;     // consecutive silent history columns (an idle display is not repainted)
+    int silentRun = historyLength; // consecutive silent history columns (the history starts silent) (an idle display is not repainted)
     juce::Point<float> mouse { -1.0f, -1.0f };
     int dragCtl = -1;
     Ctl pressed;

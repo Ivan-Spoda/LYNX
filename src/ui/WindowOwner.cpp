@@ -3,6 +3,9 @@
 #include "ui/LogoData.h"
 #include "ui/Theme.h"
 
+#include <cstdint>
+#include <ctime>
+
 #if JUCE_WINDOWS
  #include <windows.h>
 #endif
@@ -21,6 +24,18 @@ juce::Component::SafePointer<juce::Component>& mainWindow()
 void setMainWindowForOwnership (juce::Component* window)
 {
     mainWindow() = window;
+}
+
+double processCpuSeconds()
+{
+   #if JUCE_WINDOWS
+    FILETIME created {}, exited {}, kernel {}, user {};
+    if (GetProcessTimes (GetCurrentProcess(), &created, &exited, &kernel, &user))
+        return (double) ((((std::uint64_t) kernel.dwHighDateTime << 32) | kernel.dwLowDateTime) + (((std::uint64_t) user.dwHighDateTime << 32) | user.dwLowDateTime)) * 1e-7;
+    return 0.0;
+   #else
+    return (double) std::clock() / CLOCKS_PER_SEC;
+   #endif
 }
 
 juce::Image logoImage()

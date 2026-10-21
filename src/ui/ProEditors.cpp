@@ -250,7 +250,8 @@ private:
         for (auto* path : { &inPath, &outPath, &grPath }) path->closeSubPath();
         fillLevel (g, inPath, inColour(), p, 0.55f, 0.22f);
         fillLevel (g, outPath, outColour(), p, 0.7f, 0.18f);
-        skin::glowStroke (g, outLine, colour::textPrimary.withAlpha (0.7f), 1.0f, 0.5f);
+        g.setColour (colour::textPrimary.withAlpha (0.6f));
+        g.strokePath (outLine, juce::PathStrokeType (1.0f)); // (no glow on the 100-column-a-second history: it is redrawn at 30 Hz)
         fillLevel (g, grPath, colour::accent, p, fx.enabled ? 0.8f : 0.25f, fx.enabled ? 0.35f : 0.1f);
         scaleLabels (g, scale, p, d.getRight() + 6.0f, { 0.0f, -3.0f, -6.0f, -9.0f, -12.0f, -15.0f, -24.0f, -36.0f });
 
@@ -766,8 +767,10 @@ private:
         inP.lineTo (p.getX(), p.getBottom());
         inP.closeSubPath();
         fillLevel (g, inP, inColour(), p, 0.42f, 0.12f);
-        skin::glowStroke (g, outLine, outColour().withAlpha (0.9f), 1.2f, 0.6f);
-        skin::glowStroke (g, grLine, colour::accent.withAlpha (fx.enabled ? 1.0f : 0.3f), 2.0f, fx.enabled ? 1.0f : 0.0f);
+        g.setColour (outColour().withAlpha (0.9f));
+        g.strokePath (outLine, juce::PathStrokeType (1.2f));
+        g.setColour (colour::accent.withAlpha (fx.enabled ? 1.0f : 0.3f));
+        g.strokePath (grLine, juce::PathStrokeType (2.0f));
         // threshold
         const auto ty = scale.y ((float) thresholdDb(), p);
         const auto dashes = std::array<float, 2> { 7.0f, 5.0f };
@@ -995,8 +998,9 @@ private:
             if (i == 0) curve.startNewSubPath (pt);
             else curve.lineTo (pt);
         }
-        skin::glowStroke (g, curve, fx.enabled ? colour::textPrimary : colour::textDisabled, 2.2f, 0.0f);
-        if (fx.enabled)
+        if (! fx.enabled)
+            skin::glowStroke (g, curve, colour::textDisabled, 2.2f, 0.0f);
+        else
         {
             g.setColour (accent.withAlpha (0.25f));
             g.strokePath (curve, juce::PathStrokeType (6.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));

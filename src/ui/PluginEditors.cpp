@@ -649,7 +649,7 @@ public:
                 if (kind == EffectKind::fruitySend) // the destination insert (FL's tinted box; "…" = none)
                 {
                     const auto target = flbasic::sendTrack (value);
-                    g.setColour ((target > 0 ? colour::accent : colour::accentMuted).withAlpha (hot ? 1.0f : 0.85f));
+                    g.setColour ((target > 0 ? accent : colour::accentMuted).withAlpha (hot ? 1.0f : 0.85f));
                     g.fillRoundedRectangle (r, radius::sm * s);
                     g.setColour (target > 0 ? colour::onAccent : colour::textSecondary);
                     g.setFont (font (juce::jmax (8.0f, 9.0f * s), true));
@@ -1259,7 +1259,7 @@ public:
             if (raw (6) >= 0) // low cut
             {
                 const auto x = xOf (5.0 * std::pow (16.0, raw (6) / 65536.0));
-                g.setColour (colour::accent.withAlpha (0.6f));
+                g.setColour (accent.withAlpha (0.6f));
                 g.drawVerticalLine ((int) x, inner.getY(), inner.getBottom());
             }
             g.setColour (colour::textDisabled);
@@ -1330,7 +1330,7 @@ public:
                     g.setColour (colour::textSecondary);
                     g.drawText (juce::String (-db), juce::Rectangle<float> (well.getX(), y - 10.0f * s, 22.0f * s, 10.0f * s), juce::Justification::centredLeft, false);
                 }
-                g.setColour ((fx.enabled ? colour::accent : colour::textDisabled).withAlpha (0.85f));
+                g.setColour ((fx.enabled ? accent : colour::textDisabled).withAlpha (0.85f));
                 g.fillRoundedRectangle (well.withTrimmedLeft (well.getWidth() * 0.35f).withHeight (well.getHeight() * amount), radius::sm);
                 g.setColour (colour::textSecondary);
                 g.drawText ((amount > 0.0005f ? juce::String (-amount * 30.0f, 1) : juce::String ("0.0")) + " dB", bar.withTop (bar.getBottom() - 14.0f * s), juce::Justification::centred, false);
@@ -1339,7 +1339,7 @@ public:
             g.setColour (colour::gridBeat);
             for (int db = 3; db < 30; db += 3)
                 g.drawVerticalLine ((int) (bar.getRight() - bar.getWidth() * (float) db / 30.0f), bar.getY(), bar.getBottom());
-            g.setColour ((fx.enabled ? colour::accent : colour::textDisabled).withAlpha (0.85f));
+            g.setColour ((fx.enabled ? accent : colour::textDisabled).withAlpha (0.85f));
             g.fillRoundedRectangle (bar.withLeft (bar.getRight() - bar.getWidth() * amount), radius::sm);
             if (item.label != nullptr && *item.label != 0)
             {
@@ -1556,7 +1556,7 @@ public:
             for (int i = 0; i < 12; ++i)
             {
                 const auto a = juce::MathConstants<float>::twoPi * (float) i / 12.0f;
-                g.setColour (i == 0 ? (fx.enabled ? colour::accent : colour::textSecondary) : colour::textDisabled);
+                g.setColour (i == 0 ? (fx.enabled ? accent : colour::textSecondary) : colour::textDisabled);
                 g.fillEllipse (juce::Rectangle<float> (4.0f * s, 4.0f * s).withCentre ({ c.x + std::sin (a) * radius * 0.85f, c.y - std::cos (a) * radius * 0.85f }));
             }
             return;
@@ -1625,7 +1625,7 @@ public:
             g.strokePath (path, juce::PathStrokeType (juce::jmax (1.5f, 2.0f * s)));
         };
         drawSlot (state ? state->slots[(std::size_t) (grossbeat::slotsPerKind + volumeSlot)] : grossbeat::Slot {}, colour::info.withAlpha (fx.enabled ? 0.9f : 0.3f), false);
-        drawSlot (state ? state->slots[(std::size_t) timeSlot] : grossbeat::Slot {}, (fx.enabled ? colour::accent : colour::textDisabled), true);
+        drawSlot (state ? state->slots[(std::size_t) timeSlot] : grossbeat::Slot {}, (fx.enabled ? accent : colour::textDisabled), true);
     }
 
     // --- the parametric EQ's graph (FL's Parametric EQ 2 arrangement) -----------------------------------
@@ -1829,7 +1829,7 @@ public:
         if (id == "sgamount")
         {
             const auto amount = soundgoodizerAmount();
-            drawKnob (g, r, amount, false, fx.enabled ? colour::accent : colour::textDisabled, sgDragging);
+            drawKnob (g, r, amount, false, fx.enabled ? accent : colour::textDisabled, sgDragging);
             const auto body = r.reduced (r.getWidth() * 0.16f);
             g.setGradientFill (juce::ColourGradient (colour::bg6, body.getCentreX(), body.getY(), colour::bg4, body.getCentreX(), body.getBottom(), false));
             g.fillEllipse (body);
@@ -1845,7 +1845,7 @@ public:
         {
             const auto cell = juce::Rectangle<float> (r.getX() + r.getWidth() * (float) p / 4.0f, r.getY(), r.getWidth() / 4.0f, r.getHeight());
             const auto led = juce::Rectangle<float> (8.0f * s, 8.0f * s).withCentre ({ cell.getCentreX(), cell.getY() + 8.0f * s });
-            g.setColour (p == chosen ? (fx.enabled ? colour::accent : colour::textSecondary) : colour::ledOff);
+            g.setColour (p == chosen ? (fx.enabled ? accent : colour::textSecondary) : colour::ledOff);
             g.fillEllipse (led);
             g.setColour (p == chosen ? colour::textPrimary : colour::textSecondary);
             g.setFont (font (juce::jmax (10.0f, 20.0f * s), true));
@@ -2439,7 +2439,7 @@ private:
     int hoverItem = -1, hoverHeader = 0, dragItem = -1;
     juce::Colour accent { skin::colour::crimson }; // the plugin family's accent (ui/PluginSkin.h)
     skin::Animator anim;                            // hover fades (runs only while something moves)
-    int quietFrames = 0;
+    int quietFrames = 1000; // frames since the live meters last moved (the displays start at rest)
     float lastMeters = 0.0f;
     ui::ValueDrag drag;
     juce::String presetName;

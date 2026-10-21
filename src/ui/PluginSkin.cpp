@@ -2,6 +2,9 @@
 
 #include "ui/WindowOwner.h"
 
+#include <cstdint>
+#include <unordered_map>
+
 namespace lynx::skin
 {
 namespace
@@ -216,7 +219,49 @@ void bottomBar (juce::Graphics& g, juce::Rectangle<float> a)
 
 // --- controls ------------------------------------------------------------------------------------
 
+namespace
+{
+void drawKnobDirect (juce::Graphics& g, juce::Rectangle<float> bounds, const KnobLook& k);
+}
+
+// Knobs are drawn once per look into a small cached image (value to 1/1000, hover in 8 steps, the screen's pixel
+// scale) and blitted afterwards: a display editor repainting at 30 Hz re-uses its unchanged knobs for free.
 void knob (juce::Graphics& g, juce::Rectangle<float> bounds, const KnobLook& k)
+{
+    const auto size = juce::jmin (bounds.getWidth(), bounds.getHeight()) - 2.0f;
+    if (size <= 4.0f) return;
+    const auto scale = juce::jlimit (1.0f, 4.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+    const auto pad = juce::jlimit (2.0f, 5.0f, size * 0.075f) + 2.0f;
+    const auto area = bounds.withSizeKeepingCentre (size, size).expanded (pad);
+    const auto px = (int) std::ceil (area.getWidth() * scale);
+    if (px > 400) { drawKnobDirect (g, bounds, k); return; }
+
+    std::uint64_t key = (std::uint64_t) juce::jlimit (0, 1000, (int) std::lround (k.value * 1000.0f));
+    key = key * 1009u + (std::uint64_t) std::lround (size * 4.0f);
+    key = key * 9u + (std::uint64_t) std::lround (juce::jlimit (0.0f, 1.0f, k.hover) * 8.0f);
+    key = key * 8u + (k.bipolar ? 1u : 0u) + (k.active ? 2u : 0u) + (k.enabled ? 4u : 0u);
+    key = key * 401u + (std::uint64_t) std::lround (scale * 100.0f);
+    key ^= (std::uint64_t) k.accent.getARGB() * 0x9e3779b97f4a7c15ull;
+
+    static std::unordered_map<std::uint64_t, juce::Image> cache;
+    auto it = cache.find (key);
+    if (it == cache.end())
+    {
+        if (cache.size() > 1500) cache.clear();
+        juce::Image img (juce::Image::ARGB, px, px, true);
+        {
+            juce::Graphics ig (img);
+            ig.addTransform (juce::AffineTransform::scale ((float) px / area.getWidth()));
+            drawKnobDirect (ig, juce::Rectangle<float> (pad, pad, size, size).expanded (1.0f), k);
+        }
+        it = cache.emplace (key, img).first;
+    }
+    g.drawImage (it->second, area, juce::RectanglePlacement::stretchToFit);
+}
+
+namespace
+{
+void drawKnobDirect (juce::Graphics& g, juce::Rectangle<float> bounds, const KnobLook& k)
 {
     const auto size = juce::jmin (bounds.getWidth(), bounds.getHeight()) - 2.0f;
     if (size <= 4.0f) return;
@@ -303,6 +348,7 @@ void knob (juce::Graphics& g, juce::Rectangle<float> bounds, const KnobLook& k)
     g.setColour (k.enabled ? (k.active ? accent.brighter (0.6f) : theme::colour::textPrimary) : theme::colour::textSecondary);
     g.strokePath (pointer, roundStroke (pw));
 }
+} // namespace
 
 void slider (juce::Graphics& g, juce::Rectangle<float> t, float value01, bool vertical, bool bipolar, juce::Colour accent, bool hot, bool enabled,
              float thumbLength, float thumbThickness)

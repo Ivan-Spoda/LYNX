@@ -1066,8 +1066,6 @@ public:
         const auto curveColour = fx.enabled ? colour::textPrimary : colour::textDisabled;
         if (fx.enabled)
         {
-            g.setColour (colour::accent.withAlpha (0.10f));
-            g.strokePath (total, juce::PathStrokeType (10.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
             g.setColour (colour::accent.withAlpha (0.28f));
             g.strokePath (total, juce::PathStrokeType (5.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         }
@@ -1277,9 +1275,17 @@ private:
 
     void timerCallback() override
     {
+        if (! isShowing()) return; // a hidden editor costs nothing
         updateSpectrum();
-        if (isShowing()) repaint (graphArea().toNearestInt());
+        // redraw the graph only when the analyser or a dynamic band moved (an idle editor stops drawing)
+        double signature = 0.0;
+        for (const auto* v : { &specPre, &specPost })
+            for (const auto x : *v) signature += x;
+        for (int b = 0; b < bands; ++b) signature += liveDynamic (b) * (b + 1);
+        if (signature != lastSignature || demo) repaint (graphArea().toNearestInt());
+        lastSignature = signature;
     }
+    double lastSignature = 0.0;
 
     void updateSpectrum()
     {
