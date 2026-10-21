@@ -460,6 +460,10 @@ product = FabFilter Pro-Q
 vendor = FabFilter
 lynx = Facet EQ
 names = FabFilter Pro-Q 2; FabFilter Pro-Q 3; FabFilter Pro-Q 4; Pro-Q 2; Pro-Q 3; Pro-Q 4
+# round 124: a Pro-Q 4 state (component state "FFBS", 600 values) is translated band by band (shape, frequency, gain,
+# Q, slope; processing mode, gain scale, output) — Facet's shapes are fitted to the official trial, so her curves
+# null against the reference (docs/analise/REA_rodada124_extras.md §2). Other versions keep a flat curve.
+translate = pro-q4
 
 # ---------------------------------------------------------------- vocal tools -> LYNX's mixing suite (round 96)
 [waves-deesser]
