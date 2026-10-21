@@ -2600,7 +2600,6 @@ countries: br
 "Lookahead 2 ms" = "Lookahead 2 ms"
 "Detection" = "Detecção"
 "The voice scrolls by; red: what the de-esser takes away. Drag the dashed line to set the threshold" = "A voz passa rolando; vermelho: o que o de-esser retira. Arraste a linha tracejada para ajustar o limiar"
-"Processing" = "Processamento"
 "Drag the dashed threshold line  -  KNEE on the left: the curve  -  SIDE CHAIN: the detector" = "Arraste a linha tracejada do limiar  -  KNEE à esquerda: a curva  -  SIDE CHAIN: o detector"
 "Knee: show the transfer curve" = "Knee: mostrar a curva de transferência"
 "Open the side chain: detector EQ, level, external input, stereo link" = "Abrir o sidechain: EQ do detector, nível, entrada externa, link estéreo"
