@@ -34,6 +34,35 @@ Aether ← Fresh Air, LYNX Tune ← Auto-Tune Pro (Auto mode).
 ## 3. Implementation
 (filled in per batch)
 
+### 3a. Apex Limiter and Hush De-esser (sub-branch parity128a)
+Every new control is a parameter appended to the engine (saved projects are positional; older ones load the new
+parameters at their defaults) and every default leaves the output **byte-identical** to the round-127 engines: a
+harness (`tmp/parity128`, scratch) built the old and the new ApexLimiter.cpp / MixSuite.cpp side by side and compared
+the raw output over 3 sample rates × 48 Apex settings (gain, style, link, true peak) × 32 Hush settings (threshold,
+mode, detector, look-ahead, listen) [EXEC: `cmp` identical]. Tests: `tests/Parity128aTests.inc`.
+
+- **Apex** (`core/ApexLimiter.*`, `ApexEditor`): 8 styles — the four old ones keep the indices their saved values
+  round to (0, 1/3, 2/3, 1 → Clean 0, Punch 2, Loud 5, Safe 7) and Glue / Dynamic / Dense / Bus sit between them as
+  new release laws (no existing law retuned); ATTACK 0–10 s (v⁴ law like the reference's text, 625 ms at the middle):
+  how slowly the slow release stage dips (0 = at once = before); CHANNEL LINKING split into TRANSIENTS (the old
+  Link) and RELEASE (adds linking of the release stage beyond the transients; default 0 so old projects with a
+  partial link sound the same); bottom bar Dither Off / 16–24 bits (TPDF, ±1 LSB) with noise shaping None / Basic
+  (1st order) / Optimized (2nd order) / Weighted (3-tap) error feedback; ADVANCED » fold-out with DC offset filter
+  (5 Hz one-pole), Unity Gain (output ÷ gain), Audition Limiting (delayed input after gain − output); meter-scale menu
+  next to TP (−16 / −32 / −48 dB, K-12 / 14 / 20 — labels relative to the K reference). Not done: oversampling
+  (the engine's only oversampling is the 4x true-peak estimator), loudness meters, external side chain.
+- **Hush** (`core/MixSuite.*` hush, `HushEditor`): MODE Single vocal / Allround — Allround subtracts
+  0.5 dB per dB that the full-band level exceeds the detected band by more than 6 dB, so steady highs in a mix
+  trigger less [model: our choice, the reference documents only the intent]; the frequency slider has two handles
+  (2–20 kHz log): left = the existing Frequency (where the band starts), right = the new low-pass (where it ends; far
+  right = off): detection, listen and split-band processing are band-limited, above the low-pass the signal passes;
+  LOOKAHEAD knob 0–15 ms with its power button: the time is the delay and the reported latency (built with the slot
+  — `mixsuite::makeHush` — so the delay compensation is right from the first block; moving it re-plans PDC); STEREO
+  LINK 0–100 % (per-channel envelopes below 100 %) + MID (detect the mid signal only); SIDE CHAIN In / Ext (Ext
+  detects the slot's side-chain source; a menu picks the track); DISPLAY hides the scrolling waveform and the window
+  shrinks; In level in the bottom bar (Release moved to the bar too, as the reference has no release knob). Not
+  done: oversampling. Pro-DS state translation untouched (vmatch127 owns it).
+
 ## Where I stopped
 - Done: §1, §2, docs/PARITY.md (tables + before scores), Desktop page.
 - Next: shared editor header (undo / redo, A/B, presets), then per-engine gaps in the order of §2.
