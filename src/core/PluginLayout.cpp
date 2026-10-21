@@ -2305,8 +2305,8 @@ Layout echoformLayout()
     // round 119: ping-pong in pairs (shown with the ping-pong style)
     v.push_back (when (toggle (280, 252, 90, 24, "Pairs", TR_NOOP ("Pairs")), "Style", 0.8f, 1.0f));
     // round 129: the echoes' polarity per side (H-Delay's phase L / R) and a tap-tempo pad (sets the left time)
-    v.push_back (toggle (376, 252, 70, 24, "Phase L", TR_NOOP ("Phase L"), boxed));
-    v.push_back (toggle (452, 252, 70, 24, "Phase R", TR_NOOP ("Phase R"), boxed));
+    v.push_back (toggle (376, 254, 70, 20, "Phase L", TR_NOOP ("Phase L")));
+    v.push_back (toggle (452, 254, 70, 20, "Phase R", TR_NOOP ("Phase R")));
     v.push_back (display (532, 252, 80, 24, "taptempo", "Time L", "Sync L"));
     // the mode selector along the bottom
     v.push_back (label (8, 254, 52, 20, TR_NOOP ("Mode")));

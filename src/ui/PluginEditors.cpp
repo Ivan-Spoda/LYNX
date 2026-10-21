@@ -1513,7 +1513,7 @@ public:
                 const auto peakDb = ioMeters[(std::size_t) k].peak * 48.0f - 48.0f;
                 g.setColour (peakDb > -0.1f ? juce::Colour (0xffe5383b) : colour::textPrimary);
                 g.setFont (font (juce::jmax (7.0f, 8.5f * s)));
-                g.drawText (ioMeters[(std::size_t) k].peak > 0.001f ? juce::String (peakDb, 1) : juce::String::fromUTF8 ("-â"),
+                g.drawText (ioMeters[(std::size_t) k].peak > 0.001f ? juce::String (peakDb, 1) : juce::String ("-inf"),
                             column.withY (bottom.getY()).withHeight (readH), juce::Justification::centred, false);
             }
             return;
