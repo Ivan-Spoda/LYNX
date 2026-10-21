@@ -1064,6 +1064,13 @@ public:
                 g.setColour (p[(std::size_t) (lynxtune::bypassC + pc)] >= 0.5f ? juce::Colour (0xffe0a040) : accent);
                 g.fillRect (k.withHeight (3.0f * s));
             }
+            if (! on && ((inScale >> pc) & 1u) != 0) // removed by hand: a cross
+            {
+                const auto x = juce::Rectangle<float> (7.0f * s, 7.0f * s).withCentre ({ k.getCentreX(), k.getY() + 10.0f * s });
+                g.setColour (accent.withAlpha (0.9f));
+                g.drawLine (x.getX(), x.getY(), x.getRight(), x.getBottom(), 1.5f * s);
+                g.drawLine (x.getRight(), x.getY(), x.getX(), x.getBottom(), 1.5f * s);
+            }
             if (pc == sungPc && fx.enabled)
             {
                 g.setColour (accent.withAlpha (0.55f));

@@ -1085,7 +1085,7 @@ Layout lynxTune()
     adv (knob (398, 420, 34, "Onset rate", TR_NOOP ("ONSET RATE"), 452, showValue));
     adv (label (470, 368, 300, 16, TR_NOOP ("Pitch tracking"), alignLeft));
     adv (toggle (470, 400, 150, 20, "Ignore vibrato", TR_NOOP ("Ignore vibrato")));
-    adv (label (470, 428, 320, 36, TR_NOOP ("Ignore vibrato: notes are chosen from the pitch with its vibrato smoothed away"), alignLeft | dim));
+    adv (label (470, 430, 320, 14, TR_NOOP ("Notes are picked from the pitch with its vibrato smoothed"), alignLeft | dim));
     // --- the keyboard: BYPASS / REMOVE modes, LATCH, four octaves (a key edits its note name in every octave)
     v.push_back (section (0, 482, 800, 128, TR_NOOP ("TARGET NOTES")));
     v.push_back (display (8, 502, 784, 102, "tunekeys"));

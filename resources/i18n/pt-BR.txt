@@ -2838,7 +2838,7 @@ countries: br
 "ONSET DELAY" = "ATRASO DE INÍCIO"
 "ONSET RATE" = "TEMPO DE ENTRADA"
 "Pitch tracking" = "Detecção de afinação"
-"Ignore vibrato: notes are chosen from the pitch with its vibrato smoothed away" = "Ignorar vibrato: as notas são escolhidas pela afinação com o vibrato suavizado"
+"Notes are picked from the pitch with its vibrato smoothed" = "As notas são escolhidas pela afinação com o vibrato suavizado"
 "Click a key: {0} that note in every octave" = "Clique numa tecla: {0} essa nota em todas as oitavas"
 "remove / restore" = "remover / restaurar"
 "bypass / correct" = "não corrigir / corrigir"
