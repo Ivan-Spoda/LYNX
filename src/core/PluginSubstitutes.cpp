@@ -536,7 +536,8 @@ vendor = Waves
 lynx = LYNX Tune
 waves = WavesTune Real-Time; Waves Tune Real-Time; WavesTune
 names = WavesTune Real-Time; Waves Tune Real-Time
-# its settings are not translated: the project's key when another pitch corrector names it, else chromatic, gentle
+# round 120: its saved scale (root + note statuses) is read; speed / note transition not yet (see translateWavesTune)
+translate = waves-tune
 preset = Scale=0; Retune=0.3536; Humanize=0.5
 mix = 1
 )TABLE";
@@ -922,6 +923,23 @@ int translateAutoTunePro (const std::vector<std::uint8_t>& state, EffectSlot& sl
     return 2;
 }
 
+// Waves Tune Real-Time: the key and scale saved in its state (wavesTuneScale; [DATA] every one of the 11 distinct
+// states of her corpus names its scale — "Natural Minor" / "Major" — with the root and the twelve note statuses).
+// A scale LYNX Tune has no name for becomes its custom scale with the same notes. Its speed / note-transition values
+// are not translated yet (the official trial does not load as itself in a VST3 host here: REA round 120): the entry's
+// gentle retune stays.
+int translateWavesTune (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    const auto sc = wavesTuneScale (state);
+    if (! sc || slot.kind != EffectKind::lynxTune)
+        return 0;
+    slot.params[lynxtune::key] = (float) sc->key / 11.0f;
+    slot.params[lynxtune::scale] = (float) sc->scale / (float) (vocal::scaleCount - 1);
+    for (int k = 0; k < 12; ++k)
+        slot.params[(std::size_t) (lynxtune::noteC + k)] = sc->scale != (int) vocal::Scale::custom || ((sc->mask >> k) & 1u) != 0 ? 1.0f : 0.0f;
+    return 2;
+}
+
 // Fresh Air: its two air amounts become Aether's air shelf. [EXEC] Black-box measurement of the official trial
 // (fxmeasure, pink noise at -20 dBFS RMS, 48 kHz; docs/analise/REA_rodada113.md §3b): each setting's response above
 // 2 kHz is fitted by one high shelf (RBJ, S = 0.6, Aether's); gain and frequency follow these least-squares laws of
@@ -1104,6 +1122,8 @@ RawTranslator rawTranslatorNamed (std::string_view name)
         return translateWavesSslChannel;
     if (name == "auto-tune-pro")
         return translateAutoTunePro;
+    if (name == "waves-tune")
+        return translateWavesTune;
     if (name == "fresh-air")
         return translateFreshAir;
     if (name == "waves-rcomp")
@@ -1153,6 +1173,70 @@ std::optional<std::pair<int, int>> autoTuneProKey (const std::vector<std::uint8_
     else
         return std::nullopt; // the other scales: not confirmed
     return std::pair<int, int> { (int) key, (int) lynxScale };
+}
+
+std::optional<PitchCorrectorScale> wavesTuneScale (const std::vector<std::uint8_t>& state)
+{
+    const auto start = findBytes (state, "<PresetChunkXMLTree");
+    if (start == std::string::npos)
+        return std::nullopt;
+    const std::string xml (state.begin() + (std::ptrdiff_t) start, state.end());
+    std::string setup = "SETUP_A";
+    if (const auto a = xml.find ("<ActiveSetup>"); a != std::string::npos)
+        if (const auto b = xml.find ("</ActiveSetup>", a); b != std::string::npos)
+            setup = trim (std::string_view (xml).substr (a + 13, b - a - 13));
+    const auto data = xml.find ("<PresetData Setup=\"" + setup + "\"");
+    if (data == std::string::npos)
+        return std::nullopt;
+    const auto end = std::min (xml.find ("</PresetData>", data), xml.size());
+    const auto scaleAt = xml.find ("<Scale ", data);
+    const auto segAt = xml.find ("<NoteSegmentation>", data);
+    const auto segEnd = xml.find ("</NoteSegmentation>", data);
+    const auto rootAt = xml.find ("<Root>", data);
+    if (scaleAt >= end || segAt >= end || segEnd >= end || rootAt >= end)
+        return std::nullopt;
+    int root = -1;
+    try
+    {
+        root = std::stoi (xml.substr (rootAt + 6, 4));
+    }
+    catch (...)
+    {
+        return std::nullopt;
+    }
+    if (root < 0 || root > 11)
+        return std::nullopt;
+    // the twelve notes above the root, in order (NoteCents 0, 100 … 1100): "x" = excluded, anything else = a target
+    std::uint16_t rel = 0;
+    int count = 0;
+    for (auto p = xml.find ("<NoteStatus>", segAt); p < segEnd && count < 12; p = xml.find ("<NoteStatus>", p + 1), ++count)
+    {
+        const auto q = xml.find ("</NoteStatus>", p);
+        if (q == std::string::npos || q > segEnd)
+            return std::nullopt;
+        if (trim (std::string_view (xml).substr (p + 12, q - p - 12)) != "x")
+            rel = (std::uint16_t) (rel | (1u << count));
+    }
+    if (count != 12 || rel == 0)
+        return std::nullopt;
+    PitchCorrectorScale out;
+    out.key = root;
+    out.mask = (std::uint16_t) (((rel << root) | (rel >> (12 - root))) & 0xfff);
+    out.scale = (int) vocal::Scale::custom;
+    for (int s = 0; s < vocal::scaleCount; ++s)
+        if (s != (int) vocal::Scale::custom && vocal::scaleMask ((vocal::Scale) s, root) == out.mask)
+        {
+            out.scale = s;
+            break;
+        }
+    return out;
+}
+
+std::optional<PitchCorrectorScale> pitchCorrectorScale (const std::vector<std::uint8_t>& state)
+{
+    if (const auto k = autoTuneProKey (state))
+        return PitchCorrectorScale { k->first, k->second, vocal::scaleMask ((vocal::Scale) k->second, k->first) };
+    return wavesTuneScale (state);
 }
 
 std::optional<std::pair<float, float>> freshAirAmounts (const std::vector<std::uint8_t>& state)
@@ -1552,7 +1636,7 @@ bool substituteEffectSlot (EffectSlot& slot, const PluginIdentity& identity, con
     auto replacement = makeSubstituteSlot (*entry, &identity, &translated);
     // a pitch corrector whose own key is unknown: the project's key (its other pitch correctors), with the entry's
     // gentle retune; no key anywhere: the entry's chromatic preset
-    if (replacement.kind == EffectKind::lynxTune && context.knowsKey() && ! autoTuneProKey (identity.state))
+    if (replacement.kind == EffectKind::lynxTune && context.knowsKey() && ! pitchCorrectorScale (identity.state))
     {
         replacement.params[lynxtune::key] = (float) context.key / 11.0f;
         replacement.params[lynxtune::scale] = (float) context.scale / (float) (vocal::scaleCount - 1);
@@ -1574,11 +1658,13 @@ SubstituteContext substituteContextOf (const Song& song)
     auto look = [&votes] (const ForeignPlugin& plugin) {
         if (plugin.format == ForeignPlugin::Format::none)
             return;
-        if (const auto k = autoTuneProKey (pluginIdentity (plugin).state))
+        const auto sc = pitchCorrectorScale (pluginIdentity (plugin).state);
+        if (sc && sc->scale != (int) vocal::Scale::custom)
         {
-            auto it = std::find_if (votes.begin(), votes.end(), [&] (const auto& v) { return v.first == *k; });
+            const std::pair<int, int> k { sc->key, sc->scale };
+            auto it = std::find_if (votes.begin(), votes.end(), [&] (const auto& v) { return v.first == k; });
             if (it == votes.end())
-                votes.push_back ({ *k, 1 });
+                votes.push_back ({ k, 1 });
             else
                 ++it->second;
         }
