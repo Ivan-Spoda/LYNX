@@ -2849,3 +2849,4 @@ countries: br
 "Early|Late" = "Iniciais|Cauda"
 "Tap tempo: click in time (two taps or more) to set the delay" = "Tap tempo: clique no tempo (dois toques ou mais) para definir o delay"
 "Keep the Mix when loading presets" = "Manter o Mix ao carregar presets"
+"Delay L" = "Delay E"

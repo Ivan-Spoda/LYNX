@@ -1375,7 +1375,7 @@ const EffectInfo& latticeInfo()
                                      { "Detune rate", 0.049049f }, { "Detune depth", 0.5f }, { "Vibrato rate", 0.2982456f },
                                      { "Vibrato depth", 0.0f }, { "Over-mod", 0.0f }, { "Drive in", 0.375f }, { "Drive out", 0.75f },
                                      { "Noise", 0.3333333f }, { "Rotate", 0.5f }, { "Smoothing", 0.0990991f }, { "Colour", 0.0f },
-                                     { "Sync", 0.0f }, { "Taps", 6.5f / 24.0f }, { "Diffusion on", 0.0f }, { "Drive on", 0.0f },
+                                     { "Sync", 0.0f }, { "Taps", 1.5f / 24.0f } /* round 129: two taps (one a side), the reference default */, { "Diffusion on", 0.0f }, { "Drive on", 0.0f },
                                      { "Drive post", 1.0f }, { "Half speed", 0.0f } } };
     return info;
 }

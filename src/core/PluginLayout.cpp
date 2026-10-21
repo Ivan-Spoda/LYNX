@@ -2254,8 +2254,11 @@ Layout echoformLayout()
     v.push_back (stepped (dial (44, k2, d, "Style", TR_NOOP ("Style")), 4));
     // delay: the left time (ms or note) and the second knob of the style: spread, ratio, spacing or the right time
     v.push_back (section (88, top, 188, h, TR_NOOP ("Delay")));
-    v.push_back (when (dial (138, 76, 54, "Time L", TR_NOOP ("Delay"), big), "Sync L", 0.0f, 0.5f));
-    v.push_back (when (stepped (dial (138, 76, 54, "Note L", TR_NOOP ("Delay"), big), 9), "Sync L", 0.5f, 1.0f));
+    // round 129: "Delay L" when the style has a right time (dual, ping-pong), as on the reference
+    v.push_back (when (when (dial (138, 76, 54, "Time L", TR_NOOP ("Delay"), big), "Sync L", 0.0f, 0.5f), "Style", 0.0f, 0.6f));
+    v.push_back (when (when (stepped (dial (138, 76, 54, "Note L", TR_NOOP ("Delay"), big), 9), "Sync L", 0.5f, 1.0f), "Style", 0.0f, 0.6f));
+    v.push_back (when (when (dial (138, 76, 54, "Time L", TR_NOOP ("Delay L"), big), "Sync L", 0.0f, 0.5f), "Style", 0.6f, 1.0f));
+    v.push_back (when (when (stepped (dial (138, 76, 54, "Note L", TR_NOOP ("Delay L"), big), 9), "Sync L", 0.5f, 1.0f), "Style", 0.6f, 1.0f));
     v.push_back (when (dial (228, 76, 54, "Spread", TR_NOOP ("Spread"), (std::uint16_t) (big | bipolar)), "Style", 0.0f, 0.2f));
     v.push_back (when (dial (228, 76, 54, "Ratio", TR_NOOP ("Ratio"), big), "Style", 0.2f, 0.4f));
     v.push_back (when (dial (228, 76, 54, "Spacing", TR_NOOP ("Spacing"), (std::uint16_t) (big | bipolar)), "Style", 0.4f, 0.6f));
@@ -2279,7 +2282,10 @@ Layout echoformLayout()
     v.push_back (dial (488, k2, d, "Diffusion size", TR_NOOP ("Size")));
     // modulation: wow / flutter (tape), rate / depth, shift / detune (shifter), pitch / detune (pitch, reverse, detune)
     const auto tape = 1.0f / 12.0f, shifter = 8.0f / 12.0f, pitch = 9.0f / 12.0f, detune = 11.0f / 12.0f;
-    v.push_back (section (532, top, 80, h, TR_NOOP ("Mod")));
+    // round 129: the section is named after what it holds in the mode (the reference renames it FREQ / PITCH)
+    v.push_back (when (section (532, top, 80, h, TR_NOOP ("Mod")), "Mode", 0.0f, shifter));
+    v.push_back (when (section (532, top, 80, h, TR_NOOP ("Freq")), "Mode", shifter, pitch));
+    v.push_back (when (section (532, top, 80, h, TR_NOOP ("Pitch")), "Mode", pitch, 1.0f));
     v.push_back (when (dial (572, k1, d, "Wow", TR_NOOP ("Wow")), "Mode", 0.0f, tape));
     v.push_back (when (dial (572, k2, d, "Flutter", TR_NOOP ("Flutter")), "Mode", 0.0f, tape));
     v.push_back (when (dial (572, k1, d, "Mod rate", TR_NOOP ("Rate")), "Mode", tape, shifter));
