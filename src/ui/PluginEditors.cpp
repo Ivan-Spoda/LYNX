@@ -100,7 +100,7 @@ public:
                 startTimerHz (30);
                 break;
             }
-        setSize ((int) std::ceil ((float) l.width * initialScale), (int) std::ceil ((float) l.height * initialScale + headerHeight));
+        setSize ((int) std::ceil ((float) l.width * initialScale), (int) std::ceil ((float) l.height * initialScale + headerHeight + footerHeight()));
     }
 
     ~NativeEffectEditor() override
@@ -135,7 +135,38 @@ public:
     float scale() const
     {
         const auto& l = activeLayout();
-        return juce::jmax (0.25f, juce::jmin ((float) getWidth() / (float) l.width, ((float) getHeight() - headerHeight) / (float) l.height));
+        return juce::jmax (0.25f, juce::jmin ((float) getWidth() / (float) l.width, ((float) getHeight() - headerHeight - footerHeight()) / (float) l.height));
+    }
+
+    // LYNX's own engines show a one-line description of the control under the mouse at the bottom (the reference
+    // reverbs' description line, round 129)
+    bool hasHelpLine() const
+    {
+        return layout != nullptr && layout != &plugui::soundgoodizerLayout()
+               && std::find (plugui::ownLayoutKinds().begin(), plugui::ownLayoutKinds().end(), kind) != plugui::ownLayoutKinds().end();
+    }
+    float footerHeight() const { return hasHelpLine() ? 20.0f : 0.0f; }
+
+    void paintHelpLine (juce::Graphics& g)
+    {
+        using namespace theme;
+        const auto area = juce::Rectangle<float> (0.0f, (float) getHeight() - footerHeight(), (float) getWidth(), footerHeight());
+        g.setColour (colour::bg0.withAlpha (0.55f));
+        g.fillRect (area);
+        juce::String text;
+        if (hoverItem >= 0 && hoverItem < (int) activeLayout().items.size())
+        {
+            const auto& item = activeLayout().items[(std::size_t) hoverItem];
+            if (const auto p = paramOf (item); p >= 0)
+            {
+                const auto what = pluginheader::describe (kind, effectInfo (kind).params[(std::size_t) p].name);
+                text = (item.label != nullptr && *item.label != 0 ? tr (item.label) : utf8 (effectInfo (kind).params[(std::size_t) p].name))
+                       + (what.isNotEmpty() ? juce::String::fromUTF8 (" \xe2\x80\x94 ") + what : juce::String());
+            }
+        }
+        g.setColour (colour::textSecondary);
+        g.setFont (font (type::small));
+        g.drawText (text, area.reduced (10.0f, 0.0f), juce::Justification::centredLeft, true);
     }
 
     juce::Rectangle<float> rectOf (const LayoutItem& item) const
@@ -334,6 +365,8 @@ public:
         for (int i = 0; i < (int) items.size(); ++i)
             if (visible (items[(std::size_t) i]))
                 paintItem (g, items[(std::size_t) i], i, *fx);
+        if (hasHelpLine())
+            paintHelpLine (g);
     }
 
     juce::Rectangle<float> headerArea() const { return { 0.0f, 0.0f, (float) getWidth(), headerHeight }; }

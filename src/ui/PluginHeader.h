@@ -92,5 +92,9 @@ juce::Array<juce::File> userPresets (EffectKind kind);
 
 // Drops the undo history of every slot (a new project).
 void clearHistory();
+
+// One sentence about what a control does (the reference reverbs' description line at the bottom of the window,
+// round 129), translated; empty when there is none. `param` is the parameter's EffectInfo name.
+juce::String describe (EffectKind kind, const char* param);
 } // namespace pluginheader
 } // namespace lynx
