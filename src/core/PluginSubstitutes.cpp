@@ -183,9 +183,11 @@ mix = 1
 [soundtoys-littleplate]
 product = Little Plate
 vendor = Soundtoys
-lynx = Reeverb 2
+lynx = Foil Plate
 names = LittlePlate; Little Plate
-preset = Dry=0; Wet=0.8
+# round 129 (docs/PARITY.md): LYNX's plate reverb plays a plate's role (was Reeverb 2); its state is encoded: a
+# 2 s plate, 100 % wet, at the slot's dry / wet 25 % as before
+preset = Decay=0.3; Mix=1
 mix = 0.25
 
 [waves-reverbs]
@@ -219,7 +221,11 @@ waves = SuperTap
 [soundtoys-echoboy]
 product = EchoBoy
 vendor = Soundtoys
-lynx = Fruity Delay 3
+# round 129 (docs/PARITY.md): LYNX's multi-mode echo plays EchoBoy's role (styles, saturation, wow / flutter, note
+# sync; was Fruity Delay 3 at FL's default). Its state is encoded: a tape echo, 1/4 note at the project tempo,
+# 25 % feedback, 25 % mix
+lynx = Echoform
+preset = Mode=0.0415; Sync L=0.6248; Note L=0.4498; Feedback=0.125; Mix=0.25
 # [DATA] VST2 unique ID from real projects
 vst2 = StEB
 names = EchoBoy; EchoBoyJr; EchoBoy Jr
@@ -227,7 +233,9 @@ names = EchoBoy; EchoBoyJr; EchoBoy Jr
 [soundtoys-primaltap]
 product = PrimalTap
 vendor = Soundtoys
-lynx = Fruity Delay 3
+# round 129: Echoform (as EchoBoy), a darker lo-fi tape echo
+lynx = Echoform
+preset = Mode=0.125; Sync L=0.6248; Note L=0.4498; Feedback=0.125; Mix=0.25
 names = PrimalTap; Little PrimalTap; LittlePrimalTap
 
 # Valhalla delay / modulation plugins -> LYNX's delay / modulation suite (round 101). Their saved state is a JUCE
@@ -521,8 +529,9 @@ lynx = Auto-pan
 # [DATA] VST2 unique ID from real projects
 vst2 = StPn
 names = PanMan
-# its state is encoded: a moderate sweep (round 113, was 75 %)
-preset = Depth=0.5
+# its state is encoded: a moderate sweep (round 113 meant depth 50 %; round 129: Auto-pan's Depth is bipolar,
+# −100 … +100 %, so 0.5 was 0 % = no movement at all — 0.75 is the +50 % sweep round 113 chose)
+preset = Depth=0.75
 
 # ---------------------------------------------------------------- vocal pitch correction -> LYNX Tune (round 95)
 [antares-auto-tune]

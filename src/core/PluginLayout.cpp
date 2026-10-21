@@ -1585,31 +1585,59 @@ Layout ridgeStrip()
     v.push_back (meter (292, 484, 256, 12, 1, TR_NOOP ("Gate")));
     v.push_back (toggle (292, 508, 84, 20, "Dynamics on", TR_NOOP ("Dyn in")));
     v.push_back (tabs (384, 508, 164, 20, "Order", TR_NOOP ("EQ>Dyn|Dyn>EQ")));
+    // the GAIN block (round 129, the reference's): input trim and phase, the output fader beside the input / output
+    // level meter with its peak read-outs
     v.push_back (section (284, 580, 272, 132, TR_NOOP ("Gain")));
-    v.push_back (dial (340, 636, 40, "Input", TR_NOOP ("Input"), bipolar));
-    v.push_back (toggle (390, 626, 60, 20, "Phase", TR_NOOP ("Phase")));
-    v.push_back (dial (496, 636, 40, "Output", TR_NOOP ("Output"), bipolar));
+    v.push_back (dial (322, 628, 36, "Input", TR_NOOP ("Input"), bipolar));
+    v.push_back (toggle (294, 682, 56, 20, "Phase", TR_NOOP ("Phase")));
+    v.push_back (slider (Item::vslider, 370, 600, 34, 106, "Output", TR_NOOP ("Output")));
+    v.push_back (display (420, 598, 130, 110, "iometer"));
+    return l;
+}
+
+Layout compressorLayout()
+{
+    // round 129: LYNX's basic compressor in the role of the Waves Renaissance Compressor (docs/PARITY.md; the official
+    // trial's panel): the threshold fader beside the input / output meters, the gain-reduction meter in the middle with
+    // the ratio under it, the make-up gain fader on the right, attack and release along the bottom
+    Layout l;
+    l.width = 420;
+    l.height = 300;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 412, 292, TR_NOOP ("Compressor")));
+    v.push_back (slider (Item::vslider, 16, 30, 34, 172, "Threshold", TR_NOOP ("Threshold")));
+    v.push_back (display (58, 26, 112, 180, "iometer"));
+    v.push_back (meter (184, 26, 66, 180, 0, TR_NOOP ("Reduction")));
+    v.push_back (slider (Item::vslider, 268, 30, 34, 172, "Makeup", TR_NOOP ("Gain")));
+    v.push_back (toggle (314, 30, 94, 20, "Auto gain", TR_NOOP ("Auto gain")));
+    v.push_back (dial (90, 252, 34, "Attack", TR_NOOP ("Attack")));
+    v.push_back (dial (217, 252, 34, "Ratio", TR_NOOP ("Ratio")));
+    v.push_back (dial (340, 252, 34, "Release", TR_NOOP ("Release")));
     return l;
 }
 
 Layout glowLeveler()
 {
-    // round 114: the optical levelers' classic front panel (the role: Waves CLA-2A / LA-2A), from the official product
-    // pages: GAIN on the left, PEAK REDUCTION on the right, the VU meter between them showing the gain reduction,
-    // the COMPRESS / LIMIT switch under the meter; LYNX's extras (sidechain emphasis, mix) small along the bottom
+    // round 114: the optical levelers' classic front panel (the role: Waves CLA-2A / LA-2A): GAIN on the left, PEAK
+    // REDUCTION on the right, the VU meter between them, the COMPRESS / LIMIT switch under the meter.
+    // Round 129 (docs/PARITY.md, the official trial's panel): the VU DISPLAY selector (input / GR / output) top right,
+    // AUTO MAKEUP under it, and the bottom strip of the reference — HF emphasis (its HI FREQ), MIX, TRIM
     Layout l;
     l.width = 540;
-    l.height = 270;
+    l.height = 300;
     auto& v = l.items;
-    v.push_back (section (4, 4, 532, 262, TR_NOOP ("Optical leveler")));
-    v.push_back (dial (86, 110, 92, "Gain", TR_NOOP ("Gain"), big));
-    v.push_back (dial (454, 110, 92, "Peak reduction", TR_NOOP ("Peak reduction"), big));
-    auto vu = display (170, 28, 200, 136, "vumeter");
+    v.push_back (section (4, 4, 532, 292, TR_NOOP ("Optical leveler")));
+    v.push_back (dial (86, 124, 92, "Gain", TR_NOOP ("Gain"), big));
+    v.push_back (dial (454, 124, 92, "Peak reduction", TR_NOOP ("Peak reduction"), big));
+    auto vu = display (170, 40, 200, 136, "vumeter");
     vu.steps = 0; // live output 0: gain reduction
     v.push_back (vu);
-    v.push_back (tabs (200, 172, 140, 22, "Limit", TR_NOOP ("Compress|Limit")));
-    v.push_back (dial (232, 226, 28, "Emphasis", TR_NOOP ("Emphasis")));
-    v.push_back (dial (308, 226, 28, "Mix", TR_NOOP ("Mix")));
+    v.push_back (display (392, 22, 136, 18, "vusel"));
+    v.push_back (tabs (200, 184, 140, 22, "Limit", TR_NOOP ("Compress|Limit")));
+    v.push_back (toggle (404, 206, 120, 20, "Auto makeup", TR_NOOP ("Auto makeup")));
+    v.push_back (dial (170, 254, 28, "Emphasis", TR_NOOP ("HF emphasis")));
+    v.push_back (dial (270, 254, 28, "Mix", TR_NOOP ("Mix")));
+    v.push_back (dial (370, 254, 28, "Trim", TR_NOOP ("Trim"), bipolar));
     return l;
 }
 
@@ -2442,7 +2470,7 @@ const std::vector<EffectKind>& ownLayoutKinds()
                                                  EffectKind::foilPlate, EffectKind::nebula, EffectKind::halo, EffectKind::horizon,
                                                  EffectKind::echoform, EffectKind::spiralEcho, EffectKind::orbit, EffectKind::latticeMod,
                                                  EffectKind::crestCompressor, EffectKind::prismMultiband, EffectKind::sentryGate,
-                                                 EffectKind::quellDenoiser, EffectKind::geminiDoubler };
+                                                 EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::compressor };
     return kinds;
 }
 
@@ -2500,6 +2528,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::vocodex: l = vocodexLayout(); break;
         case EffectKind::ridgeStrip: l = ridgeStrip(); break;
         case EffectKind::glowLeveler: l = glowLeveler(); break;
+        case EffectKind::compressor: l = compressorLayout(); break;
         case EffectKind::hushDeEsser: l = hushDeEsser(); break;
         case EffectKind::aether: l = aetherLayout(); break;
         case EffectKind::ember: l = emberLayout(); break;

@@ -1268,8 +1268,8 @@ const EffectInfo& info (EffectKind kind)
                   { "Early send", 0.0f }, { "Diffusion", 1.0f }, { "Type", 0.0f }, { "Space", 0.0f }, { "Low cut", 0.0f } }) };
     static const EffectInfo foilInfo { "Foil Plate",
         params ({ { "Mix", 1.0f }, { "Predelay", 0.0f }, { "Decay", 0.5f }, { "Size", 0.5f }, { "Width", 0.5f },
-                  { "Mod rate", 0.365345f }, { "Mod depth", 0.0f }, { "Low EQ freq", 0.348774f }, { "Low EQ gain", 0.5f },
-                  { "High EQ freq", 0.5f }, { "High EQ gain", 0.5f }, { "Type", 0.0f } }) };
+                  { "Mod rate", 0.365345f }, { "Mod depth", 0.0f }, { "Low EQ freq", 0.343434f }, { "Low EQ gain", 0.5f },
+                  { "High EQ freq", 0.494949f }, { "High EQ gain", 0.5f }, { "Type", 0.0f } }) }; // EQ at 700 Hz / 10 kHz (round 129)
     static const EffectInfo nebulaInfo { "Nebula",
         params ({ { "Mix", 0.5f }, { "Sync", 0.0f }, { "Note", 0.333333f }, { "Delay", 0.5f }, { "Warp", 0.0f },
                   { "Feedback", 0.5f }, { "Density", 0.0f }, { "Width", 1.0f }, { "Low cut", 0.0f }, { "High cut", 1.0f },

@@ -30,6 +30,7 @@
 #include "ui/FacetEqEditor.h"
 #include "ui/ProEditors.h"
 #include "ui/ParametricEqEditor.h"
+#include "ui/PluginHeader.h"
 #include "ui/PluginSkin.h"
 #include "ui/Theme.h"
 #include "ui/ValueControl.h"
@@ -91,7 +92,8 @@ public:
         const auto& l = activeLayout();
         for (const auto& item : l.items) // live meters and graphs (mixing suite, LYNX Tune's pitch, round 108's dynamics): 30 Hz
             if (item.type == Item::display && item.display != nullptr
-                && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "pitchgraph") == 0
+                && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0
+                    || std::strcmp (item.display, "pitchgraph") == 0
                     || std::strcmp (item.display, "pitchtrace") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)))
             {
                 startTimerHz (30);
@@ -200,6 +202,9 @@ public:
 
     // Controls stored in the slot's state (core/StateParams.h: Maximus' bands, Delay Bank's banks, band tables...)
     // edit those bytes instead of EffectSlot::params
+    // the header's undo / A-B / preset bar (round 129): every editor whose setting is its parameters
+    bool usesBar() const { return ! stateBacked() && layout != &plugui::soundgoodizerLayout() && layout != nullptr; }
+
     bool stateBacked() const { return plugui::usesStateParams (kind) && layout != &plugui::soundgoodizerLayout(); }
     bool isStateParam (int param) const { return stateBacked() && plugui::stateIndex (kind, param) >= 0; }
     const stateparams::Table& stateTable() const { return *stateparams::tableFor (kind); }
@@ -230,6 +235,8 @@ public:
         }
         if (current() == nullptr || param < 0 || param >= maxEffectParams)
             return;
+        if (usesBar())
+            bar.willEdit();
         engine.editSong ([t = track, s = slot, param, v = juce::jlimit (0.0f, 1.0f, value)] (Song& song) {
             song.mixer[(std::size_t) t].effects[(std::size_t) s].params[(std::size_t) param] = v;
         });
@@ -352,12 +359,20 @@ public:
         const auto ledC = juce::Point<float> (menuButton().getRight() + 30.0f, area.getCentreY());
         skin::powerLed (g, ledC, 7.0f, fx.enabled);
         auto text = area.withLeft (ledC.x + 10.0f).withRight (presetBox().getX() - 6.0f);
+        if (usesBar())
+            text = bar.place (area).withLeft (ledC.x + 10.0f);
         const auto name = layout == &plugui::soundgoodizerLayout() ? juce::String ("Soundgoodizer") : utf8 (effectInfo (kind).name);
         const auto nameWidth = skin::titleText (g, text.withHeight (area.getHeight()), name, accent);
         text.removeFromLeft (nameWidth);
         g.setFont (font (type::small));
         g.setColour (colour::textSecondary);
         g.drawText ("(" + trackName() + ")", text.withTrimmedLeft (8.0f), juce::Justification::centredLeft, true);
+
+        if (usesBar())
+        {
+            bar.paint (g, accent);
+            return;
+        }
 
         // presets: name, previous, next
         const auto box = presetBox();
@@ -1431,12 +1446,66 @@ public:
             }
             return;
         }
+        else if (id == "iometer") // round 129: input and output peak meters with peak holds and read-outs (−48 … 0 dBFS)
+        {
+            // the originals' level meters (SSL E-Channel's IN / OUT meter, RComp's input and output, Doubler's output)
+            const auto fracOf = [] (float linear) { return juce::jlimit (0.0f, 1.0f, (20.0f * std::log10 (juce::jmax (1e-6f, linear)) + 48.0f) / 48.0f); };
+            ioMeters[0].update (fracOf (liveMeter (2)), 0.02f);
+            ioMeters[1].update (fracOf (liveMeter (3)), 0.02f);
+            const auto labelH = 13.0f * s, readH = 13.0f * s;
+            auto area = r.reduced (2.0f * s);
+            const auto top = area.removeFromTop (labelH), bottom = area.removeFromBottom (readH);
+            const auto scaleW = 18.0f * s;
+            auto bars = area.withTrimmedLeft (scaleW);
+            g.setFont (font (juce::jmax (7.0f, 8.0f * s)));
+            for (int db = 0; db >= -48; db -= 12)
+            {
+                const auto y = bars.getY() + bars.getHeight() * (float) -db / 48.0f;
+                g.setColour (colour::gridBeat);
+                g.drawHorizontalLine ((int) y, bars.getX(), bars.getRight());
+                g.setColour (colour::textSecondary);
+                g.drawText (juce::String (db), juce::Rectangle<float> (area.getX(), y - 6.0f * s, scaleW - 2.0f * s, 12.0f * s), juce::Justification::centredRight, false);
+            }
+            const auto w = bars.getWidth() / 2.0f;
+            const char* names[] = { TR_NOOP ("In"), TR_NOOP ("Out") };
+            for (int k = 0; k < 2; ++k)
+            {
+                const auto bar = juce::Rectangle<float> (bars.getX() + w * (float) k, bars.getY(), w, bars.getHeight()).reduced (3.0f * s, 0.0f);
+                skin::meter (g, bar, ioMeters[(std::size_t) k].level, ioMeters[(std::size_t) k].peak, true);
+                const auto column = juce::Rectangle<float> (bar.getX() - 4.0f * s, 0.0f, bar.getWidth() + 8.0f * s, 0.0f);
+                g.setColour (colour::textSecondary);
+                g.setFont (font (juce::jmax (7.0f, 8.5f * s), true));
+                g.drawText (caps (tr (names[k])), column.withY (top.getY()).withHeight (labelH), juce::Justification::centred, false);
+                const auto peakDb = ioMeters[(std::size_t) k].peak * 48.0f - 48.0f;
+                g.setColour (peakDb > -0.1f ? juce::Colour (0xffe5383b) : colour::textPrimary);
+                g.setFont (font (juce::jmax (7.0f, 8.5f * s)));
+                g.drawText (ioMeters[(std::size_t) k].peak > 0.001f ? juce::String (peakDb, 1) : juce::String::fromUTF8 ("-â"),
+                            column.withY (bottom.getY()).withHeight (readH), juce::Justification::centred, false);
+            }
+            return;
+        }
+        else if (id == "vusel") // round 129: the VU display selector, INPUT | GR | OUTPUT (the reference's VU DISPLAY knob)
+        {
+            static constexpr int order[] = { 1, 0, 2 };
+            const char* names[] = { TR_NOOP ("Input"), TR_NOOP ("GR"), TR_NOOP ("Output") };
+            const auto w = r.getWidth() / 3.0f;
+            for (int k = 0; k < 3; ++k)
+            {
+                const auto cell = juce::Rectangle<float> (r.getX() + w * (float) k, r.getY(), w, r.getHeight()).reduced (1.5f * s, 0.0f);
+                skin::button (g, cell, vuMode == order[k], false, accent, radius::sm * s);
+                g.setColour (vuMode == order[k] ? colour::textPrimary : colour::textSecondary);
+                g.setFont (font (juce::jmax (7.0f, 9.5f * s), true));
+                g.drawText (caps (tr (names[k])), cell, juce::Justification::centred, false);
+            }
+            return;
+        }
         else if (id == "vumeter") // round 114: an analog-style VU needle showing the gain reduction (the optical leveler)
         {
             // gain reduction (needle down from 0 VU) or the output level (0 VU = −18 dBFS), like the reference's selector
-            const auto out = liveMeter (3);
-            const auto target = vuOutput ? -juce::jlimit (-3.0f, 30.0f, -(20.0f * std::log10 (juce::jmax (1e-6f, out)) + 18.0f))
-                                         : -juce::jlimit (0.0f, 1.0f, liveMeter (item.steps)) * 30.0f;
+            // round 129: input / gain reduction / output, like the reference's VU DISPLAY selector (the "vusel" item)
+            const auto level = liveMeter (vuMode == 1 ? 2 : 3);
+            const auto target = vuMode != 0 ? -juce::jlimit (-3.0f, 30.0f, -(20.0f * std::log10 (juce::jmax (1e-6f, level)) + 18.0f))
+                                            : -juce::jlimit (0.0f, 1.0f, liveMeter (item.steps)) * 30.0f;
             vuNeedle += (-target - vuNeedle) * 0.35f; // a meter's inertia (~300 ms at the 30 Hz refresh)
             const auto face = r.reduced (2.0f * s);
             g.setColour (juce::Colour (0xffd9cfb4).withAlpha (fx.enabled ? 1.0f : 0.5f));
@@ -1469,7 +1538,7 @@ public:
             g.setFont (font (juce::jmax (8.0f, 11.0f * s), true));
             g.drawText ("VU", face.withTop (face.getY() + face.getHeight() * 0.5f).withHeight (16.0f * s).toNearestInt(), juce::Justification::centred, false);
             g.setFont (font (juce::jmax (7.0f, 8.5f * s)));
-            g.drawText ((vuOutput ? tr ("Output") : tr ("Gain reduction")) + "  " + juce::String (-vuNeedle, 1) + (vuOutput ? " VU" : " dB"), face.withTop (face.getBottom() - 16.0f * s).toNearestInt(), juce::Justification::centred, false);
+            g.drawText ((vuMode == 2 ? tr ("Output") : vuMode == 1 ? tr ("Input") : tr ("Gain reduction")) + "  " + juce::String (-vuNeedle, 1) + (vuMode != 0 ? " VU" : " dB"), face.withTop (face.getBottom() - 16.0f * s).toNearestInt(), juce::Justification::centred, false);
             // the needle
             const auto a = angleOf (-vuNeedle);
             const juce::Point<float> dir { std::sin (a), -std::cos (a) };
@@ -1793,6 +1862,8 @@ public:
     {
         if (current() == nullptr)
             return;
+        if (usesBar())
+            bar.willEdit();
         engine.editSong ([t = track, sl = slot, changes] (Song& song) {
             auto& params = song.mixer[(std::size_t) t].effects[(std::size_t) sl].params;
             for (auto [p, v] : changes)
@@ -1953,6 +2024,8 @@ public:
             return 0;
         if (menuButton().expanded (2.0f).contains (p))
             return 1;
+        if (usesBar())
+            return bar.contains (p) ? 5 : 0;
         if (presetBox().contains (p))
             return 2;
         if (prevButton().contains (p))
@@ -1972,6 +2045,8 @@ public:
             mouseAt = p; // the menu's arrows light under the mouse
             repaint();
         }
+        if (usesBar() && bar.hover (p))
+            repaint();
         if (h != hoverHeader || i != hoverItem)
         {
             hoverHeader = h;
@@ -1984,6 +2059,7 @@ public:
 
     void mouseExit (const juce::MouseEvent&) override
     {
+        bar.hoverExit();
         hoverHeader = 0;
         hoverItem = -1;
         anim.setHot (-1);
@@ -1998,6 +2074,13 @@ public:
 
         if (const auto h = headerItemAt (e.position); h > 0)
         {
+            if (h == 5)
+            {
+                const pluginheader::PresetBar::FlPresets fl { [this] (juce::PopupMenu& m) { addFlPresets (m); },
+                                                              [this] (int delta) { stepPreset (delta); }, [this] { return presetName; } };
+                bar.click (bar.partAt (e.position), *this, &fl);
+                return;
+            }
             if (h == 1 || h == 2 || e.mods.isPopupMenu())
                 showOptionsMenu (h == 2);
             else
@@ -2008,6 +2091,7 @@ public:
         const auto index = itemAt (e.position);
         if (index < 0)
             return;
+        bar.beginGesture();
 
         const auto& item = activeLayout().items[(std::size_t) index];
         const auto r = rectOf (item);
@@ -2026,9 +2110,17 @@ public:
             return;
         }
 
-        if (item.type == Item::display && juce::String (item.display) == "vumeter") // the VU's selector: gain reduction / output
+        if (item.type == Item::display && juce::String (item.display) == "vumeter") // the VU's selector: gain reduction / output / input
         {
-            vuOutput = ! vuOutput;
+            vuMode = (vuMode + 1) % 3;
+            repaint();
+            return;
+        }
+        if (item.type == Item::display && juce::String (item.display) == "vusel") // round 129: INPUT | GR | OUTPUT
+        {
+            const auto r = rectOf (item);
+            static constexpr int order[] = { 1, 0, 2 };
+            vuMode = order[juce::jlimit (0, 2, (int) ((e.position.x - r.getX()) / r.getWidth() * 3.0f))];
             repaint();
             return;
         }
@@ -2336,6 +2428,7 @@ public:
             case 2: return { tr ("Preset: click for the list of FL presets of this plugin"), presetName, false, true };
             case 3: return { tr ("Previous preset"), {}, false, false };
             case 4: return { tr ("Next preset"), {}, false, false };
+            case 5: return { bar.hintFor (bar.partAt (p)), bar.presetLabel(), false, true };
             default: break;
         }
         const auto index = itemAt (p);
@@ -2347,7 +2440,11 @@ public:
         if (item.type == Item::display && juce::String (item.display) == "sgpresets")
             return { tr ("Soundgoodizer preset A to D (read from your FL installation)"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "vumeter")
-            return { tr ("VU meter: click to show the gain reduction or the output level"), vuOutput ? tr ("Output") : tr ("Gain reduction"), false, false };
+            return { tr ("VU meter: click to show the gain reduction, the output or the input level"), vuMode == 2 ? tr ("Output") : vuMode == 1 ? tr ("Input") : tr ("Gain reduction"), false, false };
+        if (item.type == Item::display && juce::String (item.display) == "iometer")
+            return { tr ("Input and output level (peak, dBFS); the numbers hold the highest peak"), {}, false, false };
+        if (item.type == Item::display && juce::String (item.display) == "vusel")
+            return { tr ("VU display: what the meter shows (input level, gain reduction, output level)"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "xy")
             return { tr ("Drag the point: both values at once"), {}, false, false };
         if (item.type == Item::display)
@@ -2386,6 +2483,12 @@ public:
         if (! fx || fx->kind != kind)
             return;
         presetName = f.getFileNameWithoutExtension();
+        if (usesBar())
+        {
+            bar.beginGesture();
+            bar.willEdit();
+            fx->presetName = presetName.toStdString();
+        }
         engine.editSong ([t = track, s = slot, fx = *fx] (Song& song) {
             auto& target = song.mixer[(std::size_t) t].effects[(std::size_t) s];
             const auto enabled = target.enabled;
@@ -2408,6 +2511,21 @@ public:
                 at = i;
         at = at < 0 ? (delta > 0 ? 0 : files.size() - 1) : (at + delta + files.size()) % files.size();
         loadPreset (files[at]);
+    }
+
+    // FL's factory presets of this plugin, in folders (the header's preset menu)
+    void addFlPresets (juce::PopupMenu& presets)
+    {
+        const auto files = presetFiles();
+        std::map<juce::String, juce::PopupMenu> folders;
+        for (const auto& f : files)
+            folders[f.getParentDirectory().getFileName()].addItem (f.getFileNameWithoutExtension(), true, f.getFileNameWithoutExtension() == presetName,
+                                                                   [this, f] { loadPreset (f); });
+        if (folders.size() == 1)
+            presets = folders.begin()->second;
+        else
+            for (auto& [name, menu] : folders)
+                presets.addSubMenu (name, menu);
     }
 
     void showOptionsMenu (bool presetsOnly)
@@ -2442,6 +2560,11 @@ public:
         menu.addItem (tr ("Reset to defaults"), [this] {
             const auto& info = effectInfo (kind);
             presetName = {};
+            if (usesBar())
+            {
+                bar.beginGesture();
+                bar.willEdit();
+            }
             auto bytes = current() != nullptr ? current()->state : std::vector<std::uint8_t> {};
             if (stateBacked())
             {
@@ -2453,6 +2576,7 @@ public:
                 auto& fx = song.mixer[(std::size_t) t].effects[(std::size_t) s];
                 for (std::size_t i = 0; i < info.params.size() && i < fx.params.size(); ++i)
                     fx.params[i] = info.params[i].defaultValue;
+                fx.presetName.clear();
                 if (state)
                     fx.state = bytes;
             });
@@ -2502,7 +2626,7 @@ private:
                     pitchHistory.erase (pitchHistory.begin(), pitchHistory.begin() + (std::ptrdiff_t) (pitchHistory.size() - pitchHistoryLength));
                 repaint (rectOf (item).getSmallestIntegerContainer());
             }
-            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)) && visible (item))
+            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)) && visible (item))
             {
                 history = history || std::strcmp (item.display, "grhistory") == 0;
                 repaint (rectOf (item).getSmallestIntegerContainer());
@@ -2524,6 +2648,7 @@ private:
     float lastMeters = 0.0f;
     ui::ValueDrag drag;
     juce::String presetName;
+    pluginheader::PresetBar bar { engine, track, slot }; // undo / redo, A / B, presets (round 129)
     int eqSelected = -1;
     bool eqDragging = false, xyDragging = false, sgDragging = false;
     struct PitchPoint { float sung, target, shift; }; // MIDI note numbers (0 = none) and the applied correction in semitones
@@ -2536,7 +2661,8 @@ private:
     dynui::History dynHistory; // the dynamics suite's scrolling gain-reduction graph
     int crossoverDrag = -1;    // the crossover parameter being dragged on a band display
     float vuNeedle = 0.0f;     // the VU display's needle (dB below 0 VU, with inertia)
-    bool vuOutput = false;     // the VU shows the output level instead of the gain reduction
+    std::array<skin::Ballistics, 2> ioMeters {}; // the "iometer" display: input and output (round 129)
+    int vuMode = 0;            // what the VU shows: 0 gain reduction, 1 input level, 2 output level (0 VU = −18 dBFS)
     juce::Point<float> mouseAt { -1.0f, -1.0f };
 };
 
