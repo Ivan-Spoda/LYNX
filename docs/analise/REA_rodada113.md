@@ -90,7 +90,7 @@ forcing C major.
 | Renaissance Compressor | Compressor | RealWorld list, not confirmed | 2:1 above −15 dBFS, auto gain (was −18 dB 4:1) |
 | DeEsser | Hush De-esser | RealWorld list; value 0 = 5506 is the only one in Hz | frequency from value 0 [model]; −20 dBFS, 4 dB range (was 6 kHz, −30 dBFS, 12 dB) |
 | CLA-2A | Glow Leveler | RealWorld list (208 values), not confirmed | peak reduction 30 %, +2 dB (was 45 %, +3 dB) |
-| Fresh Air | Aether | 2530-byte state: two floats 0..1 at 1290 / 1294 (0.33–0.60 in her slots) [DATA] | mid → exciter × 0.25, high → air shelf up to +6 dB [model gain] (was neutral) |
+| Fresh Air | Aether | 2530-byte state: two floats 0..1 at 1290 / 1294 = Mid Air / High Air [DATA, EXEC] | air shelf gain + frequency from laws measured on the official trial (§3b; was neutral) |
 | Decapitator / EchoBoy / PanMan | Ember / Fruity Delay 3 / Auto-pan | Soundtoys encoded preset | Ember drive +1.4 dB (was +5.4), Auto-pan depth 50 % (was 75 %), Delay 3 default |
 | H-Delay | Fruity Delay 3 | RealWorld list (BPM, time in ms readable) | default; FL's slot mix is 0–7 % in her projects, so it barely plays |
 
@@ -103,6 +103,73 @@ against no substitutes, level-normalised, 125 Hz … 16 kHz (spread = RMS of the
     Glow Leveler      +2.1 +0.9 -0.1 -0.1 -0.4 +0.2 -0.1 +0.5 (0.85) +0.9 +0.4 -0.1 -0.0 -0.2 +0.0 +0.1 +0.4 (0.39)
     Ember Saturator   +1.1 +1.6 -0.2 -0.2 -0.0 +0.3 +1.5 -0.0 (0.88) +0.2 +1.1 -0.2 -0.1 +0.0 +0.1 +0.6 -0.3 (0.46)
     LYNX Tune         +1.0 +0.0 +0.1 +0.0 -0.3 -0.4 -0.7 -1.1 (0.61) (same: PSOLA)
+
+## 3b. Fresh Air measured (official trial on this PC)
+
+[EXEC] The official Fresh Air trial (v1.1.7, installed here 2026-10-20) in tools/fxmeasure, headless: its parameters
+are "Mid Air", "High Air" (0–100 %), Bypass, Trim; setting Mid 0.3 / High 0.7 and saving the state puts 0.3 / 0.7 at
+offsets 1290 / 1294 of the 2530-byte component state — the layout read from her projects. Pink noise at −20 dBFS RMS,
+48 kHz, gain vs the input (dB):
+
+                 1k    2k    3k    4k    6k    8k   10k   12k   16k   20k
+    Mid 0.25   +0.7  +0.5  +1.0  +1.6  +2.2  +2.5  +2.6  +2.7  +2.7  +2.7
+    Mid 0.5    +0.7  +0.5  +1.5  +2.6  +3.6  +4.0  +4.2  +4.3  +4.4  +4.4
+    Mid 1      -0.0  -0.1  +2.5  +4.6  +6.2  +6.7  +7.0  +7.1  +7.2  +7.2
+    High 0.25  +1.0  +0.9  +0.7  +0.5  +0.2  +1.0  +2.3  +3.3  +4.3  +4.6
+    High 0.5   +1.4  +1.1  +0.7  +0.2  +0.0  +2.2  +4.7  +6.3  +7.5  +7.8
+    High 1     +1.7  +1.2  +0.4  -0.5  +0.3  +4.6  +7.8  +9.5 +10.8 +11.1
+
+Each response above 2 kHz (singles and the seven Mid/High pairs her corpus uses) was fitted by Aether's shelf (RBJ
+high shelf, S = 0.6); least squares over the fits give gain = 10.345 m + 20.548 h − 2.32 m² − 7.75 h² − 11.673 m h dB
+and log2 f = 12.8069 − 0.7108 m + 0.6746 h − 0.5369 m h (5–20 kHz), within 0.43–0.69 dB RMS of the measured curves
+for her settings (up to 1.6 dB for High alone at 100 %, which she never uses). Her most common setting (0.29 / 0.25)
+is +6.6 dB from 6.8 kHz. Fresh Air may be level-dependent ("dynamic"); only −20 dBFS was measured (not confirmed at
+other levels). Scripts: tmp/r113/py/fafit.py, renders in C:\Users\kauan\lynx-test\r113\fa.
+
+## 3c. The Waves vocal plugins measured (official trials on this PC)
+
+[EXEC] Waves V17 trials (WaveShell1-VST3 17.1) in tools/fxmeasure, headless (`load <shell> 48000 512 <name>`;
+`loadcomponent` puts a project's raw VST3 component state in). RealWorld layout: every control moved alone, the list
+value that followed it (and its text) recorded (tmp/r113/wv/*_probe.txt, *_map.txt; py/wvmap.py, wvprobe.py). Her
+states read back through the plugins (the same in every project of her corpus):
+
+| Plugin (values) | Layout confirmed | Her state |
+|---|---|---|
+| RComp (28) | 0 release ms, 1 threshold dB, 2 gain dB, 8 attack ms, 9 ratio, 16 warm/smooth, 17 ARC/manual, 22 electro/opto, 27 trim | -15 dB, 2.95:1, 0.5 ms, 160 ms ARC, gain 0, warm, electro |
+| DeEsser (15) | 0 freq Hz, 2 threshold dB, 10 monitor, 13 side chain (1 high pass, 2 band pass), 14 audio (0 split, 1 wideband) | 5506 Hz, -24.2 dB, high pass, split |
+| CLA-2A (208) | 38 gain, 74 peak reduction, 112 comp/limit, 140 analog, 153 hi freq, 206 trim, 207 auto makeup | gain 48.96, peak reduction 62.6, comp |
+| SSL E-Channel (57) | 0-3 comp thresh/ratio/fast/release, 5-9 expander, 11 dyn bypass, 13-24 EQ (LF/LMF/HMF/HF type, gain, freq, Q), 25 EQ bypass, 27/28 HP/LP, 29 filter split, 30 gain, 39 phase, 40 input | comp -1.3 dB 1.8:1 fast 0.35; HP 116 Hz; LF -6 dB 60 Hz shelf; HMF +3 dB 3.5 kHz Q 1.5; HF +4.8 dB 10.16 kHz shelf |
+
+[EXEC] Each plugin at her state on sine stairs (1 and 6 kHz, -60 .. 0 dBFS peak, 3 dB steps) and her raw take
+(py/wvmeas.py, stairtab.py); gain in dB at -60 / -24 / -18 / -12 / -6 / 0 dBFS:
+
+    RComp      1k    0.0  -0.4  -1.8  -4.6  -8.5 -12.8    take -9.6 dB (no make-up at gain 0)
+    DeEsser    6k    0.0  -0.0  -1.4  -5.6  -8.6 -10.2    1 kHz untouched
+    CLA-2A     1k   16.0  12.4   7.9   3.3  -1.2  -5.8    6 kHz: 14.3 at -60 (its tone)
+    SSL (EQ off) 1k  0.9   0.9   0.4  -0.7  -2.2  -4.0    +0.9 dB below the threshold
+
+Substitutes fitted (grid search, LYNX's effect run on the same signals through tmp/r113/fxl/fxlynx; py/fitdyn.py):
+- RComp -> Compressor: threshold - 5 dB, same ratio, attack, release 300 ms for ARC, gain as make-up, no auto gain:
+  0.53 dB RMS on the stairs, take level -9.48 vs -9.56 dB.
+- DeEsser -> Hush (split, high-pass detector): 0.81 x the frequency, threshold + 5 dB, 12 dB range (fixed; the
+  original flattens about 10 dB down): 0.84 dB RMS (6 kHz weighted x3).
+- CLA-2A -> Glow Leveler: gain knob -> level below the threshold (noise at -70 dBFS: 20 -> -18.5, 30 -> -3.0,
+  40 -> +8.0, 48.96 -> +15.5, 60 -> +24.2, 70 -> +29.2, 80 -> +31.8 dB) + 1.5 dB; peak reduction
+  0.40 + 0.021 x (knob - 40) (fitted on her take after RComp at peak reduction 40 / 62.6 / 75 / 85: 50 ms level
+  envelope within 0.3-1.4 dB; Glow saturates above 75). On the stairs Glow's knee is softer (3 dB RMS), the take's
+  envelope is what is matched.
+- SSL E-Channel -> Ridge Strip: its bands are broader than Ridge's. Each band measured alone (impulse at -60 dBFS,
+  py/sslbands.py) and Ridge's band fitted to it (fxl/ridgefit, 0.03-0.5 dB RMS; LF boost at 400 Hz 1.5): HF shelf
+  at 0.36 x the frequency and 0.8 x the gain; HMF at 1.37 x, gain 0.8 x, Q 0.5 + 0.27 (Q - 0.5); LF cut at 60 Hz =
+  0.32 x the gain from ~400 Hz, boost 0.75 x at 2.4 x; HP 50 / 116 / 250 Hz = Ridge 27 / 99 / 194 Hz. With the EQ
+  bypassed the compressor at her state is Ridge's at threshold - 15.7 dB, 1 + 0.375 (ratio - 1), +0.9 dB (the
+  original's level below the threshold), dynamics before the EQ (py/sslxl.py): her whole state 0.69 dB RMS on the
+  stairs, pink at -40 dBFS within 1 dB RMS 40 Hz - 18 kHz (0.3 dB above 150 Hz), take level -2.1 vs -1.6 dB.
+  LMF (0 dB in her states) and the expander are taken at face value [model].
+Before (gentle defaults) RComp / DeEsser / CLA-2A moved her take by -0.2 / -0.1 / +1.0 dB where the originals do
+-9.6 / -0.05 / +6.3 dB (CLA-2A after RComp), and Ridge was flat where the SSL adds +6 dB at 6 kHz: the defaults kept
+the level and tone, the originals do not. Only one state per plugin exists in her corpus, so the laws are calibrated
+at her settings; other settings follow the same units with the same offsets [model].
 
 ## 4. Whole vocal path: substitutes vs bypassed vs FL
 
@@ -148,13 +215,16 @@ experiments: `LYNX_PARAM="t.k.p=v"`, and the substituted slots are listed with t
 ## Where I stopped / next steps
 - Done: §1 matching fixes, §2 Auto-Tune key/scale + project key, §3 gentle defaults + Fresh Air / DeEsser reads, §5
   switch, tests (`tests/Substitutes113Tests.inc`), PLUGIN_FALLBACK.md.
-- [EXEC] Verified on her laptop with this branch's LYNX.exe (hidden, idle priority, her settings restored after):
-  `kwe` hosts Auto-Tune Pro from `…\VST3\Antares\` (before: bypassed); `game over --find-plugins` scans both Waves
-  shells (16.0 and 16.3) in 88 s and then hosts Auto-Tune Pro, SSLChannel, NS1, CLA-2A, H-Delay, Fresh Air and the
-  Soundtoys plugins; only RComp and DeEsser (not installed there, FL leaves them empty) are substitutes.
-- Still to verify there: Auto-Tune Pro hosted from the Antares folder; the 16.0 shell described
-  (or `scan-failures.log` saying why not) — needs her LYNX run in her own desktop session.
-- Official trials of Auto-Tune Pro, Fresh Air, Waves and Soundtoys are being installed on this PC (2026-10-20): once
-  they load headlessly, measure (fxmeasure) Auto-Tune Pro's scale list (confirms or corrects §2), Fresh Air's gain
-  law, and the Waves RealWorld layouts (RComp, DeEsser, CLA-2A, SSL E-Channel) to translate them instead of the
-  gentle defaults; FL renders with the real plugins as the reference.
+- Done (2026-10-20, second landing): §3c RComp, DeEsser, CLA-2A and SSL E-Channel measured on the official Waves
+  trials and translated (`translate = waves-rcomp / waves-deesser / waves-cla-2a / waves-ssl-channel`); fxmeasure
+  picks a shell's plugin by name and loads raw component states.
+- [EXEC] Verified on her laptop with this branch's LYNX.exe (first landing): `kwe` hosts Auto-Tune Pro from
+  `…\VST3\Antares\`; `game over --find-plugins` scans both Waves shells and hosts Auto-Tune Pro, SSLChannel, NS1,
+  CLA-2A, H-Delay, Fresh Air and the Soundtoys plugins; only RComp and DeEsser are substitutes there.
+- Next:
+  - Auto-Tune Pro is still NOT installed on this PC (only Auto-Tune Central / Antares Central): the scale-list order
+    (§2, [model]) waits for the user to install the trial.
+  - Soundtoys 5 / UADx trials not installed (need vendor logins) — Decapitator / PanMan / EchoBoy stay at defaults.
+  - Waves Tune Real-Time and H-Delay layouts (same probe method), NS1 / Doubler have no LYNX role yet.
+  - Whole-chain check: FL here can now render her vocal with the real Waves trials (once FL finds the 17.x shell)
+    against LYNX with the translated substitutes; the per-plugin fits are from one state each.

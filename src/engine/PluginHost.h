@@ -11,6 +11,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "core/Effects.h"
+#include "core/FixedBlock.h"
 #include "core/FlPluginDb.h"
 #include "core/PluginSubstitutes.h"
 #include "core/Instruments.h"
@@ -22,13 +23,19 @@ namespace lynx
 // when the mode changes; call only while it is not processing (offline renders, before/after the render loop).
 void setPluginRenderMode (juce::AudioPluginInstance& plugin, bool offline, int blockSize);
 
+// Block length of "Use fixed size buffers" (PluginRef::fixedBuffers): the audio device's buffer size, as FL (set when
+// the device starts; 512 until then). Plugins created afterwards use it.
+int fixedPluginBlock() noexcept;
+void setFixedPluginBlock (int samples) noexcept;
+
 // Adapters: a JUCE plugin seen by the core as an Instrument/Effect.
 // Notes become MIDI at the start of the next rendered chunk; since the core
 // renders in chunks that start exactly at each event, timing is sample-accurate.
 class PluginInstrument final : public Instrument
 {
 public:
-    PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize);
+    // fixedBlock > 0: FL's "Use fixed size buffers" — the plugin always gets blocks of that length (+ that much latency)
+    PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize, int fixedBlock = 0);
     ~PluginInstrument() override;
 
     juce::AudioPluginInstance& getInstance() noexcept { return *plugin; }
@@ -39,20 +46,25 @@ public:
     void allNotesOff() noexcept override;
     void render (float* left, float* right, int n, float gainLeft, float gainRight) noexcept override;
     void setParameter (int index, float value) noexcept override;
-    int latencySamples() const noexcept override { return plugin->getLatencySamples(); }
+    int latencySamples() const noexcept override { return plugin->getLatencySamples() + (fixed != nullptr ? fixed->latency() : 0); }
     void setRenderMode (bool offline) { setPluginRenderMode (*plugin, offline, blockSize); }
+    bool usesFixedBlocks() const noexcept { return fixed != nullptr; }
 
 private:
     std::unique_ptr<juce::AudioPluginInstance> plugin;
     juce::AudioBuffer<float> buffer;
     juce::MidiBuffer midi;
     int blockSize;
+    std::unique_ptr<FixedBlock> fixed;
+    std::vector<float> scratch; // fixed blocks: the delayed output before it is mixed in
+    juce::MidiBuffer pending; // fixed blocks: MIDI waiting for the block being collected, at its offsets in it
 };
 
 class PluginEffect final : public Effect
 {
 public:
-    PluginEffect (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize);
+    // fixedBlock > 0: FL's "Use fixed size buffers" — the plugin always gets blocks of that length (+ that much latency)
+    PluginEffect (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize, int fixedBlock = 0);
     ~PluginEffect() override;
 
     juce::AudioPluginInstance& getInstance() noexcept { return *plugin; }
@@ -61,14 +73,16 @@ public:
     void reset() noexcept override {}
     void process (float* left, float* right, int n, const EffectParams& params, double bpm) noexcept override;
     void setParameter (int index, float value) noexcept override;
-    int latencySamples() const noexcept override { return plugin->getLatencySamples(); }
+    int latencySamples() const noexcept override { return plugin->getLatencySamples() + (fixed != nullptr ? fixed->latency() : 0); }
     void setRenderMode (bool offline) { setPluginRenderMode (*plugin, offline, blockSize); }
+    bool usesFixedBlocks() const noexcept { return fixed != nullptr; }
 
 private:
     std::unique_ptr<juce::AudioPluginInstance> plugin;
     juce::AudioBuffer<float> buffer;
     juce::MidiBuffer midi;
     int blockSize;
+    std::unique_ptr<FixedBlock> fixed;
 };
 
 // Plugin formats, known-plugin list (saved in AppData) and instance creation.

@@ -141,11 +141,17 @@ Priority: **H** high value & low risk (next rounds), **M** worthwhile, **L** low
 
 ## Where I stopped / next candidates
 
-- Done: Part A table A7 (code + tests), "notify about rendering mode".
-- Next rounds, in order: (1) per-plugin **fixed-size buffers** (accumulate/split blocks for a plugin, report the added
-  latency to PDC) — relevant to round 111's plugin crashes; (2) per-plugin **separate-process** toggle in the plugin
-  menu; (3) **purge unused recordings** (FL's "Delete unused recorded files" prompt); (4) record into a project data
-  folder (`<project>/Audio/Recorded`) with FL-like names; (5) per-plugin "allow threaded processing" opt-out;
-  (6) underrun counter in the CPU panel.
+- Done (landing 1): Part A table A7 (code + tests), "notify about rendering mode".
+- Done (landing 2): per-plugin **Processing** submenu (channel menu + mixer slot menu): **Use fixed size buffers**
+  (`src/core/FixedBlock.h`: the plugin always gets blocks of the device buffer size; input collected, output delayed by
+  exactly one block, MIDI kept at its offset in the block; the block is added to the plugin's `latencySamples()` so
+  PDC compensates it) and **Run in a separate process** (FL's "Make bridged", per plugin; greyed when the global option
+  is on). Both are saved in the project (`fixedBuffers`, `separateProcess`) and re-create the plugin with its current
+  state when toggled. **Underrun counter** in the CPU meter (driver's xrun count when it reports one, else LYNX's
+  estimate), red number + hint. Tests `tests/FixedBlockTests118.inc`.
+- Next rounds, in order: (1) **purge unused recordings** (FL's "Delete unused recorded files" prompt); (2) record into
+  a project data folder (`<project>/Audio/Recorded`) with FL-like names; (3) per-plugin "allow threaded processing"
+  opt-out; (4) read FL's wrapper flags ("Use fixed size buffers", "Make bridged") from imported .flp files into
+  `PluginRef`; (5) "Process maximum size buffers" variant.
 - Not confirmed: the exact busy flag that postpones autosave in FL's modes 0–3; whether FL's undo history survives a
   save.

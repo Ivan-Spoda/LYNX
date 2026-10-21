@@ -99,8 +99,14 @@ struct PluginRef
     std::string name;  // to display even when the plugin is not installed
     std::string state; // plugin state in base64 (what the plugin returns when saving)
     ForeignPlugin foreign; // FL import not yet resolved (format == none: nothing pending)
+    // FL wrapper processing options (REA_rodada118 Part B), saved with the project:
+    bool fixedBuffers = false;    // "Use fixed size buffers": constant block length (the device buffer), + that latency
+    bool separateProcess = false; // "Make bridged": this plugin runs in its own process even with the global option off
 
-    bool operator== (const PluginRef& o) const { return id == o.id && state == o.state && foreign == o.foreign; }
+    bool operator== (const PluginRef& o) const
+    {
+        return id == o.id && state == o.state && foreign == o.foreign && fixedBuffers == o.fixedBuffers && separateProcess == o.separateProcess;
+    }
 };
 
 // Channel sampler settings (FL's "Channel settings" window).

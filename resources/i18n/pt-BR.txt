@@ -2774,3 +2774,10 @@ countries: br
 "Loading plugins..." = "Carregando plugins..."
 "Loading {0}... {1}/{2}" = "Carregando {0}... {1}/{2}"
 "Building the mixer..." = "Montando o mixer..."
+
+# --- plugin processing options and underrun counter (round 118)
+"Processing" = "Processamento"
+"Use fixed size buffers (adds latency)" = "Usar buffers de tamanho fixo (adiciona latência)"
+"Run in a separate process" = "Rodar em um processo separado"
+"Run in a separate process (on for all plugins in Options)" = "Rodar em um processo separado (ligado para todos os plugins em Opções)"
+"{0} underruns (the sound broke up; red number)" = "{0} underruns (o som falhou; número vermelho)"

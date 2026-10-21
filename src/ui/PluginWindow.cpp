@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <map>
 
+#include "engine/PluginSandbox.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
@@ -132,6 +133,28 @@ void close (const juce::AudioPluginInstance& plugin)
 void scanPluginsWithProgress (AudioEngine& engine, std::function<void (int)> onDone)
 {
     (new ScanThread (engine, std::move (onDone)))->launchThread(); // deletes itself when done
+}
+
+juce::PopupMenu pluginProcessingMenu (AudioEngine& engine, const PluginRef& current, juce::AudioPluginInstance* instance,
+                                      std::function<PluginRef* (Song&)> find)
+{
+    auto toggle = [&engine, find, instance] (bool PluginRef::*option) {
+        if (instance != nullptr)
+            PluginWindows::close (*instance);
+        engine.capturePluginStates(); // the new instance starts from the current settings
+        engine.editSong ([find, option] (Song& song) {
+            if (auto* ref = find (song))
+                ref->*option = ! (ref->*option);
+        });
+    };
+
+    juce::PopupMenu menu;
+    menu.addItem (tr ("Use fixed size buffers (adds latency)"), true, current.fixedBuffers, [toggle] { toggle (&PluginRef::fixedBuffers); });
+    // with Options › "Run plugins in a separate process" on, every plugin already runs in one
+    const auto all = pluginSandboxEnabled();
+    menu.addItem (all ? tr ("Run in a separate process (on for all plugins in Options)") : tr ("Run in a separate process"), ! all,
+                  all || current.separateProcess, [toggle] { toggle (&PluginRef::separateProcess); });
+    return menu;
 }
 
 void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instruments, std::function<void (PluginRef)> onChosen)
