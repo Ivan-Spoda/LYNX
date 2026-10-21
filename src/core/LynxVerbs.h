@@ -89,8 +89,11 @@ struct Settings
     double outLowCut = 0.0, outHighCut = 0.0;  // Hz (0 = off)
     int outLowOrder = 2, outHighOrder = 2;     // 1 = 6 dB/oct, 2 = 12 dB/oct
     double bandLimit = 0.0;        // Hz (0 = off): a steep (24 dB/oct) low-pass, the reduced bandwidth of some algorithms
+    int bandLimitSections = 2;     // its Butterworth order / 2 (2 = 24 dB/oct … 16 = 192 dB/oct)
     double lowShelfHz = 200.0, lowShelfDb = 0.0;
     double highShelfHz = 6000.0, highShelfDb = 0.0;
+    double toneHighHz = 8000.0, toneHighDb = 0.0;          // a second high shelf (an algorithm's own tone)
+    double toneMidHz = 1000.0, toneMidDb = 0.0, toneMidQ = 0.7; // a bell (an algorithm's own tone)
     double gain = 1.0;
 };
 
