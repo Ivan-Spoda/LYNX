@@ -13,6 +13,7 @@
 #include "engine/Vst2Format.h"
 #include "engine/PluginSandbox.h"
 #include "engine/FlStudio.h"
+#include "platform/CrashGuard.h"
 #include "ui/I18n.h"
 
 #if JUCE_WINDOWS
@@ -113,9 +114,92 @@ void setFixedPluginBlock (int samples) noexcept
 
 // ---------------------------------------------------------------------------
 
+// Crashes of hosted plugins this session. The audio thread only writes a fixed slot (no allocation, no lock): a bounded
+// copy of the instance's name, taken when the instance was created.
+namespace
+{
+constexpr int crashSlots = 16;
+struct CrashSlot
+{
+    char name[128] {};
+    std::uint32_t code = 0;
+};
+CrashSlot crashLog[crashSlots];
+std::atomic<int> crashCount { 0 };
+
+void recordCrash (const std::string& name, std::uint32_t code) noexcept
+{
+    const auto index = crashCount.load (std::memory_order_relaxed);
+    auto& slot = crashLog[index % crashSlots];
+    std::size_t i = 0;
+    for (; i + 1 < sizeof (slot.name) && i < name.size(); ++i)
+        slot.name[i] = name[i];
+    slot.name[i] = 0;
+    slot.code = code;
+    crashCount.store (index + 1, std::memory_order_release); // (two plugins crashing in the same instant may share a slot)
+}
+
+// The calls of one audio block, as a guarded unit
+struct BlockCall
+{
+    juce::AudioPluginInstance* plugin;
+    juce::AudioBuffer<float>* view;
+    juce::MidiBuffer* midi;
+    void operator()() const { plugin->processBlock (*view, *midi); }
+};
+} // namespace
+
+int pluginCrashCount() noexcept
+{
+    return crashCount.load (std::memory_order_acquire);
+}
+
+std::vector<PluginCrash> pluginCrashes()
+{
+    std::vector<PluginCrash> list;
+    const auto count = pluginCrashCount();
+    for (int i = std::max (0, count - crashSlots); i < count; ++i)
+        list.push_back ({ crashLog[i % crashSlots].name, crashLog[i % crashSlots].code });
+    return list;
+}
+
+namespace
+{
+std::optional<std::string> guardedState (juce::AudioPluginInstance& plugin, std::atomic<bool>& crashed, const std::string& name)
+{
+    if (crashed.load())
+        return std::nullopt;
+    juce::MemoryBlock state;
+    if (const auto code = crashguard::run ([&] { plugin.getStateInformation (state); }); code != 0)
+    {
+        crashed.store (true);
+        recordCrash (name, code);
+        return std::nullopt;
+    }
+    return state.toBase64Encoding().toStdString();
+}
+
+void guardedUiParameter (juce::AudioPluginInstance& plugin, std::atomic<bool>& crashed, const std::string& name, int index, float value)
+{
+    if (crashed.load())
+        return;
+    if (const auto code = crashguard::run ([&] {
+            const auto& params = plugin.getParameters();
+            if (index >= 0 && index < params.size())
+                params[index]->setValueNotifyingHost (value);
+        });
+        code != 0)
+    {
+        crashed.store (true);
+        recordCrash (name, code);
+    }
+}
+} // namespace
+
 PluginInstrument::PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize, int fixedBlock)
     : plugin (std::move (instance)),
-      blockSize (maxBlockSize)
+      blockSize (maxBlockSize),
+      name (plugin->getName().toStdString())
 {
     buffer.setSize (bufferChannels (*plugin), blockSize);
     midi.ensureSize (8192); // the audio thread only adds events within this capacity
@@ -130,7 +214,27 @@ PluginInstrument::PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> i
 
 PluginInstrument::~PluginInstrument()
 {
-    plugin->releaseResources();
+    // a plugin that crashed is not called again, not even to release it (its memory is left as it is)
+    if (crashed.load())
+        (void) plugin.release();
+    else
+        crashguard::run ([this] { plugin->releaseResources(); });
+}
+
+void PluginInstrument::failed (std::uint32_t code) noexcept
+{
+    crashed.store (true, std::memory_order_relaxed);
+    recordCrash (name, code);
+}
+
+std::optional<std::string> PluginInstrument::captureState()
+{
+    return guardedState (*plugin, crashed, name);
+}
+
+void PluginInstrument::setParameterFromUi (int index, float value)
+{
+    guardedUiParameter (*plugin, crashed, name, index, value);
 }
 
 void PluginInstrument::noteOn (int key, float velocity) noexcept
@@ -151,11 +255,20 @@ void PluginInstrument::allNotesOff() noexcept
 
 void PluginInstrument::setParameter (int index, float value) noexcept
 {
-    setPluginParameter (*plugin, index, value);
+    if (crashed.load (std::memory_order_relaxed))
+        return;
+    if (const auto code = crashguard::run ([&] { setPluginParameter (*plugin, index, value); }); code != 0)
+        failed (code);
 }
 
 void PluginInstrument::render (float* left, float* right, int n, float gl, float gr) noexcept
 {
+    if (crashed.load (std::memory_order_relaxed))
+    {
+        midi.clear();
+        return; // silent
+    }
+
     if (fixed != nullptr)
     {
         // events of this chunk start where the block being collected stands now
@@ -167,7 +280,12 @@ void PluginInstrument::render (float* left, float* right, int n, float gl, float
         auto process = [this] (float* const* ch, int count) {
             juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), count);
             view.clear();
-            plugin->processBlock (view, pending);
+            if (! crashed.load (std::memory_order_relaxed))
+                if (const auto code = crashguard::run (BlockCall { plugin.get(), &view, &pending }); code != 0)
+                {
+                    failed (code);
+                    view.clear(); // silent from here on
+                }
             pending.clear();
             std::memcpy (ch[0], view.getReadPointer (0), sizeof (float) * (size_t) count);
             std::memcpy (ch[1], view.getReadPointer (view.getNumChannels() > 1 ? 1 : 0), sizeof (float) * (size_t) count);
@@ -194,7 +312,12 @@ void PluginInstrument::render (float* left, float* right, int n, float gl, float
         const auto count = juce::jmin (blockSize, n - done);
         juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), count);
         view.clear();
-        plugin->processBlock (view, midi);
+        if (const auto code = crashguard::run (BlockCall { plugin.get(), &view, &midi }); code != 0)
+        {
+            midi.clear();
+            failed (code);
+            return;
+        }
         midi.clear();
 
         const auto* l = view.getReadPointer (0);
@@ -214,7 +337,8 @@ void PluginInstrument::render (float* left, float* right, int n, float gl, float
 
 PluginEffect::PluginEffect (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize, int fixedBlock)
     : plugin (std::move (instance)),
-      blockSize (maxBlockSize)
+      blockSize (maxBlockSize),
+      name (plugin->getName().toStdString())
 {
     buffer.setSize (bufferChannels (*plugin), blockSize);
     if (fixedBlock > 0)
@@ -224,25 +348,57 @@ PluginEffect::PluginEffect (std::unique_ptr<juce::AudioPluginInstance> instance,
 
 PluginEffect::~PluginEffect()
 {
-    plugin->releaseResources();
+    if (crashed.load())
+        (void) plugin.release();
+    else
+        crashguard::run ([this] { plugin->releaseResources(); });
+}
+
+void PluginEffect::failed (std::uint32_t code) noexcept
+{
+    crashed.store (true, std::memory_order_relaxed);
+    recordCrash (name, code);
+}
+
+std::optional<std::string> PluginEffect::captureState()
+{
+    return guardedState (*plugin, crashed, name);
+}
+
+void PluginEffect::setParameterFromUi (int index, float value)
+{
+    guardedUiParameter (*plugin, crashed, name, index, value);
 }
 
 void PluginEffect::setParameter (int index, float value) noexcept
 {
-    setPluginParameter (*plugin, index, value);
+    if (crashed.load (std::memory_order_relaxed))
+        return;
+    if (const auto code = crashguard::run ([&] { setPluginParameter (*plugin, index, value); }); code != 0)
+        failed (code);
 }
 
 void PluginEffect::process (float* left, float* right, int n, const EffectParams&, double) noexcept
 {
+    if (crashed.load (std::memory_order_relaxed))
+        return; // bypassed: the input plays through
+
     if (fixed != nullptr)
     {
         float* io[2] = { left, right };
         fixed->run (io, n, true, [this] (float* const* ch, int count) {
+            if (crashed.load (std::memory_order_relaxed))
+                return; // (crashed in an earlier block of this call: the input passes through)
             juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), count);
             view.clear();
             view.copyFrom (0, 0, ch[0], count);
             view.copyFrom (1, 0, ch[1], count);
-            plugin->processBlock (view, midi);
+            if (const auto code = crashguard::run (BlockCall { plugin.get(), &view, &midi }); code != 0)
+            {
+                midi.clear();
+                failed (code); // this block keeps its dry input
+                return;
+            }
             midi.clear();
             std::memcpy (ch[0], view.getReadPointer (0), sizeof (float) * (size_t) count);
             std::memcpy (ch[1], view.getReadPointer (view.getNumChannels() > 1 ? 1 : 0), sizeof (float) * (size_t) count);
@@ -257,7 +413,12 @@ void PluginEffect::process (float* left, float* right, int n, const EffectParams
         view.clear();
         view.copyFrom (0, 0, left + done, count);
         view.copyFrom (1, 0, right + done, count);
-        plugin->processBlock (view, midi);
+        if (const auto code = crashguard::run (BlockCall { plugin.get(), &view, &midi }); code != 0)
+        {
+            midi.clear();
+            failed (code); // this block keeps its dry input
+            return;
+        }
         midi.clear();
 
         std::memcpy (left + done, view.getReadPointer (0), sizeof (float) * (size_t) count);
@@ -321,7 +482,8 @@ PluginHost::PluginHost (bool keep)
         // once: files marked as failed by scans before the class-count timeout (REA_rodada107 §2) get another try,
         // since a large bundle (Waves shell) was marked "hung" only for taking longer than 30 s
         const auto retried = settingsFolder().getChildFile ("scan-retry.txt");
-        // round 113: once more, as the scan now keeps a description whose plugin only hung while closing
+        // round 113: once more, as the scan now keeps a description whose plugin only hung while closing (or, round
+        // 111, crashed in its teardown at exit after writing it)
         if (retried.loadFileAsString().getIntValue() < 2)
         {
             if (! known.getBlacklistedFiles().isEmpty())
@@ -777,8 +939,19 @@ int PluginHost::scanOneFile (const juce::String& formatName, const juce::String&
     return found.size();
 }
 
+namespace
+{
+std::atomic<bool> loadedAny { false };
+}
+
+bool PluginHost::pluginsWereLoaded() noexcept
+{
+    return loadedAny.load();
+}
+
 int PluginHost::addPluginFile (const juce::File& file)
 {
+    loadedAny.store (true);
     const auto before = known.getNumTypes();
     juce::OwnedArray<juce::PluginDescription> found;
 
@@ -1303,6 +1476,7 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const Plu
         return nullptr;
     }
 
+    loadedAny.store (true); // (even a failed load may leave the module mapped)
     juce::String message;
     if (pluginSandboxEnabled() || ref.separateProcess)
     {
@@ -1314,7 +1488,10 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const Plu
         return nullptr;
     }
 
+    crashguard::note (("loading plugin " + description->name + " (" + description->pluginFormatName + ", "
+                       + juce::File (description->fileOrIdentifier).getFileName() + ")").toStdString());
     auto instance = formats.createPluginInstance (*description, sampleRate, maxBlockSize, message);
+    crashguard::note (("loaded plugin " + description->name + (instance == nullptr ? juce::String (" (failed)") : juce::String())).toStdString());
 
     if (instance == nullptr)
     {

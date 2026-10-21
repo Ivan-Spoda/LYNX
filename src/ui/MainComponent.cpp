@@ -18,6 +18,7 @@
 #include "ui/WindowOwner.h"
 
 #include "engine/PluginSandbox.h"
+#include "platform/CrashGuard.h"
 
 #include "engine/Text.h"
 
@@ -2259,6 +2260,26 @@ void MainComponent::timerCallback()
                       6000);
     }
 
+    // a hosted plugin crashed inside a call: it was switched off (bypassed / silent) and LYNX kept running
+    if (const auto crashes = pluginCrashCount(); crashes != pluginCrashesSeen)
+    {
+        pluginCrashesSeen = crashes;
+        juce::StringArray names, lines;
+        for (const auto& c : pluginCrashes())
+        {
+            const auto name = juce::String::fromUTF8 (c.plugin.c_str());
+            names.addIfNotAlreadyThere (name);
+            lines.add (juce::Time::getCurrentTime().toISO8601 (true) + "  " + name + "  " + crashguard::describe (c.code) + " 0x"
+                       + juce::String::toHexString ((juce::int64) c.code));
+        }
+        PluginHost::settingsFolder().getChildFile ("plugin-crashes.log").appendText (lines[lines.size() - 1] + "\n");
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::WarningIcon, tr ("Plugin crashed"),
+            tr ("The plugin \"{0}\" crashed and was switched off, so LYNX and your project kept running (the effect is bypassed, an "
+                "instrument stays silent). Save your project; the plugin loads again the next time you open it.",
+                { names[names.size() - 1] }));
+    }
+
     auto& transport = engine.getTransport();
 
     if (! heldKeys.empty())
@@ -2706,6 +2727,7 @@ void MainComponent::chooseFileToOpenNow()
 void MainComponent::openFile (const juce::File& file)
 {
     juce::String error;
+    crashguard::note (("opening project " + file.getFileName()).toStdString()); // session breadcrumb (round 111)
 
     if (file.hasFileExtension ("zip"))
     {

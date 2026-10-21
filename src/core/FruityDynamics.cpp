@@ -505,7 +505,9 @@ private:
         else
             d = over * ratioSlope;
         const auto e = d * 0.115129255f; // ln 10 / 20
-        return (float) std::exp ((double) e) * gainLin;
+        const auto g = (float) std::exp ((double) e) * gainLin;
+        // (a negative knee with a tiny amount overflows the curve to inf; at Gain −inf that was inf · 0 = NaN: round 111)
+        return std::isfinite (g) ? g : (gainLin > 0.0f ? std::numeric_limits<float>::max() : 0.0f);
     }
 
     void setGains() noexcept

@@ -35,6 +35,8 @@ double hzForX (juce::Rectangle<float> area, float x)
 
 float yForDb (juce::Rectangle<float> area, double db, double rangeDb)
 {
+    if (! std::isfinite (db)) // (a NaN point would reach the path renderer)
+        db = 0.0;
     return area.getCentreY() - area.getHeight() * 0.5f * (float) (juce::jlimit (-rangeDb, rangeDb, db) / rangeDb);
 }
 

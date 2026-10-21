@@ -5,6 +5,7 @@ out/
 *.user
 build-local/
 build-win/
+build-asan/
 build-linux/
 build-mac/
 dist/

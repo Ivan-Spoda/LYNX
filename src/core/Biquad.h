@@ -110,7 +110,9 @@ struct Biquad
         const auto a = std::pow (10.0, db / 40.0);
         const auto w = 2.0 * pi * hz / sr;
         const auto cw = std::cos (w);
-        const auto alpha = std::sin (w) / 2.0 * std::sqrt ((a + 1.0 / a) * (1.0 / slope - 1.0) + 2.0);
+        // (a slope steeper than the gain allows makes the root negative: the shelf's Q would be infinite and the
+        // coefficients NaN. Capped at Q 10, round 111; the cookbook range S ≤ 1 never gets near it.)
+        const auto alpha = std::sin (w) / 2.0 * std::sqrt (std::max ((a + 1.0 / a) * (1.0 / slope - 1.0) + 2.0, 0.01));
         const auto sq = 2.0 * std::sqrt (a) * alpha;
 
         if (high)

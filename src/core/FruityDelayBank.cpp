@@ -741,7 +741,7 @@ struct Engine::Impl
     {
         auto& bk = bank[b];
         bk.offL = roundEven ((double) ((bk.offsetMs * (float) rateOs) / 100000.0f));
-        bk.time = (float) (p (b, 12) * rateOs);
+        bk.time = (float) ((std::int64_t) p (b, 12) * rateOs); // (64-bit: the product overflows an int at 192 kHz)
         if (bk.opt.sync)
             bk.time = (float) ((double) bk.time * 0.03125 / (double) tempo);
         else

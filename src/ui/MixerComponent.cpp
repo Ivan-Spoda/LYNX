@@ -3240,6 +3240,12 @@ void EffectsPanel::openPluginWindow (int slot)
 
     if (auto* plugin = dynamic_cast<PluginEffect*> (effect.get()))
     {
+        if (plugin->hasCrashed()) // (not called again: its window would call into it)
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Plugin"),
+                                                    tr ("This plugin crashed and was switched off. Save the project and open it again to reload it."));
+            return;
+        }
         const auto& s = engine.getSong().mixer[(std::size_t) track].effects[(std::size_t) slot];
         PluginWindows::open (effect, plugin->getInstance(), juce::String::fromUTF8 (s.plugin.name.c_str()));
         return;

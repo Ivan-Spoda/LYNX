@@ -31,6 +31,16 @@ void setFixedPluginBlock (int samples) noexcept;
 // Adapters: a JUCE plugin seen by the core as an Instrument/Effect.
 // Notes become MIDI at the start of the next rendered chunk; since the core
 // renders in chunks that start exactly at each event, timing is sample-accurate.
+// Hosted plugins that crashed during this session (newest last; read from the UI thread): the plugin's name and the
+// exception (platform/CrashGuard.h). `count` only grows, so the UI notices a new one by comparing it.
+struct PluginCrash
+{
+    std::string plugin;
+    std::uint32_t code = 0;
+};
+int pluginCrashCount() noexcept;
+std::vector<PluginCrash> pluginCrashes();
+
 class PluginInstrument final : public Instrument
 {
 public:
@@ -46,15 +56,30 @@ public:
     void allNotesOff() noexcept override;
     void render (float* left, float* right, int n, float gainLeft, float gainRight) noexcept override;
     void setParameter (int index, float value) noexcept override;
-    int latencySamples() const noexcept override { return plugin->getLatencySamples() + (fixed != nullptr ? fixed->latency() : 0); }
-    void setRenderMode (bool offline) { setPluginRenderMode (*plugin, offline, blockSize); }
+    int latencySamples() const noexcept override
+    {
+        return crashed.load (std::memory_order_relaxed) ? 0 : plugin->getLatencySamples() + (fixed != nullptr ? fixed->latency() : 0);
+    }
+
+    // The plugin crashed inside a call (caught by platform/CrashGuard.h): it is never called again, the slot plays
+    // through (effect) or stays silent (instrument) and the UI is told (pluginCrashes()).
+    bool hasCrashed() const noexcept { return crashed.load (std::memory_order_relaxed); }
+    // The plugin's state for saving (base64, as capturePluginState), or nullopt after a crash (keep the saved one).
+    std::optional<std::string> captureState();
+    // Sets a parameter from the UI / controllers (setValueNotifyingHost), guarded like the audio calls.
+    void setParameterFromUi (int index, float value);
+    void setRenderMode (bool offline) { if (! hasCrashed()) setPluginRenderMode (*plugin, offline, blockSize); }
     bool usesFixedBlocks() const noexcept { return fixed != nullptr; }
 
 private:
+    void failed (std::uint32_t code) noexcept;
+
     std::unique_ptr<juce::AudioPluginInstance> plugin;
     juce::AudioBuffer<float> buffer;
     juce::MidiBuffer midi;
     int blockSize;
+    std::string name;
+    std::atomic<bool> crashed { false };
     std::unique_ptr<FixedBlock> fixed;
     std::vector<float> scratch; // fixed blocks: the delayed output before it is mixed in
     juce::MidiBuffer pending; // fixed blocks: MIDI waiting for the block being collected, at its offsets in it
@@ -73,15 +98,30 @@ public:
     void reset() noexcept override {}
     void process (float* left, float* right, int n, const EffectParams& params, double bpm) noexcept override;
     void setParameter (int index, float value) noexcept override;
-    int latencySamples() const noexcept override { return plugin->getLatencySamples() + (fixed != nullptr ? fixed->latency() : 0); }
-    void setRenderMode (bool offline) { setPluginRenderMode (*plugin, offline, blockSize); }
+    int latencySamples() const noexcept override
+    {
+        return crashed.load (std::memory_order_relaxed) ? 0 : plugin->getLatencySamples() + (fixed != nullptr ? fixed->latency() : 0);
+    }
+
+    // The plugin crashed inside a call (caught by platform/CrashGuard.h): it is never called again, the slot plays
+    // through (effect) or stays silent (instrument) and the UI is told (pluginCrashes()).
+    bool hasCrashed() const noexcept { return crashed.load (std::memory_order_relaxed); }
+    // The plugin's state for saving (base64, as capturePluginState), or nullopt after a crash (keep the saved one).
+    std::optional<std::string> captureState();
+    // Sets a parameter from the UI / controllers (setValueNotifyingHost), guarded like the audio calls.
+    void setParameterFromUi (int index, float value);
+    void setRenderMode (bool offline) { if (! hasCrashed()) setPluginRenderMode (*plugin, offline, blockSize); }
     bool usesFixedBlocks() const noexcept { return fixed != nullptr; }
 
 private:
+    void failed (std::uint32_t code) noexcept;
+
     std::unique_ptr<juce::AudioPluginInstance> plugin;
     juce::AudioBuffer<float> buffer;
     juce::MidiBuffer midi;
     int blockSize;
+    std::string name;
+    std::atomic<bool> crashed { false };
     std::unique_ptr<FixedBlock> fixed;
 };
 
@@ -98,6 +138,9 @@ public:
     juce::AudioPluginFormatManager& getFormats() noexcept { return formats; }
 
     static juce::File settingsFolder();          // %APPDATA%\LYNX
+    // Did this process load any third-party plugin module (instance or in-process scan)? (then it ends without
+    // unloading them, platform/CrashGuard.h exitNow)
+    static bool pluginsWereLoaded() noexcept;
     static juce::FileSearchPath defaultSearchPath(); // default VST3 folders
 
     // The folders LYNX scans: the user's list (setup wizard / %APPDATA%\LYNX\plugin-folders.txt), else suggestedFolders().

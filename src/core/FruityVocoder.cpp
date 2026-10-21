@@ -280,7 +280,7 @@ void Engine::configure() noexcept
     const auto sv = (float) st.c[freqScale] * inv128;
     const auto e = dmath::exp ((double) sv * dmath::ln (10000.0));
     scale = (float) (std::llrint ((double) (float) (e - 1.0)) + 1);
-    top = (float) ((double) (rate * 20000) / 44100.0);
+    top = (float) ((double) rate * 20000.0 / 44100.0); // (in double: rate · 20000 overflows an int above 107 kHz)
     buildBank (synthesis, true);
     buildBank (analysis, false);
     const auto msScale = (float) ((double) rate * 0.001);

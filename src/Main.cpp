@@ -46,6 +46,7 @@
 #include "core/EventEdit.h"
 #include "core/FacetEq.h"
 #include "ui/FacetEqEditor.h"
+#include "core/RackRenderer.h"
 #include "ui/ProEditors.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/PluginEditors.h"
@@ -54,6 +55,7 @@
 #include "ui/Theme.h"
 #include "ui/WaveformView.h"
 #include "ui/WindowOwner.h"
+#include "platform/CrashGuard.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -92,12 +94,53 @@ void onCrash (void*)
     folder.createDirectory();
     const auto stamp = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S");
     folder.getChildFile ("crash " + stamp + ".txt").replaceWithText (juce::SystemStats::getStackBacktrace());
+    lynx::crashguard::note (("crashed: backtrace in autosave\\crash " + stamp + ".txt").toStdString());
 
     if (crashEngine != nullptr)
     {
         juce::String error;
         lynx::ProjectFile::save (crashEngine->getSong(), folder.getChildFile ("recovered " + stamp + lynx::ProjectFile::extension), error);
     }
+}
+juce::File sessionsFolder()
+{
+    return lynx::PluginHost::settingsFolder().getChildFile ("sessions");
+}
+
+// Sessions of earlier runs whose process is gone without closing (a fail-fast, a crash, a forced end): each is appended
+// to %APPDATA%\LYNX\crash-history.log and its file removed. Returns the last step of the newest one ("" when none).
+juce::String collectUncleanSessions()
+{
+    juce::String lastStep;
+    juce::Time newest;
+    for (const auto& file : sessionsFolder().findChildFiles (juce::File::findFiles, false, "session-*.txt"))
+    {
+        const auto text = file.loadFileAsString();
+        juce::StringPairArray values;
+        juce::StringArray steps;
+        for (const auto& line : juce::StringArray::fromLines (text))
+        {
+            if (line.startsWith ("step="))
+                steps.add (line.fromFirstOccurrenceOf ("=", false, false));
+            else if (line.contains ("="))
+                values.set (line.upToFirstOccurrenceOf ("=", false, false), line.fromFirstOccurrenceOf ("=", false, false));
+        }
+        const auto pid = (std::uint32_t) values["pid"].getLargeIntValue();
+        const auto start = (std::uint64_t) values["start"].getLargeIntValue();
+        if (pid == lynx::crashguard::processId() || lynx::crashguard::processRunning (pid, start))
+            continue; // this run, or another LYNX window still open
+
+        lynx::PluginHost::settingsFolder().getChildFile ("crash-history.log")
+            .appendText (juce::Time::getCurrentTime().toISO8601 (true) + "  previous session ended without closing\n" + text + "\n");
+        file.deleteFile();
+
+        if (const auto modified = file.getLastModificationTime(); lastStep.isEmpty() || modified > newest)
+        {
+            newest = modified;
+            lastStep = steps.isEmpty() ? juce::String ("start-up") : steps[steps.size() - 1].fromFirstOccurrenceOf (" ", false, false);
+        }
+    }
+    return lastStep;
 }
 } // namespace
 
@@ -116,7 +159,11 @@ public:
 
         // child process of a sandboxed plugin: no window or audio of its own
         if (lynx::runPluginSandboxWorker (commandLine))
+        {
+            lynx::crashguard::quietCrashReports();
+            sandboxChild = true;
             return;
+        }
 
         const auto args = juce::StringArray::fromTokens (commandLine, true);
 
@@ -165,10 +212,12 @@ public:
         {
             // child process of the plugin scan (see PluginHost::scan)
             const auto i = args.indexOf ("--scan-one");
+            // no crash dialogs from the plugin being examined; and once the result is written, the process ends without
+            // unloading it: a Waves shell crashed in its own teardown at exit (Intel GPU driver fail-fast, 0xC0000409),
+            // which showed Windows' crash dialog and made the scan reject the whole shell (round 111)
+            lynx::crashguard::quietCrashReports();
             lynx::PluginHost::scanOneFile (args[i + 1].unquoted(), args[i + 2].unquoted(), juce::File (args[i + 3].unquoted()));
-            setApplicationReturnValue (0);
-            quit();
-            return;
+            lynx::crashguard::exitNow (0);
         }
 
         if (args.contains ("--paths"))
@@ -418,7 +467,9 @@ public:
         if (args.contains ("--plugintest"))
         {
             const auto i = args.indexOf ("--plugintest");
-            runPluginTest (args[i + 1].unquoted(), args[i + 2].unquoted());
+            // optional 3rd argument: the plugin's name inside a shell (e.g. "CLA-2A Stereo" in a WaveShell)
+            const auto only = i + 3 < args.size() && ! args[i + 3].startsWith ("--") ? args[i + 3].unquoted() : juce::String();
+            runPluginTest (args[i + 1].unquoted(), args[i + 2].unquoted(), only);
             return;
         }
 
@@ -428,6 +479,19 @@ public:
             // loaded with the FL plugin's Default preset when the FL installation has one
             const auto i = args.indexOf ("--plugui");
             runPluginEditorSnapshots (args[i + 1].unquoted());
+            return;
+        }
+
+        if (args.contains ("--fxfuzz"))
+        {
+            // LYNX.exe --fxfuzz report.txt [rounds] [--drags]: every built-in effect in its editor, parameters swept (and
+            // dragged with the mouse), audio rendered at several rates; a crash ends the process (round 111)
+            const auto i = args.indexOf ("--fxfuzz");
+            const auto rounds = args.size() > i + 2 ? juce::jmax (1, args[i + 2].getIntValue()) : 6;
+            // --drags: also mouse drags over the editors (their menus may flash on screen: not for the selftest)
+            const auto ok = runEffectFuzz (rounds, args[i + 1].unquoted(), args.contains ("--drags"));
+            setApplicationReturnValue (ok ? 0 : 1);
+            quit();
             return;
         }
 
@@ -497,6 +561,15 @@ public:
             return;
         }
 
+        // session breadcrumb: a fail-fast (no crash handler runs) still leaves the last steps behind (round 111)
+        uncleanLastStep = collectUncleanSessions();
+        sessionsFolder().createDirectory();
+        lynx::crashguard::beginSession (
+            sessionsFolder().getChildFile ("session-" + juce::String (lynx::crashguard::processId()) + ".txt").getFullPathName().toStdString(),
+            ("LYNX session\nversion=" + getApplicationVersion() + "\npid=" + juce::String (lynx::crashguard::processId())
+             + "\nstart=" + juce::String ((juce::int64) lynx::crashguard::processStartTime())
+             + "\nstarted=" + juce::Time::getCurrentTime().toISO8601 (true) + "\n").toStdString());
+
         startupTrace.mark ("initialise (normal start)");
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
         startupOptions = lynx::StartupOptions::load();
@@ -511,6 +584,7 @@ public:
             startEngine();
             createMainWindow();
             mainWindow->reveal();
+            showUncleanNotice();
             startupTrace.mark ("window revealed");
             openStartupFile();
             startupTrace.mark ("startup file opened");
@@ -547,6 +621,7 @@ public:
                     startupTrace.mark ("window revealed (after the splash)");
                     splash->toFront (false);
                     splash->finish ([this] { splash = nullptr; });
+                    showUncleanNotice();
                     openStartupFile();
                     startupTrace.mark ("startup file opened");
                     juce::MessageManager::callAsync ([] { startupTrace.mark ("first message loop turn"); });
@@ -578,6 +653,19 @@ public:
         startupTrace.mark ("main window built");
     }
 
+    // the previous run ended without closing (see collectUncleanSessions): say so once, with its last step
+    void showUncleanNotice()
+    {
+        if (uncleanLastStep.isEmpty())
+            return;
+        juce::AlertWindow::showMessageBoxAsync (
+            juce::MessageBoxIconType::InfoIcon, lynx::tr ("LYNX closed unexpectedly"),
+            lynx::tr ("The last session ended without closing normally. Last step: {0}. Backup copies of your project are in "
+                      "LYNX's autosave folder; details in crash-history.log.",
+                      { uncleanLastStep }));
+        uncleanLastStep.clear();
+    }
+
     void openStartupFile()
     {
         if (fileToOpen != juce::File() && mainWindow != nullptr)
@@ -586,12 +674,19 @@ public:
 
     void shutdown() override
     {
+        lynx::crashguard::note ("closing");
         lynx::shutdownPluginSandboxWorker();
         splash = nullptr;
         mainWindow = nullptr; // the UI goes before the engine
         crashEngine = nullptr;
         engine = nullptr;
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        lynx::crashguard::endSession(); // a clean exit: no breadcrumb left behind
+
+        // everything is saved and closed: a process that loaded third-party plugins ends here, before the DLLs' own
+        // teardown runs (some crash in it at exit, round 111)
+        if (sandboxChild || lynx::PluginHost::pluginsWereLoaded())
+            lynx::crashguard::exitNow (getApplicationReturnValue());
     }
 
     void systemRequestedQuit() override
@@ -603,6 +698,9 @@ public:
     }
 
 private:
+    bool sandboxChild = false;
+    juce::String uncleanLastStep; // last step of a previous run that ended without closing
+
     // LYNX.exe --selftest report.txt: renders 2 s without a sound card and writes the result.
     // Exit code 0 = audio came out, 1 = silence.
     void runSelfTest (const juce::String& reportPath, const juce::String& demoProjectPath)
@@ -859,8 +957,11 @@ private:
             }
         }
 
+        // every built-in effect's editor and engine with extreme settings (round 111): a crash or NaN output fails here
+        const auto effectsOk = runEffectFuzz (4, {}); // (no mouse drags: nothing may open on screen)
+
         const auto ok = audioOk && projectOk && richOk && substituteOk && undoOk && recordOk && recordUndoOk && midiOk && packageOk
-                        && wavpack != "ERROR";
+                        && wavpack != "ERROR" && effectsOk;
 
         juce::String report;
         report << "connections=" << offline.getNumGraphConnections() << "\n"
@@ -873,6 +974,7 @@ private:
                << "midi=" << (midiOk ? "OK" : "ERROR") << "\n"
                << "package=" << (packageOk ? "OK" : "ERROR") << "\n"
                << "wavpack=" << wavpack << "\n"
+               << "effects=" << (effectsOk ? "OK" : "NONFINITE") << "\n"
                << "result=" << (ok ? "OK" : "FAILED") << "\n";
 
         if (reportPath.isNotEmpty())
@@ -882,9 +984,124 @@ private:
         quit();
     }
 
-    // LYNX.exe --plugintest plugin.vst3 report.txt: loads the plugin, plays notes if it is an
+    // Every built-in effect in its native editor: random / extreme parameters, mouse drags over the editor, the editor
+    // painted, audio rendered at 44.1 / 48 / 96 kHz. Returns false when an effect output NaN / inf (muted by the
+    // renderer's guard). The report lists each effect. Used by --fxfuzz and (a short run) by --selftest.
+    bool runEffectFuzz (int rounds, const juce::String& reportPath, bool drags = false)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        lynx::setNativeEditorDemo (true);
+        juce::String report;
+        auto allFinite = true;
+        {
+            lynx::AudioEngine offline (false);
+            juce::Random random (111);
+            const auto value = [&] { const auto r = random.nextInt (6); return r == 0 ? 0.0f : r == 1 ? 1.0f : random.nextFloat(); };
+
+            for (int k = 0; k <= (int) lynx::EffectKind::sentryGate; ++k)
+            {
+                const auto kind = (lynx::EffectKind) k;
+                if (! lynx::NativeEffectWindows::canOpen (kind))
+                    continue;
+                const auto before = lynx::RackRenderer::nonFiniteEffectBlocks();
+                const auto& info = lynx::effectInfo (kind);
+                auto fx = lynx::makeEffectSlot (kind);
+                int dragged = 0; // parameter changes made by the mouse drags
+
+                for (int round = 0; round < rounds; ++round)
+                {
+                    if (round > 0)
+                        for (std::size_t p = 0; p < info.params.size(); ++p)
+                            fx.params[p] = round == 1 ? 0.0f : round == 2 ? 1.0f : value();
+                    auto song = lynx::Song::makeDefault(); // its demo beat feeds the effect
+                    song.mixer.resize (2);
+                    song.mixer[0].name = "Master";
+                    song.mixer[1].name = "Insert 1";
+                    song.mixer[1].effects.assign (1, fx);
+                    for (auto& channel : song.channels)
+                        channel.mixerTrack = 1;
+                    offline.setSong (std::move (song));
+                    offline.dispatchPendingMessages();
+
+                    const auto pages = juce::jmax (1, (int) lynx::plugui::layoutFor (kind).pages.size());
+                    for (int page = 0; page < pages; ++page)
+                    {
+                        auto editor = kind == lynx::EffectKind::facetEq ? lynx::makeFacetEqEditor (offline, 1, 0, false)
+                                                                        : lynx::makeNativeEffectEditor (offline, 1, 0, 1.0f, page);
+                        if (editor == nullptr || editor->getWidth() <= 0 || editor->getHeight() <= 0)
+                            continue;
+                        juce::Image image (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
+                        const auto paint = [&] {
+                            juce::Graphics g (image);
+                            editor->paintEntireComponent (g, false);
+                        };
+                        paint();
+
+                        // drags from a grid of points, as a user moving every control (plain left button)
+                        if (round >= 3 && drags)
+                        {
+                            const auto source = juce::Desktop::getInstance().getMainMouseSource();
+                            const auto step = juce::jmax (12, juce::jmin (editor->getWidth(), editor->getHeight()) / 8);
+                            for (int y = step / 2; y < editor->getHeight(); y += step)
+                                for (int x = step / 2; x < editor->getWidth(); x += step)
+                                {
+                                    auto* target = editor->getComponentAt (x, y);
+                                    if (target == nullptr)
+                                        continue;
+                                    const auto at = target->getLocalPoint (editor.get(), juce::Point<float> ((float) x, (float) y));
+                                    const auto now = juce::Time::getCurrentTime();
+                                    const auto event = [&] (juce::Point<float> p, juce::ModifierKeys mods) {
+                                        return juce::MouseEvent (source, p, mods, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, target, target, now, at, now, 1, false);
+                                    };
+                                    const auto down = juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier);
+                                    const juce::Component::SafePointer<juce::Component> alive (target);
+                                    target->mouseDown (event (at, down));
+                                    const auto dy = (float) (random.nextBool() ? 400 : -400), dx = (float) (random.nextInt (401) - 200);
+                                    if (alive != nullptr)
+                                        target->mouseDrag (event (at + juce::Point<float> (dx * 0.5f, dy * 0.5f), down));
+                                    if (alive != nullptr)
+                                        target->mouseDrag (event (at + juce::Point<float> (dx, dy), down));
+                                    if (alive != nullptr)
+                                        target->mouseUp (event (at + juce::Point<float> (dx, dy), juce::ModifierKeys()));
+                                    juce::PopupMenu::dismissAllActiveMenus();
+                                    offline.dispatchPendingMessages();
+                                }
+                            paint();
+                        }
+                    }
+
+                    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+                        offline.renderOffline (0.05, rate);
+                    if (round == 0 || round >= 3) // keep what the drags set for the next round
+                        if (offline.getSong().mixer.size() > 1 && ! offline.getSong().mixer[1].effects.empty())
+                        {
+                            const auto& now = offline.getSong().mixer[1].effects[0];
+                            for (std::size_t p = 0; p < fx.params.size(); ++p)
+                                dragged += now.params[p] != fx.params[p] ? 1 : 0;
+                            dragged += now.state != fx.state ? 1 : 0;
+                            fx = now;
+                        }
+                }
+
+                const auto broken = lynx::RackRenderer::nonFiniteEffectBlocks() - before;
+                allFinite = allFinite && broken == 0;
+                report << info.name << ": " << (broken == 0 ? juce::String ("OK") : "non-finite output in " + juce::String ((juce::int64) broken) + " blocks")
+                       << " (" << dragged << " changes by mouse)\n";
+                if (reportPath.isNotEmpty())
+                    juce::File (reportPath).replaceWithText (report + "(running)\n"); // what was reached, if it crashes
+            }
+        }
+        lynx::setNativeEditorDemo (false);
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        report << "result=" << (allFinite ? "OK" : "NONFINITE") << "\n";
+        if (reportPath.isNotEmpty())
+            juce::File (reportPath).replaceWithText (report);
+        return allFinite;
+    }
+
+    // LYNX.exe --plugintest plugin.vst3 report.txt ["name"]: loads the plugin (or the one named in a shell), plays notes if it is an
     // instrument (and runs audio through it if it is an effect) and measures the audio.
-    void runPluginTest (const juce::String& pluginPath, const juce::String& reportPath)
+    void runPluginTest (const juce::String& pluginPath, const juce::String& reportPath, const juce::String& only = {})
     {
         juce::String report;
         bool ok = false;
@@ -899,7 +1116,8 @@ private:
 
             for (const auto& type : host.getKnownPlugins().getTypes())
             {
-                if (juce::File (type.fileOrIdentifier).getFileName() != juce::File (pluginPath).getFileName())
+                if (juce::File (type.fileOrIdentifier).getFileName() != juce::File (pluginPath).getFileName()
+                    || (only.isNotEmpty() && type.name != only))
                     continue;
 
                 report << "  " << (type.isInstrument ? "instrument: " : "effect: ") << type.name << " (" << type.manufacturerName
@@ -934,15 +1152,22 @@ private:
                 song.mixer[0].effects.push_back (slot);
             }
 
+            const auto effectSlot = (int) song.mixer[0].effects.size() - 1; // (the default master may hold effects already)
             offline.setSong (song);
 
+            // after a render: the rack (and its plugins) is built when the engine is prepared
+            const auto peak = offline.renderOffline (3.0, 48000.0);
             const auto* loadedInstrument = dynamic_cast<lynx::PluginInstrument*> (offline.getChannelInstrument (4).get());
-            const auto* loadedEffect = dynamic_cast<lynx::PluginEffect*> (offline.getEffect (0, 0).get());
+            const auto* loadedEffect = dynamic_cast<lynx::PluginEffect*> (offline.getEffect (0, effectSlot).get());
             report << "instrument_loaded=" << (loadedInstrument != nullptr ? "yes" : "no") << "\n"
                    << "effect_loaded=" << (loadedEffect != nullptr ? "yes" : "no") << "\n";
-
-            const auto peak = offline.renderOffline (3.0, 48000.0);
+            if (host.getLoadFailures().size() > 0) // why: the host's own message (license, missing file, load failure)
+                report << "load_failures=" << host.getLoadFailures().joinIntoString (" | ") << "\n";
             report << "peak=" << peak << "\n";
+            // plugins that crashed inside a call, were caught and switched off (round 111)
+            report << "plugin_crashes=" << lynx::pluginCrashCount() << "\n";
+            for (const auto& c : lynx::pluginCrashes())
+                report << "  crashed: " << c.plugin << " (" << lynx::crashguard::describe (c.code) << ")\n";
 
             offline.capturePluginStates();
             const auto stateSize = hasInstrument ? offline.getSong().channels[4].plugin.state.size() : (size_t) 0;

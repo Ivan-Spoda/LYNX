@@ -231,6 +231,7 @@ if(LYNX_BUILD_APP)
     target_sources(LYNX PRIVATE
         src/Main.cpp
         src/platform/FileTypes.cpp
+        src/platform/CrashGuard.cpp
         src/platform/Paths.cpp
         src/platform/NativeEmbed.cpp
         src/engine/AudioEngine.cpp

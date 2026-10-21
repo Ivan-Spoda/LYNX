@@ -1629,18 +1629,13 @@ void AudioEngine::applyControllers()
     // plugin parameters live in the plugin
     for (const auto& [target, v] : pluginChanges)
     {
-        juce::AudioPluginInstance* plugin = nullptr;
-
         if (target.kind == AutomationTargetKind::channelParam)
             if (auto* p = dynamic_cast<PluginInstrument*> (getChannelInstrument (target.index).get()))
-                plugin = &p->getInstance();
+                p->setParameterFromUi (target.param, v);
 
         if (target.kind == AutomationTargetKind::effectParam)
             if (auto* p = dynamic_cast<PluginEffect*> (getEffect (target.index, target.slot).get()))
-                plugin = &p->getInstance();
-
-        if (plugin != nullptr && target.param >= 0 && target.param < plugin->getParameters().size())
-            plugin->getParameters()[target.param]->setValueNotifyingHost (v);
+                p->setParameterFromUi (target.param, v);
     }
 }
 
@@ -1833,12 +1828,14 @@ void AudioEngine::capturePluginStates()
     // Changes only the saved state (recreates nothing and doesn't enter the undo history).
     for (std::size_t i = 0; i < song.channels.size(); ++i)
         if (auto* p = dynamic_cast<PluginInstrument*> (getChannelInstrument ((int) i).get()))
-            song.channels[i].plugin.state = capturePluginState (p->getInstance());
+            if (auto state = p->captureState()) // (a plugin that crashed keeps the state saved before)
+                song.channels[i].plugin.state = std::move (*state);
 
     for (std::size_t t = 0; t < song.mixer.size(); ++t)
         for (std::size_t s = 0; s < song.mixer[t].effects.size(); ++s)
             if (auto* p = dynamic_cast<PluginEffect*> (getEffect ((int) t, (int) s).get()))
-                song.mixer[t].effects[s].plugin.state = capturePluginState (p->getInstance());
+                if (auto state = p->captureState())
+                    song.mixer[t].effects[s].plugin.state = std::move (*state);
 
     lastPublishedShape.song.channels = song.channels;
     lastPublishedShape.song.mixer = song.mixer;

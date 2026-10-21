@@ -776,7 +776,8 @@ struct Engine::Impl
             if (k == 15)
                 mask[1024] = 1.0f;
             const double scale = 2048.0 / fs;
-            const long a = (long) (scale * lo), z = (long) (scale * hi);
+            // (below 44.1 kHz the upper crossovers lie above Nyquist: the mask stops at its last bin, round 111)
+            const long a = std::min ((long) (scale * lo), 1025L), z = std::min ((long) (scale * hi), 1025L);
             for (long i = a; i < z; ++i)
                 mask[(std::size_t) i] = 1.0f;
             bp[k >> 1].conv[k & 1].design (mask);

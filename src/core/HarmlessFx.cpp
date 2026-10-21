@@ -344,7 +344,9 @@ void buildSaturation (int thr, float ceil, double top, MaximusPreset::Band& b, b
     }
     b.sat[65537] = b.sat[65536];
     b.satOut = soundgoodizer ? f32 ((double) ceil * 3.0517578125e-05) : ceil;
-    b.satIn = f32 (1.0 / top);
+    // (post gain and ceiling both at 0 left top = 0: an infinite input scale, then 0 · inf = NaN read as a table index.
+    // Round 111: the scale stays finite; that band is silent anyway, its output scale being the ceiling 0.)
+    b.satIn = top > 0.0 ? f32 (1.0 / top) : 0.0f;
 }
 } // namespace
 
@@ -1317,9 +1319,10 @@ private:
             auto sat = [&] (float x) {
                 const auto v = (double) x * k;
                 const auto a = std::fabs (v);
+                if (! (a < 65536.0)) // (also NaN / inf: never an index outside the table)
+                    return (float) ((v < 0.0 ? -(double) t[65536] : (double) t[65536]) * (double) S.satOut);
                 auto i = (long long) a;
                 const auto fr = a - (double) i;
-                i = std::min<long long> (i, 65536);
                 const auto y = (double) t[i] + ((double) t[i + 1] - (double) t[i]) * fr;
                 return (float) ((v < 0.0 ? -y : y) * (double) S.satOut);
             };
