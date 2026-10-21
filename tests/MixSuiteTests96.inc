@@ -453,8 +453,8 @@ TEST (mixsuite_panels_place_every_parameter)
             }
             if (item.type == plugui::Item::tabs || item.type == plugui::Item::radio)
                 CHECK (item.values.empty() || item.values.size() == plugui::optionLabels (item).size());
-            if (item.type == plugui::Item::display && std::strcmp (item.display, "grmeter") == 0)
-                ++meters;
+            if (item.type == plugui::Item::display && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0))
+                ++meters; // round 114: the optical leveler shows its reduction on a VU needle
             if (item.type != plugui::Item::section && item.type != plugui::Item::label)
                 controls.push_back (&item);
         }

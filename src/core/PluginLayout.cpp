@@ -1516,77 +1516,84 @@ LayoutItem meter (float x, float y, float w, float h, int output, const char* ca
 
 Layout ridgeStrip()
 {
+    // round 114: the classic console channel strip's layout (the role: Waves SSL E-Channel, measured on the official
+    // trial): two columns read top to bottom. Left: FILTERS, then the four EQ bands HF, HMF, LMF, LF (gain on the
+    // left, frequency in the middle, Q / bell on the right), the EQ curve under them. Right: DYNAMICS (the
+    // compressor, then the expander / gate, their gain-reduction meters), the routing (EQ and dynamics in, order,
+    // filters to the side chain), and the GAIN block (input, phase, output) at the bottom.
     Layout l;
-    l.width = 700;
-    l.height = 360;
+    l.width = 560;
+    l.height = 716;
     auto& v = l.items;
-    // filters
-    v.push_back (section (4, 4, 104, 352, TR_NOOP ("Filters")));
-    v.push_back (dial (56, 62, 40, "HPF", TR_NOOP ("High-pass")));
-    v.push_back (dial (56, 150, 40, "LPF", TR_NOOP ("Low-pass")));
-    v.push_back (toggle (12, 214, 92, 20, "Filters to SC", TR_NOOP ("To sidechain")));
-
-    // equalizer: the curve on top, one column per band (LF … HF, low to high as on the graph)
-    v.push_back (section (112, 4, 340, 352, TR_NOOP ("Equalizer")));
-    v.push_back (display (118, 24, 328, 96, "ridgeeq"));
-    const char* bands[] = { TR_NOOP ("LF"), TR_NOOP ("LMF"), TR_NOOP ("HMF"), TR_NOOP ("HF") };
-    const char* gains[] = { "LF gain", "LMF gain", "HMF gain", "HF gain" };
-    const char* freqs[] = { "LF freq.", "LMF freq.", "HMF freq.", "HF freq." };
+    // --- left column: filters and EQ
+    v.push_back (section (4, 4, 276, 104, TR_NOOP ("Filters")));
+    v.push_back (dial (54, 50, 36, "HPF", TR_NOOP ("High-pass")));
+    v.push_back (dial (140, 50, 36, "LPF", TR_NOOP ("Low-pass")));
+    v.push_back (toggle (186, 40, 88, 20, "Filters to SC", TR_NOOP ("To sidechain")));
+    const char* names[] = { TR_NOOP ("HF"), TR_NOOP ("HMF"), TR_NOOP ("LMF"), TR_NOOP ("LF") };
+    const char* gains[] = { "HF gain", "HMF gain", "LMF gain", "LF gain" };
+    const char* freqs[] = { "HF freq.", "HMF freq.", "LMF freq.", "LF freq." };
+    const char* extra[] = { "HF bell", "HMF Q", "LMF Q", "LF bell" };
     for (int b = 0; b < 4; ++b)
     {
-        const auto cx = 158.0f + 82.0f * (float) b;
-        v.push_back (label (cx - 36.0f, 124, 72, 14, bands[b], boxed));
-        v.push_back (dial (cx, 162, 38, gains[b], TR_NOOP ("Gain"), bipolar));
-        v.push_back (dial (cx, 230, 32, freqs[b], TR_NOOP ("Freq")));
+        const auto y = 112.0f + 102.0f * (float) b;
+        v.push_back (section (4, y, 276, 98, names[b]));
+        v.push_back (dial (54, y + 44.0f, 36, gains[b], TR_NOOP ("Gain"), bipolar));
+        v.push_back (dial (140, y + 44.0f, 36, freqs[b], TR_NOOP ("Freq")));
         if (b == 1 || b == 2)
-            v.push_back (dial (cx, 290, 28, b == 1 ? "LMF Q" : "HMF Q", TR_NOOP ("Q")));
+            v.push_back (dial (226, y + 44.0f, 30, extra[b], TR_NOOP ("Q")));
         else
-            v.push_back (toggle (cx - 30.0f, 282, 62, 20, b == 0 ? "LF bell" : "HF bell", TR_NOOP ("Bell")));
+            v.push_back (toggle (194, y + 34.0f, 72, 20, extra[b], TR_NOOP ("Bell")));
     }
-    v.push_back (tabs (118, 330, 130, 20, "EQ curve", TR_NOOP ("Brown|Black")));
-    v.push_back (toggle (360, 330, 88, 20, "EQ on", TR_NOOP ("EQ in")));
+    v.push_back (section (4, 520, 276, 192, TR_NOOP ("Equalizer")));
+    v.push_back (display (10, 540, 264, 118, "ridgeeq"));
+    v.push_back (tabs (10, 664, 150, 20, "EQ curve", TR_NOOP ("Brown|Black")));
+    v.push_back (toggle (170, 664, 104, 20, "EQ on", TR_NOOP ("EQ in")));
 
-    // dynamics: static curve, the two gain-reduction meters, compressor and gate
-    v.push_back (section (456, 4, 160, 352, TR_NOOP ("Dynamics")));
-    v.push_back (display (462, 24, 148, 66, "ridgecomp"));
-    v.push_back (meter (462, 94, 148, 10, 0, TR_NOOP ("Comp")));
-    v.push_back (meter (462, 108, 148, 10, 1, TR_NOOP ("Gate")));
-    v.push_back (label (462, 122, 148, 14, TR_NOOP ("Compressor"), boxed));
-    v.push_back (dial (488, 158, 30, "Ratio", TR_NOOP ("Ratio")));
-    v.push_back (dial (536, 158, 30, "Comp. threshold", TR_NOOP ("Thres")));
-    v.push_back (dial (584, 158, 30, "Comp. release", TR_NOOP ("Release")));
-    v.push_back (dial (488, 214, 24, "Comp. mix", TR_NOOP ("Mix")));
-    v.push_back (toggle (512, 208, 100, 20, "Fast attack", TR_NOOP ("Fast attack")));
-    v.push_back (label (462, 252, 148, 14, TR_NOOP ("Gate / expander"), boxed));
-    v.push_back (dial (488, 286, 30, "Gate range", TR_NOOP ("Range")));
-    v.push_back (dial (536, 286, 30, "Gate threshold", TR_NOOP ("Thres")));
-    v.push_back (dial (584, 286, 30, "Gate release", TR_NOOP ("Release")));
-    v.push_back (toggle (462, 334, 70, 20, "Gate fast", TR_NOOP ("Fast")));
-    v.push_back (toggle (536, 334, 76, 20, "Expander", TR_NOOP ("Expand")));
-
-    // master: trims, order, phase, dynamics in
-    v.push_back (section (620, 4, 76, 352, TR_NOOP ("Master")));
-    v.push_back (dial (658, 58, 34, "Input", TR_NOOP ("Input"), bipolar));
-    v.push_back (dial (658, 134, 34, "Output", TR_NOOP ("Output"), bipolar));
-    v.push_back (tabs (628, 190, 60, 76, "Order", TR_NOOP ("EQ>Dyn|Dyn>EQ")));
-    v.push_back (toggle (626, 278, 68, 20, "Dynamics on", TR_NOOP ("Dyn in")));
-    v.push_back (toggle (626, 306, 68, 20, "Phase", TR_NOOP ("Phase")));
+    // --- right column: dynamics, routing, gain
+    v.push_back (section (284, 4, 272, 236, TR_NOOP ("Compressor")));
+    v.push_back (display (290, 24, 120, 70, "ridgecomp"));
+    v.push_back (dial (480, 62, 46, "Comp. threshold", TR_NOOP ("Threshold"), big));
+    v.push_back (dial (330, 150, 32, "Ratio", TR_NOOP ("Ratio")));
+    v.push_back (dial (410, 150, 32, "Comp. release", TR_NOOP ("Release")));
+    v.push_back (dial (490, 150, 28, "Comp. mix", TR_NOOP ("Mix")));
+    v.push_back (toggle (296, 206, 110, 20, "Fast attack", TR_NOOP ("Fast attack")));
+    v.push_back (section (284, 244, 272, 196, TR_NOOP ("Expander / gate")));
+    v.push_back (dial (480, 296, 46, "Gate threshold", TR_NOOP ("Threshold"), big));
+    v.push_back (dial (330, 290, 32, "Gate range", TR_NOOP ("Range")));
+    v.push_back (dial (330, 370, 32, "Gate release", TR_NOOP ("Release")));
+    v.push_back (toggle (396, 380, 70, 20, "Gate fast", TR_NOOP ("Fast")));
+    v.push_back (tabs (396, 408, 154, 20, "Expander", TR_NOOP ("Gate|Expand")));
+    v.push_back (section (284, 444, 272, 132, TR_NOOP ("Dynamics")));
+    v.push_back (meter (292, 466, 256, 12, 0, TR_NOOP ("Comp")));
+    v.push_back (meter (292, 484, 256, 12, 1, TR_NOOP ("Gate")));
+    v.push_back (toggle (292, 508, 84, 20, "Dynamics on", TR_NOOP ("Dyn in")));
+    v.push_back (tabs (384, 508, 164, 20, "Order", TR_NOOP ("EQ>Dyn|Dyn>EQ")));
+    v.push_back (section (284, 580, 272, 132, TR_NOOP ("Gain")));
+    v.push_back (dial (340, 636, 40, "Input", TR_NOOP ("Input"), bipolar));
+    v.push_back (toggle (390, 626, 60, 20, "Phase", TR_NOOP ("Phase")));
+    v.push_back (dial (496, 636, 40, "Output", TR_NOOP ("Output"), bipolar));
     return l;
 }
 
 Layout glowLeveler()
 {
+    // round 114: the optical levelers' classic front panel (the role: Waves CLA-2A / LA-2A), from the official product
+    // pages: GAIN on the left, PEAK REDUCTION on the right, the VU meter between them showing the gain reduction,
+    // the COMPRESS / LIMIT switch under the meter; LYNX's extras (sidechain emphasis, mix) small along the bottom
     Layout l;
-    l.width = 420;
-    l.height = 220;
+    l.width = 540;
+    l.height = 270;
     auto& v = l.items;
-    v.push_back (section (4, 4, 412, 212, TR_NOOP ("Optical leveler")));
-    v.push_back (meter (16, 28, 388, 20, 0, TR_NOOP ("Gain reduction")));
-    v.push_back (dial (90, 112, 64, "Gain", TR_NOOP ("Gain"), big));
-    v.push_back (dial (330, 112, 64, "Peak reduction", TR_NOOP ("Peak reduction"), big));
-    v.push_back (tabs (166, 62, 88, 22, "Limit", TR_NOOP ("Compress|Limit")));
-    v.push_back (dial (186, 128, 32, "Emphasis", TR_NOOP ("Emphasis")));
-    v.push_back (dial (236, 128, 32, "Mix", TR_NOOP ("Mix")));
+    v.push_back (section (4, 4, 532, 262, TR_NOOP ("Optical leveler")));
+    v.push_back (dial (86, 110, 92, "Gain", TR_NOOP ("Gain"), big));
+    v.push_back (dial (454, 110, 92, "Peak reduction", TR_NOOP ("Peak reduction"), big));
+    auto vu = display (170, 28, 200, 136, "vumeter");
+    vu.steps = 0; // live output 0: gain reduction
+    v.push_back (vu);
+    v.push_back (tabs (200, 172, 140, 22, "Limit", TR_NOOP ("Compress|Limit")));
+    v.push_back (dial (232, 226, 28, "Emphasis", TR_NOOP ("Emphasis")));
+    v.push_back (dial (308, 226, 28, "Mix", TR_NOOP ("Mix")));
     return l;
 }
 
@@ -1613,20 +1620,21 @@ Layout hushDeEsser()
 
 Layout aetherLayout()
 {
+    // round 114: the "air" processors' front panel (the role: Slate Digital Fresh Air), from the official product page:
+    // two big knobs side by side — the presence / exciter one (MID) on the left, the high shelf (HIGH) on the right —
+    // and the output trim between them; LYNX's extra settings (frequencies, character, mix) small under each
     Layout l;
-    l.width = 380;
-    l.height = 262;
+    l.width = 440;
+    l.height = 270;
     auto& v = l.items;
-    v.push_back (section (4, 4, 182, 192, TR_NOOP ("Air")));
-    v.push_back (dial (95, 68, 58, "Air", TR_NOOP ("Air"), big));
-    v.push_back (dial (95, 150, 32, "Air freq.", TR_NOOP ("Freq")));
-    v.push_back (section (190, 4, 186, 192, TR_NOOP ("Exciter")));
-    v.push_back (dial (283, 68, 58, "Harmonics", TR_NOOP ("Harmonics"), big));
-    v.push_back (dial (236, 150, 32, "Exciter freq.", TR_NOOP ("Freq")));
-    v.push_back (dial (330, 150, 32, "Character", TR_NOOP ("Even / odd"), bipolar));
-    v.push_back (section (4, 200, 372, 58, nullptr, boxed));
-    v.push_back (dial (140, 218, 24, "Mix", TR_NOOP ("Mix")));
-    v.push_back (dial (240, 218, 24, "Output", TR_NOOP ("Output"), bipolar));
+    v.push_back (section (4, 4, 432, 262, TR_NOOP ("Air")));
+    v.push_back (dial (104, 96, 104, "Harmonics", TR_NOOP ("Mid air"), big));
+    v.push_back (dial (336, 96, 104, "Air", TR_NOOP ("High air"), big));
+    v.push_back (dial (220, 120, 40, "Output", TR_NOOP ("Trim"), bipolar));
+    v.push_back (dial (66, 222, 26, "Exciter freq.", TR_NOOP ("Freq")));
+    v.push_back (dial (142, 222, 26, "Character", TR_NOOP ("Even / odd"), bipolar));
+    v.push_back (dial (220, 222, 26, "Mix", TR_NOOP ("Mix")));
+    v.push_back (dial (336, 222, 26, "Air freq.", TR_NOOP ("Freq")));
     return l;
 }
 
@@ -1870,6 +1878,18 @@ LayoutItem choiceMenu (float x, float y, float w, float h, const char* param, co
 // The reverbs keep the reference plugins' layout logic (REA round 100, screenshots of the official demos in
 // tmp/valh100/ref): the same control groups in the same order — mix and pre-delay first, the decay as the largest
 // control, then grouped boxes, the algorithm / mode menu along the bottom — drawn in LYNX's own style.
+// round 114: the reference reverbs / delays write each knob's name above it and its value under it
+Layout captionsAbove (Layout l)
+{
+    for (auto& i : l.items)
+        if (i.type == Item::knob && (i.style & showValue) != 0 && (i.style & noCaption) == 0)
+        {
+            i.style = (std::uint16_t) (i.style | captionAbove);
+            i.y -= 14.0f;
+        }
+    return l;
+}
+
 Layout epochVerbLayout()
 {
     // Mix / Predelay · big Decay · Damping (2 × 2) · Shape · Diffusion · Modulation · EQ; Mode and Color menus below
@@ -2394,17 +2414,17 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::hushDeEsser: l = hushDeEsser(); break;
         case EffectKind::aether: l = aetherLayout(); break;
         case EffectKind::ember: l = emberLayout(); break;
-        case EffectKind::epochVerb: l = epochVerbLayout(); break;
-        case EffectKind::atrium: l = atriumLayout(); break;
-        case EffectKind::foilPlate: l = foilPlateLayout(); break;
-        case EffectKind::nebula: l = nebulaLayout(); break;
-        case EffectKind::halo: l = haloLayout(); break;
-        case EffectKind::horizon: l = horizonLayout(); break;
+        case EffectKind::epochVerb: l = captionsAbove (epochVerbLayout()); break;
+        case EffectKind::atrium: l = captionsAbove (atriumLayout()); break;
+        case EffectKind::foilPlate: l = captionsAbove (foilPlateLayout()); break;
+        case EffectKind::nebula: l = captionsAbove (nebulaLayout()); break;
+        case EffectKind::halo: l = captionsAbove (haloLayout()); break;
+        case EffectKind::horizon: l = captionsAbove (horizonLayout()); break;
         case EffectKind::lynxTune: l = lynxTune(); break;
-        case EffectKind::echoform: l = echoformLayout(); break;
-        case EffectKind::spiralEcho: l = spiralLayout(); break;
-        case EffectKind::orbit: l = orbitLayout(); break;
-        case EffectKind::latticeMod: l = latticeLayout(); break;
+        case EffectKind::echoform: l = captionsAbove (echoformLayout()); break;
+        case EffectKind::spiralEcho: l = captionsAbove (spiralLayout()); break;
+        case EffectKind::orbit: l = captionsAbove (orbitLayout()); break;
+        case EffectKind::latticeMod: l = captionsAbove (latticeLayout()); break;
         case EffectKind::fruitySend: l = fruitySend(); break;
         case EffectKind::crestCompressor: l = crestCompressor(); break;
         case EffectKind::prismMultiband: l = prismMultiband(); break;
