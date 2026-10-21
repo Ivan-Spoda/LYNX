@@ -49,8 +49,11 @@ public:
     // sleep now instead of polling until spinMicros runs out. Wait-free; the next parallelFor wakes them as usual.
     void park() noexcept { parkedGeneration.store (generation, std::memory_order_release); }
 
-    // How long a worker keeps polling for new work after finishing before it sleeps (microseconds).
-    static constexpr int spinMicros = 250;
+    // How long a worker keeps polling for new work after finishing before it sleeps (microseconds). REA round 116
+    // measured 250 → 60 on Windows (FL Studio ASIO, 256 samples, Thief / Exoplanet playing): process CPU 106/114 % →
+    // 70/90 % of a core, the callback's average and peak load unchanged (the gaps between one block's parallelFor
+    // calls are usually far shorter than 60 µs; a longer one costs a semaphore wake-up)
+    static constexpr int spinMicros = 60;
 
     // Diagnostics: how many indices the workers (not the calling thread) ran, and how many times a worker
     // was woken from sleep. Relaxed counters.
