@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <thread>
 
 #include "core/Preferences.h"
@@ -1015,8 +1016,7 @@ std::optional<juce::PluginDescription> PluginHost::findForeign (const ForeignPlu
     // full scan) go last: the same class ID found at the old path would load nothing ("no compatible plug-in format")
     std::stable_partition (types.begin(), types.end(), [this] (const juce::PluginDescription& d) { return fileStillThere (d.fileOrIdentifier); });
     // a module the user chose not to wait for (round 121): its plugins are missing for this open (substitutes play)
-    types.erase (std::remove_if (types.begin(), types.end(), [] (const juce::PluginDescription& d) { return warmup().skipped (d.fileOrIdentifier.toStdString()); }),
-                 types.end());
+    types.removeIf ([] (const juce::PluginDescription& d) { return warmup().skipped (d.fileOrIdentifier.toStdString()); });
     auto found = [how] (const juce::PluginDescription& d, const char* reason) {
         if (how != nullptr)
             *how = reason;
@@ -1470,6 +1470,37 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::instantiate (const Plugin
     return createInstance (ref, sampleRate, error);
 }
 
+std::unique_ptr<juce::AudioPluginInstance> createRightInstance (juce::AudioPluginFormatManager& formats, const juce::PluginDescription& description,
+                                                                double sampleRate, int blockSize, juce::String& error)
+{
+    auto instance = formats.createPluginInstance (description, sampleRate, blockSize, error);
+    // A shell that hands out another plugin than the one asked for: a Waves shell's FIRST instance in a process comes
+    // up as another of its plugins (round 119 saw Q10; round 121 §3: "SSLChannel Stereo" came up as "JJP-Guitars
+    // Mono/Stereo") — its class list is reordered (587 -> 1174 entries) when it gets a host context, which JUCE sets
+    // between its class lookup (by index) and the creation. Created again, it is the right one.
+    if (instance == nullptr || instance->getName() == description.name)
+        return instance;
+    loadtrace::add ("plugin_mismatch " + description.name.toStdString() + " -> " + instance->getName().toStdString(), 0.0);
+    if (description.pluginFormatName != "VST3")
+        return instance;
+    // the wrong ones stay alive until the right one exists (released first, the shell went back to its first list)
+    std::vector<std::unique_ptr<juce::AudioPluginInstance>> wrong;
+    for (int attempt = 0; attempt < 3 && instance != nullptr && instance->getName() != description.name; ++attempt)
+    {
+        wrong.push_back (std::move (instance));
+        instance = formats.createPluginInstance (description, sampleRate, blockSize, error);
+        if (instance != nullptr && instance->getName() != description.name)
+            loadtrace::add ("plugin_mismatch_again " + description.name.toStdString() + " -> " + instance->getName().toStdString(), 0.0);
+    }
+    if (instance != nullptr && instance->getName() != description.name)
+    {
+        // another plugin playing in its place would sound wrong without a word: a load failure is said
+        error = description.name + ": " + tr ("the plugin file handed out another plugin ({0})", { instance->getName() });
+        return nullptr;
+    }
+    return instance;
+}
+
 std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const PluginRef& ref, double sampleRate, juce::String* error)
 {
     if (onInstantiate)
@@ -1505,7 +1536,7 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const Plu
 
     crashguard::note (("loading plugin " + description->name + " (" + description->pluginFormatName + ", "
                        + juce::File (description->fileOrIdentifier).getFileName() + ")").toStdString());
-    auto instance = formats.createPluginInstance (*description, sampleRate, maxBlockSize, message);
+    auto instance = createRightInstance (formats, *description, sampleRate, maxBlockSize, message);
     crashguard::note (("loaded plugin " + description->name + (instance == nullptr ? juce::String (" (failed)") : juce::String())).toStdString());
 
     if (instance == nullptr)
@@ -1542,6 +1573,7 @@ struct FactoryCalls
     virtual long __stdcall getFactoryInfo (void*) = 0;
     virtual int __stdcall countClasses() = 0;
 };
+
 
 struct StartedModule
 {
@@ -1599,7 +1631,7 @@ modulewarm::Registry& warmup()
 
 void startModuleOf (const juce::PluginDescription& d)
 {
-    if (pluginSandboxEnabled())
+    if (pluginSandboxEnabled() || std::getenv ("LYNX_NO_MODULE_WARMUP") != nullptr) // (the env var: A/B measurements)
         return;
     if (modulewarm::worthStartingAhead (d.pluginFormatName.toStdString(), d.fileOrIdentifier.toStdString()))
         warmup().start (d.fileOrIdentifier.toStdString());

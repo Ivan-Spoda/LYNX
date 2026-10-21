@@ -312,6 +312,11 @@ private:
 bool pluginSubstitutesEnabled();
 void setPluginSubstitutesEnabled (bool enabled);
 
+// createPluginInstance, checked: a VST3 shell that hands out another of its plugins than the one asked for (a Waves
+// shell's first instance in a process, round 121) is created once more.
+std::unique_ptr<juce::AudioPluginInstance> createRightInstance (juce::AudioPluginFormatManager& formats, const juce::PluginDescription& description,
+                                                                double sampleRate, int blockSize, juce::String& error);
+
 // Stereo layout (if the plugin accepts it), rate and block size; calls prepareToPlay.
 void preparePlugin (juce::AudioPluginInstance& plugin, double sampleRate, int blockSize);
 

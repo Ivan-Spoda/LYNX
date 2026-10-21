@@ -69,7 +69,7 @@ State Registry::start (const std::string& file)
     {
         const std::scoped_lock l (*entriesLock);
         auto& e = (*entries)[file];
-        if (e.state == State::warming || e.state == State::ready || e.state == State::skipped)
+        if (e.state != State::none) // (a failed one is tried again on the next open: newOpen forgets it)
             return e.state;
         e.state = State::warming;
         e.started = clock();

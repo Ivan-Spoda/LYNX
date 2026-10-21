@@ -3374,6 +3374,7 @@ private:
     }
     std::unique_ptr<MainWindow> mainWindow;
     std::unique_ptr<lynx::SplashScreen> splash;
+    double splashDuration = lynx::SplashScreen::minimumDuration; // seconds of its clock (round 121: from the process start)
     lynx::StartupOptions startupOptions;
     juce::File fileToOpen;
 };
