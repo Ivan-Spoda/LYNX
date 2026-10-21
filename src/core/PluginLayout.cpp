@@ -1741,7 +1741,7 @@ Layout crestCompressor()
     Layout l;
     l.width = 840;
     l.height = 604;
-    l.pages = { TR_NOOP ("Character"), TR_NOOP ("Side chain") };
+    l.pages = { TR_NOOP ("Character"), TR_NOOP ("Side chain"), TR_NOOP ("Options") };
     auto& v = l.items;
     // the display: scrolling input / output level and gain reduction, with the threshold; meters on the right
     v.push_back (display (8, 8, 704, 252, "grhistory"));
@@ -1773,11 +1773,19 @@ Layout crestCompressor()
     v.push_back (tabs (358, 462, 270, 22, "Max lookahead", TR_NOOP ("Off|1 ms|2 ms|5 ms|10 ms|20 ms")));
     v.push_back (meter (640, 462, 192, 22, 0, TR_NOOP ("Reduction")));
     // folded parts
-    v.push_back (pageTabs (8, 492, 240, 22, TR_NOOP ("Character|Side chain")));
+    v.push_back (pageTabs (8, 492, 360, 22, TR_NOOP ("Character|Side chain|Options")));
     v.push_back (section (8, 518, 824, 82, nullptr, boxed));
     v.push_back (onPage (tabs (20, 530, 280, 22, "Character", TR_NOOP ("Off|Warm|Crisp|Bright")), 0));
     v.push_back (onPage (tabs (310, 530, 140, 22, "Character pre", TR_NOOP ("Post|Pre")), 0));
     v.push_back (onPage (dial (492, 546, 28, "Drive", TR_NOOP ("Drive"), bipolar), 0));
+    // round 128 (Pro-C 3 parity): dry level and auto threshold; link mode and the display options on their own page
+    v.push_back (onPage (dial (572, 546, 28, "Dry", TR_NOOP ("Dry")), 0));
+    v.push_back (onPage (toggle (630, 530, 160, 20, "Auto threshold", TR_NOOP ("Auto threshold")), 0));
+    v.push_back (onPage (label (20, 530, 70, 22, TR_NOOP ("Link mode")), 2));
+    v.push_back (onPage (tabs (92, 530, 360, 22, "Link mode", TR_NOOP ("Stereo|Mid|Side|Mid > side|Side > mid")), 2));
+    v.push_back (onPage (label (470, 530, 50, 22, TR_NOOP ("Scale")), 2));
+    v.push_back (onPage (tabs (520, 530, 230, 22, "Meter scale", TR_NOOP ("9 dB|18 dB|36 dB|72 dB|90 dB")), 2));
+    v.push_back (onPage (toggle (20, 562, 160, 20, "Input meter", TR_NOOP ("Input meter")), 2));
     v.push_back (onPage (dial (36, 548, 26, "Stereo link", TR_NOOP ("Stereo link")), 1));
     v.push_back (onPage (toggle (72, 528, 120, 20, "External SC", TR_NOOP ("External input")), 1));
     v.push_back (onPage (toggle (72, 554, 120, 20, "SC listen", TR_NOOP ("Listen")), 1));
@@ -1828,6 +1836,8 @@ Layout prismMultiband()
         add (dial (628, 398, 36, names[b][5], TR_NOOP ("Attack")));
         add (dial (700, 398, 36, names[b][6], TR_NOOP ("Release")));
         add (dial (788, 398, 40, names[b][7], TR_NOOP ("Level"), bipolar));
+        static const char* las[4] { "B1 lookahead", "B2 lookahead", "B3 lookahead", "B4 lookahead" };
+        add (dial (858, 398, 22, las[b], TR_NOOP ("Lookahead"))); // round 128: the band's own look-ahead
     }
     // global bar
     v.push_back (label (8, 482, 50, 22, TR_NOOP ("Slope")));
@@ -1846,7 +1856,7 @@ Layout sentryGate()
 {
     Layout l;
     l.width = 680;
-    l.height = 392;
+    l.height = 480;
     auto& v = l.items;
     // left: threshold (big) with ratio and range under it
     v.push_back (dial (86, 84, 92, "Threshold", TR_NOOP ("Threshold"), big));
@@ -1874,6 +1884,16 @@ Layout sentryGate()
                                                                 { "Dry", TR_NOOP ("Dry") }, { "Output", TR_NOOP ("Output") } };
     for (int k = 0; k < 6; ++k)
         v.push_back (dial (186.0f + 84.0f * (float) k, 326, 28, knobs[k].first, knobs[k].second, k == 5 ? bipolar : 0));
+    // round 128 (Pro-G parity): channel mode, ducking, the side-chain gain / mix per channel, wet / dry pan, input
+    v.push_back (section (4, 392, 672, 84, TR_NOOP ("Expert")));
+    v.push_back (tabs (14, 414, 160, 22, "Channel mode", TR_NOOP ("Left/Right|Mid/Side")));
+    v.push_back (toggle (14, 444, 120, 22, "Ducking", TR_NOOP ("Ducking")));
+    static const std::pair<const char*, const char*> expert[7] { { "SC gain L", TR_NOOP ("Gain L") }, { "SC mix L", TR_NOOP ("Mix L") },
+                                                                 { "SC gain R", TR_NOOP ("Gain R") }, { "SC mix R", TR_NOOP ("Mix R") },
+                                                                 { "Wet pan", TR_NOOP ("Wet pan") }, { "Dry pan", TR_NOOP ("Dry pan") },
+                                                                 { "Input", TR_NOOP ("Input") } };
+    for (int k = 0; k < 7; ++k)
+        v.push_back (dial (220.0f + 68.0f * (float) k, 438, 22, expert[k].first, expert[k].second, bipolar));
     return l;
 }
 

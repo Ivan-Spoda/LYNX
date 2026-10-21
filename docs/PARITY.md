@@ -148,24 +148,24 @@ lookahead, meter scale, knee display, input meter.
 | Full-window level display (input, output, gain-reduction line, threshold) | ✅ | |
 | Knee / transfer panel sliding out from the left | ✅ | |
 | THRESHOLD, RATIO, style button, ATTACK, RELEASE knobs floating on the display | ✅ | |
-| AUTO threshold | ❌ | |
+| AUTO threshold | ✅ | round 128: the threshold follows the programme (3 s RMS of the detector input; the knob's −18 dB = at the average level) |
 | AUTO release | ✅ | |
 | KNEE, RANGE, LOOKAHEAD, HOLD small knobs | ✅ | |
-| Styles | ⚠️ | 11 (no Smooth, TTM, Op-El, Mastering under those names) |
+| Styles | ⚠️ | 11 (no Smooth, TTM, Op-El, Mastering under those names; the translator maps them onto the nearest fitted family — new names would need their own measured families) |
 | Character Off / Tube / Diode / Bright, pre / post, drive | ✅ | |
 | AUTO GAIN | ✅ | |
-| DRY knob (dry level, parallel compression) | ⚠️ | LYNX has MIX (0–100 %); the original has a separate DRY gain and Mix up to 200 % |
+| DRY knob (dry level, parallel compression) | ✅ | round 128: DRY under AUTO GAIN (−∞ … +36 dB, the original's law); MIX moved to the bottom bar (0–100 %, the original goes to 200 %) |
 | Wet / dry pan (mid / side balance) | ❌ | |
 | SIDE CHAIN panel: listen, level, stereo link, detector EQ with nodes | ✅ | 3 EQ bands (original: 6) |
 | Side chain Internal / External | ✅ | |
 | Side chain Host Sync / MIDI triggering | ❌ | |
-| Stereo link mode (Mid / Side / M→S / S→M) | ❌ | |
+| Stereo link mode (Mid / Side / M→S / S→M) | ✅ | round 128: "Link mode" in the side-chain panel (Stereo, Mid, Side, Mid > side, Side > mid); translated from Pro-C 3's mid-only link range + mode |
 | Audition triggering | ❌ | |
 | Oversampling (bottom bar) | ⚠️ | up to 8x (original 32x) |
 | Lookahead maximum (bottom bar) | ✅ | |
 | In / out levels (bottom bar) | ✅ | no pan |
-| Meter scale (9/18/36/72/90 dB) | ❌ | fixed |
-| Input level meter switch | ⚠️ | IN meter always shown |
+| Meter scale (9/18/36/72/90 dB) | ✅ | round 128: the dB box at the display's bottom right |
+| Input level meter switch | ✅ | round 128: click IN above the meters |
 | Output + gain-reduction meters with holds | ✅ | |
 
 ## Prism Multiband ← Pro-MB
@@ -185,15 +185,15 @@ lookahead on, expert mode, display range, analyser options.
 | Wheel = threshold | ✅ | |
 | S / M buttons per band | ✅ | |
 | Floating band panel: power, THRESHOLD, RANGE, ATTACK, RELEASE, OUTPUT, mode, RATIO, KNEE | ✅ | |
-| LOOKAHEAD slider per band | ⚠️ | one global lookahead |
+| LOOKAHEAD per band | ✅ | round 128: LOOKAHEAD in the band panel (0–20 ms, capped by the global look-ahead, which sets the latency); translated from Pro-MB |
 | EXPERT (»): side-chain filtering, external side chain, stereo link per band | ❌ | |
 | Band output pan (mid / side) | ❌ | |
 | Crossover slope per band 6–48 dB/oct | ⚠️ | one global slope 12 / 24 / 48 |
 | Processing mode Linear / Dynamic / Minimum phase | ❌ | |
 | Oversampling | ❌ | |
-| Display range 3 / 6 / 12 / 30 dB | ⚠️ | 6 / 12 / 30 |
+| Display range 3 / 6 / 12 / 30 dB | ✅ | round 128: 3 dB added |
 | Analyser off / pre / post / pre+post | ✅ | |
-| Analyser resolution / speed / tilt / freeze | ❌ | |
+| Analyser resolution / speed / tilt / freeze | ⚠️ | round 128: the analyser button opens a menu (off / pre / post / pre+post, speed, freeze); no resolution / tilt choice |
 | Mix, In, Out (bottom bar) | ✅ | |
 | Output meter | ✅ | |
 
@@ -209,14 +209,14 @@ pan, oversampling Off / 2x / 4x, expert mode, channel mode L/R or M/S, input / o
 | THRESHOLD big knob with RATIO / RANGE under it | ✅ | |
 | Display: level history behind the transfer curve, threshold dashed | ✅ | |
 | Style button (5 styles) | ✅ | |
-| Ducking style | ❌ | |
+| Ducking style | ✅ | round 128: DUCKING in the expert strip (the gate upside down: an open gate cuts by the range); shown under the style button when on |
 | ATTACK, RELEASE, HOLD, KNEE, LOOKAHEAD (+ on) | ✅ | |
 | EXPERT strip: side chain In / Ext, high / low-pass range slider, Audition | ✅ | |
-| EXPERT: side-chain GAIN + L/R MIX (two channels) | ❌ | |
-| EXPERT: WET + PAN, DRY + PAN | ⚠️ | Dry and Output levels; no pan |
-| Channel mode Left/Right or Mid/Side (bottom bar) | ❌ | |
+| EXPERT: side-chain GAIN + L/R MIX (two channels) | ✅ | round 128: GAIN / MIX per detector channel (L / R, or M / S); translated from Pro-G |
+| EXPERT: WET + PAN, DRY + PAN | ✅ | round 128: WET PAN / DRY PAN next to DRY / OUTPUT; translated |
+| Channel mode Left/Right or Mid/Side (bottom bar) | ✅ | round 128: bottom bar; the detector channels become mid / side; translated |
 | Oversampling (bottom bar) | ❌ | |
-| In / Out levels (bottom bar) | ⚠️ | Out only |
+| In / Out levels (bottom bar) | ✅ | round 128: In added (−24 … +24 dB); translated |
 | Level meter | ✅ | |
 
 ## Hush De-esser ← Pro-DS
