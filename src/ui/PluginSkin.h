@@ -1,0 +1,169 @@
+#pragma once
+
+// The LYNX plugin-editor skin (REA round 122): one design kit shared by every built-in plugin editor — the
+// display-first editors (ProEditors), the FL-arranged panels (PluginEditors), Facet EQ, the generator pages and
+// LYNX Tune. It only changes how things are DRAWN: layouts, control placement and gestures stay with each editor.
+//
+// Identity: LYNX's dark surfaces and red brand mark, with one accent per plugin family (reverbs violet, delays blue,
+// modulation teal, dynamics amber, saturation orange, voice rose, EQ / filters the LYNX red) so each editor is
+// recognisable at a glance. Knobs carry a lit value arc with a soft glow, machined caps and a pointer; displays sit
+// in inset wells; meters are lit gradients with peak holds; lit buttons glow. Everything is plain vector drawing
+// (no images except the cached logo), cheap enough for 30 Hz displays, and nothing animates unless something
+// changed (see Animator).
+
+#include <juce_gui_basics/juce_gui_basics.h>
+
+#include <functional>
+#include <map>
+
+#include "core/Song.h"
+#include "ui/Theme.h"
+
+namespace lynx::skin
+{
+// --- colours -------------------------------------------------------------------------------------
+namespace colour
+{
+inline const juce::Colour crimson { 0xffe5383b }; // = theme accent (EQ, filters, LYNX's own default)
+inline const juce::Colour violet { 0xffa48bff };  // reverbs
+inline const juce::Colour azure { 0xff5aa2ff };   // delays / echoes
+inline const juce::Colour teal { 0xff3fd0c2 };    // modulation
+inline const juce::Colour amber { 0xfff7b33c };   // dynamics
+inline const juce::Colour ember { 0xffff7a3d };   // saturation / distortion
+inline const juce::Colour rose { 0xffff5c93 };    // voice / pitch
+inline const juce::Colour lime { 0xff8fdc4a };    // stereo / utility
+
+inline const juce::Colour canvasTop { 0xff1a1c22 };
+inline const juce::Colour canvasBottom { 0xff0f1014 };
+inline const juce::Colour wellTop { 0xff0a0b0e };
+inline const juce::Colour wellBottom { 0xff121318 };
+} // namespace colour
+
+// a juce::Slider carrying this property (the accent as an int64 ARGB) is drawn with the skin by theme::LookAndFeel
+inline constexpr const char* sliderProperty = "lynxSkinAccent";
+
+// the accent of a built-in effect's family
+juce::Colour accentFor (EffectKind kind);
+// the accent of a generator page (synths: crimson; sampler-like: azure...)
+juce::Colour accentForInstrument (const juce::String& pluginName);
+
+// --- surfaces ------------------------------------------------------------------------------------
+// the editor's canvas: a deep vertical gradient with a faint glow of the accent under the header
+void canvas (juce::Graphics&, juce::Rectangle<float> area, juce::Colour accent);
+// the header strip: raised gradient, top highlight, hairline and an accent line fading out from the left
+void headerBar (juce::Graphics&, juce::Rectangle<float> area, juce::Colour accent);
+// LYNX's mark (the app logo, cached at the size asked) followed by nothing: callers draw the name next to it
+void brandMark (juce::Graphics&, juce::Rectangle<float> area);
+// the plugin's name in the header (bold, with a short accent underline); returns the width used
+float titleText (juce::Graphics&, juce::Rectangle<float> area, const juce::String& name, juce::Colour accent, bool underline = true);
+// a power LED with a halo when on
+void powerLed (juce::Graphics&, juce::Point<float> centre, float diameter, bool on);
+// a raised section (group of controls) and its title strip (caps, with an accent dot)
+void section (juce::Graphics&, juce::Rectangle<float> area, float corner, bool raised = false);
+void sectionTitle (juce::Graphics&, juce::Rectangle<float> strip, const juce::String& text, juce::Colour accent, float fontSize = 10.5f);
+// an inset display well (graphs, analysers, read-outs)
+void well (juce::Graphics&, juce::Rectangle<float> area, float corner);
+// a floating panel over a display (drop shadow, glassy fill, an accent edge)
+void floatingPanel (juce::Graphics&, juce::Rectangle<float> area, juce::Colour edge, float corner = 10.0f);
+// the bottom status bar of the display-first editors
+void bottomBar (juce::Graphics&, juce::Rectangle<float> area);
+
+// --- controls ------------------------------------------------------------------------------------
+struct KnobLook
+{
+    float value = 0.0f;   // 0..1
+    bool bipolar = false;
+    juce::Colour accent = colour::crimson;
+    float hover = 0.0f;   // 0..1 (animated by the owner, or 0 / 1)
+    bool active = false;  // being dragged
+    bool enabled = true;  // the plugin is on
+};
+void knob (juce::Graphics&, juce::Rectangle<float> bounds, const KnobLook&);
+
+// a slider track (vertical or horizontal) with its lit part and a thumb
+void slider (juce::Graphics&, juce::Rectangle<float> trackArea, float value01, bool vertical, bool bipolar, juce::Colour accent, bool hot,
+             bool enabled, float thumbLength, float thumbThickness);
+// a push button / option button; lit = on (glows in the accent)
+void button (juce::Graphics&, juce::Rectangle<float> area, bool lit, bool hover, juce::Colour accent, float corner = theme::radius::md);
+// a pill switch
+void switchPill (juce::Graphics&, juce::Rectangle<float> box, bool on, juce::Colour accent, bool enabled);
+// a menu / selector face (the value is drawn by the caller)
+void selector (juce::Graphics&, juce::Rectangle<float> area, bool hover, float corner = theme::radius::lg);
+// a vertical (or horizontal) level meter with a lit gradient (green → amber → red) and a peak hold, 0..1 each
+void meter (juce::Graphics&, juce::Rectangle<float> area, float level01, float peak01, bool vertical = true);
+// a meter lit in one colour (gain reduction): `fromTop` hangs from the top
+void meterSolid (juce::Graphics&, juce::Rectangle<float> area, float level01, juce::Colour c, bool fromTop);
+// a stroked curve with a soft glow under it (response curves, analysers)
+void glowStroke (juce::Graphics&, const juce::Path&, juce::Colour, float thickness, float glow = 1.0f);
+// a value read-out plate (boxed values)
+void valuePlate (juce::Graphics&, juce::Rectangle<float> area, float corner);
+
+// --- typography ----------------------------------------------------------------------------------
+inline juce::Colour captionColour() { return juce::Colour (0xff8c919c); }
+inline juce::Colour valueColour (bool hot) { return hot ? theme::colour::textPrimary : juce::Colour (0xffd3d6dd); }
+
+// --- animation -----------------------------------------------------------------------------------
+// Smooth hover / press levels per control id, advanced by a 60 Hz timer that runs ONLY while something is
+// still moving (an idle editor costs nothing). The owner calls setTarget on hover changes and repaints in onFrame.
+class Animator final : private juce::Timer
+{
+public:
+    std::function<void()> onFrame; // repaint (the owner decides what)
+
+    void setHot (int id) // the control under the mouse (or −1): it fades in, the others fade out
+    {
+        if (id == hot) return;
+        hot = id;
+        if (id >= 0 && levels.find (id) == levels.end()) levels[id] = 0.0f;
+        kick();
+    }
+    float level (int id) const
+    {
+        const auto it = levels.find (id);
+        return it != levels.end() ? it->second : 0.0f;
+    }
+    bool running() const { return isTimerRunning(); }
+
+private:
+    void kick()
+    {
+        if (! isTimerRunning()) startTimerHz (60);
+    }
+    void timerCallback() override
+    {
+        auto moving = false;
+        for (auto it = levels.begin(); it != levels.end();)
+        {
+            const auto target = it->first == hot ? 1.0f : 0.0f;
+            auto& x = it->second;
+            x += (target - x) * (target > x ? 0.35f : 0.18f);
+            if (std::abs (target - x) < 0.02f) x = target;
+            else moving = true;
+            if (x == 0.0f && it->first != hot) it = levels.erase (it);
+            else ++it;
+        }
+        if (onFrame) onFrame();
+        if (! moving) stopTimer();
+    }
+
+    int hot = -1;
+    std::map<int, float> levels;
+};
+
+// a meter level that rises at once and falls smoothly (dB per second), with a peak hold
+struct Ballistics
+{
+    float level = 0.0f, peak = 0.0f; // 0..1
+    int hold = 0;                    // frames left before the peak falls
+    // returns true when anything moved
+    bool update (float in01, float fallPerFrame = 0.025f)
+    {
+        const auto before = level + peak;
+        level = in01 >= level ? in01 : juce::jmax (in01, level - fallPerFrame);
+        if (in01 >= peak) { peak = in01; hold = 30; }
+        else if (hold > 0) --hold;
+        else peak = juce::jmax (level, peak - fallPerFrame * 0.6f);
+        return std::abs (level + peak - before) > 1e-4f;
+    }
+};
+} // namespace lynx::skin

@@ -264,6 +264,7 @@ if(LYNX_BUILD_APP)
         src/ui/ParametricEqEditor.cpp
         src/ui/FacetEqEditor.cpp
         src/ui/ProEditors.cpp
+        src/ui/PluginSkin.cpp
         src/ui/PluginEditors.cpp
         src/ui/DynamicsDisplays.cpp
         src/ui/ExportDialog.cpp

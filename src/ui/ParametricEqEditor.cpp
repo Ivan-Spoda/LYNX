@@ -6,6 +6,7 @@
 #include "core/Effects.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
+#include "ui/PluginSkin.h"
 #include "ui/Theme.h"
 
 namespace lynx
@@ -66,8 +67,7 @@ void drawParametricEqCurve (juce::Graphics& g, juce::Rectangle<float> area, cons
                             bool enabled, int highlightBand, double rangeDb, bool labels)
 {
     using namespace theme;
-    g.setColour (colour::bg0);
-    g.fillRoundedRectangle (area, radius::md);
+    skin::well (g, area, radius::md);
 
     // grid: frequency decades and ±6/12/18 dB
     g.setColour (colour::gridBeat);
@@ -110,8 +110,7 @@ void drawParametricEqCurve (juce::Graphics& g, juce::Rectangle<float> area, cons
     g.setGradientFill (juce::ColourGradient (curveColour.withAlpha (0.22f), area.getX(), area.getY(), curveColour.withAlpha (0.04f), area.getX(),
                                              area.getCentreY(), false));
     g.fillPath (fill);
-    g.setColour (curveColour);
-    g.strokePath (curve, juce::PathStrokeType (2.0f));
+    skin::glowStroke (g, curve, curveColour, 2.0f, enabled ? 0.8f : 0.0f);
 }
 
 std::unique_ptr<juce::Component> makeParametricEqEditor (AudioEngine& engine, int track, int slot)
