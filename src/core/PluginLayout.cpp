@@ -1014,53 +1014,66 @@ Layout fruitySend()
 
 Layout lynxTune()
 {
-    // LYNX Tune (own design, REA round 95; not an FL plugin): PITCH (key, scale, voice range, A4 reference) ·
-    // CORRECTION (retune — the main control —, humanize, tracking) · FORMANT (preserve, shift) · OUTPUT (transpose,
-    // mix, low latency, MIDI source); the twelve target-note switches along the bottom, like a keyboard octave
+    // LYNX Tune (own design, REA rounds 95 / 120). Round 120: the workflow of the automatic pitch correctors' "auto"
+    // mode it stands in for (Auto-Tune Pro, studied on the official trial — layout logic only, LYNX's own drawing):
+    // the input / key / scale bar on top; the correction row in the middle — RETUNE SPEED big on the left, FLEX-TUNE
+    // beside it, the live correction meter (note name, ±100 cent ring) in the centre, the formant control and HUMANIZE
+    // big on the right; the scrolling pitch graph below; the target notes as a keyboard octave at the bottom.
     Layout l;
-    l.width = 600;
-    l.height = 236;
+    l.width = 800;
+    l.height = 548;
     auto& v = l.items;
-    v.push_back (section (0, 0, 190, 160, TR_NOOP ("PITCH")));
+    // --- top bar
+    v.push_back (section (0, 0, 382, 70, TR_NOOP ("INPUT")));
+    v.push_back (knob (36, 40, 30, "Tracking", TR_NOOP ("TRACKING"), 64, 0));
+    LayoutItem range;
+    range.type = Item::menu;
+    range.x = 70, range.y = 30, range.w = 112, range.h = 22;
+    range.param = "Range";
+    range.label = TR_NOOP ("Input type");
+    range.options = TR_NOOP ("Soprano|Alto / Tenor|Low male|Instrument");
+    v.push_back (range);
     LayoutItem key;
     key.type = Item::menu;
-    key.x = 10, key.y = 30, key.w = 80, key.h = 22;
+    key.x = 190, key.y = 30, key.w = 62, key.h = 22;
     key.param = "Key";
     key.label = TR_NOOP ("Key");
     key.options = "C|C#|D|D#|E|F|F#|G|G#|A|A#|B";
     v.push_back (key);
     LayoutItem scale;
     scale.type = Item::menu;
-    scale.x = 98, scale.y = 30, scale.w = 84, scale.h = 22;
+    scale.x = 260, scale.y = 30, scale.w = 114, scale.h = 22;
     scale.param = "Scale";
     scale.label = TR_NOOP ("Scale");
     scale.options = TR_NOOP ("Chromatic|Major|Minor|Harmonic minor|Melodic minor|Major pentatonic|Minor pentatonic|Blues|Dorian|Mixolydian|Phrygian|Lydian|Locrian|Custom");
     v.push_back (scale);
-    v.push_back (radio (10, 62, 96, 88, "Range", TR_NOOP ("Soprano|Alto / Tenor|Low male|Instrument")));
-    v.push_back (knob (148, 100, 40, "Reference", TR_NOOP ("A4"), 136, showValue));
-    v.push_back (section (194, 0, 210, 160, TR_NOOP ("CORRECTION")));
-    v.push_back (knob (250, 84, 72, "Retune", TR_NOOP ("RETUNE"), 140, big | showValue));
-    v.push_back (knob (334, 64, 38, "Humanize", TR_NOOP ("HUMANIZE"), 98, showValue));
-    v.push_back (knob (334, 122, 30, "Tracking", TR_NOOP ("TRACKING"), 150, 0));
-    v.push_back (section (408, 0, 90, 160, TR_NOOP ("FORMANT")));
-    v.push_back (toggle (416, 30, 76, 20, "Formant preserve", TR_NOOP ("Preserve")));
-    v.push_back (knob (453, 96, 40, "Formant shift", TR_NOOP ("SHIFT"), 136, bipolar | showValue));
-    v.push_back (section (502, 0, 98, 160, TR_NOOP ("OUTPUT")));
-    v.push_back (stepper (510, 30, 82, 22, "Transpose", TR_NOOP ("Transpose"), 25));
-    v.push_back (knob (551, 92, 34, "Mix", TR_NOOP ("MIX"), 124, showValue));
-    v.push_back (toggle (510, 136, 82, 18, "Low latency", TR_NOOP ("Low latency")));
-    v.push_back (section (0, 164, 600, 72, TR_NOOP ("TARGET NOTES")));
-    static const char* const notes[12] { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-    for (int k = 0; k < 12; ++k)
-        v.push_back (toggle (8.0f + 40.0f * (float) k, 194, 36, 22, notes[k], notes[k]));
-    v.push_back (stepper (500, 192, 92, 24, "MIDI", TR_NOOP ("MIDI channel"), 129));
-    // round 103: the live pitch display on top (detected pitch, target note, correction, scrolling pitch graph)
-    constexpr float top = 170.0f;
-    for (auto& item : v)
-        item.y += top;
-    l.height += (int) top;
-    v.insert (v.begin(), section (0, 0, 600, top - 4.0f, TR_NOOP ("LIVE PITCH")));
-    v.insert (v.begin() + 1, display (6, 22, 588, top - 30.0f, "pitchgraph"));
+    v.push_back (section (386, 0, 414, 70, TR_NOOP ("OUTPUT")));
+    v.push_back (stepper (398, 30, 88, 22, "Transpose", TR_NOOP ("Transpose"), 25));
+    v.push_back (knob (526, 38, 30, "Reference", TR_NOOP ("A4"), 64, showValue));
+    v.push_back (knob (590, 38, 30, "Mix", TR_NOOP ("MIX"), 64, showValue));
+    v.push_back (toggle (636, 22, 154, 18, "Low latency", TR_NOOP ("Low latency")));
+    v.push_back (stepper (636, 44, 154, 20, "MIDI", TR_NOOP ("MIDI channel"), 129));
+    // --- correction row
+    v.push_back (section (0, 74, 800, 236, TR_NOOP ("CORRECTION")));
+    v.push_back (knob (110, 180, 104, "Retune", TR_NOOP ("RETUNE SPEED"), 262, big | showValue));
+    v.push_back (knob (240, 204, 60, "Flex-Tune", TR_NOOP ("FLEX-TUNE"), 262, showValue));
+    v.push_back (display (300, 96, 200, 200, "pitchring"));
+    v.push_back (toggle (528, 128, 84, 20, "Formant preserve", TR_NOOP ("Formant")));
+    v.push_back (knob (570, 204, 60, "Formant shift", TR_NOOP ("FORMANT SHIFT"), 262, bipolar | showValue));
+    v.push_back (knob (690, 180, 104, "Humanize", TR_NOOP ("HUMANIZE"), 262, big | showValue));
+    // --- pitch graph
+    v.push_back (section (0, 314, 800, 130, TR_NOOP ("PITCH GRAPH")));
+    v.push_back (display (6, 336, 788, 102, "pitchtrace"));
+    // --- target notes: one keyboard octave (white keys below, black keys above them)
+    v.push_back (section (0, 448, 800, 100, TR_NOOP ("TARGET NOTES")));
+    static const char* const whites[7] { "C", "D", "E", "F", "G", "A", "B" };
+    for (int k = 0; k < 7; ++k)
+        v.push_back (toggle (14.0f + 46.0f * (float) k, 506, 42, 30, whites[k], whites[k]));
+    static const char* const blacks[5] { "C#", "D#", "F#", "G#", "A#" };
+    static const int after[5] { 0, 1, 3, 4, 5 }; // the white key each black key follows
+    for (int k = 0; k < 5; ++k)
+        v.push_back (toggle (14.0f + 46.0f * (float) after[k] + 25.0f, 474, 42, 26, blacks[k], blacks[k]));
+    v.push_back (label (360, 478, 420, 50, TR_NOOP ("Target notes: click a key to switch it off or on")));
     return l;
 }
 

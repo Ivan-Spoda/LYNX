@@ -248,6 +248,6 @@ TEST (live_meters_cover_facet_and_tune_round103)
     const auto& l = lynx::plugui::layoutFor (lynx::EffectKind::lynxTune);
     bool graph = false;
     for (const auto& item : l.items)
-        graph = graph || (item.type == lynx::plugui::Item::display && item.display != nullptr && std::string (item.display) == "pitchgraph");
+        graph = graph || (item.type == lynx::plugui::Item::display && item.display != nullptr && (std::string (item.display) == "pitchgraph" || std::string (item.display) == "pitchtrace")); // round 120: graph + ring
     CHECK (graph);
 }

@@ -18,6 +18,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -142,6 +143,9 @@ std::optional<std::pair<int, int>> autoTuneProKey (const std::vector<std::uint8_
 // The scale a Waves Tune Real-Time state was saved with (round 120): the active setup's <Scale> element (its root and
 // the twelve note statuses above it, "x" = excluded). `scale` is the LYNX Tune scale whose notes on `key` are exactly
 // these, else vocal::Scale::custom with `mask` (bit k = pitch class k, absolute) holding them. nullopt when absent.
+// The parameters an Auto-Tune Pro state holds (its ParamsData: X<n> = parameter n in real units; [EXEC] round 120:
+// 1 scale, 2 key, 4 retune speed ms, 61 humanize, 90 flex-tune, 62 natural vibrato dB). Empty when not readable.
+std::map<int, double> autoTuneProParams (const std::vector<std::uint8_t>& state);
 struct PitchCorrectorScale
 {
     int key = 0;
