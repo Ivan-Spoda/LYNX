@@ -813,20 +813,19 @@ public:
                 g.setFont (font (juce::jmax (8.0f, 12.0f * s), true));
                 g.drawText (value, line, juce::Justification::centredRight);
             };
-            row (caps (tr ("Target")), voiced && last.target > 0.5f ? noteText ((int) std::lround (last.target)) : juce::String ("--"), colour::accent);
+            row (caps (tr ("Target")), voiced && last.target > 0.5f ? noteText ((int) std::lround (last.target)) : juce::String ("--"), accent);
             const auto corrCents = (int) std::lround (last.shift * 100.0f);
             row (caps (tr ("Correction")), voiced ? (corrCents > 0 ? "+" : "") + juce::String (corrCents) + " c" : juce::String ("--"), colour::textPrimary);
             // the correction meter: ±100 cents from the centre
             auto bar = left.removeFromTop (juce::jmax (6.0f, 9.0f * s)).reduced (0.0f, 1.0f);
-            g.setColour (colour::bg3);
-            g.fillRoundedRectangle (bar, radius::sm);
+            skin::valuePlate (g, bar, radius::sm);
             g.setColour (colour::gridBar);
             g.drawVerticalLine ((int) bar.getCentreX(), bar.getY() - 2.0f, bar.getBottom() + 2.0f);
             if (voiced)
             {
                 const auto amount = juce::jlimit (-1.0f, 1.0f, last.shift);
                 const auto x0 = bar.getCentreX(), x1 = bar.getCentreX() + bar.getWidth() * 0.5f * amount;
-                g.setColour ((fx.enabled ? colour::accent : colour::textDisabled).withAlpha (0.9f));
+                g.setColour ((fx.enabled ? accent : colour::textDisabled).withAlpha (0.9f));
                 g.fillRoundedRectangle (juce::Rectangle<float> (juce::jmin (x0, x1), bar.getY(), std::abs (x1 - x0) + 1.0f, bar.getHeight()), radius::sm);
             }
 
@@ -834,8 +833,7 @@ public:
 
         // --- graph
         auto graph = r.reduced (6.0f * s, 6.0f * s);
-        g.setColour (colour::bg1);
-        g.fillRoundedRectangle (graph, radius::sm * s);
+        skin::well (g, graph, radius::md * s);
         // vertical range: ±7 semitones around the recent pitch (follows the voice)
         float centre = 0.0f;
         int count = 0;
@@ -888,10 +886,7 @@ public:
             }
             else
             {
-                g.setColour (colour::accent.withAlpha (0.25f));
-                g.strokePath (p, juce::PathStrokeType (5.0f * s, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-                g.setColour (fx.enabled ? colour::accent : colour::textDisabled);
-                g.strokePath (p, juce::PathStrokeType (2.0f * s, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                skin::glowStroke (g, p, fx.enabled ? accent : colour::textDisabled, 2.0f * s, fx.enabled ? 1.0f : 0.0f);
             }
         }
         g.restoreState();
@@ -905,7 +900,7 @@ public:
         g.setFont (font (juce::jmax (7.0f, 9.0f * s)));
         g.setColour (colour::textSecondary);
         g.drawText (tr ("input"), graph.removeFromTop (14.0f * s).removeFromRight (120.0f * s).withTrimmedRight (6.0f), juce::Justification::centredLeft);
-        g.setColour (colour::accent);
+        g.setColour (accent);
         g.drawText (tr ("corrected"), graph.withHeight (14.0f * s).withY (graph.getY() - 14.0f * s).removeFromRight (64.0f * s), juce::Justification::centredLeft);
     }
 
@@ -927,8 +922,10 @@ public:
         auto dial = r.withSizeKeepingCentre (side, side).reduced (4.0f * s);
         const auto c = dial.getCentre();
         const auto outer = dial.getWidth() * 0.5f, inner = outer * 0.74f;
-        g.setColour (colour::bg1);
+        g.setGradientFill (juce::ColourGradient (skin::colour::wellTop, 0.0f, dial.getY(), skin::colour::wellBottom, 0.0f, dial.getBottom(), false));
         g.fillEllipse (dial);
+        g.setColour (juce::Colours::black.withAlpha (0.6f));
+        g.drawEllipse (dial.reduced (0.5f), 1.0f);
         // 50 segments over 300° (−100 … +100 c), the top = 0
         constexpr int segments = 50;
         const auto sweep = juce::MathConstants<float>::pi * 5.0f / 3.0f;
@@ -938,10 +935,15 @@ public:
             const auto u = ((float) k + 0.5f) / (float) segments * 2.0f - 1.0f; // −1 … +1
             const auto a = u * sweep * 0.5f;
             const auto lit = voiced && ((corr > 0.0f && u > 0.0f && u <= corr) || (corr < 0.0f && u < 0.0f && u >= corr));
-            g.setColour (lit ? (fx.enabled ? colour::accent : colour::textDisabled) : colour::bg3);
             juce::Path seg;
             const auto w = sweep / (float) segments * 0.35f;
             seg.addCentredArc (c.x, c.y, (outer + inner) * 0.5f, (outer + inner) * 0.5f, 0.0f, a - w, a + w, true);
+            if (lit && fx.enabled) // a lit segment glows
+            {
+                g.setColour (accent.withAlpha (0.25f));
+                g.strokePath (seg, juce::PathStrokeType ((outer - inner) * 1.15f));
+            }
+            g.setColour (lit ? (fx.enabled ? accent : colour::textDisabled) : juce::Colour (0xff262930));
             g.strokePath (seg, juce::PathStrokeType ((outer - inner) * 0.8f));
         }
         g.setColour (colour::gridBar);
@@ -958,7 +960,7 @@ public:
         }
         // the note and the offset
         const auto target = (int) std::lround (last.target);
-        g.setColour (voiced ? (fx.enabled ? colour::accent : colour::textSecondary) : colour::textDisabled);
+        g.setColour (voiced ? (fx.enabled ? accent : colour::textSecondary) : colour::textDisabled);
         g.setFont (font (juce::jmax (14.0f, inner * 0.62f), true));
         g.drawText (voiced && last.target > 0.5f ? juce::String (names[((target % 12) + 12) % 12]) : juce::String ("--"),
                     juce::Rectangle<float> (inner * 1.6f, inner * 0.8f).withCentre (c.translated (0.0f, -inner * 0.08f)), juce::Justification::centred);

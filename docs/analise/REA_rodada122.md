@@ -43,8 +43,10 @@ One kit used by every built-in plugin editor (and ready for LYNX Tune's new edit
   with a wider glow, gradient band fills.
 - Parametric EQ curve (also the mixer's slot thumbnail): well + glowing curve.
 - Generator pages in FL's arrangement (ui/ChannelSettings.cpp: 3x Osc, FL Keys, BooBass, Sytrus, Harmor, …).
-- **Not yet**: LYNX Tune's own display (being redone by tune120 — it already gets the shared header / knobs / canvas;
-  its pitch display gets the final pass after tune120 lands).
+- LYNX Tune (after tune120 landed, 99bbdac): rose accent, the correction ring as a well with glowing lit segments,
+  the pitch graph in a well with the corrected curve glowing, the correction bar on a value plate.
+- Bug found while doing it: `Graphics::drawImage` uses the current colour's alpha, so a cached knob drawn right after a
+  faint caption came out faint; the kit now resets the opacity before the blit.
 
 ## 3. Before / after [EXEC]
 `LYNX.exe --plugui` with main (0.1.9, before) and this branch (after), 87 PNGs each; side-by-side sheets in
@@ -86,5 +88,7 @@ every frame. Median of 3 runs, main + the same CLI (before) vs this branch (afte
   second). The numbers are noisy (other agents' builds share the machine): ±5 points between runs.
 
 ## Where I stopped
-- Stage 1 (kit + all editors except LYNX Tune's display) built and rendered; CPU measured.
-- Next: land stage 1; after tune120 lands, apply the kit to LYNX Tune's new editor and land again.
+- Kit + every built-in editor (LYNX Tune included, after merging tune120) built, rendered (87 before / after pairs),
+  CPU measured, build-local 0 failures. Landing.
+- Next ideas: the Ballistics helper on the native meters (VU / GR LEDs) for a smoother fall; an optional "reduced
+  effects" switch (no glow) for very old GPUs; pt-BR needs nothing new (no new UI text).

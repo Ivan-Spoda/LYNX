@@ -256,6 +256,7 @@ void knob (juce::Graphics& g, juce::Rectangle<float> bounds, const KnobLook& k)
         }
         it = cache.emplace (key, img).first;
     }
+    g.setOpacity (1.0f); // (drawImage uses the current colour's alpha)
     g.drawImage (it->second, area, juce::RectanglePlacement::stretchToFit);
 }
 
