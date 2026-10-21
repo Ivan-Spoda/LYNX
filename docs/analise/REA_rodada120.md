@@ -44,7 +44,9 @@ not activated on this PC → tmp/tune120/ASK_USER.md. Our GUI host (uiview) stal
 
 ## 3. Auto-Tune Pro
 
-Not installed yet when this round started (only Antares Central / Auto-Tune Central); polled every 1.5 min.
+Not installed. [EXEC] No Auto-Tune Pro plug-in anywhere on C: (VST3 / VST2 / AAX folders) as of 2026-10-21 00:30;
+Auto-Tune Central's log ends with "user did not grant permission" at 23:00 — the install's Windows permission
+(UAC) prompt was refused or timed out → tmp/tune120/ASK_USER.md. The scale-list order stays [model].
 
 ## 4. LYNX Tune measured on the same test signal
 
@@ -61,5 +63,12 @@ output (YIN, 2 ms hop). LYNX Tune before this round, chromatic, retune 20 ms (fx
     octave glide         27 % of the time within 10 c of a semitone (input 19 %): the glide stays smooth
 
 ## Where I stopped
-- Done: §1 Waves Tune scale translation + tests (build-local 1 309 371 checks, 0 failures).
-- Waiting: Waves Tune Real-Time trial activation (ASK_USER), Auto-Tune Pro install.
+- Landed (a4f0e55): §1 Waves Tune scale translation + tests (build-local 1 309 371 checks, 0 failures, selftest OK).
+- Blocked on the user (tmp/tune120/ASK_USER.md): Auto-Tune Pro install (UAC prompt refused), Waves Tune Real-Time
+  trial activation (loads as Q10).
+- Next, once they load: (a) Auto-Tune Pro: `texts` of its Scale / Key parameters (scale-list order), the X0…X92
+  meaning of her ParamsData (set each parameter, save the state), retune / humanize / flex-tune / natural vibrato on
+  tmp/tune120 in_test.wav (py/ana.py), screenshots of Auto mode → LYNX Tune editor in its workflow (flex-tune and
+  natural vibrato would be new LYNX Tune parameters, appended); (b) Waves Tune RT: probe RealWorld [5]/[7]/[20]/[21]
+  (wvprobe.py method), measure speed / note transition → translate; (c) engine: compare LYNX Tune's retune curve
+  (90 % at ~55 ms for "20 ms", exponential) with the originals' and refit `retuneMs` if they differ.
