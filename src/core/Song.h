@@ -393,7 +393,9 @@ enum class EffectKind : std::uint8_t
     fruitySend,   // FL's Fruity Send, exact (REA_rodada105_send, core/FruityBasicFx.h): pan, volume, dry / range + the insert it sends to
     crestCompressor, // LYNX's Crest Compressor (REA_rodada108, core/DynamicsSuite.h): styles, side-chain EQ, character, oversampling
     prismMultiband,  // LYNX's Prism Multiband (REA_rodada108, core/DynamicsSuite.h): 4-band dynamics
-    sentryGate       // LYNX's Sentry Gate (REA_rodada108, core/DynamicsSuite.h): gate / expander
+    sentryGate,      // LYNX's Sentry Gate (REA_rodada108, core/DynamicsSuite.h): gate / expander
+    quellDenoiser,   // LYNX's Quell Denoiser (REA_rodada119, core/VoiceTools.h): one-knob multiband noise suppressor
+    geminiDoubler    // LYNX's Gemini Doubler (REA_rodada119, core/VoiceTools.h): two pitch-shifted delay voices
 };
 
 constexpr int maxEffectParams = 64; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches)

@@ -13,6 +13,8 @@
 #include "core/LynxTune.h"
 #include "core/MixSuite.h"
 #include "core/VocalPitch.h"
+#include "core/VoiceTools.h"
+#include "core/EchoSuite.h"
 
 namespace lynx
 {
@@ -197,10 +199,15 @@ mix = 0.25
 [waves-h-delay]
 product = H-Delay
 vendor = Waves
-lynx = Fruity Delay 3
-# [DATA] class ID (stereo component) and <PluginName> from real projects
+lynx = Echoform
+# [DATA] class ID (stereo component) and <PluginName> from real projects. Round 119: LYNX's echo (was Fruity Delay 3
+# at FL's default); the RealWorld list is translated (sync host / BPM / ms, note, time, feedback, ping-pong or
+# stereo, mix, output, filters), measured on the official trial (docs/analise/REA_rodada119.md §2). Without a
+# readable state: a clean quarter-note ping-pong at 30 % feedback
 vst3 = 48545356444268532d64656c61792073
 waves = H-Delay
+translate = waves-h-delay
+preset = Mix=1; Style=0.9; Sync L=0.625; Note L=0.45; Sync R=0.625; Note R=0.45; Feedback=0.0465; Mode=0.5417; Age=0; Mod depth=0; Width=1; Pairs=1; Output=0.5306
 
 [waves-supertap]
 product = SuperTap
@@ -530,6 +537,26 @@ translate = auto-tune-pro
 preset = Scale=0; Retune=0.3536; Humanize=0.5
 mix = 1
 
+# ---------------------------------------------------------------- noise suppressor / doubler (round 119)
+[waves-ns1]
+product = NS1
+vendor = Waves
+lynx = Quell Denoiser
+# LYNX's one-knob noise suppressor, fitted to the official trial (docs/analise/REA_rodada119.md §3); the amount is
+# read from the RealWorld list (value 229, %)
+waves = NS1
+translate = waves-ns1
+preset = Amount=0.25
+
+[waves-doubler]
+product = Doubler
+vendor = Waves
+lynx = Gemini Doubler
+# LYNX's two-voice doubler, laws measured on the official trial (REA_rodada119 §4); every control of the two-voice
+# Doubler is translated from the RealWorld list (voices 3 and 4 of the four-voice one are left out)
+waves = Doubler; Doubler2; Doubler4
+translate = waves-doubler
+
 [waves-tune]
 product = Waves Tune Real-Time
 vendor = Waves
@@ -592,7 +619,7 @@ std::string matchKey (const std::string& name)
 std::optional<EffectKind> effectKindNamed (const std::string& name)
 {
     const auto wanted = lowerAscii (trim (name));
-    for (int k = 0; k <= (int) EffectKind::sentryGate; ++k) // the last EffectKind: extend when one is appended
+    for (int k = 0; k <= (int) EffectKind::geminiDoubler; ++k) // the last EffectKind: extend when one is appended
     {
         const auto kind = (EffectKind) k;
         if (kind == EffectKind::plugin || kind == EffectKind::parallel)
@@ -1098,8 +1125,136 @@ int translateWavesSslChannel (const std::vector<std::uint8_t>& state, EffectSlot
     return 20;
 }
 
+// H-Delay (RealWorld list, round 119): 1 sync (0 BPM, 1 host, 2 ms), 2 BPM, 3 delay ms, 4 note (3 per length: triplet,
+// straight, dotted from 1/64; 18 = 1 bar, 19 = 2 bars), 6 mix %, 7 feedback, 10 ping-pong (1) / stereo (0), 14 output dB,
+// 15 low-pass Hz (20100 = off), 17 high-pass Hz (19 = off), 19 / 20 modulation depth % / rate Hz, 23 analog (0 = off).
+// [EXEC] Measured on the official trial: ping-pong sends the mono sum to the left echo, the right side repeats it one
+// time later at nearly the same level (-0.3 dB) and the loop gain per left-right pair is 0.93 x (feedback / 100)^2
+// (feedback 30 / 60 / 90: -20.9 / -9.5 / -2.7 dB); stereo mode feeds each side back at 0.98 x feedback / 100 per
+// repeat; the echoes are flat (+-0.5 dB, 30 Hz-20 kHz); the first echo is +1.1 dB over the mono sum with the analog
+// modes and +2.5 dB without (stereo mode: -1.9 / -0.4 dB over its own side); the mix is an equal-power dry / wet.
+int translateWavesHDelay (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    namespace e = echosuite::echoform;
+    const auto rw = wavesRealWorldParams (state);
+    const auto sync = wavesValue (rw, 1), fb = wavesValue (rw, 7);
+    if (slot.kind != EffectKind::echoform || ! sync || ! fb)
+        return 0;
+    auto& p = slot.params;
+    const bool pingPong = wavesValue (rw, 10).value_or (1.0) >= 0.5;
+    const bool analog = wavesValue (rw, 23).value_or (2.0) >= 0.5;
+    p[e::style] = e::styleValue (pingPong ? e::Style::pingPong : e::Style::single);
+    p[e::pairs] = pingPong ? 1.0f : 0.0f;
+    const auto note = (int) std::lround (wavesValue (rw, 4).value_or (13.0));
+    if (*sync >= 0.5 && *sync < 1.5 && note >= 0 && note <= 19)
+    {
+        // host tempo: the note follows the project's tempo
+        const auto index = note >= 18 ? note - 12 : note / 3;  // 1/64 … 1/2, 1 bar, 2 bars
+        const auto kind = note >= 18 ? 1 : (note % 3 == 0 ? 3 : (note % 3 == 1 ? 1 : 2)); // triplet, straight, dotted
+        for (const auto side : { e::syncL, e::syncR })
+            p[(std::size_t) side] = ((float) kind + 1.5f) / 4.0f;
+        for (const auto side : { e::noteL, e::noteR })
+            p[(std::size_t) side] = ((float) index + 0.5f) / 10.0f;
+    }
+    else
+    {
+        // its own BPM or milliseconds: the time it computed is in the list
+        const auto ms = std::clamp (wavesValue (rw, 3).value_or (375.0), 1.0, 3500.0);
+        for (const auto side : { e::syncL, e::syncR })
+            p[(std::size_t) side] = 0.0f;
+        for (const auto side : { e::timeL, e::timeR })
+            p[(std::size_t) side] = e::timeValue (ms);
+    }
+    const auto f = std::max (0.0, *fb) / 100.0;
+    const auto loop = pingPong ? 0.93 * f * f : 0.98 * f;
+    p[e::feedback] = (float) std::clamp (loop / 2.0, 0.0, 1.0);
+    p[e::mix] = (float) std::clamp (wavesValue (rw, 6).value_or (100.0) / 100.0, 0.0, 1.0);
+    const auto level = pingPong ? (analog ? 1.1 : 2.5) : (analog ? -1.9 : -0.4);
+    p[e::output] = linNorm (wavesValue (rw, 14).value_or (0.0) + level, -18.0, 18.0);
+    p[e::mode] = e::modeValue (e::Mode::clean);
+    p[e::age] = 0.0f;
+    p[e::drive] = 0.0f;
+    p[e::diffusion] = 0.0f;
+    p[e::ducking] = 0.0f;
+    p[e::width] = 1.0f;
+    p[e::spread] = 0.5f;
+    const auto hp = wavesValue (rw, 17).value_or (19.0), lp = wavesValue (rw, 15).value_or (20100.0);
+    p[e::lowCut] = hp > 19.5 ? linNorm (hp, 10.0, 2000.0) : 0.0f;
+    // Echoform's high cut acts like a one-pole at about half its label below 80 % (REA_rodada101 §3.3)
+    p[e::highCut] = lp < 20000.0 ? linNorm (2.0 * lp, 200.0, 20000.0) : 1.0f;
+    const auto depth = wavesValue (rw, 19).value_or (0.0);
+    p[e::modDepth] = (float) std::clamp (std::sqrt (std::max (0.0, depth) / 100.0), 0.0, 1.0);
+    if (depth > 0.0)
+        p[e::modRate] = (float) std::clamp (std::pow ((std::clamp (wavesValue (rw, 20).value_or (0.1), 0.01, 10.0) - 0.01) / 9.99, 1.0 / 2.3277), 0.0, 1.0);
+    return 8;
+}
+
+// NS1 (RealWorld list, round 119): value 229 is the one knob, 0 … 100 %; Quell's Amount follows the same scale
+// (fitted to the official trial, docs/analise/REA_rodada119.md §3).
+int translateWavesNs1 (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    const auto rw = wavesRealWorldParams (state);
+    const auto amount = wavesValue (rw, 229);
+    if (slot.kind != EffectKind::quellDenoiser || ! amount)
+        return 0;
+    slot.params[voicetools::quell::amount] = (float) std::clamp (*amount / 100.0, 0.0, 1.0);
+    return 1;
+}
+
+// Doubler (RealWorld list, round 119): 0 output dB, 1 direct on, 2 direct gain dB, 3 direct pan deg, 4 align,
+// 9 / 10 / 11 low shelf on / gain dB / Hz, 12 / 13 / 14 high shelf Hz / gain dB / on, 15 feedback high-pass Hz,
+// 16 / 17 voice 1 / 2 source (0 own side, 1 sum, 2 difference), 18 range (0 = 80 Hz), then a block of 10 per voice from
+// 26: on, gain dB, pan deg, octave, detune cents, delay ms, feedback %, depth cents, rate. [EXEC] Gemini's laws are the
+// measured ones (equal-power voice pan, stereo rotation of the direct signal, exact detune, octave down, LFO at
+// rate / 2 Hz, feedback = %/100 per repeat, the aligned direct signal 6.7 ms late), so the values map one to one.
+int translateWavesDoubler (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    namespace g = voicetools::gemini;
+    const auto rw = wavesRealWorldParams (state);
+    if (slot.kind != EffectKind::geminiDoubler || rw.size() < 45 || ! wavesValue (rw, 31))
+        return 0;
+    const auto at = [&] (std::size_t i, double fallback) { return wavesValue (rw, i).value_or (fallback); };
+    const auto flag = [&] (std::size_t i, double fallback) { return at (i, fallback) >= 0.5 ? 1.0f : 0.0f; };
+    auto& p = slot.params;
+    p[g::output] = linNorm (at (0, 0.0), -24.0, 0.0);
+    p[g::directOn] = flag (1, 1.0);
+    p[g::directGain] = linNorm (at (2, 0.0), -48.0, 0.0);
+    p[g::directPan] = linNorm (at (3, 0.0), -45.0, 45.0);
+    p[g::align] = flag (4, 1.0);
+    p[g::lowOn] = flag (9, 0.0);
+    p[g::lowGain] = linNorm (at (10, 0.0), -30.0, 12.0);
+    p[g::lowFreq] = g::freqValue (at (11, 100.0));
+    p[g::highFreq] = g::freqValue (at (12, 5000.0));
+    p[g::highGain] = linNorm (at (13, 0.0), -30.0, 12.0);
+    p[g::highOn] = flag (14, 0.0);
+    p[g::feedbackCut] = g::freqValue (at (15, 16.0));
+    p[g::range] = flag (18, 0.0);
+    for (int v = 0; v < g::voices; ++v)
+    {
+        const auto b = (std::size_t) (26 + 10 * v);
+        const auto param = [&] (g::VoiceParam q) -> float& { return p[(std::size_t) g::voiceParam (v, q)]; };
+        param (g::vOn) = flag (b, 1.0);
+        param (g::vGain) = linNorm (at (b + 1, 0.0), -48.0, 0.0);
+        param (g::vPan) = linNorm (at (b + 2, v == 0 ? -45.0 : 45.0), -45.0, 45.0);
+        param (g::vOctave) = flag (b + 3, 0.0);
+        param (g::vDetune) = linNorm (at (b + 4, 0.0), -100.0, 100.0);
+        param (g::vDelay) = linNorm (at (b + 5, 10.0), 0.0, 100.0);
+        param (g::vFeedback) = linNorm (at (b + 6, 0.0), 0.0, 100.0);
+        param (g::vDepth) = linNorm (at (b + 7, 0.0), -200.0, 200.0);
+        param (g::vRate) = logNorm (std::clamp (at (b + 8, 1.0), 0.1, 400.0), 0.1, 400.0);
+        param (g::vSource) = ((float) std::clamp ((int) std::lround (at (16 + (std::size_t) v, 0.0)), 0, 2) + 0.5f) / 3.0f;
+    }
+    return 33;
+}
+
 RawTranslator rawTranslatorNamed (std::string_view name)
 {
+    if (name == "waves-h-delay")
+        return translateWavesHDelay;
+    if (name == "waves-ns1")
+        return translateWavesNs1;
+    if (name == "waves-doubler")
+        return translateWavesDoubler;
     if (name == "waves-ssl-channel")
         return translateWavesSslChannel;
     if (name == "auto-tune-pro")

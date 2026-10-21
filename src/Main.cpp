@@ -998,7 +998,7 @@ private:
             juce::Random random (111);
             const auto value = [&] { const auto r = random.nextInt (6); return r == 0 ? 0.0f : r == 1 ? 1.0f : random.nextFloat(); };
 
-            for (int k = 0; k <= (int) lynx::EffectKind::sentryGate; ++k)
+            for (int k = 0; k <= (int) lynx::EffectKind::geminiDoubler; ++k)
             {
                 const auto kind = (lynx::EffectKind) k;
                 if (! lynx::NativeEffectWindows::canOpen (kind))
