@@ -83,6 +83,29 @@ bool isLynxEngine (EffectKind kind)
 {
     return flPluginsForEffect (kind).empty();
 }
+
+// "Keep the Mix when loading presets" (the reference reverbs' mix lock): per engine, a marker file in its presets folder
+juce::File mixLockFile (EffectKind kind) { return userFolder (kind).getChildFile (".mixlock"); }
+bool mixLocked (EffectKind kind) { return mixLockFile (kind).existsAsFile(); }
+void setMixLocked (EffectKind kind, bool on)
+{
+    if (on)
+    {
+        userFolder (kind).createDirectory();
+        mixLockFile (kind).create();
+    }
+    else
+        mixLockFile (kind).deleteFile();
+}
+
+// the preset's parameters with the slot's Mix kept when the mix lock is on
+EffectParams withMixLock (EffectKind kind, EffectParams params, const EffectParams& current)
+{
+    if (mixLocked (kind))
+        if (const auto p = presets::paramByName (kind, "Mix"); p >= 0)
+            params[(std::size_t) p] = current[(std::size_t) p];
+    return params;
+}
 } // namespace
 
 juce::File userFolder (EffectKind kind)
@@ -357,7 +380,8 @@ void PresetBar::loadFactory (int index)
         return;
     gesture = true;
     willEdit();
-    restore (presets::apply (kind, list[(std::size_t) index], engine.getSong().bpm, nullptr, &fx->params), fx->state, list[(std::size_t) index].name);
+    restore (withMixLock (kind, presets::apply (kind, list[(std::size_t) index], engine.getSong().bpm, nullptr, &fx->params), fx->params), fx->state,
+             list[(std::size_t) index].name);
     gesture = true;
 }
 
@@ -371,7 +395,7 @@ void PresetBar::loadUser (const juce::File& file)
         return;
     gesture = true;
     willEdit();
-    restore (loaded->params, fx->state, loaded->name.empty() ? file.getFileNameWithoutExtension().toStdString() : loaded->name);
+    restore (withMixLock (kind, loaded->params, fx->params), fx->state, loaded->name.empty() ? file.getFileNameWithoutExtension().toStdString() : loaded->name);
     gesture = true;
 }
 
@@ -468,6 +492,8 @@ void PresetBar::showPresetMenu (juce::Component& owner, const FlPresets* flPrese
             });
             break;
         }
+    if (presets::paramByName (kind, "Mix") >= 0)
+        menu.addItem (tr ("Keep the Mix when loading presets"), true, mixLocked (kind), [this] { setMixLocked (kind, ! mixLocked (kind)); });
     menu.addItem (tr ("Show the presets folder"), [this] {
         const auto folder = userFolder (kind);
         folder.createDirectory();
