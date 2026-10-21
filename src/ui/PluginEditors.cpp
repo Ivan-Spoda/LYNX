@@ -13,6 +13,7 @@
 #include "core/MaximusFx.h"
 #include "core/MixSuite.h"
 #include "core/EchoSuite.h"
+#include "core/VoiceTools.h"
 #include "core/ParametricEqFl.h"
 #include "core/VocalPitch.h"
 #include "core/FruityBasicFx.h"
@@ -1101,6 +1102,77 @@ public:
             paintSoundgoodizer (g, id, r, fx);
             return;
         }
+        else if (id == "geminipan") // Gemini Doubler: where the voices and the direct signal sit (half circle, gain = radius)
+        {
+            using namespace voicetools::gemini;
+            const auto c = juce::Point<float> (inner.getCentreX(), inner.getBottom() - 4.0f * s);
+            const auto radius = juce::jmin (inner.getWidth() * 0.5f, inner.getHeight()) - 8.0f * s;
+            g.setColour (colour::gridBeat);
+            for (int k = 1; k <= 3; ++k)
+            {
+                juce::Path arc;
+                arc.addCentredArc (c.x, c.y, radius * (float) k / 3.0f, radius * (float) k / 3.0f, 0.0f, -juce::MathConstants<float>::halfPi, juce::MathConstants<float>::halfPi, true);
+                g.strokePath (arc, juce::PathStrokeType (1.0f));
+            }
+            for (const auto deg : { -45.0f, 45.0f })
+            {
+                const auto a = juce::degreesToRadians (deg);
+                g.drawLine (c.x, c.y, c.x + radius * std::sin (a), c.y - radius * std::cos (a), 1.0f);
+            }
+            // gain −48 … 0 dB → radius 0 … 1; the dot's angle is its pan (±45° = the hard sides)
+            auto dot = [&] (float pan01, float gain01, bool active, juce::Colour col, const juce::String& text) {
+                const auto a = juce::degreesToRadians ((float) panDegrees (pan01)); // ±45° = the diagonals
+                const auto rr = radius * juce::jlimit (0.05f, 1.0f, gain01);
+                const auto pt = juce::Point<float> (c.x + rr * std::sin (a), c.y - rr * std::cos (a));
+                g.setColour (active ? col : colour::textDisabled);
+                g.fillEllipse (juce::Rectangle<float> (14.0f * s, 14.0f * s).withCentre (pt));
+                g.setColour (colour::bg0);
+                g.setFont (font (9.0f * s, true));
+                g.drawText (text, juce::Rectangle<float> (14.0f * s, 14.0f * s).withCentre (pt), juce::Justification::centred, false);
+            };
+            dot (param01 ("Direct pan"), param01 ("Direct gain"), param01 ("Direct") >= 0.5f, colour::textPrimary, "D");
+            dot (param01 ("V1 pan"), param01 ("V1 gain"), param01 ("V1 on") >= 0.5f, curveColour, "1");
+            dot (param01 ("V2 pan"), param01 ("V2 gain"), param01 ("V2 on") >= 0.5f, curveColour.withRotatedHue (0.12f), "2");
+        }
+        else if (id == "geminimap") // Gemini Doubler: each voice's delay (across, 0 … 100 ms) against its detune (up, ±100 c)
+        {
+            grid (5, 4);
+            g.setColour (colour::gridBar);
+            g.drawHorizontalLine ((int) inner.getCentreY(), inner.getX(), inner.getRight());
+            g.setColour (colour::textSecondary);
+            g.setFont (font (8.5f * s));
+            for (int k = 0; k <= 5; ++k)
+                g.drawText (juce::String (k * 20), juce::Rectangle<float> (inner.getX() + inner.getWidth() * (float) k / 5.0f - 12.0f * s, inner.getBottom() - 11.0f * s, 24.0f * s, 10.0f * s),
+                            juce::Justification::centred, false);
+            for (int k = 0; k < 2; ++k)
+            {
+                const juce::String pre = k == 0 ? "V1 " : "V2 ";
+                const auto x = inner.getX() + inner.getWidth() * param01 ((pre + "delay").toRawUTF8());
+                const auto y = inner.getBottom() - inner.getHeight() * param01 ((pre + "detune").toRawUTF8());
+                const auto col = k == 0 ? curveColour : curveColour.withRotatedHue (0.12f);
+                g.setColour ((param01 ((pre + "on").toRawUTF8()) >= 0.5f ? col : colour::textDisabled));
+                // the LFO's reach on the pitch as a bar through the dot
+                const auto depth = std::abs (param01 ((pre + "depth").toRawUTF8()) - 0.5f) * 2.0f * inner.getHeight();
+                if (depth > 1.0f)
+                    g.fillRect (juce::Rectangle<float> (3.0f * s, depth).withCentre ({ x, y }));
+                g.fillEllipse (juce::Rectangle<float> (12.0f * s, 12.0f * s).withCentre ({ x, y }));
+            }
+        }
+        else if (id == "geminieq") // Gemini Doubler: the voices' low / high shelves
+        {
+            using namespace voicetools::gemini;
+            grid (4, 4);
+            const bool lo = param01 ("Low shelf") >= 0.5f, hi = param01 ("High shelf") >= 0.5f;
+            const auto lg = lo ? shelfDb (param01 ("Low gain")) : 0.0, hg = hi ? shelfDb (param01 ("High gain")) : 0.0;
+            const auto lf = freqHz (param01 ("Low freq")), hf = freqHz (param01 ("High freq"));
+            // first-order shelf shapes (display only): −30 … +12 dB over the height
+            strokeCurve ([=] (float x) {
+                const auto f = 20.0 * std::pow (1000.0, (double) x);
+                const auto l = lg / (1.0 + std::pow (f / lf, 2.0));
+                const auto h = hg / (1.0 + std::pow (hf / f, 2.0));
+                return (float) ((l + h + 30.0) / 42.0);
+            }, inner, true);
+        }
         else if (id == "xy") // a pad: `param` across, `param2` up (drag the point)
         {
             grid (4, 4);
@@ -1281,6 +1353,25 @@ public:
         {
             const auto amount = juce::jlimit (0.0f, 1.0f, liveMeter (item.steps));
             const auto bar = r.reduced (1.5f * s);
+            if (bar.getHeight() > 2.0f * bar.getWidth()) // a tall meter (Quell): the reduction grows downwards, 0 dB at the top
+            {
+                const auto well = bar.reduced (0.0f, 4.0f * s).withTrimmedBottom (14.0f * s);
+                g.setColour (colour::gridBeat);
+                g.setFont (font (8.5f * s));
+                for (int db = 0; db <= 30; db += 6)
+                {
+                    const auto y = well.getY() + well.getHeight() * (float) db / 30.0f;
+                    g.setColour (colour::gridBeat);
+                    g.drawHorizontalLine ((int) y, well.getX(), well.getRight());
+                    g.setColour (colour::textSecondary);
+                    g.drawText (juce::String (-db), juce::Rectangle<float> (well.getX(), y - 10.0f * s, 22.0f * s, 10.0f * s), juce::Justification::centredLeft, false);
+                }
+                g.setColour ((fx.enabled ? colour::accent : colour::textDisabled).withAlpha (0.85f));
+                g.fillRoundedRectangle (well.withTrimmedLeft (well.getWidth() * 0.35f).withHeight (well.getHeight() * amount), radius::sm);
+                g.setColour (colour::textSecondary);
+                g.drawText ((amount > 0.0005f ? juce::String (-amount * 30.0f, 1) : juce::String ("0.0")) + " dB", bar.withTop (bar.getBottom() - 14.0f * s), juce::Justification::centred, false);
+                return;
+            }
             g.setColour (colour::gridBeat);
             for (int db = 3; db < 30; db += 3)
                 g.drawVerticalLine ((int) (bar.getRight() - bar.getWidth() * (float) db / 30.0f), bar.getY(), bar.getBottom());
@@ -1410,7 +1501,7 @@ public:
                     {
                         ticks.push_back ({ t, level, (k % 2) == 1 });
                         t += (k % 2) == 0 ? tR : tL;
-                        level *= std::sqrt (gain);
+                        level *= params[pairs] >= 0.5f ? ((k % 2) == 1 ? gain : 1.0) : std::sqrt (gain); // round 119: pairs
                     }
                 }
                 else

@@ -47,7 +47,11 @@ enum Param
 {
     mix, style, syncL, noteL, timeL, syncR, noteR, timeR, spread, spacing, ratio, feedback, width, drive, age,
     diffusion, diffSize, lowCut, highCut, modRate, modDepth, wow, flutter, shift, shiftDetune, pitch, pitchDetune,
-    mode, ducking, paramCount
+    mode, ducking,
+    output,     // round 119: the echoes' level, −18 … +18 dB (0.5 = 0 dB; older projects load the default)
+    pairs,      // round 119: ping-pong in pairs — the right side repeats the left echo at full level and the loop
+                // gain applies once per left-right pair (the H-Delay-style ping-pong); off = each side at √gain
+    paramCount
 };
 enum class Style { single, ratio, quad, dual, pingPong }; // the two-time styles last (the panel shows the right time for both)
 // in the panel's order: the modulation section shows wow / flutter (tape), rate / depth (lo-fi … phaser), shift / detune
@@ -70,6 +74,7 @@ double shiftDetuneHz (float v) noexcept; // ±10 Hz, |x|^2.5
 double pitchSemis (float v) noexcept;    // ±24
 double lowCutHz (float v) noexcept;      // 10 .. 2000
 double highCutHz (float v) noexcept;     // 200 .. 20000
+double outputDb (float v) noexcept;      // −18 .. +18 dB (round 119)
 Mode modeOf (float v) noexcept;
 float modeValue (Mode m) noexcept;
 Style styleOf (float v) noexcept;

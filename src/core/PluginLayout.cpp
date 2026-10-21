@@ -1861,6 +1861,75 @@ Layout sentryGate()
     return l;
 }
 
+Layout quellDenoiser()
+{
+    // round 119: the one-knob noise suppressors' front panel (the role: Waves NS1, screenshot of the official trial):
+    // the reduction meter on the left, one tall Amount fader on the right with its read-out under it; LYNX's extras
+    // (listen to what is removed, output trim) small along the bottom
+    Layout l;
+    l.width = 300;
+    l.height = 420;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 292, 412, TR_NOOP ("Noise suppressor")));
+    v.push_back (meter (30, 34, 70, 300, 0, TR_NOOP ("Reduction")));
+    v.push_back (slider (Item::vslider, 170, 30, 70, 316, "Amount", TR_NOOP ("Amount")));
+    v.push_back (value (170, 372, 70, 20, "Amount", 0));
+    v.push_back (toggle (22, 372, 96, 22, "Listen", TR_NOOP ("Listen")));
+    v.push_back (dial (256, 378, 28, "Output", TR_NOOP ("Output"), bipolar));
+    return l;
+}
+
+Layout geminiDoubler()
+{
+    // round 119: the two-voice doublers' layout (the role: Waves Doubler, screenshot of the official trial): three
+    // pictures along the top (where the voices sit in the stereo field, delay against detune, the voices' EQ), the
+    // direct signal / feedback / range / EQ row in the middle, then one row per voice (on, gain, pan, delay,
+    // feedback, octave, detune, depth, rate, source) and the output fader on the right
+    Layout l;
+    l.width = 800;
+    l.height = 460;
+    auto& v = l.items;
+    v.push_back (display (12, 8, 236, 150, "geminipan"));
+    v.push_back (display (264, 8, 260, 150, "geminimap"));
+    v.push_back (display (540, 8, 248, 150, "geminieq"));
+    // direct, feedback cut, range, shelves
+    v.push_back (section (4, 166, 792, 92, TR_NOOP ("Direct")));
+    v.push_back (toggle (14, 208, 64, 22, "Direct", TR_NOOP ("Direct")));
+    v.push_back (dial (112, 206, 30, "Direct gain", TR_NOOP ("Gain")));
+    v.push_back (dial (170, 206, 30, "Direct pan", TR_NOOP ("Pan"), bipolar));
+    v.push_back (toggle (206, 208, 64, 22, "Align", TR_NOOP ("Align")));
+    v.push_back (dial (310, 206, 30, "Feedback cut", TR_NOOP ("FB low cut")));
+    v.push_back (tabs (350, 208, 100, 22, "Range", TR_NOOP ("80 Hz|20 Hz")));
+    v.push_back (toggle (478, 208, 40, 22, "Low shelf", TR_NOOP ("L")));
+    v.push_back (dial (546, 206, 30, "Low gain", TR_NOOP ("Gain"), bipolar));
+    v.push_back (dial (600, 206, 30, "Low freq", TR_NOOP ("Freq")));
+    v.push_back (toggle (632, 208, 40, 22, "High shelf", TR_NOOP ("H")));
+    v.push_back (dial (700, 206, 30, "High gain", TR_NOOP ("Gain"), bipolar));
+    v.push_back (dial (754, 206, 30, "High freq", TR_NOOP ("Freq")));
+    // one row per voice
+    v.push_back (section (4, 264, 680, 192, TR_NOOP ("Voices")));
+    static const char* const names[2][10] {
+        { "V1 on", "V1 gain", "V1 pan", "V1 delay", "V1 feedback", "V1 octave", "V1 detune", "V1 depth", "V1 rate", "V1 source" },
+        { "V2 on", "V2 gain", "V2 pan", "V2 delay", "V2 feedback", "V2 octave", "V2 detune", "V2 depth", "V2 rate", "V2 source" } };
+    for (int k = 0; k < 2; ++k)
+    {
+        const auto cy = 316.0f + 76.0f * (float) k;
+        v.push_back (toggle (14, cy - 11, 40, 22, names[k][0], k == 0 ? TR_NOOP ("1") : TR_NOOP ("2")));
+        v.push_back (dial (90, cy, 30, names[k][1], TR_NOOP ("Gain")));
+        v.push_back (dial (148, cy, 30, names[k][2], TR_NOOP ("Pan"), bipolar));
+        v.push_back (dial (206, cy, 30, names[k][3], TR_NOOP ("Delay")));
+        v.push_back (dial (264, cy, 30, names[k][4], TR_NOOP ("Feedback")));
+        v.push_back (toggle (298, cy - 11, 50, 22, names[k][5], TR_NOOP ("Oct")));
+        v.push_back (dial (384, cy, 30, names[k][6], TR_NOOP ("Detune"), bipolar));
+        v.push_back (dial (442, cy, 30, names[k][7], TR_NOOP ("Depth"), bipolar));
+        v.push_back (dial (500, cy, 30, names[k][8], TR_NOOP ("Rate")));
+        v.push_back (tabs (540, cy - 11, 136, 22, names[k][9], k == 0 ? TR_NOOP ("L|L+R|L-R") : TR_NOOP ("R|R+L|R-L"), { 1.0f / 6.0f, 0.5f, 5.0f / 6.0f }));
+    }
+    v.push_back (section (690, 264, 106, 192, TR_NOOP ("Output")));
+    v.push_back (slider (Item::vslider, 724, 290, 38, 150, "Output", nullptr));
+    return l;
+}
+
 // --- LYNX's reverbs (REA round 100): own panels, the same conventions as the mixing suite. The algorithm / type
 // menu sits top-left with the Mix, the time controls (pre-delay, decay, size) in the middle, colour and
 // modulation to the right. -------------------------------------------------------------------------------------
@@ -2176,8 +2245,11 @@ Layout echoformLayout()
     v.push_back (dial (656, k1, d, "High cut", TR_NOOP ("High")));
     v.push_back (dial (656, k2, d, "Low cut", TR_NOOP ("Low")));
     // ducking
-    v.push_back (section (700, top, 76, h, TR_NOOP ("Duck")));
+    v.push_back (section (700, top, 76, h, TR_NOOP ("Output")));
     v.push_back (dial (738, k1, d, "Ducking", TR_NOOP ("Ducking")));
+    v.push_back (dial (738, k2, d, "Output", TR_NOOP ("Level"), bipolar)); // round 119
+    // round 119: ping-pong in pairs (shown with the ping-pong style)
+    v.push_back (when (toggle (280, 252, 90, 24, "Pairs", TR_NOOP ("Pairs")), "Style", 0.8f, 1.0f));
     // the mode selector along the bottom
     v.push_back (label (8, 254, 52, 20, TR_NOOP ("Mode")));
     v.push_back (menuOf (64, 252, 200, 24, "Mode", TR_NOOP ("Mode"),
@@ -2353,7 +2425,8 @@ const std::vector<EffectKind>& ownLayoutKinds()
                                                  EffectKind::aether, EffectKind::ember, EffectKind::epochVerb, EffectKind::atrium,
                                                  EffectKind::foilPlate, EffectKind::nebula, EffectKind::halo, EffectKind::horizon,
                                                  EffectKind::echoform, EffectKind::spiralEcho, EffectKind::orbit, EffectKind::latticeMod,
-                                                 EffectKind::crestCompressor, EffectKind::prismMultiband, EffectKind::sentryGate };
+                                                 EffectKind::crestCompressor, EffectKind::prismMultiband, EffectKind::sentryGate,
+                                                 EffectKind::quellDenoiser, EffectKind::geminiDoubler };
     return kinds;
 }
 
@@ -2429,6 +2502,8 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::crestCompressor: l = crestCompressor(); break;
         case EffectKind::prismMultiband: l = prismMultiband(); break;
         case EffectKind::sentryGate: l = sentryGate(); break;
+        case EffectKind::quellDenoiser: l = quellDenoiser(); break;
+        case EffectKind::geminiDoubler: l = geminiDoubler(); break;
         default: l = generated (kind); break;
     }
     return cache.emplace (kind, std::move (l)).first->second;

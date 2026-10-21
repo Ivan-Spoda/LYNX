@@ -15747,3 +15747,4 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "FixedBlockTests118.inc"
 #include "UiFl115Tests.inc"
 #include "LoadTraceTests112.inc"
+#include "VoiceToolsTests119.inc"

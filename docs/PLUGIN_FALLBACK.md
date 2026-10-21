@@ -123,7 +123,9 @@ matches by name).
 | ValhallaFutureVerb | Horizon (round 100) | name | every parameter |
 | Little Plate, Waves RVerb / H-Reverb / TrueVerb | Reeverb 2 (100 % wet, slot dry/wet 25 %) | name / Waves name | — |
 | FabFilter Pro-R | LuxeVerb (default) | name | — |
-| Waves H-Delay | Fruity Delay 3 ("Default") | VST3 class ID [DATA], Waves name | — |
+| Waves H-Delay | Echoform (round 119; was Fruity Delay 3) | VST3 class ID [DATA], Waves name | sync (host / BPM / ms), note, time, feedback, ping-pong (pairs) / stereo, mix, output, filters; laws measured on the official trial [EXEC] (round 119 §2) |
+| Waves NS1 | Quell Denoiser (round 119) | Waves name | the one knob (RealWorld 229), Quell fitted to the official trial [EXEC] (round 119 §3) |
+| Waves Doubler (2 / 4 voices) | Gemini Doubler (round 119) | Waves name | every control of voices 1–2, direct, align, shelves, feedback cut, range [EXEC] (round 119 §4) |
 | Waves SuperTap, Soundtoys EchoBoy / PrimalTap, FabFilter Timeless | Fruity Delay 3 | VST2 ID [DATA] (EchoBoy), names | — |
 | ValhallaDelay | Echoform (round 101) | VST3 class ID [derived], name | every setting but Era / taps / repeat-swell: mix, style, sync, times, feedback, filters, modulation, shift, pitch, ducking; the 17 modes onto Echoform's 12 characters |
 | ValhallaFreqEcho | Spiral Echo (round 101) | VST3 class ID [derived], name | all 8 settings |
@@ -148,7 +150,7 @@ matches by name).
 | Antares Auto-Tune (Pro / Artist / Access / EFX+ / Hybrid) | LYNX Tune | VST3 class ID [DATA] (Auto-Tune Pro), names | Auto-Tune Pro: key and scale (`<Custom ScaleGivenKey / ScaleGivenScale>` [DATA]; scale list 0 major, 1 minor, 2 chromatic [model, round 113 §2]) with a 20 ms retune; otherwise the project's key or a gentle chromatic correction |
 | Waves Tune Real-Time | LYNX Tune | Waves name, names | — (the project's key, else gentle chromatic) |
 
-Not mapped yet (no LYNX module plays their role): NS1, Doubler, Little AlterBoy, Filterverse, Kickstart,
+Not mapped yet (no LYNX module plays their role): Little AlterBoy, Filterverse, Kickstart,
 Sausage Fattener, Effectrix, Analog Lab (instrument). The mixing suite of round 96 (Ridge Strip, Glow Leveler, Hush
 De-esser, Aether, Ember Saturator) took over the channel strip, CLA-2A, de-esser, air and saturator roles.
 
