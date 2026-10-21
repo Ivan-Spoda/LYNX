@@ -241,13 +241,18 @@ juce::Rectangle<float> PresetBar::place (juce::Rectangle<float> area, bool withP
         rNext = take (18.0f);
         rPrev = take (18.0f);
         x -= 2.0f;
-        rPreset = take (juce::jlimit (80.0f, 180.0f, area.getWidth() * 0.26f));
+        rPreset = take (juce::jlimit (70.0f, 180.0f, area.getWidth() * 0.26f));
         x -= 8.0f;
     }
     else
         rNext = rPrev = rPreset = {};
-    rCopy = take (34.0f);
-    x -= 3.0f;
+    if (area.getWidth() >= 420.0f) // narrow windows (Quell) keep the title readable: A / B without the copy button
+    {
+        rCopy = take (34.0f);
+        x -= 3.0f;
+    }
+    else
+        rCopy = {};
     rB = take (18.0f);
     rA = take (18.0f);
     x -= 8.0f;
@@ -285,11 +290,14 @@ void PresetBar::paint (juce::Graphics& g, juce::Colour accent) const
         g.setFont (font (type::small, true));
         g.drawText (side == 0 ? "A" : "B", r, juce::Justification::centred, false);
     }
-    skin::button (g, rCopy, false, hovered == Part::copy, accent, radius::sm);
-    g.setColour (hovered == Part::copy ? colour::textPrimary : colour::textSecondary);
-    g.setFont (font (type::caption, true));
-    g.drawText (showingB ? juce::String::fromUTF8 ("B\xe2\x86\x92" "A") : juce::String::fromUTF8 ("A\xe2\x86\x92" "B"), rCopy,
-                juce::Justification::centred, false);
+    if (! rCopy.isEmpty())
+    {
+        skin::button (g, rCopy, false, hovered == Part::copy, accent, radius::sm);
+        g.setColour (hovered == Part::copy ? colour::textPrimary : colour::textSecondary);
+        g.setFont (font (type::caption, true));
+        g.drawText (showingB ? juce::String::fromUTF8 ("B\xe2\x86\x92" "A") : juce::String::fromUTF8 ("A\xe2\x86\x92" "B"), rCopy,
+                    juce::Justification::centred, false);
+    }
 
     if (! presetsShown)
         return;
@@ -559,6 +567,10 @@ void PresetBar::showPresetMenu (juce::Component& owner, const FlPresets* flPrese
     }
     menu.addSeparator();
     juce::Component::SafePointer<juce::Component> safe (&owner);
+    menu.addItem (tr ("Copy the setting you hear to the other one (A / B)"), [this, safe] {
+        if (safe != nullptr)
+            click (Part::copy, *safe);
+    });
     menu.addItem (tr ("Save preset..."), [this, safe] {
         if (safe != nullptr)
             saveAs (*safe);
