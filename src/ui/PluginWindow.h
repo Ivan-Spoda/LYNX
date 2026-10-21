@@ -22,6 +22,12 @@ void close (const juce::AudioPluginInstance& plugin);
 // Scans the VST3 folders with a progress window. `onDone(newCount)` runs on the UI thread.
 void scanPluginsWithProgress (AudioEngine& engine, std::function<void (int)> onDone);
 
+// FL's wrapper processing options for one hosted plugin ("Use fixed size buffers", "Make bridged"): toggling one
+// keeps the plugin's current state, closes its window and creates it again. `find` locates the PluginRef in the song
+// (nullptr: gone); `instance` is the running plugin (may be null).
+juce::PopupMenu pluginProcessingMenu (AudioEngine& engine, const PluginRef& current, juce::AudioPluginInstance* instance,
+                                      std::function<PluginRef* (Song&)> find);
+
 // Menus of known plugins (instruments or effects). `onChosen` receives the reference.
 void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instruments, std::function<void (PluginRef)> onChosen);
 } // namespace lynx

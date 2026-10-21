@@ -1878,8 +1878,16 @@ void ChannelRackComponent::showChannelMenu (int channel)
     {
         menu.addItem (tr ("Open plugin editor"), [this, channel] { openPluginWindow (channel); });
 
-        if (auto* p = dynamic_cast<PluginInstrument*> (engine.getChannelInstrument (channel).get()))
-            addPluginParameterItems (menu, engine, p->getInstance(), { AutomationTargetKind::channelParam, channel, 0, 0 });
+        auto* live = dynamic_cast<PluginInstrument*> (engine.getChannelInstrument (channel).get());
+        menu.addSubMenu (tr ("Processing"), pluginProcessingMenu (engine, c.plugin, live != nullptr ? &live->getInstance() : nullptr,
+                                                                [channel] (Song& song) -> PluginRef* {
+                                                                    if (channel >= (int) song.channels.size())
+                                                                        return nullptr;
+                                                                    return &song.channels[(std::size_t) channel].plugin;
+                                                                }));
+
+        if (live != nullptr)
+            addPluginParameterItems (menu, engine, live->getInstance(), { AutomationTargetKind::channelParam, channel, 0, 0 });
     }
     {
         // channel arpeggiator

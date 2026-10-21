@@ -2321,7 +2321,9 @@ void MainComponent::timerCallback()
         for (const auto& u : engine.getHeaviestUnits())
             if (heaviest.size() < 3 && u.load >= 0.01)
                 heaviest.add (u.name + " " + juce::String (juce::roundToInt (u.load * 100.0)) + "%");
-        perfMeter.setRealtime (rt.overBudget, rt.lateCalls, engine.getRtStats().takeWindowMaxLoad(), heaviest);
+        auto* device = engine.getDeviceManager().getCurrentAudioDevice();
+        perfMeter.setRealtime (rt.overBudget, rt.lateCalls, engine.getRtStats().takeWindowMaxLoad(), heaviest,
+                               device != nullptr ? device->getXRunCount() : -1);
     }
 
     // If a dialog stole focus, give it back so the PC keyboard keeps playing (unless a detached panel has it).

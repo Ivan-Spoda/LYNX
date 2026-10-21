@@ -23,6 +23,12 @@ namespace lynx
 {
 namespace
 {
+// a hosted plugin is created again when its processing options change (fixed blocks, own process)
+bool samePluginProcessing (const PluginRef& a, const PluginRef& b) noexcept
+{
+    return a.fixedBuffers == b.fixedBuffers && a.separateProcess == b.separateProcess;
+}
+
 // Silent instrument: plugin channel that could not be loaded.
 class SilentInstrument final : public Instrument
 {
@@ -116,7 +122,8 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                         || (previous->song.channels[i].sampler.stretchBeats == channel.sampler.stretchBeats
                             && previous->song.bpm == song.bpm))))
             && (kind != InstrumentKind::plugin
-                || (previous->song.channels[i].plugin.id == channel.plugin.id && previous->sampleRate == sampleRate)))
+                || (previous->song.channels[i].plugin.id == channel.plugin.id && previous->sampleRate == sampleRate
+                    && samePluginProcessing (previous->song.channels[i].plugin, channel.plugin))))
         {
             state->instruments.push_back (previous->instruments[i]);
             state->instruments.back()->configure (channel, song.bpm);
@@ -221,7 +228,8 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                 && (kind != EffectKind::parallel || sameContainer (previous->song.mixer[t].effects[i], slots[i])) // children are built in
                 && previous->song.mixer[t].effects[i].samplePath == slots[i].samplePath
                 && (kind != EffectKind::plugin
-                    || (previous->song.mixer[t].effects[i].plugin.id == slots[i].plugin.id && previous->sampleRate == sampleRate))
+                    || (previous->song.mixer[t].effects[i].plugin.id == slots[i].plugin.id && previous->sampleRate == sampleRate
+                        && samePluginProcessing (previous->song.mixer[t].effects[i].plugin, slots[i].plugin)))
                 && (previous->song.mixer[t].effects[i].state == slots[i].state
                     || (previous->sampleRate == sampleRate && previous->effects[t][i] != nullptr && previous->effects[t][i]->acceptState (slots[i].state))))
             {
