@@ -79,7 +79,7 @@ struct StartupTrace
         const auto ms = [] (clock::duration d) { return std::chrono::duration<double, std::milli> (d).count(); };
         text << juce::String (ms (now - t0), 1).paddedLeft (' ', 8) << " ms  +" << juce::String (ms (now - last), 1).paddedLeft (' ', 7) << "  " << step << "\n";
         last = now;
-        juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("LYNX/startup.log").replaceWithText (text);
+        lynx::platform::settingsFile ("startup.log").replaceWithText (text);
     }
 };
 StartupTrace startupTrace;
