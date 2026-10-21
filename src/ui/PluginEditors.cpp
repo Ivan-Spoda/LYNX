@@ -414,7 +414,7 @@ public:
         {
             case Item::section:
             {
-                skin::section (g, r, radius::lg * s, hasStyle (item, plugui::raised));
+                skin::section (g, r, radius::lg * s, hasStyle (item, plugui::raised), fx.enabled ? accent : juce::Colours::transparentBlack);
                 if (item.label != nullptr && *item.label != 0 && ! hasStyle (item, plugui::boxed))
                     skin::sectionTitle (g, r.withHeight (16.0f * s).translated (0.0f, 1.0f * s), caps (tr (item.label)), accent, juce::jmax (8.0f, 10.0f * s));
                 break;
@@ -833,7 +833,7 @@ public:
 
         // --- graph
         auto graph = r.reduced (6.0f * s, 6.0f * s);
-        skin::well (g, graph, radius::md * s);
+        skin::well (g, graph, radius::md * s, fx.enabled ? accent : juce::Colours::transparentBlack);
         // vertical range: ±7 semitones around the recent pitch (follows the voice)
         float centre = 0.0f;
         int count = 0;
@@ -887,6 +887,14 @@ public:
             else
             {
                 skin::glowStroke (g, p, fx.enabled ? accent : colour::textDisabled, 2.0f * s, fx.enabled ? 1.0f : 0.0f);
+                // round 126: the newest corrected pitch as a lit bead
+                if (fx.enabled && ! history.empty() && history.back().sung > 0.5f)
+                {
+                    const juce::Point<float> head { x0 + stepX * (float) (history.size() - 1), yFor (history.back().sung + history.back().shift) };
+                    skin::bloom (g, head, 14.0f * s, accent, 0.6f);
+                    g.setColour (juce::Colours::white);
+                    g.fillEllipse (juce::Rectangle<float> (5.0f * s, 5.0f * s).withCentre (head));
+                }
             }
         }
         g.restoreState();
@@ -922,10 +930,27 @@ public:
         auto dial = r.withSizeKeepingCentre (side, side).reduced (4.0f * s);
         const auto c = dial.getCentre();
         const auto outer = dial.getWidth() * 0.5f, inner = outer * 0.74f;
-        g.setGradientFill (juce::ColourGradient (skin::colour::wellTop, 0.0f, dial.getY(), skin::colour::wellBottom, 0.0f, dial.getBottom(), false));
+        // round 126: the ring is the hero of the editor: a bloom of the accent behind it (stronger with the
+        // correction), a deep bezel, a lit glass face
+        const auto voicedCorr = voiced ? juce::jmin (1.0f, std::abs (last.shift)) : 0.0f;
+        if (fx.enabled)
+            skin::bloom (g, c, outer * 1.55f, accent, 0.5f + 0.3f * voicedCorr);
+        g.setColour (juce::Colours::black.withAlpha (0.55f));
+        g.fillEllipse (dial.expanded (3.0f).translated (0.0f, 2.0f));
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3a3e48), c.x, dial.getY() - 3.0f, juce::Colour (0xff111216), c.x, dial.getBottom() + 3.0f, false));
+        g.fillEllipse (dial.expanded (3.0f));
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff050608), 0.0f, dial.getY(), juce::Colour (0xff121319), 0.0f, dial.getBottom(), false));
         g.fillEllipse (dial);
-        g.setColour (juce::Colours::black.withAlpha (0.6f));
+        if (fx.enabled && ! skin::reducedEffects())
+        {
+            juce::ColourGradient face (accent.withAlpha (0.10f + 0.12f * voicedCorr), c.x, c.y, accent.withAlpha (0.0f), c.x + inner, c.y, true);
+            g.setGradientFill (face);
+            g.fillEllipse (juce::Rectangle<float> (inner * 2.0f, inner * 2.0f).withCentre (c));
+        }
+        g.setColour (juce::Colours::black.withAlpha (0.7f));
         g.drawEllipse (dial.reduced (0.5f), 1.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.06f));
+        g.drawEllipse (juce::Rectangle<float> (inner * 2.0f - 6.0f, inner * 2.0f - 6.0f).withCentre (c), 1.0f);
         // 50 segments over 300° (−100 … +100 c), the top = 0
         constexpr int segments = 50;
         const auto sweep = juce::MathConstants<float>::pi * 5.0f / 3.0f;
@@ -938,13 +963,23 @@ public:
             juce::Path seg;
             const auto w = sweep / (float) segments * 0.35f;
             seg.addCentredArc (c.x, c.y, (outer + inner) * 0.5f, (outer + inner) * 0.5f, 0.0f, a - w, a + w, true);
-            if (lit && fx.enabled) // a lit segment glows
+            const auto tipSeg = lit && std::abs (u) + 1.0f / (float) segments > std::abs (corr);
+            if (lit && fx.enabled && ! skin::reducedEffects()) // a lit segment glows
             {
-                g.setColour (accent.withAlpha (0.25f));
-                g.strokePath (seg, juce::PathStrokeType ((outer - inner) * 1.15f));
+                g.setColour (accent.withAlpha (0.16f));
+                g.strokePath (seg, juce::PathStrokeType ((outer - inner) * 1.5f));
+                g.setColour (accent.withAlpha (0.3f));
+                g.strokePath (seg, juce::PathStrokeType ((outer - inner) * 1.05f));
             }
-            g.setColour (lit ? (fx.enabled ? accent : colour::textDisabled) : juce::Colour (0xff262930));
+            // lit: brighter toward the tip of the correction (the tip white-hot); unlit: dim glass LEDs
+            const auto litColour = accent.interpolatedWith (juce::Colours::white, tipSeg ? 0.55f : 0.12f * std::abs (u));
+            g.setColour (lit ? (fx.enabled ? litColour : colour::textDisabled) : juce::Colour (0xff22252c));
             g.strokePath (seg, juce::PathStrokeType ((outer - inner) * 0.8f));
+            if (! lit)
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.035f));
+                g.strokePath (seg, juce::PathStrokeType ((outer - inner) * 0.3f));
+            }
         }
         g.setColour (colour::gridBar);
         g.drawLine (c.x, c.y - outer, c.x, c.y - inner, 1.5f);
@@ -960,10 +995,19 @@ public:
         }
         // the note and the offset
         const auto target = (int) std::lround (last.target);
-        g.setColour (voiced ? (fx.enabled ? accent : colour::textSecondary) : colour::textDisabled);
-        g.setFont (font (juce::jmax (14.0f, inner * 0.62f), true));
-        g.drawText (voiced && last.target > 0.5f ? juce::String (names[((target % 12) + 12) % 12]) : juce::String ("--"),
-                    juce::Rectangle<float> (inner * 1.6f, inner * 0.8f).withCentre (c.translated (0.0f, -inner * 0.08f)), juce::Justification::centred);
+        g.setFont (font (juce::jmax (14.0f, inner * 0.66f), true));
+        {
+            const auto noteBox = juce::Rectangle<float> (inner * 1.6f, inner * 0.8f).withCentre (c.translated (0.0f, -inner * 0.08f));
+            const auto noteName = voiced && last.target > 0.5f ? juce::String (names[((target % 12) + 12) % 12]) : juce::String ("--");
+            if (voiced && fx.enabled && ! skin::reducedEffects()) // the note glows
+            {
+                g.setColour (accent.withAlpha (0.2f));
+                for (const auto& o : { juce::Point<float> { -2.0f, 0.0f }, { 2.0f, 0.0f }, { 0.0f, -2.0f }, { 0.0f, 2.0f } })
+                    g.drawText (noteName, noteBox.translated (o.x, o.y), juce::Justification::centred);
+            }
+            g.setColour (voiced ? (fx.enabled ? accent.interpolatedWith (juce::Colours::white, 0.3f) : colour::textSecondary) : colour::textDisabled);
+            g.drawText (noteName, noteBox, juce::Justification::centred);
+        }
         g.setFont (font (juce::jmax (8.0f, 11.0f * s)));
         g.setColour (colour::textSecondary);
         if (voiced)
@@ -1017,7 +1061,7 @@ public:
     {
         using namespace theme;
         const auto s = scale();
-        skin::well (g, r, radius::md * s);
+        skin::well (g, r, radius::md * s, fx.enabled ? accent : juce::Colours::transparentBlack);
         const juce::String id (item.display != nullptr ? item.display : "");
         const auto curveColour = fx.enabled ? accent : colour::textDisabled;
         const auto inner = r.reduced (6.0f * s);
@@ -2562,6 +2606,7 @@ public:
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
         keepAboveMainWindow (*this);
+        if (auto* c = getContentComponent()) skin::playOpenAnimation (*c); // round 126: fade / scale in
     }
 
     void closeButtonPressed() override;

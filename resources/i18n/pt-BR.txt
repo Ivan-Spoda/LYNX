@@ -1129,6 +1129,7 @@ countries: br
 "Spectral colours (warm = bass, cool = treble)" = "Cores espectrais (quente = graves, frio = agudos)"
 "Classic (one colour)" = "Clássica (uma cor)"
 "Stereo (left and right channels apart)" = "Estéreo (canais esquerdo e direito separados)"
+"Reduced effects in plugin editors (no glows or animations, for slower graphics cards)" = "Efeitos reduzidos nos editores de plugins (sem brilhos nem animações, para placas de vídeo mais fracas)"
 "No sample loaded" = "Nenhum sample carregado"
 "The sample: colours show where it is bass-heavy (warm) or bright (cool); outside Start/End is dimmed" = "O sample: as cores mostram onde ele tem mais graves (quente) ou brilho (frio); fora de Início/Fim fica escurecido"
 "The previewed sample: warm colours = bass, cool colours = treble" = "O sample em pré-escuta: cores quentes = graves, cores frias = agudos"

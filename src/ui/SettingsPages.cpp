@@ -90,7 +90,7 @@ public:
 
         for (auto* c : std::initializer_list<juce::Component*> { &languageTitle, &displayTitle, &startupTitle, &editingTitle, &backupTitle,
                                                                  &pluginsTitle, &languageLabel, &languageBox, &languageNote, &scaleLabel, &scaleBox,
-                                                                 &wavesLabel, &wavesBox, &stereoWaves, &splash, &startupSound, &scanAtStart,
+                                                                 &wavesLabel, &wavesBox, &stereoWaves, &reducedEffects, &splash, &startupSound, &scanAtStart,
                                                                  &typingPiano, &keepEditors, &rememberSeek, &editInLabel, &editInBox, &undoLabel,
                                                                  &undoBox, &autosaveLabel, &autosaveBox, &keepLabel, &keepBox, &openBackups,
                                                                  &sandbox, &sandboxNote, &substitutes, &substitutesNote, &managePlugins, &manageShortcuts, &shortcutsNote })
@@ -124,6 +124,8 @@ public:
         wavesBox.setSelectedId (options.waveSpectral ? 2 : 1, juce::dontSendNotification);
         wavesBox.onChange = [this] { change ([&] { options.waveSpectral = wavesBox.getSelectedId() == 2; }); };
         toggle (stereoWaves, tr ("Stereo (left and right channels apart)"), options.waveStereo, [this] (bool on) { options.waveStereo = on; });
+        toggle (reducedEffects, tr ("Reduced effects in plugin editors (no glows or animations, for slower graphics cards)"), options.reducedEffects,
+                [this] (bool on) { options.reducedEffects = on; });
 
         toggle (splash, tr ("Show the splash screen at startup"), options.splash, [this] (bool on) { options.splash = on; });
         toggle (startupSound, tr ("Play the startup sound"), options.startupSound, [this] (bool on) { options.startupSound = on; });
@@ -203,6 +205,7 @@ private:
         scaleBox.setBounds (r.row (scaleLabel, 120));
         wavesBox.setBounds (r.row (wavesLabel, 0));
         stereoWaves.setBounds (r.indented (24));
+        reducedEffects.setBounds (r.full (24));
 
         r.section (startupTitle);
         for (auto* t : { &splash, &startupSound, &scanAtStart })
@@ -271,7 +274,7 @@ private:
         backupTitle { tr ("Backup") }, pluginsTitle { tr ("Plugins and shortcuts") };
     juce::Label languageLabel, languageNote, scaleLabel, wavesLabel, editInLabel, undoLabel, autosaveLabel, keepLabel, sandboxNote, substitutesNote, shortcutsNote;
     juce::ComboBox languageBox, scaleBox, wavesBox, editInBox, undoBox, autosaveBox, keepBox;
-    juce::ToggleButton stereoWaves, splash, startupSound, scanAtStart, typingPiano, keepEditors, rememberSeek, sandbox, substitutes;
+    juce::ToggleButton stereoWaves, reducedEffects, splash, startupSound, scanAtStart, typingPiano, keepEditors, rememberSeek, sandbox, substitutes;
     juce::TextButton openBackups { tr ("Open backup folder") }, managePlugins { tr ("Plugin manager...") }, manageShortcuts { tr ("Manage shortcuts...") };
 };
 

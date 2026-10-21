@@ -769,6 +769,12 @@ private:
         fillLevel (g, inP, inColour(), p, 0.42f, 0.12f);
         g.setColour (outColour().withAlpha (0.9f));
         g.strokePath (outLine, juce::PathStrokeType (1.2f));
+        // round 126: the gain reduction burns in the LYNX red with a glow (two strokes: cheap at 100 columns a second)
+        if (fx.enabled && ! skin::reducedEffects())
+        {
+            g.setColour (colour::accent.withAlpha (0.22f));
+            g.strokePath (grLine, juce::PathStrokeType (6.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
         g.setColour (colour::accent.withAlpha (fx.enabled ? 1.0f : 0.3f));
         g.strokePath (grLine, juce::PathStrokeType (2.0f));
         // threshold
@@ -795,10 +801,7 @@ private:
         drawMeter (g, mr.withWidth (14.0f), nw.in, -60.0f, colour::meterLow.withAlpha (0.8f));
         drawMeter (g, mr.withX (mr.getX() + 17.0f).withWidth (14.0f), nw.out, -60.0f, outColour());
         const auto gr = mr.withX (mr.getX() + 34.0f).withWidth (14.0f);
-        g.setColour (colour::bg1);
-        g.fillRect (gr);
-        g.setColour (colour::accent);
-        g.fillRect (gr.withBottom (scale.y (-nw.gr, p)));
+        skin::meterSolid (g, gr, (scale.y (-nw.gr, p) - gr.getY()) / juce::jmax (1.0f, gr.getHeight()), colour::accent, true);
         g.setFont (font (type::caption));
         g.setColour (colour::textDisabled);
         g.drawText ("IN  OUT  GR", mr.withY (m.getY()).withHeight (12.0f).expanded (8.0f, 0.0f), juce::Justification::centred, false);
@@ -1919,6 +1922,7 @@ public:
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
         keepAboveMainWindow (*this);
+        if (auto* c = getContentComponent()) skin::playOpenAnimation (*c); // round 126: fade / scale in
     }
     void closeButtonPressed() override;
     ProEditor* content = nullptr;

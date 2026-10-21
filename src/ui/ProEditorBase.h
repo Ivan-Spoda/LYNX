@@ -677,17 +677,19 @@ protected:
     // the background of a display (the level history, the analyser): deep, with the accent pooling under the header
     void displayBackground (juce::Graphics& g, juce::Rectangle<float> r) const
     {
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff15171c), 0.0f, r.getY(), juce::Colour (0xff08090b), 0.0f, r.getBottom(), false));
-        g.fillRect (r);
-        juce::ColourGradient pool (accent.withAlpha (0.06f), r.getCentreX(), r.getY(), accent.withAlpha (0.0f), r.getCentreX(), r.getY() + r.getWidth() * 0.4f, true);
-        g.setGradientFill (pool);
-        g.fillRect (r.withHeight (juce::jmin (r.getHeight(), r.getWidth() * 0.4f)));
+        skin::backdrop (g, r, accent); // round 126: aurora blooms of the accent, cached as an image
     }
     // a level area filled with a vertical gradient of `c` (strong at the top, fading down)
     static void fillLevel (juce::Graphics& g, const juce::Path& p, juce::Colour c, juce::Rectangle<float> r, float top, float bottom)
     {
         g.setGradientFill (juce::ColourGradient (c.withAlpha (top), 0.0f, r.getY(), c.withAlpha (bottom), 0.0f, r.getBottom(), false));
         g.fillPath (p);
+        // round 126: the level's edge lit in its colour
+        g.saveState();
+        g.reduceClipRegion (r.withTrimmedBottom (1.0f).toNearestInt());
+        g.setColour (c.withAlpha (juce::jmin (1.0f, top + 0.25f)));
+        g.strokePath (p, juce::PathStrokeType (1.0f));
+        g.restoreState();
     }
 
     static void caption (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& t, juce::Justification j = juce::Justification::centred)

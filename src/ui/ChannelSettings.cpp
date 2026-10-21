@@ -1221,7 +1221,7 @@ public:
             switch (item.type)
             {
                 case plugui::Item::section:
-                    skin::section (g, r, radius::lg * f, (item.style & plugui::raised) != 0);
+                    skin::section (g, r, radius::lg * f, (item.style & plugui::raised) != 0, accent);
                     if (item.label != nullptr && (item.style & plugui::boxed) == 0)
                         skin::sectionTitle (g, r.withHeight (16.0f * f).translated (0.0f, 1.0f * f), caps (tr (item.label)), accent, juce::jmax (8.0f, 10.0f * f));
                     break;

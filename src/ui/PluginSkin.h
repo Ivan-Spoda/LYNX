@@ -8,8 +8,13 @@
 // modulation teal, dynamics amber, saturation orange, voice rose, EQ / filters the LYNX red) so each editor is
 // recognisable at a glance. Knobs carry a lit value arc with a soft glow, machined caps and a pointer; displays sit
 // in inset wells; meters are lit gradients with peak holds; lit buttons glow. Everything is plain vector drawing
-// (no images except the cached logo), cheap enough for 30 Hz displays, and nothing animates unless something
-// changed (see Animator).
+// (static layers — the canvas with its blooms and grain, the knobs — are rendered once into cached images), cheap
+// enough for 30 Hz displays, and nothing animates unless something changed (see Animator).
+//
+// Round 126 ("much bolder"): aurora blooms of the accent behind every editor, grain, translucent glass sections
+// with rim light, big 3D knob caps with a lit ring, a hot tip and an LED pointer (the bigger knobs light the panel
+// around them as they are turned up), illuminated buttons, LED-ladder meters, white-hot curves and a short open
+// animation. A "Reduced effects" setting turns the costly glows off.
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -59,10 +64,15 @@ float titleText (juce::Graphics&, juce::Rectangle<float> area, const juce::Strin
 // a power LED with a halo when on
 void powerLed (juce::Graphics&, juce::Point<float> centre, float diameter, bool on);
 // a raised section (group of controls) and its title strip (caps, with an accent dot)
-void section (juce::Graphics&, juce::Rectangle<float> area, float corner, bool raised = false);
+// `tint` (the accent) lights the glass from the top and colours its rim
+void section (juce::Graphics&, juce::Rectangle<float> area, float corner, bool raised = false, juce::Colour tint = juce::Colours::transparentBlack);
 void sectionTitle (juce::Graphics&, juce::Rectangle<float> strip, const juce::String& text, juce::Colour accent, float fontSize = 10.5f);
-// an inset display well (graphs, analysers, read-outs)
-void well (juce::Graphics&, juce::Rectangle<float> area, float corner);
+// an inset display well (graphs, analysers, read-outs); `glow` (the accent) lights a soft bloom from its bottom edge
+void well (juce::Graphics&, juce::Rectangle<float> area, float corner, juce::Colour glow = juce::Colours::transparentBlack);
+// the deep background of a display-first editor's body (round 126: aurora blooms of the accent; cached as an image)
+void backdrop (juce::Graphics&, juce::Rectangle<float> area, juce::Colour accent);
+// a soft bloom of light (radial, `alpha` at the centre fading to nothing at `radius`)
+void bloom (juce::Graphics&, juce::Point<float> centre, float radius, juce::Colour, float alpha);
 // a floating panel over a display (drop shadow, glassy fill, an accent edge)
 void floatingPanel (juce::Graphics&, juce::Rectangle<float> area, juce::Colour edge, float corner = 10.0f);
 // the bottom status bar of the display-first editors
@@ -97,6 +107,13 @@ void meterSolid (juce::Graphics&, juce::Rectangle<float> area, float level01, ju
 void glowStroke (juce::Graphics&, const juce::Path&, juce::Colour, float thickness, float glow = 1.0f);
 // a value read-out plate (boxed values)
 void valuePlate (juce::Graphics&, juce::Rectangle<float> area, float corner);
+
+// --- effects level (round 126) --------------------------------------------------------------------
+// "Reduced effects" (Settings > General): no glows, blooms, grain or open animation, for weak GPUs / old machines
+bool reducedEffects();
+void setReducedEffects (bool);
+// an editor window's opening: its content fades and scales in (≤ 220 ms); nothing when effects are reduced
+void playOpenAnimation (juce::Component& content);
 
 // --- typography ----------------------------------------------------------------------------------
 inline juce::Colour captionColour() { return juce::Colour (0xff8c919c); }
