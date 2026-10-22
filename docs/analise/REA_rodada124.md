@@ -298,6 +298,12 @@ At 69.6 % (68 slots) the 40–50 Hz band is worse than before. What is left, in 
   instantiation), H-Delay's fractional delays and one stereo setting (§5), NS1's slow adaptive reference and its
   31–60 Hz band at high amounts (§6), Fresh Air above High air 0.5 within 0.7 dB instead of 0.25 (§3); everything that
   has no official trial here (§0 table).
-- Next: NS1's adaptive reference (a fit with it was running: tmp/vm124/ns/fit3.txt, nsmodel.cpp has the reference
-  already — port to Quell's `fitted` engine if it improves the quiet passages); H-Delay's fractional-delay
+- NS1's adaptive reference was tried (per-band reference, 141 ms rise, 1.1 dB/s fall, thresholds follow it by 0.49;
+  tmp/vm124/ns/fit3.txt): it fixed the noise-adaptation tests (pink −50 dBFS from a cold start: 5.3 → 1.2 dB band
+  error; after a loud passage 3.7 → 2.9) but made her takes worse (up to +1.5 dB band error at 69.6 %), so it is NOT
+  in the landed engine.
+- Waves still in demo after the user's activation (ASK_USER): mutes every 20 s of processed audio in NS1, H-Delay and
+  Doubler2 (21:40); every number here masks them.
+- Next: NS1's adaptive reference with a better structure (global + per band, fitted on takes and conditioning
+  signals together); H-Delay's fractional-delay
   interpolation; Gemini octave voices with the measured shifter; the user's trial installs / licence checks (§0, §2).
