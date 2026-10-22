@@ -2822,10 +2822,6 @@ countries: br
 "INPUT" = "ENTRADA"
 "no pitch" = "sem afinação"
 # round 128 (parity with the originals): Facet EQ
-"Very slow" = "Muito lenta"
-"Slow" = "Lenta"
-"Medium" = "Média"
-"Very fast" = "Muito rápida"
 "Invert polarity" = "Inverter polaridade"
 "Pan: left / right" = "Pan: esquerda / direita"
 "Pan: mid / side" = "Pan: mid / side"
