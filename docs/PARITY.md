@@ -34,12 +34,11 @@ Round 128 covers the FabFilter / Slate / Antares roles (below). Round 129 covers
 | Sentry Gate | Pro-G (v1.4.2) | 6 | 7 | 8 | 8 |
 | Hush De-esser | Pro-DS (v1.3.2) | 4 | 6 | 7 | 8 |
 | Ember Saturator | Saturn 2 (v2.1.3); Decapitator role (not installed) | 3 | 6 | 6 | 7 |
-| Aether | Fresh Air (v1.1.7) | 8 | 8 | 8 | 8 |
+| Aether | Fresh Air (v1.1.7) | 8 | 8 | 9 | 8 |
 | LYNX Tune | Auto-Tune Pro (v11.6, Auto mode) | 5 | 6 | 7 | 7 |
 
 After = round 128 (per-plugin tables below and `docs/analise/REA_rodada128.md`). The shared header (undo / redo, A/B,
-presets) is round 129's PresetBar; once it lands every config score above gains about one point (Aether most of all:
-the header is the only thing it still misses).
+presets) is round 129's PresetBar, reused here (no second system); the scores include it.
 
 ## Shared by every editor (the frame around the controls)
 
@@ -48,9 +47,9 @@ the same things. This is where most of the "missing details" were: things a user
 
 | Original feature | Where in the originals | LYNX before | Note |
 |---|---|---|---|
-| Undo / Redo buttons | header (FabFilter, Fresh Air, Auto-Tune) | ⚠️ | edits were undoable only from the main window's history (Ctrl+Z did nothing inside an editor window) |
-| A/B compare + Copy (A→B) | header (FabFilter: A/B + Copy; Fresh Air: A > B) | ❌ | |
-| Preset browser: name, previous / next, menu, save | header (all three) | ❌ | own engines had no presets at all (the generic editors only list FL presets) |
+| Undo / Redo buttons | header (FabFilter, Fresh Air, Auto-Tune) | ✅ | round 129's shared preset bar (per-plugin undo / redo), wired into every editor incl. Facet (round 128) |
+| A/B compare + Copy (A→B) | header (FabFilter: A/B + Copy; Fresh Air: A > B) | ✅ | round 129's preset bar, saved with the project |
+| Preset browser: name, previous / next, menu, save | header (all three) | ✅ | round 129's preset bar (factory + user presets, save / delete); round 128 added the factory presets of Facet, Apex, Crest, Sentry, Ember, Aether |
 | Help | header (FabFilter "Help", Auto-Tune ⚙ / manual) | ⚠️ | the header shows a one-line gesture hint; no help menu |
 | Resizable / full-screen window | FabFilter ⤢ corner + full-screen button, Fresh Air corner | ⚠️ | round 128: every display-first editor window resizes (70–200 %, scaled); Facet resizes with its own layout; no full-screen button |
 | MIDI Learn | FabFilter bottom bar | ⚠️ | per control: right-click → "Link to controller" (LYNX's automation menu); no global learn mode |
@@ -286,7 +285,7 @@ Parameters of the original: Mid Air 0–100 %, High Air 0–100 %, Bypass, Trim 
 | Link button between them | ✅ | |
 | POWER (bypass) bottom left | ✅ | |
 | TRIM small knob bottom right | ✅ | |
-| Preset menu, save, undo / redo, A > B | ❌ | (shared header, above) |
+| Preset menu, save, undo / redo, A > B | ✅ | the shared preset bar (round 129) + factory presets (round 128) |
 | Extra settings (exciter / shelf frequency, character, mix) | — | LYNX extras in the bottom bar |
 
 ## LYNX Tune ← Auto-Tune Pro (Auto mode)
@@ -321,7 +320,7 @@ edits (Remove / Bypass, Latched / Momentary), Hold, Auto Key.
 | Pitch graph | ✅ | LYNX extra in Auto mode (input vs corrected) |
 | Graph mode (offline editing) | — | out of scope (a separate editor) |
 | Harmony Player | — | out of scope |
-| Preset browser, undo / redo | ⚠️ | FL-style preset header (FL presets only); shared header adds LYNX presets |
+| Preset browser, undo / redo | ✅ | the shared preset bar (round 129) with LYNX Tune's factory presets |
 
 ---
 
