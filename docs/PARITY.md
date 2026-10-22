@@ -31,15 +31,15 @@ The Soundtoys 5 trials were installed during this round but every one of them st
 until the user starts the trial, so their tables are from the official manuals ("manual only"). Black-box only.
 Late in the round (after the user activated the Waves trials) the Waves shell loaded again and RComp, DeEsser,
 Doubler4, Waves Tune Real-Time, SSL E-Channel, H-Delay and Doubler2 were captured; the tables above agree with those
-captures (RComp: Thresh / Gain faders on the input / output meters, ARC · Electro · Warm, Mix, Trim — the last four
-still missing in LYNX's Compressor; Waves Tune RT: Speed / Note Transition / Tolerance / Vibrato / Correction and the
+captures (RComp: Thresh / Gain faders on the input / output meters, ARC · Electro · Warm, Mix, Trim — ARC / Electro /
+Warm still missing in LYNX's Compressor; Waves Tune RT: Speed / Note Transition / Tolerance / Vibrato / Correction and the
 range buttons — see its table). Our host still shows their demo banner.
 
 | LYNX engine | Original (trial here) | Config before | Design before | Config after | Design after |
 |---|---|---|---|---|---|
 | Glow Leveler | CLA-2A (Waves) | 5 | 6 | 7 | 7 |
 | Ridge Strip | SSL E-Channel (Waves) | 6 | 6 | 7 | 7 |
-| Compressor (stand-in) | Renaissance Compressor (Waves) | 2 | 1 | 4 | 5 |
+| Compressor (stand-in) | Renaissance Compressor (Waves) | 2 | 1 | 5 | 5 |
 | Hush De-esser | DeEsser (Waves) | 7 | 5 | 8 | 5 |
 | Quell Denoiser | NS1 (Waves) | 8 | 8 | 9 | 8 |
 | Gemini Doubler | Doubler2 / Doubler4 (Waves) | 7 / 4 | 6 | 8 / 5 | 7 |
@@ -76,8 +76,8 @@ controls — undo / redo, A / B, presets — which none of LYNX's engines had; i
 - **Ridge Strip** (SSL E-Channel): the GAIN block's output fader beside an input / output meter with peak read-outs;
   dynamics before the EQ by default, as on the reference.
 - **Compressor** (the Renaissance Compressor's stand-in): its own panel — threshold fader by the input / output
-  meters, the gain-reduction meter with the ratio under it, the gain fader, attack / release (it had a bare row of
-  knobs and no meters).
+  meters, the gain-reduction meter with the ratio under it, the gain fader, attack / release, MIX and TRIM (it had a bare row
+  of knobs and no meters).
 - **Quell Denoiser** (NS1): the reduction meter now moves (the engine's meter was never published to the editor).
 - **Gemini Doubler** (Doubler): output level meters beside the output fader.
 - **Echoform** (H-Delay / ValhallaDelay): Phase L / Phase R (translated from H-Delay states), a tap-tempo pad, the
