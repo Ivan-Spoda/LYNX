@@ -1276,7 +1276,8 @@ int translateWavesNs1 (const std::vector<std::uint8_t>& state, EffectSlot& slot)
     if (slot.kind != EffectKind::quellDenoiser || ! amount)
         return 0;
     slot.params[voicetools::quell::amount] = (float) std::clamp (*amount / 100.0, 0.0, 1.0);
-    return 1;
+    slot.params[voicetools::quell::matched] = 1.0f; // round 124: the engine fitted to the trial (REA_rodada124 §6)
+    return 2;
 }
 
 // Doubler (RealWorld list, round 119): 0 output dB, 1 direct on, 2 direct gain dB, 3 direct pan deg, 4 align,

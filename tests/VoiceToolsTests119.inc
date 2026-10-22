@@ -254,7 +254,8 @@ TEST (waves_h_delay_ns1_doubler_translate_round119)
             values += i == 229 ? "23.1 " : "0 ";
         int n = 0;
         const auto s = slotFor ("NS1", values, n);
-        CHECK (n == 1 && s.kind == EffectKind::quellDenoiser && std::abs (s.params[voicetools::quell::amount] - 0.231f) < 1e-5f);
+        CHECK (n == 2 && s.kind == EffectKind::quellDenoiser && std::abs (s.params[voicetools::quell::amount] - 0.231f) < 1e-5f);
+        CHECK (s.params[voicetools::quell::matched] == 1.0f); // round 124: the engine fitted to the trial
     }
     // her Doubler: voices 78.2 / 100 ms, feedback 39 %, −1 / 0 cents, hard left / right, direct aligned, EQ off
     {

@@ -1896,6 +1896,7 @@ Layout quellDenoiser()
     v.push_back (slider (Item::vslider, 170, 30, 70, 316, "Amount", TR_NOOP ("Amount")));
     v.push_back (value (170, 372, 70, 20, "Amount", 0));
     v.push_back (toggle (22, 372, 96, 22, "Listen", TR_NOOP ("Listen")));
+    v.push_back (toggle (22, 342, 96, 22, "Matched", TR_NOOP ("Matched"))); // round 124: the engine fitted to NS1
     v.push_back (dial (256, 378, 28, "Output", TR_NOOP ("Output"), bipolar));
     return l;
 }

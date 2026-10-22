@@ -880,8 +880,13 @@ private:
         const auto fb = feedbackGain (p[feedback]); // H-Delay's feedback / 100 (0 … 2)
         const auto fbPair = fb * fb;
         float dryGain = 1.0f, wetGain = 0.0f;
-        equalPowerMix (p[mix], dryGain, wetGain);
-        wetGain *= (float) std::pow (10.0, outputDb (p[output]) / 20.0);
+        equalPowerMix (p[mix], dryGain, wetGain); // [EXEC] cos / sin of mix × 90° (Analog off, 0 … 100 % in 10 % steps)
+        // [EXEC] the output level applies to the whole output, dry included (her mix-54 / +4.6 dB state)
+        const auto outLevel = (float) std::pow (10.0, outputDb (p[output]) / 20.0);
+        wetGain *= outLevel;
+        dryGain *= outLevel;
+        if (hybridOf (p[hybrid]) == 2)
+            dryGain *= 0.928f; // [EXEC] analog: the dry path goes through the analog stage too (her mix-41 state on her take)
         const auto rel = std::exp (-1.0 / (0.010 * sr));
         const auto inGain = analog ? analogIn : 1.0, outGain = analog ? analogOut : 1.0;
         if (analog)

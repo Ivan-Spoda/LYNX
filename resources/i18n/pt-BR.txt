@@ -2823,3 +2823,4 @@ countries: br
 # round 124: Echoform's hybrid engine
 "Hybrid" = "Híbrido"
 "Off|Clean|Analog" = "Desligado|Limpo|Analógico"
+"Matched" = "Calibrado"

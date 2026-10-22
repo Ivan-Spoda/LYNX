@@ -29,6 +29,7 @@ namespace lynx::voicetools
 namespace
 {
 constexpr double pi = 3.141592653589793;
+constexpr double twoPi = 2.0 * pi;
 inline double clamp01 (float v) noexcept { return (double) std::clamp (v, 0.0f, 1.0f); }
 inline double dbToGain (double db) noexcept { return std::pow (10.0, db / 20.0); }
 inline bool on (float v) noexcept { return v >= 0.5f; }
@@ -104,6 +105,180 @@ double reductionDb (const Tuning& t, int b, double levelDb, double amount) noexc
 
 namespace
 {
+// ---- the matched engine (round 124) ---------------------------------------------------------------------------------
+// [EXEC] black-box measurements of the official NS1 trial (docs/analise/REA_rodada124.md §6), our own code:
+// - at amount 0 its output is the input through two all-passes: RBJ 60.07 Hz Q 1.0 and 16 kHz Q 0.90 (0.08° RMS);
+// - the bands' gains act on top of that without adding latency: the band below 60 Hz and the band above 16 kHz as
+//   gain-reduced parts of the split, the middle as a cascade of peaking cuts (0 dB = exactly transparent);
+// - each band: linked power detector, a downward expander (threshold / range move with the amount, soft knee), one
+//   loud band also opens its neighbours (spread), fast opening, slower closing; static shelves by amount.
+// The parameters were fitted on her takes and pink noise at her four NS1 settings (tmp/vm124/ns/nsmodel.cpp).
+// Not reproduced: the reference's slow adaptation to steady noise (seconds), which mostly matters on test noise.
+namespace fitted
+{
+struct Fit
+{
+    int bands = 7;
+    double f0 = 173.0000, step = 1.0, q = 1.2300;
+    double t0 = -39.9100, t1 = -30.8000, r0 = 182.1000, r1 = -57.0900; // range clamped to 15 … 60 dB
+    double lowCut0 = -1.1780, lowCut1 = 16.0600, highCut0 = 2.3640, highCut1 = 4.0990;
+    double slope = 0.4462, knee = 39.1100, spread = 10.2100, detA = 0.6090, detR = 2.9100, open = 3.0050, close = 26.7000;
+    double tOff[9] { -0.3251, -0.0701, 0.2107, 0.2187, 0.1810, -0.0680, -0.1600, 0.0210, -0.6890 };
+    double lsF = 68.550, lsG0 = -0.0337, lsG1 = 0.0399, hsF = 9000.0, hsG0 = -3.0, hsG1 = -3.0; // the static HF slope, the same for every amount (measured 0.15 … 0.8)
+};
+const Fit fit;
+
+struct Bq
+{
+    double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0, z1[2] {}, z2[2] {};
+    void set (double B0, double B1, double B2, double A0, double A1, double A2) noexcept { b0 = B0 / A0; b1 = B1 / A0; b2 = B2 / A0; a1 = A1 / A0; a2 = A2 / A0; }
+    void reset() noexcept { z1[0] = z1[1] = z2[0] = z2[1] = 0.0; }
+    double run (double x, int c) noexcept
+    {
+        const auto y = b0 * x + z1[c];
+        z1[c] = b1 * x - a1 * y + z2[c];
+        z2[c] = b2 * x - a2 * y;
+        return y;
+    }
+    void ap (double sr, double fc, double qq) noexcept { const auto w = twoPi * fc / sr, a = std::sin (w) / (2 * qq), c = std::cos (w); set (1 - a, -2 * c, 1 + a, 1 + a, -2 * c, 1 - a); }
+    void lp (double sr, double fc, double qq) noexcept { const auto w = twoPi * fc / sr, a = std::sin (w) / (2 * qq), c = std::cos (w); set ((1 - c) / 2, 1 - c, (1 - c) / 2, 1 + a, -2 * c, 1 - a); }
+    void bp (double sr, double fc, double qq) noexcept { const auto w = twoPi * fc / sr, a = std::sin (w) / (2 * qq), c = std::cos (w); set (a, 0, -a, 1 + a, -2 * c, 1 - a); }
+    void shelf (double sr, double fc, double g, bool high) noexcept
+    {
+        const auto A = std::pow (10.0, g / 40.0), w = twoPi * fc / sr, cw = std::cos (w), al = std::sin (w) / (2 * 0.7071), sq = 2 * std::sqrt (A) * al;
+        if (high)
+            set (A * ((A + 1) + (A - 1) * cw + sq), -2 * A * ((A - 1) + (A + 1) * cw), A * ((A + 1) + (A - 1) * cw - sq), (A + 1) - (A - 1) * cw + sq, 2 * ((A - 1) - (A + 1) * cw), (A + 1) - (A - 1) * cw - sq);
+        else
+            set (A * ((A + 1) - (A - 1) * cw + sq), 2 * A * ((A - 1) - (A + 1) * cw), A * ((A + 1) - (A - 1) * cw - sq), (A + 1) + (A - 1) * cw + sq, -2 * ((A - 1) + (A + 1) * cw), (A + 1) + (A - 1) * cw - sq);
+    }
+};
+
+class Engine
+{
+public:
+    static constexpr int maxBands = 7;
+    void prepare (double rate) noexcept
+    {
+        sr = rate;
+        ap1.ap (sr, 60.0658, 0.9998);
+        ap2.ap (sr, 16000.0, 0.8992);
+        lpA.lp (sr, 60.0658, 0.9998);
+        lpB = lpA;
+        ap2low.ap (sr, 16000.0, 0.8992);
+        lp2A.lp (sr, 16000.0, 0.8992);
+        lp2B = lp2A;
+        for (int b = 0; b < fit.bands; ++b)
+            detector[(std::size_t) b].bp (sr, centre (b), fit.q);
+        designedAmount = -1.0;
+        reset();
+    }
+    void reset() noexcept
+    {
+        for (auto* f : { &ap1, &ap2, &lpA, &lpB, &ap2low, &lp2A, &lp2B, &lsh, &hsh })
+            f->reset();
+        for (auto& f : detector)
+            f.reset();
+        for (auto& f : peaking)
+            f.reset();
+        env.fill (0.0);
+        gdb.fill (0.0);
+    }
+    // in place; returns the mean reduction (dB) of the block for the meter
+    double process (float* l, float* r, int n, double amt, bool listenOnly, float out) noexcept
+    {
+        const int nb = fit.bands + 2;
+        if (amt != designedAmount)
+        {
+            designedAmount = amt;
+            for (int b = 0; b < nb; ++b)
+            {
+                threshold[(std::size_t) b] = fit.t0 + (fit.t1 - fit.t0) * amt + fit.tOff[b];
+                range[(std::size_t) b] = std::clamp (fit.r0 + (fit.r1 - fit.r0) * amt, 15.0, 60.0);
+                staticCut[(std::size_t) b] = b == 0 ? fit.lowCut0 + (fit.lowCut1 - fit.lowCut0) * amt
+                                           : (b == nb - 1 ? fit.highCut0 + (fit.highCut1 - fit.highCut0) * amt : 0.0);
+            }
+            lsh.shelf (sr, fit.lsF, fit.lsG0 + (fit.lsG1 - fit.lsG0) * amt, false);
+            hsh.shelf (sr, fit.hsF, fit.hsG0 + (fit.hsG1 - fit.hsG0) * amt, true);
+        }
+        const auto ea = coef (fit.detA, sr), er = coef (fit.detR, sr), go = coef (fit.open, sr), gc = coef (fit.close, sr);
+        double sumRed = 0.0;
+        for (int i = 0; i < n; ++i)
+        {
+            const double xs[2] { l[i], r[i] };
+            double a[2], low[2], high[2], bandSig[maxBands][2];
+            for (int c = 0; c < 2; ++c)
+            {
+                const auto t = ap1.run (xs[c], c);
+                a[c] = ap2.run (t, c);
+                low[c] = ap2low.run (lpB.run (lpA.run (xs[c], c), c), c);
+                high[c] = a[c] - lp2B.run (lp2A.run (t, c), c);
+                for (int b = 0; b < fit.bands; ++b)
+                    bandSig[b][c] = detector[(std::size_t) b].run (a[c], c);
+            }
+            double lev[maxBands + 2];
+            const auto pw = [] (double u0, double u1) { return 0.5 * (u0 * u0 + u1 * u1); };
+            for (int b = 0; b < nb; ++b)
+            {
+                const auto p = b == 0 ? pw (low[0], low[1]) : (b == nb - 1 ? pw (high[0], high[1]) : pw (bandSig[b - 1][0], bandSig[b - 1][1]));
+                auto& e = env[(std::size_t) b];
+                e = p > e ? p + (e - p) * ea : p + (e - p) * er;
+                lev[b] = 10.0 * std::log10 (e + 1e-30) + 3.0103;
+            }
+            for (int b = 0; b < nb; ++b)
+            {
+                auto level = lev[b];
+                if (b >= 1 && b <= fit.bands)
+                    for (int j = 1; j <= fit.bands; ++j)
+                        if (j != b)
+                            level = std::max (level, lev[j] - fit.spread * std::abs (j - b));
+                const auto d = threshold[(std::size_t) b] - level;
+                double red;
+                if (d <= -fit.knee / 2)
+                    red = 0.0;
+                else if (d >= fit.knee / 2)
+                    red = fit.slope * d;
+                else
+                {
+                    const auto u = d + fit.knee / 2;
+                    red = fit.slope * u * u / (2 * fit.knee);
+                }
+                const auto target = -(std::min (range[(std::size_t) b], red) + staticCut[(std::size_t) b]);
+                auto& g = gdb[(std::size_t) b];
+                g = target > g ? target + (g - target) * go : target + (g - target) * gc;
+            }
+            for (int b = 0; b < fit.bands; ++b)
+            {
+                const auto w = twoPi * centre (b) / sr, al = std::sin (w) / (2 * fit.q), cw = std::cos (w), A = std::pow (10.0, gdb[(std::size_t) b + 1] / 40.0);
+                peaking[(std::size_t) b].set (1 + al * A, -2 * cw, 1 - al * A, 1 + al / A, -2 * cw, 1 - al / A);
+            }
+            const auto gl = std::pow (10.0, gdb[0] / 20.0), gh = std::pow (10.0, gdb[(std::size_t) nb - 1] / 20.0);
+            for (int c = 0; c < 2; ++c)
+            {
+                auto o = a[c] - (1.0 - gl) * low[c] - (1.0 - gh) * high[c];
+                for (int b = 0; b < fit.bands; ++b)
+                    o = peaking[(std::size_t) b].run (o, c);
+                o = hsh.run (lsh.run (o, c), c);
+                // Listen: what is taken away (the open chain minus the processed one)
+                const auto y = listenOnly ? a[c] - o : o;
+                (c == 0 ? l[i] : r[i]) = (float) y * out;
+            }
+            double red = 0.0;
+            for (int b = 0; b < nb; ++b)
+                red -= gdb[(std::size_t) b];
+            sumRed += red / nb;
+        }
+        return n > 0 ? sumRed / n : 0.0;
+    }
+
+private:
+    double centre (int b) const noexcept { return fit.f0 * std::pow (2.0, b * fit.step); }
+    double sr = 48000.0, designedAmount = -1.0;
+    Bq ap1, ap2, lpA, lpB, ap2low, lp2A, lp2B, lsh, hsh;
+    std::array<Bq, maxBands> detector, peaking;
+    std::array<double, maxBands + 2> env {}, gdb {}, threshold {}, range {}, staticCut {};
+};
+} // namespace fitted
+
 class Quell final : public Effect
 {
 public:
@@ -141,6 +316,18 @@ public:
         const auto amt = clamp01 (p[amount]);
         const bool listenOnly = on (p[listen]);
         const auto out = (float) dbToGain (outputDb (p[output]));
+        if (on (p[matched]))
+        {
+            if (! matchedOn)
+            {
+                matchedEngine.prepare (sr);
+                matchedOn = true;
+            }
+            const auto red = matchedEngine.process (l, r, n, amt, listenOnly, out);
+            meter[0].store ((float) std::clamp (red / 30.0, 0.0, 1.0), std::memory_order_relaxed);
+            return;
+        }
+        matchedOn = false;
         std::array<double, bands> sumRed {};
         for (int i = 0; i < n; ++i)
         {
@@ -203,6 +390,8 @@ private:
     std::array<std::array<LrSplit, bands - 1>, bands - 1> comp;
     std::array<double, bands> power {}, gainDb {};
     std::array<std::atomic<float>, bands + 1> meter {};
+    fitted::Engine matchedEngine;
+    bool matchedOn = false;
 };
 } // namespace
 
@@ -533,7 +722,7 @@ private:
 // =====================================================================================================================
 const EffectInfo& quellInfo()
 {
-    static const EffectInfo info { "Quell Denoiser", { { "Amount", 0.3f }, { "Listen", 0.0f }, { "Output", 0.5f } } };
+    static const EffectInfo info { "Quell Denoiser", { { "Amount", 0.3f }, { "Listen", 0.0f }, { "Output", 0.5f }, { "Matched", 0.0f } } };
     return info;
 }
 

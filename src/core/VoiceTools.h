@@ -39,7 +39,10 @@ const EffectInfo& geminiInfo();
 
 namespace quell
 {
-enum Param { amount, listen, output, paramCount };
+// `matched` (appended, round 124): the engine fitted to the measured NS1 trial (REA_rodada124 §6) — a zero-latency
+// chain whose open state is exactly the reference's all-pass (60 Hz / 16 kHz), a cascade of peaking cuts on seven
+// octave bands and gain-reduced low / high bands; off (older projects) = the 6-band expander of round 119
+enum Param { amount, listen, output, matched, paramCount };
 constexpr int bands = 6;
 // crossover frequencies (Hz) between the six bands
 constexpr double split[bands - 1] { 105.0, 311.0, 921.0, 2727.0, 8075.0 };
