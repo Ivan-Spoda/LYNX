@@ -1023,13 +1023,13 @@ int translateAutoTunePro (const std::vector<std::uint8_t>& state, EffectSlot& sl
         set (lynxtune::tracking, std::clamp (at (9, 50.0), 1.0, 100.0) * 0.4 / 50.0);
     // round 128: natural vibrato (X62, dB), ignore vibrato (X44), Create Vibrato (X5 shape, X7 rate, X6 cents, X46 / X50
     // onset delay / rate, ms) and the active scale's per-note Bypass / Remove edits (autoTuneProNoteEdits)
-    set (lynxtune::naturalVibrato, at (62, 0.0) / 24.0 + 0.5);
-    set (lynxtune::ignoreVibrato, at (44, 0.0) >= 0.5 ? 1.0 : 0.0);
-    set (lynxtune::vibratoShape, std::clamp (std::round (at (5, 0.0)), 0.0, 3.0) / 3.0);
-    set (lynxtune::vibratoRate, (at (7, 5.5) - 0.1) / 9.9);
-    set (lynxtune::vibratoDepth, at (6, 18.0) / 100.0);
-    set (lynxtune::vibratoDelay, at (46, 500.0) / 1500.0);
-    set (lynxtune::vibratoOnset, at (50, 500.0) / 1500.0);
+    if (has (62)) set (lynxtune::naturalVibrato, at (62, 0.0) / 24.0 + 0.5);
+    if (has (44)) set (lynxtune::ignoreVibrato, at (44, 0.0) >= 0.5 ? 1.0 : 0.0);
+    if (has (5)) set (lynxtune::vibratoShape, std::clamp (std::round (at (5, 0.0)), 0.0, 3.0) / 3.0);
+    if (has (7)) set (lynxtune::vibratoRate, (at (7, 5.5) - 0.1) / 9.9);
+    if (has (6)) set (lynxtune::vibratoDepth, at (6, 18.0) / 100.0);
+    if (has (46)) set (lynxtune::vibratoDelay, at (46, 500.0) / 1500.0);
+    if (has (50)) set (lynxtune::vibratoOnset, at (50, 500.0) / 1500.0);
     if (const auto edits = autoTuneProNoteEdits (state, key->first, key->second))
         for (int k = 0; k < 12; ++k)
         {

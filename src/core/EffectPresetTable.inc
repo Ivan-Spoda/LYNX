@@ -176,9 +176,9 @@ Gritty transistor      | Style = transistor; Drive = 18 dB
 Fuzz, parallel         | Style = fuzz; Drive = 24 dB; Mix = 30 %
 
 [Aether]
-Vocal air              | Air = #0.3; Harmonics = #0.25
-Gentle sheen           | Air = #0.15; Harmonics = #0.1
-Bright                 | Air = #0.6; Harmonics = #0.5
+Vocal air              | Air = 4.5 dB; Harmonics = 25 %
+Gentle sheen           | Air = 2 dB; Harmonics = 10 %
+Bright                 | Air = 9 dB; Harmonics = 50 %
 )PRESETS";
 }
 }
