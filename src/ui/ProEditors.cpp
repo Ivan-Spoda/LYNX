@@ -505,12 +505,12 @@ private:
         out.push_back (tabs ({ mx, y0 + 96.0f, 190.0f, 28.0f }, P ("Wideband"), "Wide band|Split band", { 1.0f, 0.0f }));
         out.push_back (custom ({ mx + 90.0f, y0 + 148.0f, 100.0f, 26.0f }, idExternal, P ("External SC"), tr ("Side chain: detect this signal (In) or another track (Ext)")));
         // right: stereo link (with MID) and look-ahead (with its power button)
-        out.push_back (knob ({ 512.0f, y0 + 6.0f, 84.0f, 90.0f }, P ("Stereo link"), tr ("Stereo link")));
-        auto mid = toggle ({ 580.0f, y0 + 72.0f, 40.0f, 18.0f }, P ("Link mid"), "MID");
+        out.push_back (knob ({ 512.0f, y0 + 2.0f, 84.0f, 90.0f }, P ("Stereo link"), tr ("Stereo link")));
+        auto mid = toggle ({ 522.0f, y0 + 96.0f, 64.0f, 18.0f }, P ("Link mid"), "MID");
         mid.hint = tr ("Mid: detect on the middle of the stereo image only");
         out.push_back (mid);
         out.push_back (knob ({ 512.0f, y0 + 120.0f, 84.0f, 90.0f }, P ("Lookahead time"), tr ("Lookahead")));
-        auto la = toggle ({ 580.0f, y0 + 112.0f, 40.0f, 18.0f }, P ("Lookahead"), tr ("On"));
+        auto la = toggle ({ 522.0f, y0 + 214.0f, 64.0f, 18.0f }, P ("Lookahead"), tr ("On"));
         la.hint = tr ("Look-ahead on / off");
         out.push_back (la);
         // the meter's threshold arrow
