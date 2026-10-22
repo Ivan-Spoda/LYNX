@@ -160,10 +160,13 @@ the dials reading 0 … 100 like the original's): the model above with the fitte
 
 | state, signal | before (round 113 fit) | after |
 |---|---|---|
-| main (1761 slots): go / kwe / lu | null −16.0 / −17.2 / −15.7 dB, level +0.04 / +0.83 / +0.56, spectrum max 4.8 / 4.3 / 3.3 dB | null −24.1 / −27.4 / −26.8 dB, level −0.35 / +0.23 / −0.03, spectrum max 0.84 / 0.43 / 0.53 dB |
-| main: pink | −8.6 dB, level −1.58, spectrum max 2.8 dB | −25.2 dB, −0.04 dB, 0.12 dB |
-| CLA-2A_2 / _3 (48.56 / 63.08, 50.16 / 60.48) | | −24.2 … −27.6 dB, level −0.34 … +0.29 |
-| CLA-2A_8 (peak reduction 45.72): go / kwe / lu / pink | | −23.3 / −24.6 / −27.1 / −18.6 dB |
+| main (1761 slots), her takes at their place in her chain (after the SSL / NS1 / RComp / DeEsser trials): go / kwe / lu | null −17.8 / −17.2 / −17.5 dB, level +0.40 / +1.03 / +0.61, spectrum max 2.4 / 3.0 / 1.5 dB | null −28.5 / −33.0 / −30.3 dB, level −0.05 / +0.10 / 0.00, spectrum max 0.36 / 0.40 / 0.42 dB, env95 0.3–0.6 dB |
+| main, raw takes (much heavier reduction): go / kwe / lu | null −16.0 / −17.2 / −15.7 dB, spectrum max 4.8 / 4.3 / 3.3 dB | null −27.0 / −28.7 / −26.1 dB, level −0.28 / −0.07 / −0.12, spectrum max 0.42 / 0.43 / 0.57 dB |
+| main, pink | −8.6 dB, level −1.58, spectrum max 2.8 dB | −24.6 dB, −0.23 dB, 0.33 dB |
+| CLA-2A_8 (peak reduction 45.72), raw takes go / kwe / lu / pink | | −25.7 / −27.7 / −29.4 / −17.3 dB |
+
+The other ten states (gain 48.56–50.16, peak reduction 60.16–63.08) differ from the main one by ≤ 1.6 dB of
+sensitivity / make-up, both taken from the measured dial laws (the same nulls within 0.3 dB on the raw takes).
 
 Not matched yet: the attack shape on the first milliseconds and the slow creep (env95 ~1 dB), Limit (one setting),
 other sample rates (the idle filter is the 48 kHz one).
