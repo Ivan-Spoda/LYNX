@@ -3017,3 +3017,7 @@ countries: br
 "Split" = "Divisão"
 "Classic|E console" = "Clássico|Console E"
 "Modern|Classic split" = "Moderno|Clássico dividido"
+# round 124: Echoform's hybrid engine
+"Hybrid" = "Híbrido"
+"Off|Clean|Analog" = "Desligado|Limpo|Analógico"
+"Matched" = "Calibrado"

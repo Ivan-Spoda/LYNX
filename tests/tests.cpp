@@ -15754,5 +15754,7 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Parity128aTests.inc"
 #include "Parity128bTests.inc"
 #include "Parity128cTests.inc"
+#include "Match124Tests.inc"
+#include "Match124xTests.inc"
 #include "Vmatch127Tests.inc"
 #include "ParityTests129.inc"

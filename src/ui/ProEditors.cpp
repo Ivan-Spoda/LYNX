@@ -2010,8 +2010,10 @@ private:
     juce::String gestures() const override { return tr ("Link: both knobs move together"); }
     bool usesHistory() const override { return true; }
 
-    int pMid() const { return P ("Harmonics"); }
-    int pHigh() const { return P ("Air"); }
+    // the dynamic air model (round 124) has its own two amounts; the classic mode drives the exciter and the shelf
+    bool dynamicModel() const { return v (P ("Dynamic")) >= 0.5f; }
+    int pMid() const { return dynamicModel() ? P ("Mid air") : P ("Harmonics"); }
+    int pHigh() const { return dynamicModel() ? P ("High air") : P ("Air"); }
     juce::Rectangle<float> display() const { return bodyArea().withHeight (206.0f); }
     juce::Rectangle<float> panel() const { return bodyArea().withTrimmedTop (206.0f); }
 
@@ -2042,9 +2044,16 @@ private:
         out.push_back (knob ({ 626.0f, a.getBottom() - 92.0f, 72.0f, 86.0f }, P ("Output"), tr ("Trim"), 0, true));
         const auto b = barArea();
         const auto y = b.getCentreY() - 11.0f;
-        out.push_back (barValue ({ 8.0f, y, 150.0f, 22.0f }, P ("Exciter freq."), tr ("Mid freq")));
-        out.push_back (barValue ({ 162.0f, y, 170.0f, 22.0f }, P ("Character"), tr ("Even / odd")));
-        out.push_back (barValue ({ 336.0f, y, 150.0f, 22.0f }, P ("Air freq."), tr ("High freq")));
+        out.push_back (barValue ({ 8.0f, y, 110.0f, 22.0f }, P ("Dynamic"), tr ("Dynamic")));
+        if (dynamicModel())
+        {
+            out.push_back (barValue ({ 490.0f, y, 110.0f, 22.0f }, P ("Mix"), tr ("Mix")));
+            out.push_back (barValue ({ 604.0f, y, 110.0f, 22.0f }, P ("Output"), tr ("Trim")));
+            return;
+        }
+        out.push_back (barValue ({ 122.0f, y, 120.0f, 22.0f }, P ("Exciter freq."), tr ("Mid freq")));
+        out.push_back (barValue ({ 246.0f, y, 120.0f, 22.0f }, P ("Character"), tr ("Even / odd")));
+        out.push_back (barValue ({ 370.0f, y, 116.0f, 22.0f }, P ("Air freq."), tr ("High freq")));
         out.push_back (barValue ({ 490.0f, y, 110.0f, 22.0f }, P ("Mix"), tr ("Mix")));
         out.push_back (barValue ({ 604.0f, y, 110.0f, 22.0f }, P ("Output"), tr ("Trim")));
     }

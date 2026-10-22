@@ -34,6 +34,7 @@ constexpr double earlyApMs[2][2] = { { 7.13, 2.31 }, { 6.47, 2.83 } };
 
 constexpr int earlyTaps = 14;
 constexpr int buildTaps = 40;
+constexpr int maxBandSections = 16;
 
 // a small deterministic generator for tap patterns (the same pattern on every machine)
 struct Lcg
@@ -221,8 +222,9 @@ struct Engine::Impl
     double curLen[lineCount] {}; // glided line lengths (samples)
     double lfo[lineCount] {};
     Shifter shifters[4]; // inside lines 0, 2, 4, 6 (shimmer)
-    Biquad outLow, outHigh, shelfLow, shelfHigh, band1, band2;
-    bool outLowOn = false, outHighOn = false, shelfLowOn = false, shelfHighOn = false, bandOn = false;
+    Biquad outLow, outHigh, shelfLow, shelfHigh, toneHigh, toneMid, band[maxBandSections];
+    bool outLowOn = false, outHighOn = false, shelfLowOn = false, shelfHighOn = false, toneHighOn = false, toneMidOn = false, bandOn = false;
+    int bandSections = 0;
 
     // tap patterns (unit times and gains), drawn once
     double eT[2][earlyTaps] {}, eG[2][earlyTaps] {};
@@ -311,8 +313,10 @@ struct Engine::Impl
         outHigh.reset();
         shelfLow.reset();
         shelfHigh.reset();
-        band1.reset();
-        band2.reset();
+        for (auto& b : band)
+            b.reset();
+        toneHigh.reset();
+        toneMid.reset();
         shiftState = 0.0f;
         first = true;
     }
@@ -409,9 +413,17 @@ struct Engine::Impl
         bandOn = s.bandLimit > 0.0 && s.bandLimit < 0.45 * sr;
         if (bandOn)
         {
-            band1.filter (sr, 0, s.bandLimit, 0.5412); // 4th-order Butterworth as two sections
-            band2.filter (sr, 0, s.bandLimit, 1.3066);
+            // Butterworth of order 2 · sections: section k's Q = 1 / (2 cos ((2k + 1) π / (4 · sections)))
+            bandSections = std::clamp (s.bandLimitSections, 1, maxBandSections);
+            for (int k = 0; k < bandSections; ++k)
+                band[k].filter (sr, 0, s.bandLimit, 1.0 / (2.0 * std::cos ((2 * k + 1) * pi / (4.0 * bandSections))));
         }
+        toneHighOn = std::abs (s.toneHighDb) > 0.01;
+        if (toneHighOn)
+            toneHigh.shelf (sr, std::min (s.toneHighHz, 0.45 * sr), s.toneHighDb, true, 0.7);
+        toneMidOn = std::abs (s.toneMidDb) > 0.01;
+        if (toneMidOn)
+            toneMid.peaking (sr, std::min (s.toneMidHz, 0.45 * sr), std::max (0.1, s.toneMidQ), s.toneMidDb);
         shelfLowOn = std::abs (s.lowShelfDb) > 0.01;
         if (shelfLowOn)
             shelfLow.shelf (sr, s.lowShelfHz, s.lowShelfDb, false, 0.7);
@@ -589,10 +601,12 @@ struct Engine::Impl
         if (outHighOn)
             outHigh.processBlock (L, R, n);
         if (bandOn)
-        {
-            band1.processBlock (L, R, n);
-            band2.processBlock (L, R, n);
-        }
+            for (int k = 0; k < bandSections; ++k)
+                band[k].processBlock (L, R, n);
+        if (toneHighOn)
+            toneHigh.processBlock (L, R, n);
+        if (toneMidOn)
+            toneMid.processBlock (L, R, n);
         if (shelfLowOn)
             shelfLow.processBlock (L, R, n);
         if (shelfHighOn)
@@ -699,8 +713,14 @@ struct EpochMode
 };
 // shape, line scale, RT / Decay, RT floor (s), bass RT ×, input diffusion, early level / span (ms), build-up (ms),
 // modulation scale, output gain, own pre-delay (ms), gate (fraction of the decay; 0 = none) — fitted to §1.
-const EpochMode epochModes[epoch::modeCount] = {
-    { "Concert Hall", 0, 1.00, 1.06, 1.20, 1.0, 1.0, 0.55, 9.0, 0.0, 1.0, 0.91, 5.0, 0.0 },
+// (LYNX_VERB_FIT: the fitting harness builds this file with the tables writable)
+#ifdef LYNX_VERB_FIT
+#define LYNX_FIT_TABLE
+#else
+#define LYNX_FIT_TABLE const
+#endif
+LYNX_FIT_TABLE EpochMode epochModes[epoch::modeCount] = {
+    { "Concert Hall", 0, 0.9394, 1, 1.2, 1, 0.975, 0.4, 42.94, 0.0, 1, 1.031, 3.2, 0.0 },
     { "Plate", 2, 0.80, 0.90, 0.45, 1.0, 1.0, 0.10, 2.0, 60.0, 1.0, 0.70, 2.0, 0.0 },
     { "Room", 1, 0.85, 1.02, 0.45, 1.0, 1.0, 0.10, 20.0, 150.0, 1.0, 0.82, 1.0, 0.0 },
     { "Chamber", 1, 1.00, 1.04, 0.45, 1.0, 1.0, 0.15, 30.0, 140.0, 1.0, 0.70, 1.2, 0.0 },
@@ -718,15 +738,61 @@ const EpochMode epochModes[epoch::modeCount] = {
     { "Drift Chamber", 1, 1.00, 1.08, 0.70, 1.0, 1.0, 0.40, 6.0, 0.0, 2.5, 0.43, 4.5, 0.0 },
     { "Drift Hall", 0, 1.00, 1.13, 1.20, 1.0, 1.0, 0.45, 9.0, 0.0, 2.5, 0.53, 5.0, 0.0 },
     { "Drift Space", 0, 1.30, 1.70, 1.20, 1.0, 1.0, 0.05, 9.0, 110.0, 2.5, 1.00, 4.0, 0.0 },
-    { "Cathedral", 0, 1.40, 1.30, 1.00, 1.0, 1.0, 0.10, 40.0, 20.0, 1.0, 1.10, 0.5, 0.0 },
+    { "Cathedral", 0, 1.49, 1, 0.8762, 1.203, 1, 0.4, 84.68, 39.77, 1, 0.756, 0.0, 0.0 },
     { "Grand Hall", 0, 1.50, 1.30, 2.40, 1.7, 1.0, 0.20, 30.0, 20.0, 1.0, 1.30, 55.0, 0.0 },
     { "Vintage Chamber", 1, 1.10, 1.20, 0.90, 1.0, 1.0, 0.05, 25.0, 110.0, 0.7, 1.40, 11.0, 0.0 },
     { "Vintage Hall", 0, 1.00, 1.08, 1.20, 1.0, 1.0, 0.50, 9.0, 0.0, 0.7, 0.95, 5.0, 0.0 },
 };
 const char* const epochColours[epoch::colourCount] = { "1970s", "1980s", "Now" };
-// colour: loop bandwidth (Hz), output high cut (Hz, 0 = none), modulation scale
-constexpr double epochColourBw[3] = { 9000.0, 14000.0, 0.0 }; // 0 = no loop band limit
-constexpr double epochColourCut[3] = { 10000.0, 16000.0, 0.0 };
+// colour: loop bandwidth (Hz, 0 = none), output high cut (Hz, first order, 0 = none), steep band limit (Hz, 0 = none) and
+// its Butterworth sections
+struct EpochColour
+{
+    double loopBw, outCut, bandLimit;
+    int sections;
+};
+LYNX_FIT_TABLE EpochColour epochColours2[3] = { { 9000.0, 0.0, 11800.0, 16 }, { 14000.0, 16000.0, 0.0, 2 }, { 0.0, 0.0, 0.0, 2 } };
+
+// Round 124 (REA_rodada124_extras §3): each algorithm's own voicing, fitted to the reference at her saved settings
+// (time–frequency energy of the impulse response and RT60 per octave). Neutral for the modes not refitted.
+struct EpochVoicing
+{
+    double bassExp = 0.35;          // bass multiplier law below 1 × (RT × mult^bassExp)
+    double highMult = 1.0;          // × the high-band RT
+    double loopBwScale = 1.0;       // × the colour's loop bandwidth
+    double earlyDecay = 3.0;        // early taps' fall over their span (e-folds)
+    double toneLowHz = 200.0, toneLowDb = 0.0;
+    double toneMidHz = 1000.0, toneMidDb = 0.0, toneMidQ = 0.7;
+    double toneHighHz = 8000.0, toneHighDb = 0.0;
+    // the mid-band RT60 (s) the reference measures at Size 100 % for each Decay (s): (decay, rt) pairs, increasing;
+    // empty = the round-100 law (Decay × RT / Decay with the floor)
+    int rtKnotCount = 0;
+    double rtKnots[2 * 16] {};
+};
+LYNX_FIT_TABLE EpochVoicing epochVoicing[epoch::modeCount] = {
+    /* Concert Hall */ { 0.0, 1.88, 1.455, 0.5, 155.8, -0.6, 1455, -0.6, 2.45, 4852, 1.5, 8, { 0.5, 1.38, 1, 1.6, 1.78, 2.27, 2, 2.46, 2.67, 3.17, 3.28, 3.7, 4, 4.63, 8, 8.68 } },
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    /* Cathedral */ { 0.875, 0.76, 1.868, 0.0, 61.95, -1.8, 200, -0.6, 0.2, 1.164e+04, -3, 13, { 0.53, 1.15, 1, 2.2, 1.85, 2.54, 1.99, 2.72, 2.5, 3.28, 2.9, 3.7, 3.87, 4.62, 4.36, 5.07, 5.15, 5.76, 6.38, 6.85, 7.37, 7.73, 12, 11.86, 14, 13.68 } },
+    {},
+    {},
+    {},
+};
 
 double epochDecay (float v) { return skewLaw (v, 0.2, 70.0, 3.3596); }
 double epochPredelay (float v) { return skewLaw (v, 0.0, 500.0, 2.3219); }
@@ -742,8 +808,11 @@ public:
 protected:
     void configure (const EffectParams& p, double, Settings& s, float& mix) const noexcept override
     {
-        const auto& m = epochModes[choice (p[16], epoch::modeCount)];
+        const auto modeIndex = choice (p[16], epoch::modeCount);
+        const auto& m = epochModes[modeIndex];
+        const auto& vo = epochVoicing[modeIndex];
         const auto colour = choice (p[15], epoch::colourCount);
+        const auto& co = epochColours2[colour];
         mix = p[0];
         const auto size = (double) p[3];
         // a very slow attack also delays the onset (the reference: +45 ms at 100 %)
@@ -751,13 +820,21 @@ protected:
         const auto decay = epochDecay (p[2]);
         s.shape = m.shape;
         s.lineScale = m.scale * (0.3 + 0.7 * size);
-        s.rt60 = withFloor (decay * m.rtScale, m.rtFloor * (0.4 + 0.6 * size)) * (0.84 + 0.16 * p[10]);
+        if (vo.rtKnotCount >= 2)
+        {
+            // measured RT per Decay, scaled like the law below for Size and late diffusion
+            const auto rt = knotLaw (std::clamp (decay, vo.rtKnots[0], vo.rtKnots[2 * (vo.rtKnotCount - 1)]), vo.rtKnots, vo.rtKnotCount);
+            const auto beyond = decay > vo.rtKnots[2 * (vo.rtKnotCount - 1)] ? decay / vo.rtKnots[2 * (vo.rtKnotCount - 1)] : 1.0;
+            s.rt60 = rt * beyond * m.rtScale * (0.85 + 0.15 * size) * (0.84 + 0.16 * p[10]);
+        }
+        else
+            s.rt60 = withFloor (decay * m.rtScale, m.rtFloor * (0.4 + 0.6 * size)) * (0.84 + 0.16 * p[10]);
         const auto bass = epochBassMult (p[5]);
-        s.lowMult = (bass < 1.0 ? std::pow (bass, 0.35) : bass) * m.lowRt;
+        s.lowMult = (bass < 1.0 ? std::pow (bass, vo.bassExp) : bass) * m.lowRt;
         s.lowXover = epochBassXover (p[6]);
         const auto shelf = -24.0 + 24.0 * p[7];
         s.highXover = epochFreq (p[8]);
-        s.highMult = 1.1 * std::pow (10.0, std::max (shelf, -14.0) / 50.0);
+        s.highMult = 1.1 * std::pow (10.0, std::max (shelf, -14.0) / 50.0) * vo.highMult;
         s.highShelfHz = s.highXover;
         s.highShelfDb = std::max (shelf, -16.0);
         s.inDiffusion = m.inDiff * p[9];
@@ -766,9 +843,19 @@ protected:
         s.modDepthMs = 0.6 * m.modScale * p[12] / std::sqrt (std::max (0.3, s.modRateHz));
         s.outHighCut = epochFreq (p[13]);
         s.outHighOrder = 1;
-        if (epochColourCut[colour] > 0.0)
-            s.outHighCut = std::min (s.outHighCut, epochColourCut[colour]);
-        s.loopBandwidth = epochColourBw[colour];
+        if (co.outCut > 0.0)
+            s.outHighCut = std::min (s.outHighCut, co.outCut);
+        s.loopBandwidth = co.loopBw * vo.loopBwScale;
+        s.bandLimit = co.bandLimit;
+        s.bandLimitSections = co.sections;
+        s.earlyDecay = vo.earlyDecay;
+        s.lowShelfHz = vo.toneLowHz;
+        s.lowShelfDb = vo.toneLowDb;
+        s.toneMidHz = vo.toneMidHz;
+        s.toneMidDb = vo.toneMidDb;
+        s.toneMidQ = vo.toneMidQ;
+        s.toneHighHz = vo.toneHighHz;
+        s.toneHighDb = vo.toneHighDb;
         s.outLowCut = 10.0 + 1490.0 * p[14];
         s.outLowOrder = 1;
         s.earlyLevel = m.early;
@@ -928,7 +1015,7 @@ struct NebulaMode
     double dm0, dm100, mult0, mult100, corr;
 };
 // decay multiplier at density 0 / 100, line length × delay at density 0 / 100, stereo correlation (measured, §4)
-const NebulaMode nebulaModes[nebula::modeCount] = {
+LYNX_FIT_TABLE NebulaMode nebulaModes[nebula::modeCount] = {
     { "Ripple", 1.03, 1.26, 1, 1, 0.93 },        { "Swell", 3.43, 3.82, 1, 2, -0.31 },
     { "Fold", 1.33, 1.39, 1, 2, -0.25 },       { "Drift", 2.56, 2.67, 1, 1, 0.25 },
     { "Abyss", 3.64, 3.97, 1, 2, -0.21 },      { "Vortex", 7.04, 6.77, 2, 2, 0.29 },
@@ -1075,7 +1162,7 @@ struct HorizonReverb
     int shape;
     double scale, rtScale, preMs, buildMs, early, gain;
 };
-const HorizonReverb horizonReverbs[horizon::reverbModeCount] = {
+LYNX_FIT_TABLE HorizonReverb horizonReverbs[horizon::reverbModeCount] = {
     { "Room", 1, 1.0, 0.80, 50.0, 60.0, 0.3, 1.5 },  { "Chamber", 1, 1.2, 1.00, 45.0, 45.0, 0.3, 3.0 },
     { "Plate", 2, 1.0, 1.00, 25.0, 8.0, 0.0, 3.6 },  { "Hall", 0, 1.0, 0.92, 35.0, 60.0, 0.2, 1.25 },
     { "Cathedral", 0, 1.3, 1.05, 60.0, 80.0, 0.1, 1.6 }, { "Space", 0, 1.5, 1.10, 70.0, 90.0, 0.0, 0.5 },

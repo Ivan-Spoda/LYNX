@@ -472,8 +472,57 @@ int fromSaturn2 (const State& s, EffectSlot& slot)
     return n;
 }
 
+// ---------------------------------------------------------------- Pro-Q 4 -> Facet EQ
+// layout (FFBS v1, 600 values; REA_rodada124_extras §2, read back through the official trial's parameter API): band b
+// (0 … 23) at 23b: 0 used, 1 enabled, 2 frequency (log2 Hz), 3 gain dB, 4 Q (norm: 0.025 · 1600^v, 0.5 = 1),
+// 5 shape (0 bell, 1 low shelf, 2 low cut, 3 high shelf, 4 high cut, 5 notch, 6 band pass, 7 tilt shelf, 8 flat tilt,
+// 9 all pass), 6 slope (0 = 0, 1 … 9 = 6, 12, 18, 24, 30, 36, 48, 72, 96 dB/oct, 10 brickwall), 7 stereo placement
+// (0 left, 1 right, 2 stereo, 3 mid, 4 side), 9 dynamic range dB; 552 processing mode (0 zero latency, 1 natural,
+// 2 linear), 555 gain scale (1 = 100 %), 556 output level (level encoding). Facet EQ has eight stereo bands with the
+// same shapes, Q law and slopes: the first eight used, enabled, stereo-placed bands are taken; dynamic bands keep
+// their static curve (her states use none).
+int fromProQ4 (const State& s, EffectSlot& slot)
+{
+    if (slot.kind != EffectKind::facetEq || s.named || s.count != 600 || ! finiteAll (s, 600))
+        return 0;
+    auto& p = slot.params;
+    int n = 0;
+    const auto set = [&] (int k, float v) {
+        p[(std::size_t) k] = clamp01 (v);
+        ++n;
+    };
+    static constexpr facet::Shape shapes[10] { facet::Shape::bell, facet::Shape::lowShelf, facet::Shape::lowCut, facet::Shape::highShelf,
+                                               facet::Shape::highCut, facet::Shape::notch, facet::Shape::bandPass,
+                                               facet::Shape::tiltShelf, facet::Shape::tiltShelf, facet::Shape::off };
+    static constexpr int slopes[11] { 6, 6, 12, 18, 24, 30, 36, 48, 72, 96, 96 };
+    int band = 0;
+    for (int b = 0; b < 24 && band < facet::bands; ++b)
+    {
+        const auto base = (std::size_t) (23 * b);
+        if (s.at (base) < 0.5f || s.at (base + 1) < 0.5f || roundIndex (s.at (base + 7)) != 2)
+            continue;
+        const auto shape = shapes[std::clamp (roundIndex (s.at (base + 5)), 0, 9)];
+        if (shape == facet::Shape::off)
+            continue;
+        set (facet::param (band, 0), facet::shapeValue (shape));
+        set (facet::param (band, 1), facet::hzValue (std::pow (2.0, (double) s.at (base + 2))));
+        set (facet::param (band, 2), facet::gainValue (s.at (base + 3)));
+        set (facet::param (band, 3), clamp01 (s.at (base + 4)));
+        set (facet::param (band, 4), facet::slopeValue (slopes[std::clamp (roundIndex (s.at (base + 6)), 0, 10)]));
+        ++band;
+    }
+    for (int b = band; b < facet::bands; ++b)
+        p[(std::size_t) facet::param (b, 0)] = facet::shapeValue (facet::Shape::off);
+    set (facet::phaseParam, facet::phaseValue ((facet::Phase) std::clamp (roundIndex (s.at (552)), 0, facet::phaseCount - 1)));
+    set (facet::scaleParam, clamp01 (s.at (555) / 2.0));
+    set (facet::outputParam, linValue (levelDb (s.at (556)), -24.0, 24.0));
+    return n;
+}
+
 Translator translatorNamed (std::string_view name)
 {
+    if (name == "pro-q4")
+        return fromProQ4;
     if (name == "pro-c3")
         return fromProC3;
     if (name == "pro-mb")
