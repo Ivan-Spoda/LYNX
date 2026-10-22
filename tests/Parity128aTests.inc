@@ -149,7 +149,7 @@ TEST (parity128a_hush_new_controls)
     using lynx::EffectKind;
     const double sr = 44100.0;
     const int n = 44100;
-    CHECK (lynx::mixsuite::hushInfo().params.size() == (std::size_t) count && count == 17);
+    CHECK (lynx::mixsuite::hushInfo().params.size() == (std::size_t) count && count == 18);
     auto p = defaults (EffectKind::hushDeEsser);
     CHECK (p[allround] == 0.0f && p[lowPass] == 1.0f && std::abs (lookaheadTimeMs (p[lookaheadTime]) - 2.0) < 1e-6 && p[stereoLink] == 1.0f && p[input] == 0.5f);
     p[threshold] = (float) (20.0 / 60.0); // −40 dBFS

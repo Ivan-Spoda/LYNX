@@ -8,6 +8,7 @@
 #include "core/Biquad.h"
 #include "core/Effects.h"
 #include "core/LrCrossover.h"
+#include "core/VoiceMatch.h"
 
 // REA_rodada96. Every formula below is textbook material, cited where it matters:
 //  - biquads: R. Bristow-Johnson, "Cookbook formulae for audio EQ biquad filter coefficients";
@@ -289,6 +290,11 @@ double releaseSeconds (float v) noexcept { return logMap (v, 0.1, 4.0); }
 double gateRangeDb (float v) noexcept { return lin (v, 0.0, 60.0); }
 double gateThresholdDb (float v) noexcept { return lin (v, -80.0, 0.0); }
 double trimDb (float v) noexcept { return lin (v, -20.0, 20.0); }
+double eQ (float v) noexcept { return vmatch::echannel::qFromDial (1.0 - (double) std::clamp (v, 0.0f, 1.0f)); }
+double eCompThresholdDb (float v) noexcept { return lin (v, -20.0, 10.0); }
+double eGateRangeDb (float v) noexcept { return lin (v, 0.0, 40.0); }
+double eGateThresholdDb (float v) noexcept { return lin (v, -30.0, 10.0); }
+bool eVoicing (const EffectParams& p) noexcept { return on (p[voicing]); }
 
 namespace
 {
@@ -378,11 +384,13 @@ public:
     void prepare (double rate) noexcept override
     {
         sr = rate;
+        console.prepare (rate);
         reset();
     }
 
     void reset() noexcept override
     {
+        console.reset();
         for (auto* d : { &audio, &side })
         {
             d->hp1.reset(); d->hp2.reset(); d->lp.reset(); d->lf.reset(); d->lmf.reset(); d->hmf.reset(); d->hf.reset();
@@ -397,6 +405,13 @@ public:
 
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
+        if (eVoicing (p))
+        {
+            const auto inPeak = Meters::peak (l, r, n);
+            console.process (l, r, n, consoleSettings (p));
+            meters.set (console.compReductionDb(), console.gateReductionDb(), inPeak, Meters::peak (l, r, n));
+            return;
+        }
         audio.design (p, sr);
         side.design (p, sr);
         const auto inPeak = Meters::peak (l, r, n);
@@ -486,6 +501,45 @@ public:
     }
 
 private:
+    // E voicing: Ridge's controls in the console's units (the shared ranges use Ridge's own laws)
+    static vmatch::echannel::Settings consoleSettings (const EffectParams& p) noexcept
+    {
+        vmatch::echannel::Settings e;
+        e.inputDb = trimDb (p[input]);
+        e.outputDb = trimDb (p[output]);
+        e.phase = on (p[phase]);
+        e.hpHz = p[hpf] > 0.0f ? hpfHz (p[hpf]) : 0.0;
+        e.lpKHz = p[lpf] > 0.0f ? lpfHz (p[lpf]) / 1000.0 : 0.0;
+        e.lfGain = bandGainDb (p[lfGain], false);
+        e.lfHz = lfHz (p[lfFreq]);
+        e.lfBell = on (p[lfBell]);
+        e.lmfGain = bandGainDb (p[lmfGain], false);
+        e.lmfKHz = lmfHz (p[lmfFreq]) / 1000.0;
+        e.lmfQ = eQ (p[lmfQ]);
+        e.hmfGain = bandGainDb (p[hmfGain], false);
+        e.hmfKHz = hmfHz (p[hmfFreq]) / 1000.0;
+        e.hmfQ = eQ (p[hmfQ]);
+        e.hfGain = bandGainDb (p[hfGain], false);
+        e.hfKHz = hfHz (p[hfFreq]) / 1000.0;
+        e.hfBell = on (p[hfBell]);
+        e.eqOn = on (p[eqOn]);
+        e.compRatio = p[compRatio] <= 0.0005f ? 1.0 : ratio (p[compRatio]);
+        e.compThreshold = eCompThresholdDb (p[compThreshold]);
+        e.compRelease = releaseSeconds (p[ridge::compRelease]);
+        e.compFast = on (p[compFastAttack]);
+        e.expRange = eGateRangeDb (p[gateRange]);
+        e.expThreshold = eGateThresholdDb (p[gateThreshold]);
+        e.expRelease = releaseSeconds (p[ridge::gateRelease]);
+        e.expFast = on (p[gateFastAttack]);
+        e.gate = ! on (p[expander]);
+        e.dynOn = on (p[dynOn]);
+        e.dynamicsAfterEq = ! on (p[order]);
+        e.filtersBeforeDynamics = on (p[filterSplit]);
+        return e;
+    }
+
+    vmatch::echannel::Channel console;
+
     static void filters (EqDesign& d, float& a, float& b) noexcept
     {
         if (d.hpOn)
@@ -624,6 +678,8 @@ double releaseMs (float v) noexcept { return logMap (v, 10.0, 250.0); }
 double lookaheadMs() noexcept { return 2.0; }
 double lookaheadTimeMs (float v) noexcept { return std::round (lin (v, 0.0, 15.0) * 100.0) / 100.0; } // (0.01 ms steps: the default is exactly 2 ms)
 float lookaheadTimeValue (double ms) noexcept { return (float) std::clamp (ms / 15.0, 0.0, 1.0); }
+double classicThresholdDb (float v) noexcept { return lin (v, -80.0, 0.0); }
+bool classic (const EffectParams& p) noexcept { return on (p[voicing]); }
 
 namespace
 {
@@ -636,6 +692,7 @@ public:
     {
         sr = rate;
         setDelay (primedMs);
+        classicEngine.prepare (rate);
         reset();
     }
 
@@ -643,6 +700,7 @@ public:
     {
         delay.reset();
         scDelay.reset();
+        classicEngine.reset();
         detect.reset();
         detectLp.reset();
         listenF.reset();
@@ -675,6 +733,22 @@ public:
             for (int i = 0; i < n; ++i) { l[i] *= gIn; r[i] *= gIn; }
         }
         const auto inPeak = Meters::peak (l, r, n);
+        if (classic (p))
+        {
+            // the measured classic de-esser has no look-ahead; the fixed latency Hush reports is kept as a plain delay
+            vmatch::deesser::Settings c;
+            c.hz = hz (p[frequency]);
+            c.thresholdDb = classicThresholdDb (p[threshold]);
+            c.bandPass = on (p[detector]);
+            c.wideband = on (p[mode]);
+            c.listen = on (p[listen]);
+            c.outputDb = lin (p[output], -12.0, 12.0);
+            classicEngine.process (l, r, n, c);
+            for (int i = 0; i < n; ++i)
+                delay.process (l[i], r[i]);
+            meters.set (classicEngine.reductionDb(), 0.0f, inPeak, Meters::peak (l, r, n));
+            return;
+        }
         const auto f = std::min (hz (p[frequency]), sr * 0.45);
         const bool band = on (p[detector]);
         if (band)
@@ -828,6 +902,7 @@ private:
     double sr = 44100.0;
     double primedMs = 2.0, delayMs = 2.0;
     Delay2<4096> delay, scDelay;
+    vmatch::deesser::DeEsser classicEngine;
     Biquad detect, detectLp, listenF, listenLp, split, bandLp, bandLp2, topHp, topHp2;
     double env = 0.0, gr = 0.0, fullEnv = 0.0;
     double envCh[2] {}, grCh[2] {};
@@ -1465,7 +1540,8 @@ const EffectInfo& ridgeInfo()
                                      { "Ratio", 0.0f }, { "Comp. threshold", 1.0f }, { "Comp. release", 0.29f }, { "Fast attack", 0.0f },
                                      { "Gate range", 0.0f }, { "Gate threshold", 0.25f }, { "Gate release", 0.29f }, { "Gate fast", 0.0f },
                                      { "Expander", 0.0f }, { "Dynamics on", 1.0f },
-                                     { "Order", 1.0f }, { "Filters to SC", 0.0f }, { "Output", 0.5f }, { "Phase", 0.0f }, { "Comp. mix", 1.0f } } };
+                                     { "Order", 1.0f }, { "Filters to SC", 0.0f }, { "Output", 0.5f }, { "Phase", 0.0f }, { "Comp. mix", 1.0f },
+                                     { "Voicing", 0.0f }, { "Filter split", 0.0f } } };
     return info;
 }
 
@@ -1482,7 +1558,7 @@ const EffectInfo& hushInfo()
     static const EffectInfo info { "Hush De-esser",
                                    { { "Frequency", 0.53f }, { "Threshold", 0.5f }, { "Range", 0.5f }, { "Wideband", 0.0f },
                                      { "Band detector", 0.0f }, { "Listen", 0.0f }, { "Lookahead", 1.0f }, { "Release", 0.56f },
-                                     { "Output", 0.5f },
+                                     { "Output", 0.5f }, { "Voicing", 0.0f }, // round 123 (vmatch123)
                                      // round 128 (parity with the reference de-esser)
                                      { "Allround", 0.0f }, { "Low-pass freq.", 1.0f }, { "Lookahead time", 2.0f / 15.0f },
                                      { "Stereo link", 1.0f }, { "Link mid", 0.0f }, { "External SC", 0.0f }, { "Input", 0.5f },
@@ -1564,6 +1640,36 @@ std::string fmt (const char* f, double v)
 std::string onOff (float v) { return on (v) ? "on" : "off"; }
 } // namespace
 
+namespace hush
+{
+std::string classicParamText (int param, float v)
+{
+    switch (param)
+    {
+        case threshold: return fmt ("%.1f dB", classicThresholdDb (v));
+        case range: case lookahead: case release: return "-";
+        default: return paramText (EffectKind::hushDeEsser, param, v);
+    }
+}
+} // namespace hush
+
+namespace ridge
+{
+std::string eParamText (int param, float v)
+{
+    switch (param)
+    {
+        case lmfQ: case hmfQ: return fmt ("Q %.2f", eQ (v));
+        case lfGain: case lmfGain: case hmfGain: case hfGain: return fmt ("%+.1f dB", bandGainDb (v, false));
+        case compThreshold: return fmt ("%+.1f dB", eCompThresholdDb (v));
+        case gateRange: return v <= 0.0f ? "off" : fmt ("%.1f dB", eGateRangeDb (v));
+        case gateThreshold: return fmt ("%+.1f dB", eGateThresholdDb (v));
+        case curve: return "-";
+        default: return paramText (EffectKind::ridgeStrip, param, v);
+    }
+}
+} // namespace ridge
+
 std::string paramText (EffectKind kind, int param, float v)
 {
     if (kind == EffectKind::ridgeStrip)
@@ -1589,6 +1695,8 @@ std::string paramText (EffectKind kind, int param, float v)
             case gateThreshold: return fmt ("%.1f dB", gateThresholdDb (v));
             case expander: return on (v) ? "expander" : "gate";
             case order: return on (v) ? "dyn > EQ" : "EQ > dyn";
+            case voicing: return on (v) ? "E console" : "classic";
+            case filterSplit: return on (v) ? "split" : "with EQ";
             case phase: return on (v) ? "inverted" : "normal";
             case compMix: return fmt ("%.0f%%", v * 100.0);
             default: return onOff (v);
@@ -1628,6 +1736,7 @@ std::string paramText (EffectKind kind, int param, float v)
             case display: return on (v) ? "shown" : "hidden";
             case release: return fmt ("%.0f ms", releaseMs (v));
             case output: return fmt ("%+.1f dB", lin (v, -12.0, 12.0));
+            case voicing: return on (v) ? "classic split" : "modern";
             default: return onOff (v);
         }
     }

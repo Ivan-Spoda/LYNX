@@ -197,3 +197,22 @@ TEST (nebula_clear_and_echoform_phase_round129)
         if (item.param != nullptr && (std::string (item.param).rfind ("Early ", 0) == 0 || std::string (item.param).rfind ("Late ", 0) == 0))
             CHECK (item.page == (std::string (item.param).rfind ("Early ", 0) == 0 ? 0 : 1));
 }
+
+TEST (compressor_mix_and_trim_round129)
+{
+    using namespace lynx;
+    // the RComp role's MIX (0 % = the dry signal) and TRIM (after the mix); defaults leave older projects unchanged
+    auto p = makeEffectSlot (EffectKind::compressor).params;
+    CHECK (formatEffectParam (EffectKind::compressor, 6, p[6], 120.0) == "100%" && formatEffectParam (EffectKind::compressor, 7, p[7], 120.0) == "+0.0 dB");
+    auto run = [] (const EffectParams& q) {
+        auto fx = makeEffect (EffectKind::compressor);
+        fx->prepare (48000.0);
+        std::vector<float> l (4800, 0.5f), r (4800, 0.5f);
+        fx->process (l.data(), r.data(), 4800, q, 120.0);
+        return l.back();
+    };
+    p[6] = 0.0f; // all dry
+    CHECK (std::abs (run (p) - 0.5f) < 1e-6f);
+    p[7] = 1.0f; // +18 dB
+    CHECK (std::abs (run (p) - 0.5f * std::pow (10.0f, 18.0f / 20.0f)) < 1e-3f);
+}
