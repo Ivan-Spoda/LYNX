@@ -27,18 +27,19 @@ Round 128 covers the FabFilter / Slate / Antares roles (below). Round 129 covers
 
 | LYNX engine | Original (trial here) | Config before | Design before | Config after | Design after |
 |---|---|---|---|---|---|
-| Facet EQ | Pro-Q 4 (v4.1.3) | 6 | 8 | … | … |
-| Apex Limiter | Pro-L 2 (v2.2.6) | 4 | 7 | … | … |
-| Crest Compressor | Pro-C 3 (v3.0.2) | 6 | 7 | … | … |
-| Prism Multiband | Pro-MB (v1.3.3) | 4 | 6 | … | … |
-| Sentry Gate | Pro-G (v1.4.2) | 6 | 7 | … | … |
-| Hush De-esser | Pro-DS (v1.3.2) | 4 | 6 | … | … |
-| Ember Saturator | Saturn 2 (v2.1.3); Decapitator role (not installed) | 3 | 6 | … | … |
-| Aether | Fresh Air (v1.1.7) | 8 | 8 | … | … |
+| Facet EQ | Pro-Q 4 (v4.1.3) | 6 | 8 | 8 | 8 |
+| Apex Limiter | Pro-L 2 (v2.2.6) | 4 | 7 | 7 | 8 |
+| Crest Compressor | Pro-C 3 (v3.0.2) | 6 | 7 | 8 | 8 |
+| Prism Multiband | Pro-MB (v1.3.3) | 4 | 6 | 5 | 6 |
+| Sentry Gate | Pro-G (v1.4.2) | 6 | 7 | 8 | 8 |
+| Hush De-esser | Pro-DS (v1.3.2) | 4 | 6 | 7 | 8 |
+| Ember Saturator | Saturn 2 (v2.1.3); Decapitator role (not installed) | 3 | 6 | 6 | 7 |
+| Aether | Fresh Air (v1.1.7) | 8 | 8 | 8 | 8 |
 | LYNX Tune | Auto-Tune Pro (v11.6, Auto mode) | 5 | 6 | 7 | 7 |
 
-The "after" columns are filled in as round 128's batches land (see the per-plugin tables and
-`docs/analise/REA_rodada128.md`).
+After = round 128 (per-plugin tables below and `docs/analise/REA_rodada128.md`). The shared header (undo / redo, A/B,
+presets) is round 129's PresetBar; once it lands every config score above gains about one point (Aether most of all:
+the header is the only thing it still misses).
 
 ## Shared by every editor (the frame around the controls)
 

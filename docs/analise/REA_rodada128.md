@@ -164,5 +164,12 @@ tests/Parity128bTests.inc.
   Learn scale from MIDI, Graph mode, Harmony Player.
 
 ## Where I stopped
-- Done: §1, §2, docs/PARITY.md (tables + before scores), Desktop page.
-- Next: shared editor header (undo / redo, A/B, presets), then per-engine gaps in the order of §2.
+- Done: §1–§3 (+ §3a–§3c from the sub-branches, merged), docs/PARITY.md with before / after scores, the Desktop page
+  (`LYNX-paridade/FabFilter-Slate-Antares.html`: trial | LYNX before | LYNX after). build-local with the FL Data dir:
+  1 426 990 checks, 0 failures (merge of all four branches).
+- Left (biggest first): the shared header (undo / redo, A/B, presets — round 129's PresetBar, then wire it into Facet's
+  own editor if parity129 did not); Prism free band placement / 6 bands / phase modes; Facet 24 bands, per-band
+  attack / release, Flat Tilt / All Pass / Brickwall (needs a value remap of the shape and slope parameters), Character;
+  Apex oversampling + loudness meters; Crest Host-Sync / MIDI triggering, 6 side-chain EQ bands; LYNX Tune Classic
+  mode, throat length, scale detune; Ember 6 bands, 28 styles (needs measured models — vmatch), modulation system;
+  Decapitator / Soundtoys (not installed).
