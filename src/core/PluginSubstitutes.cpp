@@ -1168,24 +1168,26 @@ std::optional<double> wavesValue (const std::vector<double>& rw, std::size_t i)
 float logNorm (double v, double lo, double hi) { return (float) std::clamp (std::log (v / lo) / std::log (hi / lo), 0.0, 1.0); }
 float linNorm (double v, double lo, double hi) { return (float) std::clamp ((v - lo) / (hi - lo), 0.0, 1.0); }
 
-// Renaissance Compressor (28 values): 0 release ms, 1 threshold dB, 2 gain dB, 8 attack ms, 9 ratio, 17 ARC (0) /
-// manual. Her state (-15 dB, 2.95:1, 0.5 ms, ARC, gain 0) is matched by LYNX's peak compressor at 5 dB lower threshold
-// (RComp's soft knee / RMS detector), the same ratio, 300 ms release (ARC), no auto gain (RComp at gain 0 does not make
-// up: -9.6 dB on her take), within 0.5 dB on the stairs. Warm / Smooth and Electro / Opto are not translated.
+// Renaissance Compressor (28 values): 0 release ms, 1 threshold dB, 2 gain dB, 8 attack ms, 9 ratio, 17 ARC (0) / manual,
+// 26 mix %, 27 trim dB.
+// Round 123: Compressor's "vintage program" voicing is the compressor measured black-box on the official trial at her
+// state (core/VoiceMatch.h; REA_rodada123 §3), taking threshold, ratio, attack, release and gain as they are.
 int translateWavesRComp (const std::vector<std::uint8_t>& state, EffectSlot& slot)
 {
     const auto rw = wavesRealWorldParams (state);
     const auto threshold = wavesValue (rw, 1), ratio = wavesValue (rw, 9);
     if (slot.kind != EffectKind::compressor || ! threshold || ! ratio)
         return 0;
-    slot.params[0] = linNorm (*threshold - 5.0, -60.0, 0.0);
+    slot.params[0] = linNorm (*threshold, -60.0, 0.0);
     slot.params[1] = linNorm (*ratio, 1.0, 20.0);
     slot.params[2] = logNorm (wavesValue (rw, 8).value_or (0.5), 0.1, 100.0);
-    const bool arc = wavesValue (rw, 17).value_or (0.0) < 0.5;
-    slot.params[3] = logNorm (arc ? 300.0 : wavesValue (rw, 0).value_or (300.0), 10.0, 1000.0);
+    slot.params[3] = logNorm (wavesValue (rw, 0).value_or (160.0), 10.0, 1000.0);
     slot.params[4] = linNorm (wavesValue (rw, 2).value_or (0.0), 0.0, 24.0);
     slot.params[5] = 0.0f;
-    return 5;
+    slot.params[6] = (float) std::clamp (wavesValue (rw, 26).value_or (100.0) / 100.0, 0.0, 1.0); // mix %
+    slot.params[7] = linNorm (wavesValue (rw, 27).value_or (0.0), -18.0, 18.0);                  // trim dB
+    slot.params[8] = 1.0f;                                                                         // vintage voicing
+    return 6;
 }
 
 // DeEsser (15 values): 0 frequency Hz, 2 threshold dB, 10 monitor (1 = side chain), 13 side chain (1 = high pass,
@@ -1213,10 +1215,9 @@ int translateWavesDeEsser (const std::vector<std::uint8_t>& state, EffectSlot& s
     return n;
 }
 
-// CLA-2A (208 values): 38 gain, 74 peak reduction, 112 comp (0) / limit. [EXEC] The gain knob's level below the
-// cell's threshold (noise at -70 dBFS): 20 -> -18.5 dB, 30 -> -3.0, 40 -> +8.0, 48.96 -> +15.5, 60 -> +24.2,
-// 70 -> +29.2, 80 -> +31.8. On her take after RComp (peak -12 dBFS) Glow Leveler's 50 ms level envelope follows the
-// original within 0.3-1.4 dB with peak reduction 0.40 + 0.021 x (knob - 40) and the gain above + 1.5 dB.
+// CLA-2A (208 values): 38 gain, 74 peak reduction, 112 comp (0) / limit, 153 Hi Freq, 206 trim dB. Round 123: Glow
+// Leveler's "opto classic" voicing is the leveler measured black-box on the official trial (core/VoiceMatch.h;
+// REA_rodada123 §4), where the dials read 0 .. 100 like the original's, so they map one to one.
 int translateWavesCla2a (const std::vector<std::uint8_t>& state, EffectSlot& slot)
 {
     namespace g = mixsuite::glow;
@@ -1224,18 +1225,14 @@ int translateWavesCla2a (const std::vector<std::uint8_t>& state, EffectSlot& slo
     const auto gain = wavesValue (rw, 38), reduction = wavesValue (rw, 74);
     if (slot.kind != EffectKind::glowLeveler || ! gain || ! reduction)
         return 0;
-    static constexpr double knob[] = { 0.0, 20.0, 30.0, 40.0, 48.96, 60.0, 70.0, 80.0, 100.0 };
-    static constexpr double db[] = { -60.0, -18.5, -3.0, 8.0, 15.5, 24.2, 29.2, 31.8, 34.0 };
-    const auto k = std::clamp (*gain, 0.0, 100.0);
-    std::size_t i = 1;
-    while (i < std::size (knob) - 1 && knob[i] < k)
-        ++i;
-    const auto levelDb = db[i - 1] + (db[i] - db[i - 1]) * (k - knob[i - 1]) / (knob[i] - knob[i - 1]);
-    slot.params[g::gain] = linNorm (levelDb + 1.5, 0.0, 30.0);
-    slot.params[g::peakReduction] = (float) std::clamp (0.40 + 0.021 * (*reduction - 40.0), 0.0, 1.0);
+    slot.params[g::voicing] = 1.0f;
+    slot.params[g::gain] = (float) std::clamp (*gain / 100.0, 0.0, 1.0);
+    slot.params[g::peakReduction] = (float) std::clamp (*reduction / 100.0, 0.0, 1.0);
     slot.params[g::mode] = wavesValue (rw, 112).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
-    slot.params[g::emphasis] = 0.0f;
-    return 3;
+    slot.params[g::emphasis] = (float) std::clamp (wavesValue (rw, 153).value_or (50.0) / 100.0, 0.0, 1.0);
+    slot.params[g::trim] = linNorm (wavesValue (rw, 206).value_or (0.0), -18.0, 18.0);
+    slot.params[g::mix] = 1.0f;
+    return 5;
 }
 
 // CLA-76 (106 values): 0 / 1 Input / Output as positive dB magnitudes (−0 … −∞ dB), 2 / 3 Attack / Release knobs

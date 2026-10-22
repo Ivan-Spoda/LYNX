@@ -2927,3 +2927,5 @@ countries: br
 "Hybrid" = "Híbrido"
 "Off|Clean|Analog" = "Desligado|Limpo|Analógico"
 "Matched" = "Calibrado"
+"Modern|Opto classic" = "Moderno|Óptico clássico"
+"Classic|Vintage" = "Clássico|Vintage"
