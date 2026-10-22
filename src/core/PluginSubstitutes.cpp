@@ -470,6 +470,15 @@ vendor = Solid State Logic
 lynx = Ridge Strip
 names = SSL Native Channel Strip 2; SSL Native Channel Strip; SSL 4K E; SSL 4K B; Vocalstrip 2; SSL Native Vocalstrip 2
 
+[waves-s1-imager]
+product = S1 Imager
+vendor = Waves
+lynx = Stereo Shaper
+# round 124: the width / rotation / gain matrix measured on the official trial is set exactly on the Stereo Shaper's
+# matrix (docs/analise/REA_rodada124_extras.md §4); without a readable state the slot stays neutral
+waves = S1 Imager; S1 Imager Stereo
+translate = waves-s1-imager
+
 [waves-eqs]
 product = Waves EQ (Q10 / Renaissance EQ / SSL EQ)
 vendor = Waves
@@ -481,6 +490,10 @@ product = FabFilter Pro-Q
 vendor = FabFilter
 lynx = Facet EQ
 names = FabFilter Pro-Q 2; FabFilter Pro-Q 3; FabFilter Pro-Q 4; Pro-Q 2; Pro-Q 3; Pro-Q 4
+# round 124: a Pro-Q 4 state (component state "FFBS", 600 values) is translated band by band (shape, frequency, gain,
+# Q, slope; processing mode, gain scale, output) — Facet's shapes are fitted to the official trial, so her curves
+# null against the reference (docs/analise/REA_rodada124_extras.md §2). Other versions keep a flat curve.
+translate = pro-q4
 
 # ---------------------------------------------------------------- vocal tools -> LYNX's mixing suite (round 96)
 [waves-deesser]
@@ -511,8 +524,8 @@ product = Fresh Air
 vendor = Slate Digital
 lynx = Aether
 names = Fresh Air; FreshAir
-# round 113: its two air amounts are read from the state (freshAirAmounts) and set Aether's air shelf through laws
-# measured on the official trial
+# round 113: its two air amounts are read from the state (freshAirAmounts); round 124: they drive Aether's dynamic
+# air model, measured black-box on the official trial to match it sample for sample (REA_rodada124 §3)
 translate = fresh-air
 
 [soundtoys-decapitator]
@@ -1116,22 +1129,28 @@ int translateWavesTune (const std::vector<std::uint8_t>& state, EffectSlot& slot
     return n;
 }
 
-// Fresh Air: its two air amounts become Aether's air shelf. [EXEC] Black-box measurement of the official trial
-// (fxmeasure, pink noise at -20 dBFS RMS, 48 kHz; docs/analise/REA_rodada113.md §3b): each setting's response above
-// 2 kHz is fitted by one high shelf (RBJ, S = 0.6, Aether's); gain and frequency follow these least-squares laws of
-// (mid, high), within 0.5 dB RMS of the measured curves for the settings her projects use. The exciter stays off.
+// Fresh Air: its two air amounts drive Aether's dynamic air model (round 124), which reproduces the official trial
+// measured black-box (docs/analise/REA_rodada124.md §3): the same two parallel compressed high-passed bands, the same
+// amount laws, so the amounts map one to one; Trim (the float at 2526 of the state, -12 … 0 dB) becomes the output.
+// (Round 113 fitted a static shelf; the original is level-dependent: quiet highs get up to +12 dB, loud ones +3.)
 int translateFreshAir (const std::vector<std::uint8_t>& state, EffectSlot& slot)
 {
+    namespace a = mixsuite::aether;
     const auto air = freshAirAmounts (state);
     if (! air || slot.kind != EffectKind::aether)
         return 0;
-    const auto m = (double) air->first, h = (double) air->second;
-    const auto gainDb = std::clamp (10.345 * m + 20.548 * h - 2.32 * m * m - 7.75 * h * h - 11.673 * m * h, 0.0, 15.0);
-    const auto hz = std::clamp (std::exp2 (12.8069 - 0.7108 * m + 0.6746 * h - 0.5369 * m * h), 5000.0, 20000.0);
-    slot.params[mixsuite::aether::air] = (float) (gainDb / 15.0);
-    slot.params[mixsuite::aether::airFreq] = (float) (std::log (hz / 5000.0) / std::log (4.0));
-    slot.params[mixsuite::aether::harmonics] = 0.0f;
-    return 2;
+    slot.params[a::dynamic] = 1.0f;
+    slot.params[a::midAir] = air->first;
+    slot.params[a::highAir] = air->second;
+    slot.params[a::air] = 0.0f;
+    slot.params[a::harmonics] = 0.0f;
+    slot.params[a::mix] = 1.0f;
+    float trimDb = 0.0f;
+    std::memcpy (&trimDb, state.data() + 2526, 4);
+    if (! std::isfinite (trimDb) || trimDb < -12.0f || trimDb > 0.0f)
+        trimDb = 0.0f;
+    slot.params[a::output] = (trimDb + 12.0f) / 24.0f;
+    return 3;
 }
 
 // --- Waves RealWorld lists (round 113). [EXEC] Black-box measurement of the official trials (WaveShell 17.1, tools/
@@ -1361,6 +1380,17 @@ int translateWavesHDelay (const std::vector<std::uint8_t>& state, EffectSlot& sl
             p[(std::size_t) side] = e::timeValue (ms);
     }
     const auto f = std::max (0.0, *fb) / 100.0;
+    // round 124: the hybrid engine reproduces the trial's loop exactly (REA_rodada124 §5) when the state uses no
+    // filter, modulation or lo-fi (every state of her corpus); otherwise the round-119 approximation below
+    const auto hp0 = wavesValue (rw, 17).value_or (19.0), lp0 = wavesValue (rw, 15).value_or (20100.0);
+    if (hp0 <= 19.5 && lp0 >= 20000.0 && wavesValue (rw, 19).value_or (0.0) <= 0.0 && wavesValue (rw, 21).value_or (0.0) < 0.5)
+    {
+        p[e::hybrid] = e::hybridValue (analog ? 2 : 1);
+        p[e::feedback] = (float) std::clamp (f / 2.0, 0.0, 1.0);
+        p[e::mix] = (float) std::clamp (wavesValue (rw, 6).value_or (100.0) / 100.0, 0.0, 1.0);
+        p[e::output] = linNorm (wavesValue (rw, 14).value_or (0.0), -18.0, 18.0);
+        return 9;
+    }
     const auto loop = pingPong ? 0.93 * f * f : 0.98 * f;
     p[e::feedback] = (float) std::clamp (loop / 2.0, 0.0, 1.0);
     p[e::mix] = (float) std::clamp (wavesValue (rw, 6).value_or (100.0) / 100.0, 0.0, 1.0);
@@ -1395,7 +1425,8 @@ int translateWavesNs1 (const std::vector<std::uint8_t>& state, EffectSlot& slot)
     if (slot.kind != EffectKind::quellDenoiser || ! amount)
         return 0;
     slot.params[voicetools::quell::amount] = (float) std::clamp (*amount / 100.0, 0.0, 1.0);
-    return 1;
+    slot.params[voicetools::quell::matched] = 1.0f; // round 124: the engine fitted to the trial (REA_rodada124 §6)
+    return 2;
 }
 
 // Doubler (RealWorld list, round 119): 0 output dB, 1 direct on, 2 direct gain dB, 3 direct pan deg, 4 align,
@@ -1444,8 +1475,53 @@ int translateWavesDoubler (const std::vector<std::uint8_t>& state, EffectSlot& s
     return 33;
 }
 
+// S1 Imager (RealWorld list, round 124): 0 gain dB, 1 width (0 … 3, the plug-in keeps two decimals), 4 rotation deg
+// (±45), 5 asymmetry deg (±90), 13 swap, 14 / 15 invert left / right, 16 M/S input. [EXEC] Black-box on the official
+// trial (REA_rodada124_extras §4): a frequency-flat 2 × 2 matrix, gain · rotation · width · input. Width w below 1
+// scales the side signal (mid 1, side w); above 1 the side / mid ratio is w with mid = √(0.625 + 0.375 / w²) (exact on
+// 41 measured points); rotation φ is the plain rotation [cos −sin; sin cos]. Fruity Stereo Shaper (LYNX's exact engine)
+// holds any 2 × 2 matrix, so the translation nulls the reference. Asymmetry, swap / invert and M/S input are not
+// measured beyond their neutral settings (all neutral in her states): a state that uses them is not translated.
+int translateWavesS1Imager (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    const auto rw = wavesRealWorldParams (state);
+    const auto width = wavesValue (rw, 1);
+    if (slot.kind != EffectKind::stereoShaper || ! width)
+        return 0;
+    const auto at = [&] (std::size_t i) { return wavesValue (rw, i).value_or (0.0); };
+    if (std::abs (at (5)) > 1e-6 || at (13) >= 0.5 || at (14) >= 0.5 || at (15) >= 0.5 || at (16) >= 0.5)
+        return 0;
+    const auto w = std::clamp (std::round (*width * 100.0) / 100.0, 0.0, 3.0);
+    const auto mid = w <= 1.0 ? 1.0 : std::sqrt (0.625 + 0.375 / (w * w));
+    const auto side = w * mid;
+    const auto a = 0.5 * (mid + side), b = 0.5 * (mid - side);
+    const auto phi = std::clamp (at (4), -45.0, 45.0) * 3.14159265358979323846 / 180.0;
+    const auto c = std::cos (phi), s = std::sin (phi);
+    const auto g = std::pow (10.0, std::clamp (at (0), -24.0, 0.0) / 20.0);
+    // rotation · width: [c −s; s c] · [a b; b a]
+    const double m00 = g * (c * a - s * b), m01 = g * (c * b - s * a), m10 = g * (s * a + c * b), m11 = g * (s * b + c * a);
+    // the Shaper's knob law: |gain| = (3^|x| − 1) / 2 with x = raw / 12800
+    const auto raw = [] (double gain) {
+        const auto x = std::log (2.0 * std::abs (gain) + 1.0) / std::log (3.0);
+        return std::clamp ((int) std::lround ((gain < 0.0 ? -x : x) * 12800.0), -25600, 25600);
+    };
+    const auto unit = [] (int r) { return (float) (r + 25600) / 51200.0f; };
+    auto& p = slot.params;
+    p[0] = unit (raw (m01)); // R → L
+    p[1] = unit (raw (m00)); // L
+    p[2] = unit (raw (m11)); // R
+    p[3] = unit (raw (m10)); // L → R
+    p[4] = 0.5f;             // no delay
+    p[5] = 0.5f;             // no phase
+    p[6] = 0.0f;
+    p[7] = 0.0f;
+    return 4;
+}
+
 RawTranslator rawTranslatorNamed (std::string_view name)
 {
+    if (name == "waves-s1-imager")
+        return translateWavesS1Imager;
     if (name == "waves-h-delay")
         return translateWavesHDelay;
     if (name == "waves-ns1")

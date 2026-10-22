@@ -183,8 +183,9 @@ TEST (substitute_waves_shell_by_plugin_name)
     CHECK (lynx::findPluginSubstitute (lynx::pluginIdentity (shell), false) != nullptr
            && lynx::findPluginSubstitute (lynx::pluginIdentity (shell), false)->effect == lynx::EffectKind::geminiDoubler);
 
-    // a shell sub-plugin LYNX has no substitute for: nothing (the shell's file name must not match anything)
-    shell.state = flVst3State (wavesComponent ("S1 Imager", "1"));
+    // a shell sub-plugin LYNX has no substitute for: nothing (the shell's file name must not match anything; round 124:
+    // S1 Imager has one now, Vocal Rider serves as the example)
+    shell.state = flVst3State (wavesComponent ("Vocal Rider", "1"));
     CHECK (lynx::findPluginSubstitute (lynx::pluginIdentity (shell), false) == nullptr);
     // a .lynx reference of an installed-elsewhere Waves plugin: its display name
     lynx::PluginIdentity named;
