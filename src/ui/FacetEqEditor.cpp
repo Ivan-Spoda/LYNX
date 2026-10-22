@@ -493,6 +493,15 @@ public:
     {
         const auto p = e.position;
         dragging = Drag::none;
+        if (e.mods.isPopupMenu() && headerArea().contains (p)) // round 126: the editor's style
+        {
+            juce::PopupMenu m;
+            skin::addStyleMenu (m, skin::styleKey (EffectKind::facetEq), [safe = juce::Component::SafePointer<juce::Component> (this)] {
+                if (safe != nullptr) safe->repaint();
+            });
+            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+            return;
+        }
         std::vector<Control> all;
         if (const auto* c = controlAt (p, all))
         {
@@ -742,6 +751,7 @@ public:
     void paint (juce::Graphics& g) override
     {
         using namespace theme;
+        const skin::StyleScope styleScope (skin::styleFor (EffectKind::facetEq)); // round 126: one style per plugin
         g.fillAll (colour::bg0);
         const auto* fx = current();
         if (fx == nullptr)
@@ -981,16 +991,26 @@ public:
             g.reduceClipRegion (plot.toNearestInt());
             if (mode == Analyzer::pre || mode == Analyzer::both)
             {
-                g.setColour (colour::bg5.withAlpha (0.55f));
+                g.setGradientFill (juce::ColourGradient (colour::bg5.withAlpha (0.7f), 0.0f, plot.getY(), colour::bg5.withAlpha (0.25f), 0.0f, plot.getBottom(), false));
                 g.fillPath (spectrumPath (specPre, true));
             }
             if (mode == Analyzer::post || mode == Analyzer::both)
             {
                 const auto p = spectrumPath (specPost, true);
-                g.setGradientFill (juce::ColourGradient (colour::accent.withAlpha (0.13f), 0.0f, plot.getY(), colour::accent.withAlpha (0.01f), 0.0f, plot.getBottom(), false));
+                // round 126: the analyser glows — a deep fill of the accent rising to a lit edge
+                juce::ColourGradient fillGrad (colour::accent.withAlpha (0.34f), 0.0f, plot.getY() + plot.getHeight() * 0.25f, colour::accent.withAlpha (0.02f), 0.0f,
+                                               plot.getBottom(), false);
+                fillGrad.addColour (0.5, colour::accent.darker (0.3f).withAlpha (0.14f));
+                g.setGradientFill (fillGrad);
                 g.fillPath (p);
-                g.setColour (colour::accent.withAlpha (0.55f));
-                g.strokePath (spectrumPath (specPost, false), juce::PathStrokeType (1.0f));
+                const auto edge = spectrumPath (specPost, false);
+                if (! skin::reducedEffects())
+                {
+                    g.setColour (colour::accent.withAlpha (0.18f));
+                    g.strokePath (edge, juce::PathStrokeType (4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                }
+                g.setColour (colour::accent.brighter (0.2f).withAlpha (0.85f));
+                g.strokePath (edge, juce::PathStrokeType (1.2f));
             }
             g.restoreState();
         }
@@ -1066,11 +1086,23 @@ public:
         const auto curveColour = fx.enabled ? colour::textPrimary : colour::textDisabled;
         if (fx.enabled)
         {
-            g.setColour (colour::accent.withAlpha (0.28f));
+            // round 126: the area between the sum and 0 dB lit in the accent, the sum a white-hot line in a red glow
+            auto area0 = total;
+            area0.lineTo (plot.getRight(), yForDb (0.0));
+            area0.lineTo (plot.getX(), yForDb (0.0));
+            area0.closeSubPath();
+            g.setColour (colour::accent.withAlpha (0.16f));
+            g.fillPath (area0);
+            if (! skin::reducedEffects())
+            {
+                g.setColour (colour::accent.withAlpha (0.12f));
+                g.strokePath (total, juce::PathStrokeType (12.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            }
+            g.setColour (colour::accent.withAlpha (0.4f));
             g.strokePath (total, juce::PathStrokeType (5.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         }
         g.setColour (curveColour);
-        g.strokePath (total, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.strokePath (total, juce::PathStrokeType (2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         g.restoreState();
 
         // nodes
@@ -1096,10 +1128,11 @@ public:
                 g.drawEllipse (juce::Rectangle<float> (8.0f, 8.0f).withCentre ({ pos.x, liveY }), 1.5f);
             }
             const auto r = isSel ? 9.0f : 7.5f;
+            skin::bloom (g, pos, r * (isSel ? 3.4f : 2.4f), colour, isSel || b == hover ? 0.55f : 0.35f); // round 126: every node glows
             if (isSel)
             {
-                g.setColour (colour.withAlpha (0.25f));
-                g.fillEllipse (juce::Rectangle<float> (r * 3.2f, r * 3.2f).withCentre (pos));
+                g.setColour (colour.withAlpha (0.3f));
+                g.drawEllipse (juce::Rectangle<float> (r * 3.2f, r * 3.2f).withCentre (pos), 1.5f);
             }
             const auto nodeColour = soloBand (fx.params[(std::size_t) soloParam]) == b ? colour::warning : colour;
             const auto node = juce::Rectangle<float> (r * 2.0f, r * 2.0f).withCentre (pos);
@@ -1390,6 +1423,7 @@ public:
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
         keepAboveMainWindow (*this);
+        if (auto* c = getContentComponent()) skin::playOpenAnimation (*c, skin::styleFor (EffectKind::facetEq)); // round 126: fade / scale in
     }
 
     void closeButtonPressed() override;

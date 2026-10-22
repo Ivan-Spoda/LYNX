@@ -1,6 +1,7 @@
 #include "ui/ProjectLoading.h"
 #include "core/LoadTrace.h"
 #include "ui/MainComponent.h"
+#include "ui/PluginSkin.h"
 #include "platform/Paths.h"
 #include "ui/SetupWizard.h"
 #include "core/FlPluginDb.h"
@@ -123,6 +124,9 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     if (persistent)
     {
         loadUiSettings();
+        skin::onStyleSettingsChanged = [safe = juce::Component::SafePointer<MainComponent> (this)] { // an editor's own style was picked
+            if (safe != nullptr) safe->saveUiSettings();
+        };
         loadKeyMap();
         startSession();
     }
@@ -1142,6 +1146,15 @@ void MainComponent::loadUiSettings()
             ChannelRackComponent::keepEditorsOpen = on;
         else if (key == "waveSpectral") // ("waveColours", the old spectral-by-default key, is ignored)
             ui::WaveformCache::spectral = on;
+        else if (key == "pluginStyle") // "Automatic" or a style forced on every plugin
+        {
+            const auto v = line.fromFirstOccurrenceOf ("=", false, false).trim();
+            skin::setForcedStyle (v.equalsIgnoreCase ("Automatic") || v.isEmpty() ? -1 : (int) skin::styleFromName (v));
+        }
+        else if (key == "pluginStyleOverrides")
+            skin::overridesFromString (line.fromFirstOccurrenceOf ("=", false, false).trim());
+        else if (key == "reducedEffects")
+            skin::setReducedEffects (on);
         else if (key == "waveStereo")
             ui::WaveformCache::stereo = on;
         else if (key == "rememberSeek")
@@ -1189,6 +1202,9 @@ void MainComponent::saveUiSettings()
                                       + "\nstartupSound=" + juce::String (startup.sound ? 1 : 0)
                                       + "\nwaveSpectral=" + juce::String (ui::WaveformCache::spectral ? 1 : 0)
                                       + "\nwaveStereo=" + juce::String (ui::WaveformCache::stereo ? 1 : 0)
+                                      + "\nreducedEffects=" + juce::String (skin::reducedEffects() ? 1 : 0)
+                                      + "\npluginStyle=" + juce::String (skin::forcedStyle() < 0 ? "Automatic" : skin::styleName ((skin::Style) skin::forcedStyle()))
+                                      + "\npluginStyleOverrides=" + skin::overridesToString()
                                       + "\nrememberSeek=" + juce::String (EditorGlobals::get().rememberSeek ? 1 : 0)
                                       + "\nscopeMode=" + juce::String (toolbar::OutputMonitor::mode)
                                       + "\ntoolbarGroups=" + juce::String (toolbarLayout.orderToString())
@@ -2871,6 +2887,8 @@ void MainComponent::openSettings (int page)
         o.uiScale = safe->toolbarLayout.uiScale;
         o.waveSpectral = ui::WaveformCache::spectral;
         o.waveStereo = ui::WaveformCache::stereo;
+        o.reducedEffects = skin::reducedEffects();
+        o.pluginStyle = skin::forcedStyle();
         o.splash = safe->startup.splash;
         o.startupSound = safe->startup.sound;
         o.scanAtStart = backgroundScanAtStart();
@@ -2894,6 +2912,13 @@ void MainComponent::openSettings (int page)
             auto layout = self.toolbarLayout;
             layout.uiScale = toolbarlayout::clampScale (o.uiScale);
             self.setToolbarLayout (layout, true);
+        }
+        if (o.reducedEffects != skin::reducedEffects() || o.pluginStyle != skin::forcedStyle())
+        {
+            skin::setReducedEffects (o.reducedEffects);
+            skin::setForcedStyle (o.pluginStyle);
+            for (int i = 0; i < juce::Desktop::getInstance().getNumComponents(); ++i) // open editors redraw at once
+                if (auto* c = juce::Desktop::getInstance().getComponent (i)) c->repaint();
         }
         if (o.waveSpectral != ui::WaveformCache::spectral || o.waveStereo != ui::WaveformCache::stereo)
         {

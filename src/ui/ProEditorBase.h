@@ -356,6 +356,15 @@ protected:
             bar.click (part, *this);
             return;
         }
+        if (e.mods.isPopupMenu() && headerArea().contains (e.position)) // round 126: the editor's style
+        {
+            juce::PopupMenu m;
+            skin::addStyleMenu (m, skin::styleKey (kind), [safe = juce::Component::SafePointer<juce::Component> (this)] {
+                if (safe != nullptr) safe->repaint();
+            });
+            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+            return;
+        }
         bar.beginGesture();
         Ctl c;
         if (controlAt (e.position, c))
@@ -496,9 +505,15 @@ protected:
     }
 
     // --- painting ------------------------------------------------------------------------------------
+public:
+    skin::Style editorStyle() const { return skin::styleFor (kind); } // round 126: one style per plugin
+
+protected:
+
     void paint (juce::Graphics& g) override
     {
         using namespace theme;
+        const skin::StyleScope styleScope (editorStyle());
         skin::canvas (g, getLocalBounds().toFloat(), accent);
         const auto* fx = current();
         if (fx == nullptr)
@@ -691,11 +706,7 @@ protected:
     // the background of a display (the level history, the analyser): deep, with the accent pooling under the header
     void displayBackground (juce::Graphics& g, juce::Rectangle<float> r) const
     {
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff15171c), 0.0f, r.getY(), juce::Colour (0xff08090b), 0.0f, r.getBottom(), false));
-        g.fillRect (r);
-        juce::ColourGradient pool (accent.withAlpha (0.06f), r.getCentreX(), r.getY(), accent.withAlpha (0.0f), r.getCentreX(), r.getY() + r.getWidth() * 0.4f, true);
-        g.setGradientFill (pool);
-        g.fillRect (r.withHeight (juce::jmin (r.getHeight(), r.getWidth() * 0.4f)));
+        skin::backdrop (g, r, accent); // round 126: aurora blooms of the accent, cached as an image
     }
     // a level area filled with a vertical gradient of `c` (strong at the top, fading down)
     static void fillLevel (juce::Graphics& g, const juce::Path& p, juce::Colour c, juce::Rectangle<float> r, float top, float bottom)
