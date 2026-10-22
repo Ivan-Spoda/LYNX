@@ -32,8 +32,53 @@ const char* scaleName (Scale s) noexcept
         case Scale::lydian: return "Lydian";
         case Scale::locrian: return "Locrian";
         case Scale::custom: return "Custom";
+        case Scale::wholeTone: return "Whole tone";
+        case Scale::diminished: return "Diminished";
     }
     return "Chromatic";
+}
+
+std::pair<int, Scale> detectKey (const std::array<double, 12>& h) noexcept
+{
+    // Krumhansl & Kessler (1982) probe-tone profiles, C major / C minor
+    static constexpr double major[12] { 6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88 };
+    static constexpr double minor[12] { 6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17 };
+    double total = 0.0;
+    for (const auto x : h)
+        total += std::max (0.0, x);
+    if (! (total > 0.0))
+        return { -1, Scale::major };
+    auto corr = [&h] (const double* prof, int key) {
+        double mx = 0.0, mp = 0.0;
+        for (int k = 0; k < 12; ++k)
+        {
+            mx += std::max (0.0, h[(std::size_t) k]);
+            mp += prof[k];
+        }
+        mx /= 12.0;
+        mp /= 12.0;
+        double sxy = 0.0, sxx = 0.0, syy = 0.0;
+        for (int k = 0; k < 12; ++k)
+        {
+            const auto x = std::max (0.0, h[(std::size_t) ((k + key) % 12)]) - mx, y = prof[k] - mp;
+            sxy += x * y;
+            sxx += x * x;
+            syy += y * y;
+        }
+        return sxx > 0.0 && syy > 0.0 ? sxy / std::sqrt (sxx * syy) : -2.0;
+    };
+    int bestKey = 0;
+    auto bestScale = Scale::major;
+    double best = -3.0;
+    for (int key = 0; key < 12; ++key)
+        for (const auto mode : { Scale::major, Scale::minor })
+            if (const auto c = corr (mode == Scale::major ? major : minor, key); c > best + 1e-12)
+            {
+                best = c;
+                bestKey = key;
+                bestScale = mode;
+            }
+    return { bestKey, bestScale };
 }
 
 std::uint16_t scaleMask (Scale s, int key, std::uint16_t customMask) noexcept
@@ -62,6 +107,8 @@ std::uint16_t scaleMask (Scale s, int key, std::uint16_t customMask) noexcept
         case Scale::phrygian: rel = bits ({ 0, 1, 3, 5, 7, 8, 10 }); break;
         case Scale::lydian: rel = bits ({ 0, 2, 4, 6, 7, 9, 11 }); break;
         case Scale::locrian: rel = bits ({ 0, 1, 3, 5, 6, 8, 10 }); break;
+        case Scale::wholeTone: rel = bits ({ 0, 2, 4, 6, 8, 10 }); break;
+        case Scale::diminished: rel = bits ({ 0, 2, 3, 5, 6, 8, 9, 11 }); break; // whole-half
     }
     key = ((key % 12) + 12) % 12;
     std::uint16_t m = 0;
