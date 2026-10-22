@@ -59,7 +59,7 @@ TEST (facet_eq_new_parameters_keep_old_behaviour_round103)
     using namespace lynx::facet;
     // the 22 appended controls default to the round-99 behaviour, so older projects load unchanged
     const auto p = facet103::defaults();
-    CHECK (info().params.size() == 64 && paramCount == 64 && paramCount <= lynx::maxEffectParams);
+    CHECK (info().params.size() == (std::size_t) paramCount && paramCount >= 64 && paramCount <= lynx::maxEffectParams);
     for (int b = 0; b < bands; ++b)
     {
         CHECK (std::abs (rangeDb (p[(std::size_t) (rangeParam0 + b)])) < 1e-6);

@@ -1,7 +1,9 @@
 #include "core/PluginLayout.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <mutex>
@@ -1014,69 +1016,81 @@ Layout fruitySend()
 
 Layout lynxTune()
 {
-    // LYNX Tune (own design, REA rounds 95 / 120). Round 120: the workflow of the automatic pitch correctors' "auto"
-    // mode it stands in for (Auto-Tune Pro, studied on the official trial — layout logic only, LYNX's own drawing):
-    // the input / key / scale bar on top; the correction row in the middle — RETUNE SPEED big on the left, FLEX-TUNE
-    // beside it, the live correction meter (note name, ±100 cent ring) in the centre, the formant control and HUMANIZE
-    // big on the right; the scrolling pitch graph below; the target notes as a keyboard octave at the bottom.
+    // LYNX Tune (own design, REA rounds 95 / 120 / 128). The workflow of the automatic pitch correctors' "auto" mode it
+    // stands in for (Auto-Tune Pro, studied on the official trial — layout logic only, LYNX's own drawing): the input /
+    // key / scale bar on top with AUTO KEY under the scale and the formant / transpose / A4 / mix group on the right;
+    // the correction row in the middle — RETUNE SPEED big on the left, FLEX-TUNE beside it, the live correction meter
+    // (note name, ±100 cent ring; click = HOLD) in the centre, NATURAL VIBRATO and HUMANIZE big on the right; the pitch
+    // graph or the ADVANCED page (created vibrato, ignore vibrato) below; the keyboard at the bottom with its
+    // BYPASS / REMOVE modes and LATCH (round 128).
     Layout l;
     l.width = 800;
-    l.height = 548;
+    l.height = 610;
+    l.pages = { TR_NOOP ("Pitch graph"), TR_NOOP ("Advanced") };
     auto& v = l.items;
-    // --- top bar
-    v.push_back (section (0, 0, 382, 70, TR_NOOP ("INPUT")));
-    v.push_back (knob (36, 40, 30, "Tracking", TR_NOOP ("TRACKING"), 64, 0));
-    LayoutItem range;
-    range.type = Item::menu;
-    range.x = 70, range.y = 40, range.w = 112, range.h = 22;
-    range.param = "Range";
-    range.label = TR_NOOP ("Input type");
-    range.options = TR_NOOP ("Soprano|Alto / Tenor|Low male|Instrument");
-    v.push_back (range);
-    LayoutItem key;
-    key.type = Item::menu;
-    key.x = 190, key.y = 40, key.w = 62, key.h = 22;
-    key.param = "Key";
-    key.label = TR_NOOP ("Key");
-    key.options = "C|C#|D|D#|E|F|F#|G|G#|A|A#|B";
-    v.push_back (key);
-    LayoutItem scale;
-    scale.type = Item::menu;
-    scale.x = 260, scale.y = 40, scale.w = 114, scale.h = 22;
-    scale.param = "Scale";
-    scale.label = TR_NOOP ("Scale");
-    scale.options = TR_NOOP ("Chromatic|Major|Minor|Harmonic minor|Melodic minor|Major pentatonic|Minor pentatonic|Blues|Dorian|Mixolydian|Phrygian|Lydian|Locrian|Custom");
-    v.push_back (scale);
-    v.push_back (label (70, 24, 112, 14, TR_NOOP ("Input type")));
-    v.push_back (label (190, 24, 62, 14, TR_NOOP ("Key")));
-    v.push_back (label (260, 24, 114, 14, TR_NOOP ("Scale")));
-    v.push_back (section (386, 0, 414, 70, TR_NOOP ("OUTPUT")));
-    v.push_back (stepper (398, 30, 88, 22, "Transpose", TR_NOOP ("Transpose"), 25));
-    v.push_back (knob (526, 38, 30, "Reference", TR_NOOP ("A4"), 64, showValue));
-    v.push_back (knob (590, 38, 30, "Mix", TR_NOOP ("MIX"), 64, showValue));
-    v.push_back (toggle (636, 22, 154, 18, "Low latency", TR_NOOP ("Low latency")));
-    v.push_back (stepper (636, 44, 154, 20, "MIDI", TR_NOOP ("MIDI channel"), 129));
+    auto menu = [&v] (float x, float y, float w, const char* param, const char* caption, const char* options, int steps = 0) {
+        LayoutItem m;
+        m.type = Item::menu;
+        m.x = x, m.y = y, m.w = w, m.h = 22;
+        m.param = param;
+        m.label = caption;
+        m.options = options;
+        m.steps = steps;
+        v.push_back (m);
+        v.push_back (label (x, y - 16, w, 14, caption));
+    };
+    // --- top bar: input
+    v.push_back (section (0, 0, 334, 92, TR_NOOP ("INPUT")));
+    v.push_back (knob (34, 44, 30, "Tracking", TR_NOOP ("TRACKING"), 70, 0));
+    menu (66, 40, 106, "Range", TR_NOOP ("Input type"), TR_NOOP ("Soprano|Alto / Tenor|Low male|Instrument"));
+    menu (178, 40, 52, "Key", TR_NOOP ("Key"), "C|C#|D|D#|E|F|F#|G|G#|A|A#|B");
+    menu (236, 40, 92, "Scale", TR_NOOP ("Scale"),
+          TR_NOOP ("Chromatic|Major|Minor|Harmonic minor|Melodic minor|Major pentatonic|Minor pentatonic|Blues|Dorian|Mixolydian|Phrygian|Lydian|Locrian|Custom"));
+    v.push_back (display (236, 66, 92, 20, "tuneautokey"));
+    // --- mode: latency and MIDI targets
+    v.push_back (section (338, 0, 140, 92, TR_NOOP ("MODE")));
+    v.push_back (toggle (346, 24, 124, 18, "Low latency", TR_NOOP ("Low latency")));
+    v.push_back (stepper (346, 54, 124, 24, "MIDI", TR_NOOP ("MIDI channel"), 129));
+    // --- output: formant, transpose, reference, mix
+    v.push_back (section (482, 0, 318, 92, TR_NOOP ("OUTPUT")));
+    v.push_back (toggle (490, 22, 82, 18, "Formant preserve", TR_NOOP ("Formant")));
+    v.push_back (knob (531, 58, 26, "Formant shift", TR_NOOP ("SHIFT"), 82, bipolar));
+    v.push_back (stepper (580, 40, 78, 22, "Transpose", TR_NOOP ("Transpose"), 25));
+    v.push_back (knob (700, 44, 30, "Reference", TR_NOOP ("A4"), 70, showValue));
+    v.push_back (knob (760, 44, 30, "Mix", TR_NOOP ("MIX"), 70, showValue));
     // --- correction row
-    v.push_back (section (0, 74, 800, 236, TR_NOOP ("CORRECTION")));
-    v.push_back (knob (110, 180, 104, "Retune", TR_NOOP ("RETUNE SPEED"), 262, big | showValue));
-    v.push_back (knob (240, 204, 60, "Flex-Tune", TR_NOOP ("FLEX-TUNE"), 262, showValue));
-    v.push_back (display (300, 96, 200, 200, "pitchring"));
-    v.push_back (toggle (528, 128, 84, 20, "Formant preserve", TR_NOOP ("Formant")));
-    v.push_back (knob (570, 204, 60, "Formant shift", TR_NOOP ("FORMANT SHIFT"), 262, bipolar | showValue));
-    v.push_back (knob (690, 180, 104, "Humanize", TR_NOOP ("HUMANIZE"), 262, big | showValue));
-    // --- pitch graph
-    v.push_back (section (0, 314, 800, 130, TR_NOOP ("PITCH GRAPH")));
-    v.push_back (display (6, 336, 788, 102, "pitchtrace"));
-    // --- target notes: one keyboard octave (white keys below, black keys above them)
-    v.push_back (section (0, 448, 800, 100, TR_NOOP ("TARGET NOTES")));
-    static const char* const whites[7] { "C", "D", "E", "F", "G", "A", "B" };
-    for (int k = 0; k < 7; ++k)
-        v.push_back (toggle (14.0f + 46.0f * (float) k, 506, 42, 30, whites[k], whites[k]));
-    static const char* const blacks[5] { "C#", "D#", "F#", "G#", "A#" };
-    static const int after[5] { 0, 1, 3, 4, 5 }; // the white key each black key follows
-    for (int k = 0; k < 5; ++k)
-        v.push_back (toggle (14.0f + 46.0f * (float) after[k] + 25.0f, 474, 42, 26, blacks[k], blacks[k]));
-    v.push_back (label (360, 478, 420, 50, TR_NOOP ("Target notes: click a key to switch it off or on")));
+    v.push_back (section (0, 96, 800, 236, TR_NOOP ("CORRECTION")));
+    v.push_back (knob (100, 200, 104, "Retune", TR_NOOP ("RETUNE SPEED"), 284, big | showValue));
+    v.push_back (knob (226, 224, 60, "Flex-Tune", TR_NOOP ("FLEX-TUNE"), 284, showValue));
+    v.push_back (display (300, 116, 200, 200, "pitchring"));
+    v.push_back (knob (574, 224, 60, "Natural vibrato", TR_NOOP ("NATURAL VIBRATO"), 284, bipolar | showValue));
+    v.push_back (knob (700, 200, 104, "Humanize", TR_NOOP ("HUMANIZE"), 284, big | showValue));
+    // --- pitch graph / advanced (pages)
+    v.push_back (section (0, 336, 800, 142, nullptr, boxed));
+    v.push_back (pageTabs (8, 340, 220, 20, TR_NOOP ("Pitch graph|Advanced")));
+    v.push_back (onPage (display (6, 366, 788, 106, "pitchtrace"), 0));
+    auto adv = [&v] (LayoutItem i) { v.push_back (onPage (std::move (i), 1)); };
+    adv (label (14, 368, 300, 16, TR_NOOP ("Create vibrato"), alignLeft));
+    {
+        LayoutItem m;
+        m.type = Item::menu;
+        m.x = 14, m.y = 408, m.w = 110, m.h = 22;
+        m.param = "Vibrato shape";
+        m.label = TR_NOOP ("Shape");
+        m.options = TR_NOOP ("No vibrato|Sine|Square|Sawtooth");
+        adv (m);
+        adv (label (14, 392, 110, 14, TR_NOOP ("Shape")));
+    }
+    adv (knob (176, 420, 34, "Vibrato rate", TR_NOOP ("RATE"), 452, showValue));
+    adv (knob (250, 420, 34, "Vibrato depth", TR_NOOP ("DEPTH"), 452, showValue));
+    adv (knob (324, 420, 34, "Onset delay", TR_NOOP ("ONSET DELAY"), 452, showValue));
+    adv (knob (398, 420, 34, "Onset rate", TR_NOOP ("ONSET RATE"), 452, showValue));
+    adv (label (470, 368, 300, 16, TR_NOOP ("Pitch tracking"), alignLeft));
+    adv (toggle (470, 400, 150, 20, "Ignore vibrato", TR_NOOP ("Ignore vibrato")));
+    adv (label (470, 430, 320, 14, TR_NOOP ("Notes are picked from the pitch with its vibrato smoothed"), alignLeft | dim));
+    // --- the keyboard: BYPASS / REMOVE modes, LATCH, four octaves (a key edits its note name in every octave)
+    v.push_back (section (0, 482, 800, 128, TR_NOOP ("TARGET NOTES")));
+    v.push_back (display (8, 502, 784, 102, "tunekeys"));
     return l;
 }
 
@@ -1654,9 +1668,9 @@ Layout hushDeEsser()
 {
     Layout l;
     l.width = 460;
-    l.height = 226;
+    l.height = 286;
     auto& v = l.items;
-    v.push_back (section (4, 4, 452, 218, TR_NOOP ("De-esser")));
+    v.push_back (section (4, 4, 452, 278, TR_NOOP ("De-esser")));
     v.push_back (display (12, 26, 200, 78, "hushband"));
     v.push_back (meter (12, 110, 200, 12, 0, TR_NOOP ("Reduction")));
     v.push_back (tabs (12, 130, 98, 20, "Wideband", TR_NOOP ("Split|Wide")));
@@ -1670,6 +1684,15 @@ Layout hushDeEsser()
     v.push_back (dial (412, 58, 40, "Range", TR_NOOP ("Range")));
     v.push_back (dial (300, 142, 32, "Release", TR_NOOP ("Release")));
     v.push_back (dial (376, 142, 32, "Output", TR_NOOP ("Output"), bipolar));
+    // round 128: the reference de-esser's other controls
+    v.push_back (tabs (12, 222, 200, 20, "Allround", TR_NOOP ("Single vocal|Allround")));
+    v.push_back (toggle (12, 252, 64, 20, "Link mid", TR_NOOP ("Mid (M/S)")));
+    v.push_back (toggle (80, 252, 64, 20, "External SC", TR_NOOP ("Ext")));
+    v.push_back (toggle (148, 252, 64, 20, "Display", TR_NOOP ("Display")));
+    v.push_back (dial (250, 228, 30, "Low-pass freq.", TR_NOOP ("Low pass")));
+    v.push_back (dial (310, 228, 30, "Lookahead time", TR_NOOP ("Lookahead")));
+    v.push_back (dial (370, 228, 30, "Stereo link", TR_NOOP ("Stereo link")));
+    v.push_back (dial (430, 228, 30, "Input", TR_NOOP ("Input"), bipolar));
     return l;
 }
 
@@ -1760,6 +1783,45 @@ Layout emberLayout()
             v.push_back (k);
         }
     }
+
+    // round 128 (Saturn parity): the input gain and each band's power, solo / mute, tone, feedback and dynamics
+    v.push_back (dial (250, 162, 20, "Input", TR_NOOP ("Input"), bipolar));
+    l.height = 640;
+    v.push_back (section (4, 440, 512, 196, TR_NOOP ("Band character")));
+    static const char* extraHeads[] { TR_NOOP ("On"), TR_NOOP ("Solo / mute"), TR_NOOP ("Bass"), TR_NOOP ("Mid"), TR_NOOP ("Treble"),
+                                      TR_NOOP ("Presence"), TR_NOOP ("Feedback"), TR_NOOP ("Freq"), TR_NOOP ("Dynamics") };
+    static const float extraX[] { 54.0f, 84.0f, 186.0f, 230.0f, 274.0f, 318.0f, 372.0f, 420.0f, 472.0f };
+    for (int c = 0; c < 9; ++c)
+        v.push_back (label (extraX[c] - (c == 1 ? 0.0f : 24.0f), 458, c == 1 ? 72.0f : 48.0f, 14, extraHeads[c]));
+    static const char* extraFieldNames[] { "on", "state", "bass", "mid", "treble", "presence", "feedback", "fb freq.", "dynamics" };
+    static std::array<std::array<std::array<char, 24>, 9>, 4> extraNames {};
+    for (int b = 0; b < 4; ++b)
+    {
+        const auto cy = 492.0f + 36.0f * (float) b;
+        auto name = label (12, cy - 8.0f, 24, 16, rowNames[b]);
+        name.colour = b;
+        if (b > 0)
+        {
+            name.whenParam = "Bands";
+            name.whenMin = 0.17f + 0.333f * (float) (b - 1);
+        }
+        v.push_back (name);
+        for (int c = 0; c < 9; ++c)
+        {
+            auto& n = extraNames[(std::size_t) b][(std::size_t) c];
+            std::snprintf (n.data(), n.size(), "B%d %s", b + 1, extraFieldNames[c]);
+            LayoutItem item;
+            if (c == 0) item = toggle (extraX[0] - 14.0f, cy - 9.0f, 28, 18, n.data(), nullptr);
+            else if (c == 1) item = tabs (extraX[1], cy - 9.0f, 90, 18, n.data(), TR_NOOP ("-|S|M"), { 0.0f, 0.5f, 1.0f });
+            else item = knob (extraX[c], cy, 20, n.data(), nullptr, cy + 10.0f, noCaption | (c >= 2 && c <= 5 ? bipolar : 0) | (c == 8 ? bipolar : 0));
+            if (b > 0)
+            {
+                item.whenParam = "Bands";
+                item.whenMin = name.whenMin;
+            }
+            v.push_back (item);
+        }
+    }
     return l;
 }
 
@@ -1785,7 +1847,7 @@ Layout crestCompressor()
     Layout l;
     l.width = 840;
     l.height = 604;
-    l.pages = { TR_NOOP ("Character"), TR_NOOP ("Side chain") };
+    l.pages = { TR_NOOP ("Character"), TR_NOOP ("Side chain"), TR_NOOP ("Options") };
     auto& v = l.items;
     // the display: scrolling input / output level and gain reduction, with the threshold; meters on the right
     v.push_back (display (8, 8, 704, 252, "grhistory"));
@@ -1817,11 +1879,19 @@ Layout crestCompressor()
     v.push_back (tabs (358, 462, 270, 22, "Max lookahead", TR_NOOP ("Off|1 ms|2 ms|5 ms|10 ms|20 ms")));
     v.push_back (meter (640, 462, 192, 22, 0, TR_NOOP ("Reduction")));
     // folded parts
-    v.push_back (pageTabs (8, 492, 240, 22, TR_NOOP ("Character|Side chain")));
+    v.push_back (pageTabs (8, 492, 360, 22, TR_NOOP ("Character|Side chain|Options")));
     v.push_back (section (8, 518, 824, 82, nullptr, boxed));
     v.push_back (onPage (tabs (20, 530, 280, 22, "Character", TR_NOOP ("Off|Warm|Crisp|Bright")), 0));
     v.push_back (onPage (tabs (310, 530, 140, 22, "Character pre", TR_NOOP ("Post|Pre")), 0));
     v.push_back (onPage (dial (492, 546, 28, "Drive", TR_NOOP ("Drive"), bipolar), 0));
+    // round 128 (Pro-C 3 parity): dry level and auto threshold; link mode and the display options on their own page
+    v.push_back (onPage (dial (572, 546, 28, "Dry", TR_NOOP ("Dry")), 0));
+    v.push_back (onPage (toggle (630, 530, 160, 20, "Auto threshold", TR_NOOP ("Auto threshold")), 0));
+    v.push_back (onPage (label (20, 530, 70, 22, TR_NOOP ("Link mode")), 2));
+    v.push_back (onPage (tabs (92, 530, 360, 22, "Link mode", TR_NOOP ("Stereo|Mid only|Side only|Mid > side|Side > mid")), 2));
+    v.push_back (onPage (label (470, 530, 50, 22, TR_NOOP ("Scale")), 2));
+    v.push_back (onPage (tabs (520, 530, 230, 22, "Meter scale", TR_NOOP ("9 dB|18 dB|36 dB|72 dB|90 dB")), 2));
+    v.push_back (onPage (toggle (20, 562, 160, 20, "Input meter", TR_NOOP ("Input meter")), 2));
     v.push_back (onPage (dial (36, 548, 26, "Stereo link", TR_NOOP ("Stereo link")), 1));
     v.push_back (onPage (toggle (72, 528, 120, 20, "External SC", TR_NOOP ("External input")), 1));
     v.push_back (onPage (toggle (72, 554, 120, 20, "SC listen", TR_NOOP ("Listen")), 1));
@@ -1872,6 +1942,8 @@ Layout prismMultiband()
         add (dial (628, 398, 36, names[b][5], TR_NOOP ("Attack")));
         add (dial (700, 398, 36, names[b][6], TR_NOOP ("Release")));
         add (dial (788, 398, 40, names[b][7], TR_NOOP ("Level"), bipolar));
+        static const char* las[4] { "B1 lookahead", "B2 lookahead", "B3 lookahead", "B4 lookahead" };
+        add (dial (858, 398, 22, las[b], TR_NOOP ("Lookahead"))); // round 128: the band's own look-ahead
     }
     // global bar
     v.push_back (label (8, 482, 50, 22, TR_NOOP ("Slope")));
@@ -1890,7 +1962,7 @@ Layout sentryGate()
 {
     Layout l;
     l.width = 680;
-    l.height = 392;
+    l.height = 480;
     auto& v = l.items;
     // left: threshold (big) with ratio and range under it
     v.push_back (dial (86, 84, 92, "Threshold", TR_NOOP ("Threshold"), big));
@@ -1918,6 +1990,16 @@ Layout sentryGate()
                                                                 { "Dry", TR_NOOP ("Dry") }, { "Output", TR_NOOP ("Output") } };
     for (int k = 0; k < 6; ++k)
         v.push_back (dial (186.0f + 84.0f * (float) k, 326, 28, knobs[k].first, knobs[k].second, k == 5 ? bipolar : 0));
+    // round 128 (Pro-G parity): channel mode, ducking, the side-chain gain / mix per channel, wet / dry pan, input
+    v.push_back (section (4, 392, 672, 84, TR_NOOP ("Expert")));
+    v.push_back (tabs (14, 414, 160, 22, "Channel mode", TR_NOOP ("Left/Right|Mid/Side")));
+    v.push_back (toggle (14, 444, 120, 22, "Ducking", TR_NOOP ("Ducking")));
+    static const std::pair<const char*, const char*> expert[7] { { "SC gain L", TR_NOOP ("Gain L") }, { "SC mix L", TR_NOOP ("Mix L") },
+                                                                 { "SC gain R", TR_NOOP ("Gain R") }, { "SC mix R", TR_NOOP ("Mix R") },
+                                                                 { "Wet pan", TR_NOOP ("Wet pan") }, { "Dry pan", TR_NOOP ("Dry pan") },
+                                                                 { "Input", TR_NOOP ("Input") } };
+    for (int k = 0; k < 7; ++k)
+        v.push_back (dial (220.0f + 68.0f * (float) k, 438, 22, expert[k].first, expert[k].second, bipolar));
     return l;
 }
 

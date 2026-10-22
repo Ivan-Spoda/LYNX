@@ -141,6 +141,44 @@ Tape into hall    | Echo mode = Tape; Reverb mode = Hall; Echo sync = Note; Echo
 Vocal echo verb   | Echo mode = Analog; Reverb mode = Plate; Echo sync = Dotted; Echo note = 1/8; Echo level = 38 %; Echo feedback = 25 %; Decay = 2.6 s; Mix = 25 %
 Sparkle space     | Echo mode = Sparkle; Reverb mode = Space; Echo level = 50 %; Decay = 7.41 s; Mix = 35 %
 Reverse room      | Echo mode = Reverse; Reverb mode = Room; Echo level = 62 %; Decay = 1.4 s; Mix = 30 %
+[Facet EQ]
+folder Vocals
+Vocal, low cut 90 Hz   | 1 Shape = Low Cut; 1 Freq = 90 Hz; 1 Slope = 24 dB/oct
+Vocal presence         | 1 Shape = Low Cut; 1 Freq = 80 Hz; 1 Slope = 18 dB/oct; 2 Shape = Bell; 2 Freq = 300 Hz; 2 Gain = -2.5 dB; 2 Q = 1.2; 3 Shape = Bell; 3 Freq = 3.5 kHz; 3 Gain = 2 dB; 3 Q = 0.8; 4 Shape = High Shelf; 4 Freq = 10 kHz; 4 Gain = 2.5 dB
+Vocal, tame harshness  | 1 Shape = Low Cut; 1 Freq = 80 Hz; 2 Shape = Bell; 2 Freq = 2.8 kHz; 2 Gain = 0 dB; 2 Q = 2; 2 Range = -4 dB; 2 Threshold = -30 dB
+folder Mix
+Low end cleanup        | 1 Shape = Low Cut; 1 Freq = 30 Hz; 1 Slope = 48 dB/oct; 2 Shape = Bell; 2 Freq = 250 Hz; 2 Gain = -2 dB; 2 Q = 1
+Air                    | 1 Shape = High Shelf; 1 Freq = 12 kHz; 1 Gain = 3 dB
+Telephone              | 1 Shape = Low Cut; 1 Freq = 400 Hz; 1 Slope = 24 dB/oct; 2 Shape = High Cut; 2 Freq = 3.4 kHz; 2 Slope = 24 dB/oct; 3 Shape = Bell; 3 Freq = 1.5 kHz; 3 Gain = 4 dB
+
+[Apex Limiter]
+Master, transparent    | Gain = 3 dB; Ceiling = -1 dB; Style = Clean; True Peak = On
+Master, loud           | Gain = 8 dB; Ceiling = -0.3 dB; Style = Loud; True Peak = On
+Bus, glue              | Gain = 2 dB; Ceiling = -0.5 dB; Style = Bus
+Safety limiter         | Gain = 0 dB; Ceiling = -0.3 dB; Style = Safe; True Peak = On
+
+[Crest Compressor]
+Vocal, even            | Style = Vocal; Threshold = -24 dB; Ratio = 3 : 1; Attack = 5 ms; Release = 120 ms
+Drum bus glue          | Style = Bus; Threshold = -18 dB; Ratio = 2 : 1; Attack = 10 ms; Release = 100 ms
+Punchy drums           | Style = Punch; Threshold = -20 dB; Ratio = 4 : 1; Attack = 20 ms; Release = 80 ms
+Bass, steady           | Style = Opto; Threshold = -22 dB; Ratio = 4 : 1
+Pumping                | Style = Pumping; Threshold = -26 dB; Ratio = 8 : 1
+
+[Sentry Gate]
+Drum gate              | Style = Classic; Threshold = -35 dB; Range = 40 dB; Attack = 0.1 ms; Hold = 20 ms; Release = 100 ms
+Vocal cleanup          | Style = Vocal; Threshold = -45 dB; Range = 15 dB; Release = 200 ms
+Gentle expander        | Style = Clean; Threshold = -40 dB; Range = 10 dB
+
+[Ember Saturator]
+Warm tape              | Style = tape; Drive = 9 dB
+Tube vocal             | Style = tube; Drive = 6 dB; Mix = 60 %
+Gritty transistor      | Style = transistor; Drive = 18 dB
+Fuzz, parallel         | Style = fuzz; Drive = 24 dB; Mix = 30 %
+
+[Aether]
+Vocal air              | Air = 4.5 dB; Harmonics = 25 %
+Gentle sheen           | Air = 2 dB; Harmonics = 10 %
+Bright                 | Air = 9 dB; Harmonics = 50 %
 )PRESETS";
 }
 }

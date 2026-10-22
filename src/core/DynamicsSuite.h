@@ -46,9 +46,23 @@ enum Param
     sc2Shape, sc2Freq, sc2Gain, sc2Q, sc2Slope,
     sc3Shape, sc3Freq, sc3Gain, sc3Q, sc3Slope,
     oversampling, autoGain, mix, input, output,
+    // round 128 (Pro-C 3 parity): dry level (parallel compression), auto threshold, stereo-link mode, display settings
+    dryGain, autoThreshold, linkMode, meterScale, inputMeter,
     count
 };
 constexpr int scBands = 3;
+// stereo-link modes: L/R (the classic linked or split stereo detection), mid only, side only, mid triggers the side,
+// side triggers the mid (the last four process in mid / side)
+enum class LinkMode { stereo, mid, side, midToSide, sideToMid };
+constexpr int linkModes = 5;
+LinkMode linkModeOf (float v) noexcept;
+float linkModeValue (LinkMode m) noexcept;
+double dryDb (float v) noexcept;         // −∞ (v = 0) … +36 dB; 0 dB at 0.5 (72 dB/unit above 0.25, square law below)
+float dryValue (double db) noexcept;
+double meterRangeDb (float v) noexcept;  // the display's range: 9, 18, 36, 72 or 90 dB
+// Auto threshold (round 128): the threshold follows the programme — the effective threshold is the detector input's
+// slow RMS level (3 s window) + (the threshold knob + 18 dB), so the knob's −18 dB puts it right at the average level.
+double autoThresholdDb (double knobDb, double programRmsDb) noexcept;
 inline int scParam (int band, int field) noexcept { return sc1Shape + band * 5 + field; } // field: 0 shape .. 4 slope
 
 enum class Style { clean, allround, punch, upward, twoWay, variMu, classic, opto, vocal, bus, pumping };
@@ -89,7 +103,9 @@ namespace prism
 constexpr int bands = 4;
 constexpr int fieldsPerBand = 10;
 enum Field { fThreshold, fRatio, fRange, fMode, fKnee, fAttack, fRelease, fLevel, fEnabled, fSolo };
-enum Global { xover1 = bands * fieldsPerBand, xover2, xover3, slope, lookahead, mix, input, output, count };
+enum Global { xover1 = bands * fieldsPerBand, xover2, xover3, slope, lookahead, mix, input, output,
+              // round 128 (Pro-MB parity): each band's own look-ahead (≤ the global one, which sets the latency)
+              bandLookahead0, count = bandLookahead0 + bands };
 inline int param (int band, int field) noexcept { return band * fieldsPerBand + field; }
 
 double thresholdDb (float v) noexcept;   // −90 .. 0 dBFS (square-root law, finer near 0 dB)
@@ -119,8 +135,14 @@ enum Param
 {
     style, threshold, ratio, range, attack, release, hold, knee, lookahead, lookaheadOn,
     highPass, lowPass, scExternal, scListen, upThreshold, upRatio, dry, output,
+    // round 128 (Pro-G parity): channel mode, the expert side-chain gain / mix per detector channel, wet / dry pan,
+    // ducking, input level
+    channelMode, scGainL, scMixL, scGainR, scMixR, wetPan, dryPan, ducking, input,
     count
 };
+double scGainDb (float v) noexcept;      // −36 … +36 dB
+double mixOf (float v) noexcept;         // −1 (left / mid) … +1 (right / side); 0 = the channel's own input
+double panOf (float v) noexcept;         // −1 … +1 balance
 enum class Style { classic, clean, vocal, guitar, upward };
 constexpr int styles = 5;
 Style styleOf (float v) noexcept;

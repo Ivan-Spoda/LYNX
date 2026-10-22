@@ -218,6 +218,8 @@ public:
             if (item.type == Item::display && rectOf (item).contains (p) && (juce::String (item.display) == "eq" || juce::String (item.display) == "xy"
                                                                     || juce::String (item.display) == "sgamount" || juce::String (item.display) == "sgpresets"
                                                                     || juce::String (item.display) == "prismbands" || juce::String (item.display) == "emberbands"
+                                                                    || juce::String (item.display) == "tunekeys" || juce::String (item.display) == "tuneautokey"
+                                                                    || juce::String (item.display) == "pitchring"
                                                                     || isBars (item)))
                 return i;
             if (item.type == Item::display || (item.param == nullptr && ! hasStyle (item, plugui::pageTabs)))
@@ -747,7 +749,9 @@ public:
                     }
                     g.setColour (colour::textPrimary);
                     g.setFont (font (juce::jmax (9.0f, juce::jmin (12.0f * s, r.getHeight() * 0.55f)), true));
-                    if (chosen < (int) labels.size())
+                    if (kind == EffectKind::lynxTune && param == lynxtune::scale && fx.params[lynxtune::moreScales] >= 0.25f)
+                        g.drawFittedText (tr (fx.params[lynxtune::moreScales] >= 0.75f ? "Diminished" : "Whole tone"), textArea.toNearestInt(), juce::Justification::centred, 1, 0.6f);
+                    else if (chosen < (int) labels.size())
                         g.drawFittedText (tr (juce::String::fromUTF8 (labels[(std::size_t) chosen].c_str())), textArea.toNearestInt(), juce::Justification::centred, 1, 0.6f);
                 }
                 break;
@@ -975,7 +979,9 @@ public:
         const auto s = scale();
         static const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
         PitchPoint last { 0.0f, 0.0f, 0.0f };
-        if (! pitchHistory.empty())
+        if (tuneHold)
+            last = holdPoint; // HOLD: the read-out frozen where it was clicked (round 128)
+        else if (! pitchHistory.empty())
             last = pitchHistory.back();
         else if (demoDisplays)
             last = { 63.62f, 64.0f, 0.38f };
@@ -1068,6 +1074,197 @@ public:
         }
         else
             g.drawText (tr ("no pitch"), juce::Rectangle<float> (inner * 1.4f, 16.0f * s).withCentre (c.translated (0.0f, inner * 0.5f)), juce::Justification::centred);
+        // HOLD (round 128): click the meter to freeze its read-out
+        g.setFont (font (juce::jmax (7.0f, 9.0f * s), true));
+        g.setColour (tuneHold ? accent : colour::textDisabled);
+        g.drawText (tr ("HOLD"), juce::Rectangle<float> (inner, 12.0f * s).withCentre (c.translated (0.0f, inner * 0.78f)), juce::Justification::centred);
+    }
+
+    // --- LYNX Tune's keyboard (round 128) --------------------------------------------------------------
+    // Four octaves (C2 … B5) as in the auto-mode correctors; a key edits its note name in every octave: in BYPASS mode
+    // it switches "pass uncorrected" (still a target, no correction), in REMOVE mode it removes the note from the
+    // targets. LATCH off = the edit lasts only while the key is held (live use).
+    static constexpr int tuneOctaves = 4;
+    juce::Rectangle<float> tuneKeysStrip (juce::Rectangle<float> r) const { return r.withHeight (22.0f * scale()); }
+    juce::Rectangle<float> tuneKeysBed (juce::Rectangle<float> r) const { return r.withTrimmedTop (26.0f * scale()).reduced (2.0f * scale(), 2.0f * scale()); }
+    juce::Rectangle<float> tuneModeButton (juce::Rectangle<float> r, int which) const // 0 bypass, 1 remove, 2 latch
+    {
+        const auto s = scale();
+        const auto strip = tuneKeysStrip (r).reduced (2.0f * s, 2.0f * s);
+        return which == 2 ? strip.withLeft (strip.getRight() - 70.0f * s) : strip.withWidth (78.0f * s).translated ((float) which * 82.0f * s, 0.0f);
+    }
+    // pitch class (0…11) and octave index of the key under p, −1 = none
+    int tuneKeyAt (juce::Rectangle<float> r, juce::Point<float> p) const
+    {
+        const auto bed = tuneKeysBed (r);
+        if (! bed.contains (p))
+            return -1;
+        static const int whitePc[7] { 0, 2, 4, 5, 7, 9, 11 };
+        const auto ww = bed.getWidth() / (float) (7 * tuneOctaves);
+        if (p.y < bed.getY() + bed.getHeight() * 0.6f) // black keys first (on top)
+            for (int w = 0; w < 7 * tuneOctaves; ++w)
+            {
+                const auto pc = whitePc[w % 7];
+                if (pc == 4 || pc == 11)
+                    continue;
+                const auto bx = bed.getX() + ww * (float) (w + 1) - ww * 0.3f;
+                if (p.x >= bx && p.x < bx + ww * 0.6f)
+                    return pc + 1;
+            }
+        const auto w = juce::jlimit (0, 7 * tuneOctaves - 1, (int) ((p.x - bed.getX()) / ww));
+        return whitePc[w % 7];
+    }
+    void paintTuneKeys (juce::Graphics& g, juce::Rectangle<float> r, const EffectSlot& fx)
+    {
+        using namespace theme;
+        const auto s = scale();
+        const auto& p = fx.params;
+        const auto sc = (vocal::Scale) lynxtune::effectiveScale (p[lynxtune::scale], p[lynxtune::moreScales]);
+        const auto inScale = vocal::scaleMask (sc, lynxtune::keyIndex (p[lynxtune::key]), 0xfff);
+        // mode buttons, latch, legend
+        const char* const names[3] { TR_NOOP ("Bypass"), TR_NOOP ("Remove"), TR_NOOP ("Latch") };
+        for (int b = 0; b < 3; ++b)
+        {
+            const auto br = tuneModeButton (r, b);
+            const auto lit = b == 2 ? tuneLatch : tuneRemove == (b == 1);
+            skin::button (g, br, lit, br.contains (mouseAt), b == 0 ? juce::Colour (0xffe0a040) : accent, radius::sm * s);
+            g.setColour (lit ? colour::textPrimary : colour::textSecondary);
+            g.setFont (font (juce::jmax (8.0f, 10.0f * s), true));
+            g.drawText (tr (names[b]), br, juce::Justification::centred);
+        }
+        g.setColour (colour::textDisabled);
+        g.setFont (font (juce::jmax (7.0f, 9.0f * s)));
+        g.drawText (tr ("Click a key: {0} that note in every octave", { tuneRemove ? tr ("remove / restore") : tr ("bypass / correct") }),
+                    tuneKeysStrip (r).withTrimmedLeft (170.0f * s).withTrimmedRight (80.0f * s), juce::Justification::centred, true);
+        // keys
+        const auto bed = tuneKeysBed (r);
+        const auto ww = bed.getWidth() / (float) (7 * tuneOctaves);
+        static const int whitePc[7] { 0, 2, 4, 5, 7, 9, 11 };
+        const auto sungPc = pitchHistory.empty() || pitchHistory.back().sung < 0.5f ? -1 : ((int) std::lround (pitchHistory.back().target) % 12 + 12) % 12;
+        auto keyColour = [&] (int pc, bool black) {
+            const auto on = p[(std::size_t) (lynxtune::noteC + pc)] >= 0.5f && ((inScale >> pc) & 1u) != 0;
+            const auto bypassed = p[(std::size_t) (lynxtune::bypassC + pc)] >= 0.5f;
+            auto c = black ? juce::Colour (0xff1c1e24) : juce::Colour (0xffd9dbe0);
+            if (! on)
+                c = black ? juce::Colour (0xff101114) : juce::Colour (0xff5a5d66); // removed / not in the scale
+            else if (bypassed)
+                c = black ? juce::Colour (0xff6b4d16) : juce::Colour (0xffe6be6e);
+            return c;
+        };
+        auto mark = [&] (juce::Rectangle<float> k, int pc) {
+            const auto on = p[(std::size_t) (lynxtune::noteC + pc)] >= 0.5f && ((inScale >> pc) & 1u) != 0;
+            if (on && fx.enabled) // a target: the accent line at the key's top
+            {
+                g.setColour (p[(std::size_t) (lynxtune::bypassC + pc)] >= 0.5f ? juce::Colour (0xffe0a040) : accent);
+                g.fillRect (k.withHeight (3.0f * s));
+            }
+            if (! on && ((inScale >> pc) & 1u) != 0) // removed by hand: a cross
+            {
+                const auto x = juce::Rectangle<float> (7.0f * s, 7.0f * s).withCentre ({ k.getCentreX(), k.getY() + 10.0f * s });
+                g.setColour (accent.withAlpha (0.9f));
+                g.drawLine (x.getX(), x.getY(), x.getRight(), x.getBottom(), 1.5f * s);
+                g.drawLine (x.getRight(), x.getY(), x.getX(), x.getBottom(), 1.5f * s);
+            }
+            if (pc == sungPc && fx.enabled)
+            {
+                g.setColour (accent.withAlpha (0.55f));
+                g.fillEllipse (juce::Rectangle<float> (7.0f * s, 7.0f * s).withCentre ({ k.getCentreX(), k.getBottom() - 9.0f * s }));
+            }
+        };
+        for (int w = 0; w < 7 * tuneOctaves; ++w)
+        {
+            const auto pc = whitePc[w % 7];
+            const auto k = juce::Rectangle<float> (bed.getX() + ww * (float) w, bed.getY(), ww - 1.0f, bed.getHeight());
+            g.setColour (keyColour (pc, false));
+            g.fillRoundedRectangle (k, 2.0f * s);
+            mark (k, pc);
+            if (pc == 0)
+            {
+                g.setColour (juce::Colour (0xff3a3d45));
+                g.setFont (font (juce::jmax (7.0f, 9.0f * s)));
+                g.drawText ("C" + juce::String (2 + w / 7), k.withTrimmedBottom (2.0f * s).withTop (k.getBottom() - 14.0f * s), juce::Justification::centred);
+            }
+        }
+        for (int w = 0; w < 7 * tuneOctaves; ++w)
+        {
+            const auto pc = whitePc[w % 7];
+            if (pc == 4 || pc == 11)
+                continue;
+            const auto k = juce::Rectangle<float> (bed.getX() + ww * (float) (w + 1) - ww * 0.3f, bed.getY(), ww * 0.6f, bed.getHeight() * 0.6f);
+            g.setColour (keyColour (pc + 1, true));
+            g.fillRoundedRectangle (k, 2.0f * s);
+            mark (k, pc + 1);
+        }
+    }
+    void tuneKeyClick (juce::Rectangle<float> r, juce::Point<float> at)
+    {
+        const auto* fx = current();
+        if (fx == nullptr)
+            return;
+        for (int b = 0; b < 3; ++b)
+            if (tuneModeButton (r, b).contains (at))
+            {
+                if (b == 2)
+                    tuneLatch = ! tuneLatch;
+                else
+                    tuneRemove = b == 1;
+                repaint();
+                return;
+            }
+        const auto pc = tuneKeyAt (r, at);
+        if (pc < 0)
+            return;
+        const auto onP = lynxtune::noteC + pc, byP = lynxtune::bypassC + pc;
+        const auto on = fx->params[(std::size_t) onP] >= 0.5f, by = fx->params[(std::size_t) byP] >= 0.5f;
+        tuneHeld = tuneLatch ? -1 : pc;
+        tuneHeldValues = { fx->params[(std::size_t) onP], fx->params[(std::size_t) byP] };
+        if (tuneRemove)
+            setParams ({ { onP, on ? 0.0f : 1.0f }, { byP, 0.0f } });
+        else
+            setParams ({ { onP, 1.0f }, { byP, by && on ? 0.0f : 1.0f } });
+    }
+    void tuneKeyRelease()
+    {
+        if (tuneHeld < 0)
+            return;
+        setParams ({ { lynxtune::noteC + tuneHeld, tuneHeldValues.first }, { lynxtune::bypassC + tuneHeld, tuneHeldValues.second } });
+        tuneHeld = -1;
+    }
+    void paintAutoKey (juce::Graphics& g, juce::Rectangle<float> r)
+    {
+        using namespace theme;
+        const auto s = scale();
+        skin::button (g, r, autoKeyFlash > 0, r.contains (mouseAt), accent, radius::sm * s);
+        g.setColour (colour::textPrimary);
+        g.setFont (font (juce::jmax (8.0f, 10.0f * s), true));
+        g.drawText (tr ("Auto Key"), r, juce::Justification::centred);
+    }
+    // AUTO KEY: the key and major / minor scale of what was sung while the editor was open (time per pitch class)
+    void autoKey (juce::Rectangle<float> r)
+    {
+        double total = 0.0;
+        for (const auto x : keyHistogram)
+            total += x;
+        if (total < 30.0) // about a second of voiced singing
+        {
+            ui::flashValueTip (*this, r.toNearestInt(), tr ("Play the vocal for a few seconds first"));
+            return;
+        }
+        const auto [k, mode] = vocal::detectKey (keyHistogram);
+        if (k < 0)
+            return;
+        std::vector<std::pair<int, float>> changes { { lynxtune::key, (float) k / 11.0f },
+                                                     { lynxtune::scale, (float) (int) mode / (float) (vocal::scaleCount - 1) },
+                                                     { lynxtune::moreScales, 0.0f } };
+        for (int pc = 0; pc < 12; ++pc)
+        {
+            changes.push_back ({ lynxtune::noteC + pc, 1.0f });
+            changes.push_back ({ lynxtune::bypassC + pc, 0.0f });
+        }
+        setParams (changes);
+        autoKeyFlash = 20;
+        static const char* names[] { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        ui::flashValueTip (*this, r.toNearestInt(), juce::String (names[k]) + " " + tr (mode == vocal::Scale::major ? "Major" : "Minor"));
     }
 
     // the live meter `output` of this slot's effect (published by the audio thread; 0 when not playing)
@@ -1486,6 +1683,16 @@ public:
         else if (id == "pitchring") // LYNX Tune (round 120): the correction meter
         {
             paintPitchRing (g, r, fx);
+            return;
+        }
+        else if (id == "tunekeys") // LYNX Tune (round 128): the keyboard with BYPASS / REMOVE and LATCH
+        {
+            paintTuneKeys (g, r, fx);
+            return;
+        }
+        else if (id == "tuneautokey") // LYNX Tune (round 128): AUTO KEY
+        {
+            paintAutoKey (g, r);
             return;
         }
         else if (id == "grmeter") // live gain reduction of the mixing suite (0..30 dB, from the right like a VU's GR)
@@ -2198,6 +2405,24 @@ public:
             return;
         }
 
+        if (item.type == Item::display && juce::String (item.display) == "tunekeys")
+        {
+            tuneKeyClick (rectOf (item), e.position);
+            return;
+        }
+        if (item.type == Item::display && juce::String (item.display) == "tuneautokey")
+        {
+            autoKey (rectOf (item));
+            return;
+        }
+        if (item.type == Item::display && juce::String (item.display) == "pitchring") // HOLD
+        {
+            tuneHold = ! tuneHold;
+            if (tuneHold && ! pitchHistory.empty())
+                holdPoint = pitchHistory.back();
+            repaint();
+            return;
+        }
         if (item.type == Item::display && juce::String (item.display) == "vumeter") // the VU's selector: gain reduction / output / input
         {
             vuMode = (vuMode + 1) % 3;
@@ -2316,6 +2541,22 @@ public:
                     if (t != track)
                         menu.addItem (juce::String (t) + "  " + insertName (t), engine.getSong().canRoute (track, t) || t == chosen, t == chosen,
                                       [this, param, t] { setValue (param, flbasic::sendTrackValue (t)); });
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (r.toNearestInt())));
+                return;
+            }
+            if (kind == EffectKind::lynxTune && param == lynxtune::scale) // round 128: + whole tone, diminished
+            {
+                const auto* fx = current();
+                const auto more = fx != nullptr ? juce::roundToInt (fx->params[lynxtune::moreScales] * 2.0f) : 0;
+                juce::PopupMenu menu;
+                const auto labels = plugui::optionLabels (item);
+                const auto chosen = plugui::optionAt (item, valueOf (param));
+                for (int o = 0; o < (int) labels.size(); ++o)
+                    menu.addItem (optionTexts (item)[(std::size_t) o], true, more == 0 && o == chosen,
+                                  [this, param, v = plugui::optionValue (item, o)] { setParams ({ { param, v }, { lynxtune::moreScales, 0.0f } }); });
+                menu.addSeparator();
+                menu.addItem (tr ("Whole tone"), true, more == 1, [this] { setParams ({ { lynxtune::moreScales, 0.5f } }); });
+                menu.addItem (tr ("Diminished"), true, more == 2, [this] { setParams ({ { lynxtune::moreScales, 1.0f } }); });
                 menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (r.toNearestInt())));
                 return;
             }
@@ -2453,6 +2694,7 @@ public:
     void mouseUp (const juce::MouseEvent&) override
     {
         eqDragging = false;
+        tuneKeyRelease(); // LYNX Tune's keyboard without LATCH: the edit lasts while the key is held
         if (crossoverDrag >= 0)
         {
             crossoverDrag = -1;
@@ -2738,8 +2980,19 @@ private:
         bool history = false;
         for (const auto& item : activeLayout().items)
         {
-            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "pitchgraph") == 0 || std::strcmp (item.display, "pitchtrace") == 0) && visible (item))
+            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "pitchgraph") == 0 || std::strcmp (item.display, "pitchtrace") == 0
+                                                                       || (std::strcmp (item.display, "pitchring") == 0 && ! pitchTraced())) && visible (item))
             {
+                if (std::strcmp (item.display, "pitchring") == 0 || std::strcmp (item.display, "pitchtrace") == 0)
+                {
+                    // round 128: what is sung, for AUTO KEY (time per pitch class, fading over ~30 s)
+                    for (auto& x : keyHistogram)
+                        x *= 0.999;
+                    if (const auto sungNote = liveMeter (0) * 127.0f; sungNote > 0.5f)
+                        keyHistogram[(std::size_t) (((int) std::lround (sungNote) % 12 + 12) % 12)] += 1.0;
+                    if (autoKeyFlash > 0)
+                        --autoKeyFlash;
+                }
                 // LYNX Tune's pitch history (30 points a second)
                 pitchHistory.push_back ({ liveMeter (0) * 127.0f, liveMeter (1) * 127.0f, (liveMeter (2) - 0.5f) * 4.0f });
                 if (pitchHistory.size() > pitchHistoryLength)
@@ -2774,6 +3027,20 @@ private:
     struct PitchPoint { float sung, target, shift; }; // MIDI note numbers (0 = none) and the applied correction in semitones
     static constexpr std::size_t pitchHistoryLength = 240; // 8 s
     std::vector<PitchPoint> pitchHistory;
+    // LYNX Tune (round 128): HOLD, the keyboard's mode / latch, AUTO KEY's histogram
+    bool tuneHold = false, tuneRemove = true, tuneLatch = true;
+    PitchPoint holdPoint { 0.0f, 0.0f, 0.0f };
+    int tuneHeld = -1, autoKeyFlash = 0;
+    std::pair<float, float> tuneHeldValues { 1.0f, 0.0f };
+    std::array<double, 12> keyHistogram {};
+    // is the scrolling pitch trace on the current page? (it then feeds the history; else the ring does)
+    bool pitchTraced() const
+    {
+        for (const auto& item : activeLayout().items)
+            if (item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "pitchtrace") == 0 && visible (item))
+                return true;
+        return false;
+    }
     float displayCentre = 0.0f;
     float sgStart = 0.0f;
     std::array<std::vector<std::uint8_t>, 4> sgPresets {}; // the installation's preset files A–D (read on demand)

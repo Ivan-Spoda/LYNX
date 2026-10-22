@@ -131,6 +131,7 @@ int butterworthQs (int n, double* qs) noexcept
 // analog sections of one band (normalized to the band frequency); returns the count
 int analogSections (const EffectParams& p, int b, Analog* out, double extraDb = 0.0, bool keepFlat = false) noexcept
 {
+    if (! bandPower (p, b)) return 0; // a band switched off (round 128) keeps its settings and does nothing
     const auto sh = shape (p[(std::size_t) param (b, 0)]);
     const double scale = gainScale (p[(std::size_t) scaleParam]);
     const double g = (gainDb (p[(std::size_t) param (b, 2)]) + extraDb) * scale;
@@ -490,8 +491,8 @@ public:
             }
             if (mode == Phase::zeroLatency)
             {
-                if (anyDynamic) redesignDynamic();
-                runIir (left + off, right + off, m);
+                if (anyDynamic) redesignDynamic (false);
+                runIir (left + off, right + off, m, false);
             }
             else
             {
@@ -499,11 +500,27 @@ public:
                 if (! firLoaded || (sinceDesign >= updateEvery && ! conv.fading() && (firDirty || (anyDynamic && dynamicMoved()))))
                     loadFir();
                 for (int i = 0; i < m; ++i) conv.step (left[off + i], right[off + i]);
+                // bands on one channel or on mid / side (round 128) are not in the stereo FIR: they run as the
+                // zero-latency sections after it (minimum phase)
+                if (anyPlaced)
+                {
+                    if (anyDynamic) redesignDynamic (true);
+                    runIir (left + off, right + off, m, true);
+                }
             }
         }
 
-        if (outGain != 1.0f)
-            for (int i = 0; i < n; ++i) { left[i] *= outGain; right[i] *= outGain; }
+        if (outMidSide)
+            for (int i = 0; i < n; ++i)
+            {
+                const float mid = 0.5f * (left[i] + right[i]) * outL, side = 0.5f * (left[i] - right[i]) * outR;
+                left[i] = mid + side;
+                right[i] = mid - side;
+            }
+        else if (outL != outR)
+            for (int i = 0; i < n; ++i) { left[i] *= outL; right[i] *= outR; }
+        else if (outL != 1.0f)
+            for (int i = 0; i < n; ++i) { left[i] *= outL; right[i] *= outL; }
         for (int b = 0; b < bands; ++b) meters[(std::size_t) b].store ((float) det[(std::size_t) b].gain, std::memory_order_relaxed);
     }
 
@@ -568,6 +585,21 @@ private:
         attackCoef = 1.0 - std::exp (-1.0 / (attackMs (params[(std::size_t) attackParam]) * 0.001 * sampleRate));
         releaseCoef = 1.0 - std::exp (-1.0 / (releaseMs (params[(std::size_t) releaseParam]) * 0.001 * sampleRate));
         outGain = (float) std::pow (10.0, outputDb (params[(std::size_t) outputParam]) / 20.0);
+        anyPlaced = anyMidSide = false;
+        for (int b = 0; b < bands; ++b)
+        {
+            placed[(std::size_t) b] = placement (params[(std::size_t) (placementParam0 + b)]);
+            if (placed[(std::size_t) b] != Placement::stereo && counts[(std::size_t) b] > 0) anyPlaced = true;
+            if ((placed[(std::size_t) b] == Placement::mid || placed[(std::size_t) b] == Placement::side) && counts[(std::size_t) b] > 0) anyMidSide = true;
+        }
+        // the output stage: level, auto gain, polarity, pan (left / right or mid / side)
+        float level = outGain;
+        if (params[(std::size_t) autoGainParam] >= 0.5f) level *= (float) std::pow (10.0, -autoGainDb (params, sampleRate) / 20.0);
+        if (params[(std::size_t) invertParam] >= 0.5f) level = -level;
+        const auto pan = panAmount (params[(std::size_t) panParam]);
+        outL = level * (float) (pan > 0.0 ? 1.0 - pan : 1.0);
+        outR = level * (float) (pan < 0.0 ? 1.0 + pan : 1.0);
+        outMidSide = panMidSide (params[(std::size_t) panModeParam]) && outL != outR;
 
         const int sb = soloBand (params[(std::size_t) soloParam]);
         const bool wasSolo = soloOn;
@@ -610,11 +642,13 @@ private:
         }
     }
 
-    void redesignDynamic() noexcept
+    // `placedOnly`: in the FIR modes only the bands outside the FIR (one channel, mid or side) run as sections
+    void redesignDynamic (bool placedOnly) noexcept
     {
         for (int b = 0; b < bands; ++b)
         {
             const auto& d = det[(std::size_t) b];
+            if (placedOnly && placed[(std::size_t) b] == Placement::stereo) continue;
             if (! d.on || std::abs (d.gain - dynUsed[(std::size_t) b]) < 0.01) continue;
             const int before = counts[(std::size_t) b];
             const int c = designKeep (b, d.gain);
@@ -634,30 +668,62 @@ private:
         return false;
     }
 
-    void runIir (float* left, float* right, int n) noexcept
+    // the bands as digital sections: stereo bands on both channels, left / right bands on theirs, then mid / side
+    // bands on the mid / side signals (round 128). `placedOnly`: only the bands outside the FIR (the FIR modes).
+    void runIir (float* left, float* right, int n, bool placedOnly) noexcept
     {
         for (int b = 0; b < bands; ++b)
-            for (int k = 0; k < counts[(std::size_t) b]; ++k)
+        {
+            const auto pl = placed[(std::size_t) b];
+            if (pl == Placement::mid || pl == Placement::side || (placedOnly && pl == Placement::stereo)) continue;
+            runBand (b, left, right, n, pl == Placement::left ? 1 : pl == Placement::right ? 2 : 3);
+        }
+        if (! anyMidSide) return;
+        for (int i = 0; i < n; ++i)
+        {
+            const float l = left[i], r = right[i];
+            left[i] = 0.5f * (l + r);
+            right[i] = 0.5f * (l - r);
+        }
+        for (int b = 0; b < bands; ++b)
+        {
+            const auto pl = placed[(std::size_t) b];
+            if (pl == Placement::mid) runBand (b, left, right, n, 1);
+            else if (pl == Placement::side) runBand (b, left, right, n, 2);
+        }
+        for (int i = 0; i < n; ++i)
+        {
+            const float m = left[i], sd = right[i];
+            left[i] = m + sd;
+            right[i] = m - sd;
+        }
+    }
+
+    // one band's sections on the channels in `mask` (bit 0 = the first buffer, bit 1 = the second)
+    void runBand (int b, float* left, float* right, int n, int mask) noexcept
+    {
+        for (int k = 0; k < counts[(std::size_t) b]; ++k)
+        {
+            const auto& c = sections[(std::size_t) b][(std::size_t) k];
+            auto& st = state[(std::size_t) b][(std::size_t) k];
+            for (int ch = 0; ch < 2; ++ch)
             {
-                const auto& c = sections[(std::size_t) b][(std::size_t) k];
-                auto& st = state[(std::size_t) b][(std::size_t) k];
-                for (int ch = 0; ch < 2; ++ch)
+                if ((mask & (1 << ch)) == 0) continue;
+                float* x = ch == 0 ? left : right;
+                double z1 = st.z1[ch], z2 = st.z2[ch];
+                for (int i = 0; i < n; ++i)
                 {
-                    float* x = ch == 0 ? left : right;
-                    double z1 = st.z1[ch], z2 = st.z2[ch];
-                    for (int i = 0; i < n; ++i)
-                    {
-                        const double in = x[i];
-                        const double y = c.b0 * in + z1;
-                        z1 = c.b1 * in - c.a1 * y + z2;
-                        z2 = c.b2 * in - c.a2 * y;
-                        x[i] = (float) y;
-                    }
-                    // denormal guard
-                    st.z1[ch] = std::abs (z1) < 1e-30 ? 0.0 : z1;
-                    st.z2[ch] = std::abs (z2) < 1e-30 ? 0.0 : z2;
+                    const double in = x[i];
+                    const double y = c.b0 * in + z1;
+                    z1 = c.b1 * in - c.a1 * y + z2;
+                    z2 = c.b2 * in - c.a2 * y;
+                    x[i] = (float) y;
                 }
+                // denormal guard
+                st.z1[ch] = std::abs (z1) < 1e-30 ? 0.0 : z1;
+                st.z2[ch] = std::abs (z2) < 1e-30 ? 0.0 : z2;
             }
+        }
     }
 
     // solo: the band's region alone (delayed like the FIR modes so switching does not jump)
@@ -690,7 +756,7 @@ private:
         int used = 0;
         for (int b = 0; b < bands; ++b)
         {
-            if (shape (current[(std::size_t) param (b, 0)]) == Shape::off) continue;
+            if (shape (current[(std::size_t) param (b, 0)]) == Shape::off || placed[(std::size_t) b] != Placement::stereo) continue;
             const int c = analogSections (current, b, a + used, det[(std::size_t) b].on ? det[(std::size_t) b].gain : 0.0);
             for (int k = 0; k < c; ++k) f0[used + k] = hz (current[(std::size_t) param (b, 1)]);
             used += c;
@@ -744,7 +810,9 @@ private:
     std::array<double, bands> dynUsed {};
     std::array<std::atomic<float>, bands> meters {};
     double attackCoef = 0.1, releaseCoef = 0.001;
-    float outGain = 1.0f;
+    float outGain = 1.0f, outL = 1.0f, outR = 1.0f;
+    std::array<Placement, bands> placed {};
+    bool anyPlaced = false, anyMidSide = false, outMidSide = false;
     bool anyDynamic = false, soloOn = false, firLoaded = false, firDirty = true, sideGiven = false;
     Biquad solo;
     const float* sideL = nullptr;
@@ -815,6 +883,22 @@ const EffectInfo& info()
         e.params.push_back ({ "Solo", 0.0f });
         e.params.push_back ({ "Detector", 0.0f });
         e.params.push_back ({ "Analyzer", 1.0f });
+        // round 128 (Pro-Q parity): band power and stereo placement, output options, display settings
+        static std::array<std::array<char, 24>, bands * 2> bandExtras {};
+        for (int k = 0; k < bands * 2; ++k)
+        {
+            auto& n = bandExtras[(std::size_t) k];
+            std::snprintf (n.data(), n.size(), k < bands ? "%d Bypass" : "%d Placement", k % bands + 1);
+            e.params.push_back ({ n.data(), 0.0f });
+        }
+        e.params.push_back ({ "Auto Gain", 0.0f });
+        e.params.push_back ({ "Invert", 0.0f });
+        e.params.push_back ({ "Pan", 0.5f });
+        e.params.push_back ({ "Pan Mode", 0.0f });
+        e.params.push_back ({ "Analyzer Range", 0.5f });
+        e.params.push_back ({ "Analyzer Speed", 0.5f });
+        e.params.push_back ({ "Analyzer Tilt", 0.75f });
+        e.params.push_back ({ "Display Range", displayRangeValue (12.0) });
         return e;
     }();
     return i;
@@ -833,6 +917,22 @@ std::string paramText (int p, float v)
     if (p == soloParam) { const auto b = soloBand (v); if (b < 0) return "Off"; std::snprintf (t, sizeof (t), "Band %d", b + 1); return t; }
     if (p == detectorParam) return sidechainDetector (v) ? "Sidechain" : "Input";
     if (p == analyzerParam) { static const char* a[] = { "Off", "Pre", "Post", "Pre + Post" }; return a[(int) analyzer (v)]; }
+    if (p >= powerParam0 && p < powerParam0 + bands) return v >= 0.5f ? "Off" : "On";
+    if (p >= placementParam0 && p < placementParam0 + bands) return placementName (placement (v));
+    if (p == autoGainParam) return v >= 0.5f ? "On" : "Off";
+    if (p == invertParam) return v >= 0.5f ? "Inverted" : "Normal";
+    if (p == panParam)
+    {
+        const auto a = panAmount (v);
+        if (std::abs (a) < 0.005) return "Centre";
+        std::snprintf (t, sizeof (t), "%s %.0f%%", a < 0.0 ? "L" : "R", std::abs (a) * 100.0);
+        return t;
+    }
+    if (p == panModeParam) return panMidSide (v) ? "Mid/Side" : "Left/Right";
+    if (p == specRangeParam) { std::snprintf (t, sizeof (t), "%.0f dB", analyzerRangeDb (v)); return t; }
+    if (p == specSpeedParam) { static const char* a[] = { "Very slow", "Slow", "Medium", "Fast", "Very fast" }; return a[analyzerSpeed (v)]; }
+    if (p == specTiltParam) { std::snprintf (t, sizeof (t), "%.1f dB/oct", analyzerTiltDb (v)); return t; }
+    if (p == displayRangeParam) { std::snprintf (t, sizeof (t), "%.0f dB", displayRangeDb (v)); return t; }
     switch (p % fieldsPerBand)
     {
         case 0: return shapeName (shape (v));
@@ -932,7 +1032,7 @@ const char* phaseName (Phase p) noexcept
 
 bool isDynamic (const EffectParams& p, int b) noexcept
 {
-    return hasGain (shape (p[(std::size_t) param (b, 0)])) && std::abs (rangeDb (p[(std::size_t) (rangeParam0 + b)])) > 0.01;
+    return hasGain (shape (p[(std::size_t) param (b, 0)])) && bandPower (p, b) && std::abs (rangeDb (p[(std::size_t) (rangeParam0 + b)])) > 0.01;
 }
 
 double dynamicGainDb (double level, double threshold, double range) noexcept
@@ -952,6 +1052,47 @@ int latencyFor (Phase p, double sampleRate) noexcept
         case Phase::linear: return linearBlock * f + firTaps * f / 2;
         default: return 0;
     }
+}
+
+Placement placement (float v) noexcept { return (Placement) std::clamp ((int) std::lround (v * (placementCount - 1)), 0, placementCount - 1); }
+float placementValue (Placement p) noexcept { return (float) (int) p / (float) (placementCount - 1); }
+const char* placementName (Placement p) noexcept
+{
+    static const char* names[] = { "Stereo", "Left", "Right", "Mid", "Side" };
+    return names[(int) p];
+}
+bool bandPower (const EffectParams& p, int b) noexcept { return p[(std::size_t) (powerParam0 + b)] < 0.5f; } // stored as "bypassed" so a zeroed array is on
+double panAmount (float v) noexcept { return std::clamp ((double) v * 2.0 - 1.0, -1.0, 1.0); }
+bool panMidSide (float v) noexcept { return v >= 0.5f; }
+double analyzerRangeDb (float v) noexcept { return 60.0 + 30.0 * std::clamp ((int) std::lround (v * 2.0f), 0, 2); }
+int analyzerSpeed (float v) noexcept { return std::clamp ((int) std::lround (v * 4.0f), 0, 4); }
+double analyzerTiltDb (float v) noexcept { return 1.5 * std::clamp ((int) std::lround (v * 4.0f), 0, 4); }
+double displayRangeDb (float v) noexcept
+{
+    static constexpr double r[] { 3.0, 6.0, 12.0, 30.0 };
+    return r[std::clamp ((int) std::lround (v * 3.0f), 0, 3)];
+}
+float displayRangeValue (double db) noexcept { return db <= 4.5 ? 0.0f : db <= 9.0 ? 1.0f / 3.0f : db <= 21.0 ? 2.0f / 3.0f : 1.0f; }
+
+double autoGainDb (const EffectParams& params, double sampleRate) noexcept
+{
+    constexpr int points = 32;
+    double sum = 0.0;
+    for (int b = 0; b < bands; ++b)
+    {
+        Analog a[maxSections];
+        const int c = analogSections (params, b, a);
+        if (c == 0) continue;
+        const double f0 = hz (params[(std::size_t) param (b, 1)]);
+        for (int i = 0; i < points; ++i)
+        {
+            const double f = std::min (20.0 * std::pow (1000.0, (i + 0.5) / points), 0.49 * sampleRate);
+            double m = 1.0;
+            for (int k = 0; k < c; ++k) m *= mag2 (a[k], f / f0);
+            sum += 10.0 * std::log10 (std::max (m, 1e-30));
+        }
+    }
+    return sum / points;
 }
 
 std::unique_ptr<Effect> make (const EffectParams* initial) { return std::make_unique<FacetEqEffect> (initial); }

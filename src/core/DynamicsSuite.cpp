@@ -194,6 +194,33 @@ double driveDb (float v) noexcept { return lin (v, -24.0, 24.0); }
 double scLevelDb (float v) noexcept { return lin (v, -36.0, 36.0); }
 int oversamplingOf (float v) noexcept { return 1 << pick (v, 4); }
 double trimDb (float v) noexcept { return lin (v, -36.0, 36.0); }
+LinkMode linkModeOf (float v) noexcept { return (LinkMode) pick (v, linkModes); }
+float linkModeValue (LinkMode m) noexcept { return (float) (int) m / (float) (linkModes - 1); }
+double dryDb (float v) noexcept
+{
+    if (v <= 0.0f)
+        return -120.0;
+    if (v >= 0.25f)
+        return 72.0 * (double) v - 36.0;
+    return -18.0 + 40.0 * std::log10 ((double) v / 0.25); // amplitude ∝ v² below −18 dB
+}
+float dryValue (double db) noexcept
+{
+    if (db <= -119.0)
+        return 0.0f;
+    if (db >= -18.0)
+        return (float) std::clamp ((db + 36.0) / 72.0, 0.25, 1.0);
+    return (float) (0.25 * std::pow (10.0, (db + 18.0) / 40.0));
+}
+double meterRangeDb (float v) noexcept
+{
+    static constexpr double r[] { 9.0, 18.0, 36.0, 72.0, 90.0 };
+    return r[pick (v, 5)];
+}
+double autoThresholdDb (double knobDb, double programRmsDb) noexcept
+{
+    return std::clamp (programRmsDb + knobDb + 18.0, -60.0, 0.0);
+}
 
 namespace
 {
@@ -490,7 +517,7 @@ private:
         Ctx c;
         c.st = styleOf (p[style]);
         const auto& sd = styleDefs[(int) c.st];
-        c.thr = thresholdDb (p[threshold]);
+        c.thr = on (p[autoThreshold]) ? autoThresholdDb (thresholdDb (p[threshold]), programDb) : thresholdDb (p[threshold]);
         c.rat = ratioOf (p[ratio]);
         c.kn = kneeDb (p[knee]);
         c.rng = std::max (0.01, rangeDb (p[range]));
@@ -593,6 +620,10 @@ private:
             const auto rng = std::max (0.01, rangeDb (p[range]));
             makeup = (float) dbToGain (std::min (rng, -0.5 * curveGain (st, 0.0, thresholdDb (p[threshold]), ratioOf (p[ratio]), kneeDb (p[knee]), rng)));
         }
+        const auto mode = linkModeOf (p[linkMode]);
+        const bool ms = mode != LinkMode::stereo;
+        const auto dryG = (float) (p[dryGain] > 0.0f ? dbToGain (dryDb (p[dryGain])) : 0.0);
+        const bool autoThr = on (p[autoThreshold]);
         const auto la = std::min (lookaheadMs (p[lookahead]), latencyMs);
         const auto factor = osFactor > 1 ? osFactor : 1;
         const auto lag = std::clamp ((int) std::lround ((latencyMs - la) * 0.001 * sr * factor), 0, gainCapacity - 1);
@@ -619,6 +650,12 @@ private:
             }
             sa *= scGain;
             sb *= scGain;
+            if (ms)
+            {
+                const auto m = 0.5f * (sa + sb), d = 0.5f * (sa - sb);
+                sa = m;
+                sb = d;
+            }
             if (scEqOn)
                 for (int q = 0; q < scBands; ++q)
                     for (int k = 0; k < scCount[(std::size_t) q]; ++k)
@@ -629,8 +666,16 @@ private:
                     }
             sideL[(std::size_t) i] = sa;
             sideR[(std::size_t) i] = sb;
+            if (autoThr)
+                programSum += 0.5 * ((double) sa * sa + (double) sb * sb);
             dl[(std::size_t) i] = a;
             dr[(std::size_t) i] = b;
+            if (ms)
+            {
+                const auto m = 0.5f * (a + b), d = 0.5f * (a - b);
+                a = m;
+                b = d;
+            }
             audioDelay.process (a, b);
             wl[(std::size_t) i] = a;
             wr[(std::size_t) i] = b;
@@ -646,10 +691,21 @@ private:
             return;
         }
 
+        if (autoThr) // the programme's slow RMS level (3 s), block by block
+        {
+            const auto ms2 = programSum / std::max (1, n);
+            programSum = 0.0;
+            const auto k = std::exp (-(double) n / (3.0 * sr));
+            programMs = k * programMs + (1.0 - k) * ms2;
+            programDb = std::max (-120.0, 10.0 * std::log10 (programMs + 1e-15));
+        }
+        const auto detLink = ms ? 0.0 : link; // mid / side: each detector on its own channel
         double maxGr = 0.0;
         if (factor == 1)
         {
-            maxGr = gains (sideL.data(), sideR.data(), n, link, lag, context (p, sr), gl.data(), gr.data());
+            maxGr = gains (sideL.data(), sideR.data(), n, detLink, lag, context (p, sr), gl.data(), gr.data());
+            if (ms)
+                routeMs (mode, gl.data(), gr.data(), n);
             for (int i = 0; i < n; ++i)
             {
                 wl[(std::size_t) i] = stage (wl[(std::size_t) i], gl[(std::size_t) i] * makeup, ch, pre, drv);
@@ -671,7 +727,9 @@ private:
                     return 0.0f;
                 });
             }
-            maxGr = gains (upL.data(), upR.data(), m, link, lag, context (p, sr * factor), upGl.data(), upGr.data());
+            maxGr = gains (upL.data(), upR.data(), m, detLink, lag, context (p, sr * factor), upGl.data(), upGr.data());
+            if (ms)
+                routeMs (mode, upGl.data(), upGr.data(), m);
             for (int c = 0; c < 2; ++c)
             {
                 const auto* g = c == 0 ? upGl.data() : upGr.data();
@@ -685,6 +743,12 @@ private:
         for (int i = 0; i < n; ++i)
         {
             float a = wl[(std::size_t) i], b = wr[(std::size_t) i];
+            if (ms)
+            {
+                const auto m = a, d = b;
+                a = m + d;
+                b = m - d;
+            }
             if (ch != Character::off)
             {
                 a = dc.process (a, 0);
@@ -693,12 +757,34 @@ private:
             float da = dl[(std::size_t) i], db = dr[(std::size_t) i];
             dryLa.process (da, db);
             dryDelay.process (da, db);
-            l[i] = (da + (a - da) * mx) * outGain;
-            r[i] = (db + (b - db) * mx) * outGain;
+            if (dryG > 0.0f) // round 128: the dry level added on top (parallel compression)
+            {
+                l[i] = (da + (a - da) * mx + da * dryG) * outGain;
+                r[i] = (db + (b - db) * mx + db * dryG) * outGain;
+            }
+            else
+            {
+                l[i] = (da + (a - da) * mx) * outGain;
+                r[i] = (db + (b - db) * mx) * outGain;
+            }
         }
         meters.set (0, (float) std::clamp (maxGr / 30.0, 0.0, 1.0));
         meters.set (2, inPeak);
         meters.set (3, blockPeak (l, r, n));
+    }
+
+    // mid / side link modes: the gains computed per channel (0 = mid, 1 = side) → where they apply
+    static void routeMs (LinkMode mode, float* gm, float* gs, int count) noexcept
+    {
+        for (int i = 0; i < count; ++i)
+            switch (mode)
+            {
+                case LinkMode::mid: gs[i] = 1.0f; break;
+                case LinkMode::side: gm[i] = 1.0f; break;
+                case LinkMode::midToSide: gs[i] = gm[i]; gm[i] = 1.0f; break;
+                case LinkMode::sideToMid: gm[i] = gs[i]; gs[i] = 1.0f; break;
+                case LinkMode::stereo: break;
+            }
     }
 
     static float stage (float x, float g, Character ch, bool pre, float drv) noexcept
@@ -711,6 +797,7 @@ private:
     }
 
     double sr = 48000.0, latencyMs = -1.0;
+    double programSum = 0.0, programMs = 1e-4, programDb = -40.0; // auto threshold: the programme's slow RMS
     int osFactor = 0, laSamples = 0;
     std::atomic<int> latency { 0 };
     EffectParams lastParams = [] {
@@ -865,6 +952,8 @@ public:
         delay.reset();
         for (auto& d : bandDelay)
             d.reset();
+        for (auto& d : gainDelay)
+            d.reset();
         env.fill (-120.0);
         gains.fill (1.0f);
     }
@@ -902,6 +991,9 @@ public:
             enabled[(std::size_t) b] = on (p[(std::size_t) param (b, fEnabled)]);
             soloed[(std::size_t) b] = on (p[(std::size_t) param (b, fSolo)]);
             anySolo = anySolo || soloed[(std::size_t) b];
+            // round 128: a band's own look-ahead (≤ the global one): its gain waits for the difference
+            const auto bandLa = std::min (laMs, lookaheadMs (p[(std::size_t) (bandLookahead0 + b)]));
+            gainDelay[(std::size_t) b].setLength (std::max (0, laSamples - (int) std::lround (bandLa * 0.001 * sr)));
         }
         std::array<double, bands> extreme {};
 
@@ -935,6 +1027,7 @@ public:
                         extreme[(std::size_t) b] = gdb;
                     g = (float) dbToGain (gdb + level[(std::size_t) b]);
                 }
+                g = gainDelay[(std::size_t) b].process (g);
                 float sl = bl[b], sr2 = br[b];
                 bandDelay[(std::size_t) b].process (sl, sr2);
                 if (anySolo)
@@ -968,6 +1061,7 @@ private:
             return;
         laMs = la;
         const auto s = (int) std::lround (la * 0.001 * sr);
+        laSamples = s;
         delay.setLength (s);
         for (auto& d : bandDelay)
             d.setLength (s);
@@ -989,6 +1083,8 @@ private:
     bool designed = false;
     StereoDelay delay;
     std::array<StereoDelay, bands> bandDelay;
+    std::array<MonoDelay, bands> gainDelay;
+    int laSamples = 0;
     std::array<double, bands> env {};
     std::array<float, bands> gains {};
     LiveMeters meters;
@@ -1014,6 +1110,9 @@ double filterHz (float v) noexcept { return logMap (v, 5.0, 30000.0); }
 float filterValue (double hz) noexcept { return logValue (std::clamp (hz, 5.0, 30000.0), 5.0, 30000.0); }
 double upThresholdDb (float v) noexcept { return lin (v, -30.0, 0.0); }
 double upRatioOf (float v) noexcept { return lin (v, 1.0, 3.0); }
+double scGainDb (float v) noexcept { return lin (v, -36.0, 36.0); }
+double mixOf (float v) noexcept { return lin (v, -1.0, 1.0); }
+double panOf (float v) noexcept { return lin (v, -1.0, 1.0); }
 
 namespace
 {
@@ -1054,7 +1153,10 @@ double hysteresisDb (Style s) noexcept { return styleDefs[(int) s].offsetDb; }
 
 double staticGainDb (const EffectParams& p, double inputDb, bool)
 {
-    return gateCurve (p, inputDb);
+    const auto g = gateCurve (p, inputDb);
+    if (on (p[ducking]) && styleOf (p[style]) != Style::upward) // ducking: the gate turned upside down
+        return -rangeDb (p[range]) - g;
+    return g;
 }
 
 namespace
@@ -1110,6 +1212,29 @@ public:
             lp.filter (sr, 0, std::min (lpHz, sr * 0.45), 0.70710678);
         const bool external = on (p[scExternal]) && scL != nullptr && scR != nullptr;
         const bool listen = on (p[scListen]);
+        // round 128: input level, the expert side-chain gain / mix per detector channel (mid / side in M/S mode),
+        // ducking, wet / dry pan
+        const auto inG = (float) dbToGain (lin (p[input], -24.0, 24.0));
+        const bool msMode = on (p[channelMode]);
+        const auto gL = (float) dbToGain (scGainDb (p[scGainL])), gR = (float) dbToGain (scGainDb (p[scGainR]));
+        const auto mL = (float) mixOf (p[scMixL]), mR = (float) mixOf (p[scMixR]);
+        const bool expertSc = msMode || gL != 1.0f || gR != 1.0f || mL != 0.0f || mR != 0.0f;
+        const bool duck = on (p[ducking]) && st != Style::upward;
+        const auto duckFloor = dbToGain (-rangeDb (p[range]));
+        const auto balance = [] (float pan, float& a, float& b) {
+            if (pan > 0.0f) a = 1.0f - pan;
+            else if (pan < 0.0f) b = 1.0f + pan;
+        };
+        float wetA = 1.0f, wetB = 1.0f, dryA = 1.0f, dryB = 1.0f;
+        balance ((float) panOf (p[wetPan]), wetA, wetB);
+        balance ((float) panOf (p[dryPan]), dryA, dryB);
+        const bool panned = wetA != 1.0f || wetB != 1.0f || dryA != 1.0f || dryB != 1.0f;
+        if (inG != 1.0f)
+            for (int i = 0; i < n; ++i)
+            {
+                l[i] *= inG;
+                r[i] *= inG;
+            }
         const auto attMs = std::max (sd.attackMinMs, attackMs (p[attack]) * sd.attackScale);
         const auto aA = coef (attMs, sr);
         const auto aR = coef (sd.releaseBaseMs + sd.releaseScale * releaseMs (p[release]), sr);
@@ -1125,6 +1250,21 @@ public:
         for (int i = 0; i < n; ++i)
         {
             float sa = external ? scL[i] : l[i], sb = external ? scR[i] : r[i];
+            if (expertSc)
+            {
+                float a0 = sa, b0 = sb;
+                if (msMode)
+                {
+                    a0 = 0.5f * (sa + sb);
+                    b0 = 0.5f * (sa - sb);
+                }
+                // each detector channel: its own input at mix 0, moving to the first (−1) or second (+1) channel
+                const auto pick = [] (float own, float first, float second, float m) {
+                    return m < 0.0f ? own + (-m) * (first - own) : own + m * (second - own);
+                };
+                sa = gL * pick (a0, a0, b0, mL);
+                sb = gR * pick (b0, a0, b0, mR);
+            }
             if (hpOn)
             {
                 sa = hp.process (sa, 0);
@@ -1144,7 +1284,9 @@ public:
             // peak detector: instant attack, 5 ms release
             const auto m = (double) std::max (std::abs (sa), std::abs (sb));
             level = m > level ? m : levelRel * level + (1.0 - levelRel) * m;
-            const auto target = dbToGain (gateCurve (p, gainToDb (level)));
+            auto target = dbToGain (gateCurve (p, gainToDb (level)));
+            if (duck) // ducking: an open gate is the deepest cut
+                target = duckFloor / std::max (1e-9, target);
             // the gain moves in the linear domain: opening with the attack, closing (after hold) with the release
             if (target >= gain)
             {
@@ -1159,8 +1301,16 @@ public:
             const auto g = gainDelay.process ((float) gain);
             float a = l[i], b = r[i];
             delay.process (a, b);
-            l[i] = (a * g + a * dryGain) * outGain;
-            r[i] = (b * g + b * dryGain) * outGain;
+            if (panned)
+            {
+                l[i] = (a * g * wetA + a * dryGain * dryA) * outGain;
+                r[i] = (b * g * wetB + b * dryGain * dryB) * outGain;
+            }
+            else
+            {
+                l[i] = (a * g + a * dryGain) * outGain;
+                r[i] = (b * g + b * dryGain) * outGain;
+            }
         }
         meters.set (0, (float) std::clamp (maxGr / 30.0, 0.0, 1.0));
         meters.set (2, inPeak);
@@ -1216,7 +1366,9 @@ const EffectInfo& crestInfo()
                                      { "SC1 shape", 0.0f }, { "SC1 freq.", 0.30f }, { "SC1 gain", 0.5f }, { "SC1 Q", 0.5f }, { "SC1 slope", 0.125f },
                                      { "SC2 shape", 0.0f }, { "SC2 freq.", 0.575f }, { "SC2 gain", 0.5f }, { "SC2 Q", 0.5f }, { "SC2 slope", 0.125f },
                                      { "SC3 shape", 0.0f }, { "SC3 freq.", 0.80f }, { "SC3 gain", 0.5f }, { "SC3 Q", 0.5f }, { "SC3 slope", 0.125f },
-                                     { "Oversampling", 0.0f }, { "Auto gain", 1.0f }, { "Mix", 1.0f }, { "Input", 0.5f }, { "Output", 0.5f } } };
+                                     { "Oversampling", 0.0f }, { "Auto gain", 1.0f }, { "Mix", 1.0f }, { "Input", 0.5f }, { "Output", 0.5f },
+                                     { "Dry", 0.0f }, { "Auto threshold", 0.0f }, { "Link mode", 0.0f }, { "Meter scale", 0.75f },
+                                     { "Input meter", 1.0f } } };
     return info;
 }
 
@@ -1243,6 +1395,8 @@ const EffectInfo& prismInfo()
         i.params.push_back ({ "Mix", 1.0f });
         i.params.push_back ({ "Input", 0.5f });
         i.params.push_back ({ "Output", 0.5f });
+        for (const auto* n : { "B1 lookahead", "B2 lookahead", "B3 lookahead", "B4 lookahead" })
+            i.params.push_back ({ n, 1.0f }); // 20 ms: each band leads by the whole global look-ahead (as before)
         return i;
     }();
     return info;
@@ -1255,7 +1409,10 @@ const EffectInfo& sentryInfo()
                                      { "Release", 0.31f }, { "Hold", 0.28f }, { "Knee", 0.0f }, { "Lookahead", 0.0f },
                                      { "Lookahead on", 0.0f }, { "High pass", 0.0f }, { "Low pass", 1.0f }, { "External SC", 0.0f },
                                      { "SC listen", 0.0f }, { "Up threshold", 0.8f }, { "Up ratio", 0.25f }, { "Dry", 0.0f },
-                                     { "Output", 0.5f } } };
+                                     { "Output", 0.5f },
+                                     { "Channel mode", 0.0f }, { "SC gain L", 0.5f }, { "SC mix L", 0.5f }, { "SC gain R", 0.5f },
+                                     { "SC mix R", 0.5f }, { "Wet pan", 0.5f }, { "Dry pan", 0.5f }, { "Ducking", 0.0f },
+                                     { "Input", 0.5f } } };
     return info;
 }
 
@@ -1321,6 +1478,14 @@ std::string paramText (EffectKind kind, int param, float v)
             case stereoLink: case mix: return fmt ("%.0f%%", v * 100.0);
             case oversampling: return oversamplingOf (v) == 1 ? "off" : std::to_string (oversamplingOf (v)) + "x";
             case input: case output: return db (trimDb (v));
+            case dryGain: return v <= 0.0f ? "-inf dB" : db (dryDb (v));
+            case linkMode:
+            {
+                static const char* names[linkModes] { "Stereo", "Mid only", "Side only", "Mid > side", "Side > mid" };
+                return names[(int) linkModeOf (v)];
+            }
+            case meterScale: return fmt ("%.0f dB", meterRangeDb (v));
+            case inputMeter: return on (v) ? "shown" : "hidden";
             default: return on (v) ? "on" : "off";
         }
     }
@@ -1347,7 +1512,8 @@ std::string paramText (EffectKind kind, int param, float v)
             case slope: return std::to_string (slopeDbOct (v)) + " dB/oct";
             case lookahead: return v <= 0.0f ? "off" : msText (lookaheadMs (v));
             case mix: return fmt ("%.0f%%", v * 100.0);
-            default: return db (trimDb (v));
+            case input: case output: return db (trimDb (v));
+            default: return msText (lookaheadMs (v)); // the bands' own look-ahead
         }
     }
     if (kind == EffectKind::sentryGate)
@@ -1373,7 +1539,15 @@ std::string paramText (EffectKind kind, int param, float v)
             case upThreshold: return fmt ("%.1f dB", upThresholdDb (v));
             case upRatio: return fmt ("%.2f : 1", upRatioOf (v));
             case dry: return fmt ("%.0f%%", v * 100.0);
-            case output: return db (lin (v, -24.0, 24.0));
+            case output: case input: return db (lin (v, -24.0, 24.0));
+            case channelMode: return on (v) ? "Mid/Side" : "Left/Right";
+            case scGainL: case scGainR: return db (scGainDb (v));
+            case scMixL: case scMixR: return fmt ("%+.2f", mixOf (v));
+            case wetPan: case dryPan:
+            {
+                const auto x = panOf (v);
+                return std::abs (x) < 0.005 ? std::string ("C") : fmt (x < 0 ? "%.0f%% L" : "%.0f%% R", std::abs (x) * 100.0);
+            }
             default: return on (v) ? "on" : "off";
         }
     }

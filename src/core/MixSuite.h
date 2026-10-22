@@ -154,16 +154,26 @@ double sidechainDb (float v) noexcept; // peak reduction: −20 .. +40 dB into t
 // ---- Hush (de-esser) ----
 namespace hush
 {
-// round 123: voicing (appended): 0 = Hush's own engine, 1 = the measured classic split de-esser (core/VoiceMatch.h)
-enum Param { frequency, threshold, range, mode, detector, listen, lookahead, release, output, voicing, count };
+// Round 128 (parity with the reference de-esser), appended so saved projects keep their meaning, every default
+// leaving the output unchanged: allround (detection mode: 0 single vocal, 1 allround = the sibilance must also stand
+// out from the full-band level), lowPass (the band's upper edge 2 .. 20 kHz; 1 = off), lookaheadTime (0 .. 15 ms, the
+// delay = the latency; default 2 ms), stereoLink (0 .. 100 %), linkMid (detect on the mid signal only), external
+// (detect the slot's side chain), input (±12 dB), display (editor only: show the waveform).
+// round 123 (vmatch123): voicing at 9 — 0 = Hush's own engine, 1 = the measured classic split de-esser
+// (core/VoiceMatch.h); round 128's controls follow it.
+enum Param { frequency, threshold, range, mode, detector, listen, lookahead, release, output, voicing,
+             allround, lowPass, lookaheadTime, stereoLink, linkMid, external, input, display, count };
 double hz (float v) noexcept;          // 2 .. 16 kHz
+double lowPassHz (float v) noexcept;   // 2 .. 20 kHz (v ≥ 0.999 = off)
+double lookaheadTimeMs (float v) noexcept; // 0 .. 15 ms
+float lookaheadTimeValue (double ms) noexcept;
 double classicThresholdDb (float v) noexcept; // voicing 1: -80 .. 0 dB (the original's dial)
 bool classic (const EffectParams& p) noexcept;
 std::string classicParamText (int param, float v);
 double thresholdDb (float v) noexcept; // −60 .. 0 dBFS
 double rangeDb (float v) noexcept;     // 0 .. 24 dB
 double releaseMs (float v) noexcept;   // 10 .. 250 ms
-double lookaheadMs() noexcept;         // the fixed lookahead (always reported as latency)
+double lookaheadMs() noexcept;         // the default lookahead (2 ms)
 } // namespace hush
 
 // ---- Aether (air band + exciter) ----
@@ -190,9 +200,28 @@ enum Param
     band2Style, band2Drive, band2Mix, band2Level,
     band3Style, band3Drive, band3Mix, band3Level,
     band4Style, band4Drive, band4Mix, band4Level,
+    // round 128 (Saturn parity, appended): the input gain, then per band its power, state (normal / solo / mute),
+    // tone (bass / mid / treble / presence), feedback (amount, frequency) and dynamics. Every default is the old sound.
+    inputGain,
+    band1On, band1State, band1Bass, band1Mid, band1Treble, band1Presence, band1Feedback, band1FeedbackFreq, band1Dynamics,
+    band2On, band2State, band2Bass, band2Mid, band2Treble, band2Presence, band2Feedback, band2FeedbackFreq, band2Dynamics,
+    band3On, band3State, band3Bass, band3Mid, band3Treble, band3Presence, band3Feedback, band3FeedbackFreq, band3Dynamics,
+    band4On, band4State, band4Bass, band4Mid, band4Treble, band4Presence, band4Feedback, band4FeedbackFreq, band4Dynamics,
     count
 };
 constexpr int maxBands = 4;
+// a band's round-128 parameters: field 0 power, 1 state, 2 bass, 3 mid, 4 treble, 5 presence, 6 feedback,
+// 7 feedback frequency, 8 dynamics
+constexpr int extraFields = 9;
+inline int bandExtra (int band, int field) noexcept { return band1On + std::clamp (band, 0, maxBands - 1) * extraFields + std::clamp (field, 0, extraFields - 1); }
+enum class BandState { normal, solo, mute };
+BandState bandState (float v) noexcept;
+double inputDb (float v) noexcept;      // ±24 dB before everything
+double toneDb (float v) noexcept;       // ±18 dB: bass (low shelf 120 Hz), mid (bell 800 Hz), treble (high shelf 3.5 kHz),
+                                        // presence (bell 6 kHz) on the band's saturated signal
+double feedbackAmount (float v) noexcept; // 0 … 1: the band-passed output fed back into the shaper (loop gain up to 0.9)
+double feedbackHz (float v) noexcept;   // 10 Hz … 1 kHz (log): the feedback band's centre
+double dynamicsAmount (float v) noexcept; // −1 (compress) … +1 (expand) the band's level after the drive
 enum class Style { tube, tape, transistor, fuzz };
 constexpr int styles = 4;
 Style styleOf (float v) noexcept;
@@ -219,6 +248,8 @@ const EffectInfo& emberInfo();
 
 std::string paramText (EffectKind kind, int param, float v);
 std::unique_ptr<Effect> make (EffectKind kind);
+// Hush with its look-ahead (= latency) known before the first block (round 128)
+std::unique_ptr<Effect> makeHush (const EffectParams* params);
 bool isSuiteKind (EffectKind kind) noexcept;
 
 // Meters the editor shows (written by the audio thread, read by the UI): see Effect::controlOutput.

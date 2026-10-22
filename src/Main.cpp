@@ -3,6 +3,7 @@
 
 #include "core/LoadTrace.h"
 #include "core/Effects.h"
+#include "core/LynxTune.h"
 #include "core/FlEffects.h"
 #include "core/FlpImport.h"
 #include "core/NoteEdit.h"
@@ -2235,7 +2236,7 @@ private:
                     eq.params[(std::size_t) (rangeParam0 + b)] = rangeValue (bandsDemo[b].range);
                 }
                 eq.params[(std::size_t) phaseParam] = phaseValue (Phase::natural);
-                const auto own = [&] (const lynx::EffectSlot& fx, const juce::String& file, bool facetEditor) {
+                const auto own = [&] (const lynx::EffectSlot& fx, const juce::String& file, bool facetEditor, int page = 0) {
                     lynx::Song song;
                     song.mixer.resize (2);
                     song.mixer[0].name = "Master";
@@ -2243,7 +2244,7 @@ private:
                     song.mixer[1].effects.push_back (fx);
                     offline.setSong (std::move (song));
                     offline.dispatchPendingMessages();
-                    auto editor = facetEditor ? lynx::makeFacetEqEditor (offline, 1, 0, true) : lynx::makeNativeEffectEditor (offline, 1, 0, 1.25f, 0);
+                    auto editor = facetEditor ? lynx::makeFacetEqEditor (offline, 1, 0, true) : lynx::makeNativeEffectEditor (offline, 1, 0, 1.25f, page);
                     juce::Image image (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
                     {
                         juce::Graphics g (image);
@@ -2258,6 +2259,14 @@ private:
                 };
                 own (eq, "Facet EQ.png", true);
                 own (lynx::makeEffectSlot (lynx::EffectKind::lynxTune), "LYNX Tune.png", false);
+                {
+                    // round 128: the ADVANCED page, with E bypassed and A removed on the keyboard and a created vibrato
+                    auto tune = lynx::makeEffectSlot (lynx::EffectKind::lynxTune);
+                    tune.params[(std::size_t) (lynx::lynxtune::bypassC + 4)] = 1.0f;
+                    tune.params[(std::size_t) (lynx::lynxtune::noteC + 9)] = 0.0f;
+                    tune.params[lynx::lynxtune::vibratoShape] = 1.0f / 3.0f;
+                    own (tune, "LYNX Tune-p2.png", false, 1);
+                }
                 lynx::setNativeEditorDemo (false);
             }
 

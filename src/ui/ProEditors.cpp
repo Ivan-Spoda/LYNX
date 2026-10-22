@@ -83,9 +83,25 @@ public:
     ApexEditor (AudioEngine& e, int t, int s, bool d) : ProEditor (e, t, s, EffectKind::apexLimiter, d, 950, 600) { fillDemo(); }
 
 private:
-    enum { idPanel = 1, idGain, idCeiling, idTp };
-    LevelScale scale;
-    bool panelOpen = true;
+    enum { idPanel = 1, idGain, idCeiling, idTp, idAdvanced };
+    bool panelOpen = true, advancedOpen = false;
+    static constexpr const char* styles = "Clean|Glue|Punch|Dynamic|Dense|Loud|Bus|Safe";
+
+    // the display / meter scale chosen with the meter-scale menu (round 128): −16 / −32 / −48 dB, K-12 / K-14 / K-20
+    int meterScale() const { return apex::meterScale (v (apex::pMeterScale)); }
+    LevelScale scaleNow() const
+    {
+        switch (meterScale())
+        {
+            case 0: return { -6.0f, -16.0f };
+            case 1: return { -12.0f, -32.0f };
+            case 3: return { -24.0f, -60.0f };
+            case 4: return { -26.0f, -62.0f };
+            case 5: return { -32.0f, -68.0f };
+            default: return { -15.0f, -48.0f };
+        }
+    }
+    float kOffset() const { const auto m = meterScale(); return m == 3 ? 12.0f : m == 4 ? 14.0f : m == 5 ? 20.0f : 0.0f; }
     float outHold = -120.0f, grHold = 0.0f;
     int holdAge = 0;
 
@@ -113,7 +129,7 @@ private:
     juce::Rectangle<float> panel() const
     {
         const auto p = plot();
-        return { p.getX() + 8.0f, p.getBottom() - 104.0f, 420.0f, 96.0f };
+        return { p.getX() + 8.0f, p.getBottom() - 104.0f, 560.0f, 96.0f };
     }
 
     Column demoColumn (int i) const override
@@ -130,33 +146,59 @@ private:
     {
         out.push_back (custom (gainTrack().expanded (8.0f, 14.0f), idGain, 0));
         const auto d = plot();
-        out.push_back (custom ({ d.getX() + 60.0f, scale.y ((float) ceilingDb(), d) - 5.0f, d.getWidth() - 60.0f, 10.0f }, idCeiling, 1,
+        out.push_back (custom ({ d.getX() + 60.0f, scaleNow().y ((float) ceilingDb(), d) - 5.0f, d.getWidth() - 60.0f, 10.0f }, idCeiling, 1,
                                tr ("Output ceiling: drag up or down (the bottom bar's Out does the same)")));
         out.push_back (button ({ d.getRight() - 46.0f, d.getBottom() - 26.0f, 40.0f, 20.0f }, idTp, "TP", v (5) >= 0.5f,
                                tr ("True peak: the ceiling also holds between the samples (4x interpolation)")));
         if (panelOpen)
         {
             const auto p = panel();
-            out.push_back (button ({ p.getRight() - 24.0f, p.getY() + 6.0f, 18.0f, 18.0f }, idPanel, juce::String::fromUTF8 ("\xc2\xab"), false, tr ("Hide the knobs")));
-            out.push_back (menu ({ p.getX() + 14.0f, p.getY() + 40.0f, 96.0f, 26.0f }, 4, {}, "Clean|Punch|Loud|Safe"));
-            out.push_back (knob ({ p.getX() + 128.0f, p.getY() + 22.0f, 70.0f, 72.0f }, 2, tr ("Lookahead")));
-            out.push_back (knob ({ p.getX() + 206.0f, p.getY() + 22.0f, 70.0f, 72.0f }, 3, tr ("Release")));
-            out.push_back (knob ({ p.getX() + 300.0f, p.getY() + 22.0f, 70.0f, 72.0f }, 6, tr ("Channel link")));
+            out.push_back (button ({ p.getX() - 2.0f, p.getY() + 6.0f, 16.0f, 18.0f }, idPanel, juce::String::fromUTF8 ("\xc2\xab"), false, tr ("Hide the knobs")));
+            out.push_back (menu ({ p.getX() + 16.0f, p.getY() + 40.0f, 96.0f, 26.0f }, apex::pStyle, {}, styles));
+            out.push_back (knob ({ p.getX() + 122.0f, p.getY() + 22.0f, 68.0f, 72.0f }, apex::pLookahead, tr ("Lookahead")));
+            out.push_back (knob ({ p.getX() + 192.0f, p.getY() + 22.0f, 68.0f, 72.0f }, apex::pAttack, tr ("Attack")));
+            out.push_back (knob ({ p.getX() + 262.0f, p.getY() + 22.0f, 68.0f, 72.0f }, apex::pRelease, tr ("Release")));
+            out.push_back (knob ({ p.getX() + 346.0f, p.getY() + 22.0f, 80.0f, 72.0f }, apex::pLink, tr ("Transients")));
+            out.push_back (knob ({ p.getX() + 428.0f, p.getY() + 22.0f, 80.0f, 72.0f }, apex::pLinkRelease, tr ("Release")));
+            out.push_back (button ({ p.getRight() - 30.0f, p.getY() + 4.0f, 26.0f, p.getHeight() - 8.0f }, idAdvanced,
+                                   juce::String::fromUTF8 (advancedOpen ? "\xc2\xab" : "\xc2\xbb"), advancedOpen,
+                                   tr ("Advanced: DC offset filter, unity gain, audition limiting")));
+            if (advancedOpen)
+            {
+                const auto ad = advanced();
+                out.push_back (toggle ({ ad.getX() + 10.0f, ad.getY() + 24.0f, ad.getWidth() - 20.0f, 20.0f }, apex::pDcFilter, tr ("DC offset filter")));
+                out.push_back (toggle ({ ad.getX() + 10.0f, ad.getY() + 48.0f, ad.getWidth() - 20.0f, 20.0f }, apex::pUnity, tr ("Unity gain")));
+                out.push_back (toggle ({ ad.getX() + 10.0f, ad.getY() + 72.0f, ad.getWidth() - 20.0f, 20.0f }, apex::pAudition, tr ("Audition limiting")));
+            }
         }
         else
-            out.push_back (button ({ 0.0f, plot().getBottom() - 120.0f, 22.0f, 110.0f }, idPanel, juce::String::fromUTF8 ("\xc2\xbb"), false, tr ("Show the knobs: style, look-ahead, release, channel link")));
+            out.push_back (button ({ 0.0f, plot().getBottom() - 120.0f, 22.0f, 110.0f }, idPanel, juce::String::fromUTF8 ("\xc2\xbb"), false, tr ("Show the knobs: style, look-ahead, attack, release, channel linking")));
+        // the meter scale next to the TP button (bottom right of the display)
+        {
+            const auto d = plot();
+            auto ms = menu ({ d.getRight() - 120.0f, d.getBottom() - 26.0f, 70.0f, 20.0f }, apex::pMeterScale, {}, "-16 dB|-32 dB|-48 dB|K-12|K-14|K-20");
+            ms.hint = tr ("Meter scale of the display and the meters");
+            out.push_back (ms);
+        }
         const auto b = barArea();
         const auto cy = b.getCentreY();
-        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 190.0f, 22.0f }, 5, tr ("True peak limiting"), "Off|On"));
-        out.push_back (barMenu ({ 210.0f, cy - 11.0f, 150.0f, 22.0f }, 4, tr ("Style"), "Clean|Punch|Loud|Safe"));
-        out.push_back (barValue ({ 370.0f, cy - 11.0f, 150.0f, 22.0f }, 2, tr ("Lookahead")));
+        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 190.0f, 22.0f }, apex::pTruePeak, tr ("True peak limiting"), "Off|On"));
+        out.push_back (barMenu ({ 206.0f, cy - 11.0f, 140.0f, 22.0f }, apex::pDither, tr ("Dither"), "Off|16 bits|18 bits|20 bits|22 bits|24 bits"));
+        out.push_back (barMenu ({ 352.0f, cy - 11.0f, 180.0f, 22.0f }, apex::pShaping, tr ("Noise shaping"), "None|Basic|Optimized|Weighted"));
         out.push_back (barValue ({ b.getRight() - 150.0f, cy - 11.0f, 140.0f, 22.0f }, 1, tr ("Out")));
         out.push_back (barValue ({ b.getRight() - 300.0f, cy - 11.0f, 140.0f, 22.0f }, 0, tr ("Gain")));
+    }
+
+    juce::Rectangle<float> advanced() const
+    {
+        const auto pn = panel();
+        return { pn.getRight() + 6.0f, pn.getY(), 170.0f, pn.getHeight() };
     }
 
     void buttonPressed (const Ctl& c, const juce::MouseEvent&) override
     {
         if (c.id == idPanel) panelOpen = ! panelOpen;
+        if (c.id == idAdvanced) advancedOpen = ! advancedOpen;
         if (c.id == idTp) set ({ { 5, v (5) >= 0.5f ? 0.0f : 1.0f } });
         repaint();
     }
@@ -188,7 +230,7 @@ private:
         }
         else if (c.id == idCeiling)
         {
-            const auto db = juce::jlimit (-30.0f, 0.0f, scale.db (e.position.y, plot()));
+            const auto db = juce::jlimit (-30.0f, 0.0f, scaleNow().db (e.position.y, plot()));
             set ({ { 1, (float) (db / 30.0 + 1.0) } });
             ui::showValueTip (*this, juce::Rectangle<int> (60, 16).withCentre (e.position.toInt()), tr ("Out") + " " + text (1));
         }
@@ -238,11 +280,11 @@ private:
         {
             const auto& c = columnBack (k);
             const auto x = p.getRight() - (float) k;
-            inPath.lineTo (x, scale.y (c.in + gain, p));
-            outPath.lineTo (x, scale.y (c.out, p));
-            grPath.lineTo (x, scale.y (-c.gr, p));
-            if (k == 0) outLine.startNewSubPath (x, scale.y (c.out, p));
-            else outLine.lineTo (x, scale.y (c.out, p));
+            inPath.lineTo (x, scaleNow().y (c.in + gain, p));
+            outPath.lineTo (x, scaleNow().y (c.out, p));
+            grPath.lineTo (x, scaleNow().y (-c.gr, p));
+            if (k == 0) outLine.startNewSubPath (x, scaleNow().y (c.out, p));
+            else outLine.lineTo (x, scaleNow().y (c.out, p));
         }
         inPath.lineTo (p.getX(), p.getBottom());
         outPath.lineTo (p.getX(), p.getBottom());
@@ -253,7 +295,7 @@ private:
         g.setColour (colour::textPrimary.withAlpha (0.6f));
         g.strokePath (outLine, juce::PathStrokeType (1.0f)); // (no glow on the 100-column-a-second history: it is redrawn at 30 Hz)
         fillLevel (g, grPath, colour::accent, p, fx.enabled ? 0.8f : 0.25f, fx.enabled ? 0.35f : 0.1f);
-        scaleLabels (g, scale, p, d.getRight() + 6.0f, { 0.0f, -3.0f, -6.0f, -9.0f, -12.0f, -15.0f, -24.0f, -36.0f });
+        drawScale (g, p, d.getRight() + 6.0f);
 
         // the biggest reductions, tagged (one tag per 1.5 s at most)
         g.setFont (font (type::caption, true));
@@ -265,7 +307,7 @@ private:
                 if (columnBack (k).gr > bestGr) { bestGr = columnBack (k).gr; best = k; }
             if (best < 0) continue;
             const auto x = p.getRight() - (float) best;
-            const auto r = juce::Rectangle<float> (46.0f, 16.0f).withCentre ({ x, scale.y (-bestGr, p) + 12.0f });
+            const auto r = juce::Rectangle<float> (46.0f, 16.0f).withCentre ({ x, scaleNow().y (-bestGr, p) + 12.0f });
             g.setColour (colour::bg3.withAlpha (0.92f));
             g.fillRoundedRectangle (r, 3.0f);
             g.setColour (colour::accent);
@@ -275,7 +317,7 @@ private:
         }
 
         // the ceiling line (red) with its value at the right
-        const auto cy = scale.y ((float) ceilingDb(), p);
+        const auto cy = scaleNow().y ((float) ceilingDb(), p);
         g.setColour (colour::accent);
         g.drawHorizontalLine ((int) cy, p.getX(), p.getRight());
         g.setFont (font (type::caption, true));
@@ -305,9 +347,9 @@ private:
         const auto outR = m.withWidth (22.0f);
         const auto grR = m.withTrimmedLeft (28.0f);
         const auto newest = columnBack (0);
-        const auto outY = scale.y (newest.out, p);
+        const auto outY = scaleNow().y (newest.out, p);
         skin::meterSolid (g, outR, (outR.getBottom() - outY) / outR.getHeight(), outColour(), false);
-        skin::meterSolid (g, grR, (scale.y (-newest.gr, p) - grR.getY()) / grR.getHeight(), colour::accent, true);
+        skin::meterSolid (g, grR, (scaleNow().y (-newest.gr, p) - grR.getY()) / grR.getHeight(), colour::accent, true);
         g.setColour (colour::bg0.withAlpha (0.5f));
         for (auto y = m.getY() + 3.0f; y < m.getBottom(); y += 3.0f) g.drawHorizontalLine ((int) y, m.getX(), m.getRight());
         g.setFont (font (type::caption, true));
@@ -321,21 +363,52 @@ private:
         {
             const auto pn = panel();
             drawPanel (g, pn);
-            caption (g, { pn.getX() + 14.0f, pn.getY() + 8.0f, 96.0f, 14.0f }, tr ("Style"));
-            caption (g, { pn.getX() + 120.0f, pn.getY() + 8.0f, 166.0f, 14.0f }, tr ("Envelope"));
-            caption (g, { pn.getX() + 292.0f, pn.getY() + 8.0f, 90.0f, 14.0f }, tr ("Stereo"));
+            caption (g, { pn.getX() + 16.0f, pn.getY() + 8.0f, 96.0f, 14.0f }, tr ("Style"));
+            caption (g, { pn.getX() + 120.0f, pn.getY() + 8.0f, 212.0f, 14.0f }, tr ("Envelope"));
+            caption (g, { pn.getX() + 340.0f, pn.getY() + 8.0f, 176.0f, 14.0f }, tr ("Channel linking"));
             g.setColour (colour::border);
-            g.drawVerticalLine ((int) pn.getX() + 118, pn.getY() + 10.0f, pn.getBottom() - 10.0f);
-            g.drawVerticalLine ((int) pn.getX() + 288, pn.getY() + 10.0f, pn.getBottom() - 10.0f);
+            g.drawVerticalLine ((int) pn.getX() + 116, pn.getY() + 10.0f, pn.getBottom() - 10.0f);
+            g.drawVerticalLine ((int) pn.getX() + 336, pn.getY() + 10.0f, pn.getBottom() - 10.0f);
+            if (advancedOpen)
+            {
+                const auto ad = advanced();
+                drawPanel (g, ad);
+                caption (g, { ad.getX(), ad.getY() + 6.0f, ad.getWidth(), 14.0f }, tr ("Advanced"));
+            }
         }
         // latency (constant: the maximum look-ahead)
         g.setColour (colour::textDisabled);
         g.setFont (font (type::caption));
-        g.drawText (tr ("latency {0} samples", { juce::String (apex::latencyAt (48000.0)) }), juce::Rectangle<float> (530.0f, barArea().getY(), 140.0f, barH),
+        g.drawText (tr ("latency {0} samples", { juce::String (apex::latencyAt (48000.0)) }), juce::Rectangle<float> (540.0f, barArea().getY(), 108.0f, barH),
                     juce::Justification::centredLeft, true);
     }
 
     void paintCustom (juce::Graphics&, const Ctl&) override {}
+
+    // the dB marks of the chosen meter scale (K scales are labelled relative to their 0 VU)
+    void drawScale (juce::Graphics& g, juce::Rectangle<float> p, float labelX) const
+    {
+        const auto sc = scaleNow();
+        const auto k = kOffset();
+        std::vector<float> marks;
+        switch (meterScale())
+        {
+            case 0: marks = { 0.0f, -2.0f, -4.0f, -6.0f, -9.0f, -12.0f, -16.0f }; break;
+            case 1: marks = { 0.0f, -3.0f, -6.0f, -9.0f, -12.0f, -18.0f, -24.0f, -32.0f }; break;
+            case 2: marks = { 0.0f, -3.0f, -6.0f, -9.0f, -12.0f, -15.0f, -24.0f, -36.0f }; break;
+            default: for (float m = 8.0f; m >= -36.0f; m -= (m > -12.0f ? 4.0f : 12.0f)) marks.push_back (m - k); break;
+        }
+        g.setFont (font (type::caption));
+        for (const auto m : marks)
+        {
+            const auto y = sc.y (m, p);
+            g.setColour (colour::gridBeat);
+            g.drawHorizontalLine ((int) y, p.getX(), p.getRight());
+            g.setColour (colour::textDisabled);
+            const auto label = k > 0.0f ? (m + k > 0.0f ? "+" : "") + juce::String ((int) std::lround (m + k)) : (m == 0.0f ? juce::String ("0 dB") : juce::String ((int) m));
+            g.drawText (label, juce::Rectangle<float> (labelX, y - 7.0f, 40.0f, 14.0f), juce::Justification::centredLeft, false);
+        }
+    }
 };
 
 // =============================================================================================================
@@ -346,10 +419,21 @@ private:
 class HushEditor final : public ProEditor
 {
 public:
-    HushEditor (AudioEngine& e, int t, int s, bool d) : ProEditor (e, t, s, EffectKind::hushDeEsser, d, 720, 500) { fillDemo(); }
+    HushEditor (AudioEngine& e, int t, int s, bool d) : ProEditor (e, t, s, EffectKind::hushDeEsser, d, 720, 500)
+    {
+        fillDemo();
+        if (! displayShown()) setSize (720, 500 - (int) waveH);
+    }
 
 private:
-    enum { idThreshold = 1, idFreq, idMeterThreshold };
+    enum { idThreshold = 1, idFreq, idMeterThreshold, idDisplay, idExternal };
+    static constexpr float waveH = 194.0f; // the waveform display (DISPLAY hides it and the window shrinks)
+    bool displayShown() const { return v (P ("Display")) >= 0.5f; }
+    // which handle of the frequency slider is being dragged: 0 = high-pass (Frequency), 1 = low-pass
+    int dragHandle = 0;
+    static float freqPos (double hz) { return (float) (std::log (hz / 2000.0) / std::log (10.0)); } // 2 .. 20 kHz
+    float hpPos() const { return freqPos (mixsuite::hush::hz (v (pFreq()))); }
+    float lpPos() const { return v (P ("Low-pass freq.")) >= 0.999f ? 1.0f : freqPos (mixsuite::hush::lowPassHz (v (P ("Low-pass freq.")))); }
 
     juce::String title() const override { return "Hush De-esser"; }
     juce::String gestures() const override { return tr ("Drag the threshold line or the meter's arrow  -  drag the frequency slider") ; }
@@ -358,7 +442,11 @@ private:
 
     int pFreq() const { return P ("Frequency"); }
     int pThr() const { return P ("Threshold"); }
-    juce::Rectangle<float> wave() const { return bodyArea().withTrimmedRight (112.0f).withHeight (190.0f).reduced (0.0f, 4.0f); }
+    juce::Rectangle<float> wave() const
+    {
+        return displayShown() ? bodyArea().withTrimmedRight (112.0f).withHeight (190.0f).reduced (0.0f, 4.0f)
+                              : bodyArea().withTrimmedRight (112.0f).withHeight (0.0f).translated (0.0f, -4.0f);
+    }
     juce::Rectangle<float> meters() const { return { (float) getWidth() - 70.0f, headerH + 18.0f, 26.0f, bodyArea().getHeight() - 26.0f }; }
     juce::Rectangle<float> freqTrack() const { return { 34.0f, wave().getBottom() + 182.0f, 250.0f, 24.0f }; }
 
@@ -393,38 +481,104 @@ private:
         const auto w = wave();
         const auto y0 = w.getBottom() + 10.0f;
         // threshold line on the waveform (both halves)
-        out.push_back (custom ({ w.getX(), waveY ((float) thresholdDb(), true) - 5.0f, w.getWidth(), 10.0f }, idThreshold, pThr(), tr ("Threshold: drag up or down")));
-        out.push_back (custom ({ w.getX(), waveY ((float) thresholdDb(), false) - 5.0f, w.getWidth(), 10.0f }, idThreshold, pThr(), tr ("Threshold: drag up or down")));
+        if (displayShown())
+        {
+            out.push_back (custom ({ w.getX(), waveY ((float) thresholdDb(), true) - 5.0f, w.getWidth(), 10.0f }, idThreshold, pThr(), tr ("Threshold: drag up or down")));
+            out.push_back (custom ({ w.getX(), waveY ((float) thresholdDb(), false) - 5.0f, w.getWidth(), 10.0f }, idThreshold, pThr(), tr ("Threshold: drag up or down")));
+        }
         auto thr = knob ({ 44.0f, y0 + 4.0f, 110.0f, 142.0f }, pThr(), tr ("Threshold"), 2);
         thr.colour = colour::warning;
         out.push_back (thr);
         auto rng = knob ({ 170.0f, y0 + 4.0f, 110.0f, 142.0f }, P ("Range"), tr ("Range"), 2);
         rng.colour = colour::warning;
         out.push_back (rng);
-        out.push_back (custom (freqTrack().expanded (0.0f, 4.0f), idFreq, pFreq(), {}));
+        out.push_back (custom (freqTrack().expanded (0.0f, 4.0f), idFreq, pFreq(), tr ("Drag the left handle: where the band starts (high-pass); the right one: where it ends (low-pass, far right = off)")));
         auto aud = toggle ({ freqTrack().getCentreX() - 50.0f, freqTrack().getBottom() + 8.0f, 100.0f, 22.0f }, P ("Listen"), tr ("Audition"));
         aud.hint = tr ("Listen: hear only what the de-esser takes away (the detection band)");
         out.push_back (aud);
-        // middle: detection and processing modes
+        // middle: display, mode, processing, side chain
         const auto mx = 304.0f;
-        out.push_back (tabs ({ mx, y0 + 30.0f, 190.0f, 28.0f }, P ("Band detector"), "High-pass|Band", { 0.0f, 1.0f }));
-        out.push_back (tabs ({ mx, y0 + 88.0f, 190.0f, 28.0f }, P ("Wideband"), "Wide band|Split band", { 1.0f, 0.0f }));
-        out.push_back (toggle ({ mx + 30.0f, y0 + 140.0f, 130.0f, 24.0f }, P ("Lookahead"), tr ("Lookahead 2 ms")));
-        // right: release and output
-        out.push_back (knob ({ 508.0f, y0 + 14.0f, 92.0f, 104.0f }, P ("Release"), tr ("Release")));
-        out.push_back (knob ({ 508.0f, y0 + 132.0f, 92.0f, 96.0f }, P ("Output"), tr ("Output"), 1, true));
+        out.push_back (button ({ mx + 40.0f, y0 - 2.0f, 110.0f, 20.0f }, idDisplay, tr ("Display"), displayShown(), tr ("Show or hide the scrolling display")));
+        auto md = tabs ({ mx, y0 + 40.0f, 190.0f, 28.0f }, P ("Allround"), "Single vocal|Allround", { 0.0f, 1.0f });
+        md.hint = tr ("Single vocal: one voice; Allround: a mix or other material (the sibilance must also stand out from the whole signal)");
+        out.push_back (md);
+        out.push_back (tabs ({ mx, y0 + 96.0f, 190.0f, 28.0f }, P ("Wideband"), "Wide band|Split band", { 1.0f, 0.0f }));
+        out.push_back (custom ({ mx + 90.0f, y0 + 148.0f, 100.0f, 26.0f }, idExternal, P ("External SC"), tr ("Side chain: detect this signal (In) or another track (Ext)")));
+        // right: stereo link (with MID) and look-ahead (with its power button)
+        out.push_back (knob ({ 512.0f, y0 + 2.0f, 84.0f, 90.0f }, P ("Stereo link"), tr ("Stereo link")));
+        auto mid = toggle ({ 522.0f, y0 + 96.0f, 64.0f, 18.0f }, P ("Link mid"), "MID");
+        mid.hint = tr ("Mid: detect on the middle of the stereo image only");
+        out.push_back (mid);
+        out.push_back (knob ({ 512.0f, y0 + 120.0f, 84.0f, 90.0f }, P ("Lookahead time"), tr ("Lookahead")));
+        auto la = toggle ({ 522.0f, y0 + 214.0f, 64.0f, 18.0f }, P ("Lookahead"), tr ("On"));
+        la.hint = tr ("Look-ahead on / off");
+        out.push_back (la);
         // the meter's threshold arrow
         out.push_back (custom ({ meters().getX() - 12.0f, meterY ((float) thresholdDb()) - 7.0f, 12.0f, 14.0f }, idMeterThreshold, pThr(), tr ("Threshold: drag up or down")));
         const auto b = barArea();
         const auto cy = b.getCentreY();
         out.push_back (barMenu ({ 10.0f, cy - 11.0f, 180.0f, 22.0f }, P ("Band detector"), tr ("Detection"), "High-pass|Band", { 0.0f, 1.0f }));
-        out.push_back (barMenu ({ 200.0f, cy - 11.0f, 170.0f, 22.0f }, P ("Lookahead"), tr ("Lookahead"), "Off|On"));
+        out.push_back (barValue ({ 200.0f, cy - 11.0f, 150.0f, 22.0f }, P ("Release"), tr ("Release")));
+        out.push_back (barValue ({ b.getRight() - 290.0f, cy - 11.0f, 130.0f, 22.0f }, P ("Input"), tr ("In")));
         out.push_back (barValue ({ b.getRight() - 150.0f, cy - 11.0f, 140.0f, 22.0f }, P ("Output"), tr ("Out")));
+    }
+
+    void buttonPressed (const Ctl& c, const juce::MouseEvent&) override
+    {
+        if (c.id == idDisplay)
+        {
+            const auto show = ! displayShown();
+            set ({ { P ("Display"), show ? 1.0f : 0.0f } }, false);
+            setSize (720, show ? 500 : 500 - (int) waveH);
+        }
+        repaint();
+    }
+
+    void showSideChainMenu()
+    {
+        const auto* fx = current();
+        if (fx == nullptr) return;
+        juce::PopupMenu menu;
+        const auto ext = v (P ("External SC")) >= 0.5f;
+        menu.addItem (tr ("In: detect this signal"), true, ! ext, [this] { set ({ { P ("External SC"), 0.0f } }); });
+        juce::PopupMenu from;
+        const auto assign = [this] (int source) {
+            const auto p = P ("External SC");
+            engine.editSong ([tk = track, sl = slot, source, p] (Song& s) {
+                auto& target = s.mixer[(std::size_t) tk].effects[(std::size_t) sl];
+                target.sidechain = source;
+                target.params[(std::size_t) p] = source >= 0 ? 1.0f : 0.0f;
+            });
+        };
+        const auto& song = engine.getSong();
+        for (int t = 1; t < (int) song.mixer.size(); ++t)
+            if (t != track)
+                from.addItem (juce::String (t) + " " + juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()), true, ext && fx->sidechain == t, [assign, t] { assign (t); });
+        menu.addSubMenu (tr ("Ext: side chain from"), from);
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
     }
 
     void customDown (const Ctl& c, const juce::MouseEvent& e) override
     {
-        if (ui::isResetClick (e)) { set ({ { c.param, (float) specFor (c.param).defaultValue } }); return; }
+        if (c.id == idExternal)
+        {
+            const auto* fx = current();
+            const auto ext = e.position.x >= c.r.getCentreX();
+            if (ext && (fx == nullptr || fx->sidechain < 0 || e.mods.isPopupMenu())) showSideChainMenu();
+            else set ({ { c.param, ext ? 1.0f : 0.0f } });
+            return;
+        }
+        if (c.id == idFreq)
+        {
+            const auto x = (e.position.x - freqTrack().getX()) / freqTrack().getWidth();
+            dragHandle = std::abs (x - lpPos()) < std::abs (x - hpPos()) ? 1 : 0;
+        }
+        if (ui::isResetClick (e))
+        {
+            const auto p = c.id == idFreq && dragHandle == 1 ? P ("Low-pass freq.") : c.param;
+            set ({ { p, (float) specFor (p).defaultValue } });
+            return;
+        }
         if (e.mods.isPopupMenu())
         {
             ui::showValueMenu (*this, &engine, specFor (c.param), v (c.param), [this, p = c.param] (double x) { set ({ { p, (float) x } }); });
@@ -438,9 +592,19 @@ private:
         if (c.id == idFreq)
         {
             const auto tr_ = freqTrack();
-            const auto hz = 2000.0 * std::pow (8.0, juce::jlimit (0.0, 1.0, (double) ((e.position.x - tr_.getX()) / tr_.getWidth())));
-            set ({ { pFreq(), invert ([] (float x) { return mixsuite::hush::hz (x); }, hz) } });
-            ui::showValueTip (*this, tr_.toNearestInt(), tr ("Frequency") + " " + text (pFreq()));
+            const auto x = juce::jlimit (0.0, 1.0, (double) ((e.position.x - tr_.getX()) / tr_.getWidth()));
+            const auto hz = 2000.0 * std::pow (10.0, x);
+            if (dragHandle == 1)
+            {
+                const auto lp = P ("Low-pass freq.");
+                set ({ { lp, x >= 0.985 ? 1.0f : invert ([] (float y) { return mixsuite::hush::lowPassHz (y); }, juce::jmax (hz, mixsuite::hush::hz (v (pFreq())))) } });
+                ui::showValueTip (*this, tr_.toNearestInt(), tr ("Low pass") + " " + text (lp));
+            }
+            else
+            {
+                set ({ { pFreq(), invert ([] (float y) { return mixsuite::hush::hz (y); }, juce::jmin (hz, 16000.0)) } });
+                ui::showValueTip (*this, tr_.toNearestInt(), tr ("Frequency") + " " + text (pFreq()));
+            }
             return;
         }
         float db;
@@ -469,26 +633,43 @@ private:
         {
             const auto tr_ = freqTrack();
             const auto band = v (P ("Band detector")) >= 0.5f;
-            const auto f = (float) (std::log (mixsuite::hush::hz (v (pFreq())) / 2000.0) / std::log (8.0));
-            const auto x = tr_.getX() + tr_.getWidth() * juce::jlimit (0.0f, 1.0f, f);
+            const auto x1 = tr_.getX() + tr_.getWidth() * juce::jlimit (0.0f, 1.0f, hpPos());
+            const auto x2 = tr_.getX() + tr_.getWidth() * juce::jlimit (0.0f, 1.0f, lpPos());
             g.setColour (colour::bg1);
             g.fillRoundedRectangle (tr_, 4.0f);
-            // the detection region: everything above (high-pass) or a band around the frequency
+            // the detection region: between the two handles (band mode: a band around the left one, cut at the right one)
             g.setColour (colour::warning.withAlpha (0.35f));
-            if (band) g.fillRect (juce::Rectangle<float> (x - 34.0f, tr_.getY() + 2.0f, 68.0f, tr_.getHeight() - 4.0f).getIntersection (tr_));
-            else g.fillRect (tr_.withLeft (x).reduced (0.0f, 2.0f));
+            const auto left = band ? x1 - 34.0f : x1;
+            const auto right = band ? juce::jmin (x1 + 34.0f, x2) : x2;
+            g.fillRect (juce::Rectangle<float> (left, tr_.getY() + 2.0f, juce::jmax (1.0f, right - left), tr_.getHeight() - 4.0f).getIntersection (tr_));
             g.setColour (colour::borderStrong);
             g.drawRoundedRectangle (tr_, 4.0f, 1.0f);
-            juce::Path handle;
-            handle.addTriangle (x - 9.0f, tr_.getBottom() - 1.0f, x + 9.0f, tr_.getBottom() - 1.0f, x, tr_.getY() + 2.0f);
-            g.setColour (c.r.contains (mouse) || (dragCtl == -2 && pressed.id == idFreq) ? colour::textPrimary : colour::textSecondary);
-            g.fillPath (handle);
+            const auto hot = c.r.contains (mouse) || (dragCtl == -2 && pressed.id == idFreq);
+            for (const auto [x, k] : { std::pair<float, int> { x1, 0 }, std::pair<float, int> { x2, 1 } })
+            {
+                juce::Path handle;
+                handle.addTriangle (x - 9.0f, tr_.getBottom() - 1.0f, x + 9.0f, tr_.getBottom() - 1.0f, x, tr_.getY() + 2.0f);
+                g.setColour (hot && dragHandle == k ? colour::textPrimary : colour::textSecondary);
+                g.fillPath (handle);
+            }
             g.setFont (font (type::small, true));
             g.setColour (colour::warning);
-            g.drawText ("2 kHz", juce::Rectangle<float> (tr_.getX() - 6.0f, tr_.getBottom() + 10.0f, 60.0f, 14.0f), juce::Justification::centredLeft, false);
-            g.drawText ("16 kHz", juce::Rectangle<float> (tr_.getRight() - 54.0f, tr_.getBottom() + 10.0f, 60.0f, 14.0f), juce::Justification::centredRight, false);
+            g.drawText (text (pFreq()), juce::Rectangle<float> (tr_.getX() - 6.0f, tr_.getBottom() + 10.0f, 70.0f, 14.0f), juce::Justification::centredLeft, false);
+            const auto lpOff = v (P ("Low-pass freq.")) >= 0.999f;
+            g.drawText (lpOff ? juce::String ("20 kHz") : text (P ("Low-pass freq.")), juce::Rectangle<float> (tr_.getRight() - 64.0f, tr_.getBottom() + 10.0f, 70.0f, 14.0f),
+                        juce::Justification::centredRight, false);
+        }
+        else if (c.id == idExternal)
+        {
+            const auto ext = v (c.param) >= 0.5f;
+            const auto half = c.r.withWidth (c.r.getWidth() / 2.0f);
+            skin::button (g, half, ! ext, half.contains (mouse), accent, radius::sm);
+            skin::button (g, half.translated (half.getWidth(), 0.0f), ext, half.translated (half.getWidth(), 0.0f).contains (mouse), accent, radius::sm);
             g.setColour (colour::textPrimary);
-            g.drawText (text (pFreq()), juce::Rectangle<float> (x - 40.0f, tr_.getY() - 18.0f, 80.0f, 14.0f), juce::Justification::centred, false);
+            g.setFont (font (type::small, true));
+            g.drawText (tr ("In"), half, juce::Justification::centred, false);
+            g.drawText (tr ("Ext"), half.translated (half.getWidth(), 0.0f), juce::Justification::centred, false);
+            caption (g, { c.r.getX() - 92.0f, c.r.getY(), 88.0f, c.r.getHeight() }, tr ("Side chain"), juce::Justification::centredRight);
         }
         else if (c.id == idMeterThreshold)
         {
@@ -504,6 +685,13 @@ private:
     {
         const auto w = wave();
         displayBackground (g, bodyArea());
+        if (displayShown())
+            paintWave (g, fx, w);
+        paintControlsArea (g, w);
+    }
+
+    void paintWave (juce::Graphics& g, const EffectSlot& fx, juce::Rectangle<float> w)
+    {
         g.setColour (colour::bg1);
         g.fillRect (w);
         g.setColour (colour::gridBeat);
@@ -532,13 +720,16 @@ private:
         g.setFont (font (type::caption, true));
         g.drawText (tr ("Threshold") + " " + text (pThr()), juce::Rectangle<float> (w.getX() + 6.0f, waveY ((float) thresholdDb(), true) - 16.0f, 160.0f, 14.0f),
                     juce::Justification::centredLeft, false);
+    }
 
+    void paintControlsArea (juce::Graphics& g, juce::Rectangle<float> w)
+    {
         // the control area
         const auto area = juce::Rectangle<float> (0.0f, w.getBottom() + 4.0f, w.getWidth(), barArea().getY() - w.getBottom() - 8.0f);
         g.setColour (colour::bg2);
         g.fillRoundedRectangle (area.reduced (4.0f, 0.0f), 8.0f);
-        caption (g, { 304.0f, w.getBottom() + 22.0f, 190.0f, 14.0f }, tr ("Detection"));
-        caption (g, { 304.0f, w.getBottom() + 80.0f, 190.0f, 14.0f }, tr ("Processing"));
+        caption (g, { 304.0f, w.getBottom() + 34.0f, 190.0f, 14.0f }, tr ("Mode"));
+        caption (g, { 304.0f, w.getBottom() + 90.0f, 190.0f, 14.0f }, tr ("Processing"));
 
         // meters: input level and reduction, with the dB scale between them
         const auto m = meters();
@@ -570,8 +761,13 @@ public:
     CrestEditor (AudioEngine& e, int t, int s, bool d) : ProEditor (e, t, s, EffectKind::crestCompressor, d, 860, 560) { fillDemo(); }
 
 private:
-    enum { idThreshold = 1, idKnee, idSideChain, idScNode0 = 10 };
-    LevelScale scale { -30.0f, -72.0f };
+    enum { idThreshold = 1, idKnee, idSideChain, idInMeter, idScNode0 = 10 };
+    // the display's level scale: the meter-scale setting (9 … 90 dB) is its floor, the upper 70 % shows its top 42 %
+    LevelScale sc() const
+    {
+        const auto range = (float) dyn::crest::meterRangeDb (v (dyn::crest::meterScale));
+        return { -range * 30.0f / 72.0f, -range };
+    }
     bool kneeOpen = false, scOpen = false;
     static constexpr float scH = 170.0f;
     int scDrag = -1;
@@ -602,13 +798,14 @@ private:
     {
         using namespace dyn::crest;
         const auto p = plot();
-        out.push_back (custom ({ p.getX() + 24.0f, scale.y ((float) thresholdDb(), p) - 5.0f, p.getWidth() - 24.0f, 10.0f }, idThreshold, threshold,
+        out.push_back (custom ({ p.getX() + 24.0f, sc().y ((float) thresholdDb(), p) - 5.0f, p.getWidth() - 24.0f, 10.0f }, idThreshold, threshold,
                                tr ("Threshold: drag up or down")));
         out.push_back (button ({ kneeOpen ? kneeArea().getRight() : p.getX(), p.getY() + 80.0f, 20.0f, 64.0f }, idKnee,
                                juce::String::fromUTF8 (kneeOpen ? "\xc2\xab" : "\xc2\xbb"), kneeOpen, tr ("Knee: show the transfer curve")));
         // the knob row over the bottom of the display
         const auto by = p.getBottom() - 190.0f;
         out.push_back (knob ({ 96.0f, by, 104.0f, 118.0f }, threshold, tr ("Threshold"), 2));
+        out.push_back (toggle ({ 108.0f, by - 26.0f, 80.0f, 20.0f }, autoThreshold, tr ("Auto")));
         out.push_back (knob ({ 214.0f, by, 104.0f, 118.0f }, ratio, tr ("Ratio"), 2));
         out.push_back (menu ({ 330.0f, by + 54.0f, 104.0f, 28.0f }, style, {}, "Clean|Allround|Punch|Upward|Two-way|Vari-mu|Classic|Opto|Vocal|Bus|Pumping"));
         out.push_back (menu ({ 342.0f, by + 90.0f, 80.0f, 20.0f }, character, tr ("Character"), "Off|Warm|Crisp|Bright"));
@@ -617,7 +814,11 @@ private:
         out.push_back (toggle ({ 576.0f, by - 26.0f, 80.0f, 20.0f }, autoRelease, tr ("Auto")));
         out.push_back (knob ({ 680.0f, by - 6.0f, 62.0f, 82.0f }, P ("Output"), tr ("Gain"), 1, true));
         out.push_back (toggle ({ 670.0f, by + 76.0f, 82.0f, 20.0f }, autoGain, tr ("Auto gain")));
-        out.push_back (knob ({ 680.0f, by + 100.0f, 62.0f, 82.0f }, mix, tr ("Mix")));
+        out.push_back (knob ({ 680.0f, by + 100.0f, 62.0f, 82.0f }, dryGain, tr ("Dry")));
+        // the display's scale (bottom right, like the reference's dB box) and the input meter switch
+        out.push_back (menu ({ p.getRight() - 16.0f, p.getBottom() - 20.0f, 60.0f, 20.0f }, meterScale, {}, "9 dB|18 dB|36 dB|72 dB|90 dB"));
+        out.push_back (button ({ p.getRight() + 42.0f, main().getY(), 18.0f, 12.0f }, idInMeter, "IN", v (inputMeter) >= 0.5f,
+                               tr ("Input meter: show or hide")));
         const auto sy = p.getBottom() - 64.0f;
         out.push_back (knob ({ 110.0f, sy, 76.0f, 64.0f }, knee, tr ("Knee"), 0));
         out.push_back (knob ({ 228.0f, sy, 76.0f, 64.0f }, range, tr ("Range"), 0));
@@ -631,6 +832,7 @@ private:
             out.push_back (tabs ({ 14.0f, s.getY() + 44.0f, 104.0f, 24.0f }, scExternal, "Int|Ext"));
             out.push_back (knob ({ 130.0f, s.getY() + 12.0f, 70.0f, 82.0f }, scLevel, tr ("Level"), 1, true));
             out.push_back (knob ({ 130.0f, s.getY() + 92.0f, 70.0f, 70.0f }, stereoLink, tr ("Stereo link"), 0));
+            out.push_back (menu ({ 14.0f, s.getY() + 108.0f, 104.0f, 22.0f }, linkMode, tr ("Link mode"), "Stereo|Mid only|Side only|Mid > side|Side > mid"));
             for (int b = 0; b < scBands; ++b)
                 out.push_back (menu ({ 216.0f, s.getY() + 16.0f + 46.0f * (float) b, 92.0f, 22.0f }, scParam (b, 0), {},
                                      "Off|Bell|Low shelf|High shelf|Low cut|High cut|Notch|Band pass|Tilt shelf"));
@@ -638,9 +840,10 @@ private:
         }
         const auto b = barArea();
         const auto cy = b.getCentreY();
-        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 180.0f, 22.0f }, oversampling, tr ("Oversampling"), "Off|2x|4x|8x"));
-        out.push_back (barMenu ({ 200.0f, cy - 11.0f, 180.0f, 22.0f }, maxLookahead, tr ("Lookahead"), "Off|1 ms|2 ms|5 ms|10 ms|20 ms"));
-        out.push_back (barMenu ({ 390.0f, cy - 11.0f, 150.0f, 22.0f }, characterPre, tr ("Character"), "Post|Pre"));
+        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 150.0f, 22.0f }, oversampling, tr ("Oversampling"), "Off|2x|4x|8x"));
+        out.push_back (barMenu ({ 165.0f, cy - 11.0f, 140.0f, 22.0f }, maxLookahead, tr ("Lookahead"), "Off|1 ms|2 ms|5 ms|10 ms|20 ms"));
+        out.push_back (barMenu ({ 310.0f, cy - 11.0f, 125.0f, 22.0f }, characterPre, tr ("Character"), "Post|Pre"));
+        out.push_back (barValue ({ 440.0f, cy - 11.0f, 110.0f, 22.0f }, mix, tr ("Mix")));
         out.push_back (barValue ({ b.getRight() - 300.0f, cy - 11.0f, 140.0f, 22.0f }, P ("Input"), tr ("In")));
         out.push_back (barValue ({ b.getRight() - 150.0f, cy - 11.0f, 140.0f, 22.0f }, P ("Output"), tr ("Out")));
     }
@@ -669,6 +872,7 @@ private:
     void buttonPressed (const Ctl& c, const juce::MouseEvent&) override
     {
         if (c.id == idKnee) kneeOpen = ! kneeOpen;
+        if (c.id == idInMeter) set ({ { dyn::crest::inputMeter, v (dyn::crest::inputMeter) >= 0.5f ? 0.0f : 1.0f } });
         if (c.id == idSideChain)
         {
             scOpen = ! scOpen;
@@ -709,7 +913,7 @@ private:
             ui::showValueTip (*this, juce::Rectangle<int> (16, 16).withCentre (scNode (scDrag).toInt()), text (scParam (scDrag, 1)) + "  " + text (scParam (scDrag, 2)));
             return;
         }
-        const auto db = juce::jlimit (-60.0f, 0.0f, scale.db (e.position.y, plot()));
+        const auto db = juce::jlimit (-60.0f, 0.0f, sc().db (e.position.y, plot()));
         set ({ { threshold, invert ([] (float x) { return dyn::crest::thresholdDb (x); }, db) } });
         ui::showValueTip (*this, juce::Rectangle<int> (80, 16).withCentre (e.position.toInt()), tr ("Threshold") + " " + text (threshold));
     }
@@ -751,7 +955,24 @@ private:
         const auto m = main();
         const auto p = plot();
         displayBackground (g, bodyArea());
-        scaleLabels (g, scale, p, p.getRight() + 8.0f, { 0.0f, -6.0f, -12.0f, -18.0f, -24.0f, -30.0f, -42.0f, -60.0f });
+        {
+            // the marks of the chosen scale: six steps over the upper part, two more down to the floor
+            const auto s = sc();
+            const auto step = -s.knee / 5.0f;
+            const auto lower = std::round ((s.knee + s.floor) * 0.5f / 3.0f) * 3.0f; // one mark between the knee and the floor
+            const float marks[] { 0.0f, -step, -2.0f * step, -3.0f * step, -4.0f * step, s.knee, lower };
+            g.setFont (font (type::caption));
+            for (const auto mk : marks)
+            {
+                const auto y = s.y (mk, p);
+                g.setColour (colour::gridBeat);
+                g.drawHorizontalLine ((int) y, p.getX(), p.getRight());
+                g.setColour (colour::textDisabled);
+                const auto label = mk == 0.0f ? juce::String ("0 dB")
+                                   : std::abs (mk) < 10.0f && std::abs (mk - std::round (mk)) > 0.05f ? juce::String (mk, 1) : juce::String (juce::roundToInt (mk));
+                g.drawText (label, juce::Rectangle<float> (p.getRight() + 8.0f, y - 6.0f, 34.0f, 12.0f), juce::Justification::centredLeft, false);
+            }
+        }
         const auto n = (int) p.getWidth();
         juce::Path inP, outLine, grLine;
         inP.startNewSubPath (p.getRight(), p.getBottom());
@@ -759,8 +980,8 @@ private:
         {
             const auto& c = columnBack (k);
             const auto x = p.getRight() - (float) k;
-            inP.lineTo (x, scale.y (c.in, p));
-            const juce::Point<float> o { x, scale.y (c.out, p) }, r { x, scale.y (-c.gr, p) };
+            inP.lineTo (x, sc().y (c.in, p));
+            const juce::Point<float> o { x, sc().y (c.out, p) }, r { x, sc().y (-c.gr, p) };
             if (k == 0) { outLine.startNewSubPath (o); grLine.startNewSubPath (r); }
             else { outLine.lineTo (o); grLine.lineTo (r); }
         }
@@ -772,7 +993,7 @@ private:
         g.setColour (colour::accent.withAlpha (fx.enabled ? 1.0f : 0.3f));
         g.strokePath (grLine, juce::PathStrokeType (2.0f));
         // threshold
-        const auto ty = scale.y ((float) thresholdDb(), p);
+        const auto ty = sc().y ((float) thresholdDb(), p);
         const auto dashes = std::array<float, 2> { 7.0f, 5.0f };
         g.setColour (colour::textSecondary);
         g.drawDashedLine (juce::Line<float> (p.getX(), ty, p.getRight(), ty), dashes.data(), 2, 1.2f);
@@ -792,13 +1013,14 @@ private:
         // meters: input, output and gain reduction
         const auto mr = juce::Rectangle<float> (p.getRight() + 46.0f, p.getY(), 50.0f, p.getHeight());
         const auto nw = columnBack (0);
-        drawMeter (g, mr.withWidth (14.0f), nw.in, -60.0f, colour::meterLow.withAlpha (0.8f));
+        if (v (dyn::crest::inputMeter) >= 0.5f)
+            drawMeter (g, mr.withWidth (14.0f), nw.in, -60.0f, colour::meterLow.withAlpha (0.8f));
         drawMeter (g, mr.withX (mr.getX() + 17.0f).withWidth (14.0f), nw.out, -60.0f, outColour());
         const auto gr = mr.withX (mr.getX() + 34.0f).withWidth (14.0f);
-        skin::meterSolid (g, gr, (scale.y (-nw.gr, p) - gr.getY()) / juce::jmax (1.0f, gr.getHeight()), colour::accent, true);
+        skin::meterSolid (g, gr, (sc().y (-nw.gr, p) - gr.getY()) / juce::jmax (1.0f, gr.getHeight()), colour::accent, true);
         g.setFont (font (type::caption));
         g.setColour (colour::textDisabled);
-        g.drawText ("IN  OUT  GR", mr.withY (m.getY()).withHeight (12.0f).expanded (8.0f, 0.0f), juce::Justification::centred, false);
+        g.drawText ("OUT  GR", mr.withY (m.getY()).withHeight (12.0f).withTrimmedLeft (17.0f).expanded (6.0f, 0.0f), juce::Justification::centred, false);
         if (scOpen)
         {
             const auto s = scPanel();
@@ -827,7 +1049,7 @@ public:
 private:
     enum { idThreshold = 1, idExpert, idFilters };
     bool expertOpen = false;
-    static constexpr float expertH = 136.0f;
+    static constexpr float expertH = 240.0f;
     int filterDrag = -1;
 
     juce::String title() const override { return "Sentry Gate"; }
@@ -862,6 +1084,8 @@ private:
         out.push_back (knob ({ 10.0f, m.getY() + 182.0f, 84.0f, 104.0f }, ratio, tr ("Ratio")));
         out.push_back (knob ({ 98.0f, m.getY() + 182.0f, 84.0f, 104.0f }, range, tr ("Range")));
         out.push_back (menu ({ 530.0f, m.getY() + 12.0f, 100.0f, 26.0f }, style, {}, "Classic|Clean|Vocal|Guitar|Upward"));
+        if (v (ducking) >= 0.5f)
+            out.push_back (toggle ({ 530.0f, m.getY() + 39.0f, 100.0f, 14.0f }, ducking, tr ("Ducking")));
         out.push_back (knob ({ 530.0f, m.getY() + 54.0f, 100.0f, 108.0f }, attack, tr ("Attack")));
         out.push_back (knob ({ 530.0f, m.getY() + 178.0f, 100.0f, 108.0f }, release, tr ("Release")));
         out.push_back (knob ({ 644.0f, m.getY() + 8.0f, 76.0f, 88.0f }, hold, tr ("Hold"), 0));
@@ -869,7 +1093,7 @@ private:
         out.push_back (knob ({ 644.0f, m.getY() + 196.0f, 76.0f, 88.0f }, lookahead, tr ("Lookahead"), 0));
         out.push_back (toggle ({ 646.0f, m.getY() + 290.0f, 72.0f, 20.0f }, lookaheadOn, tr ("On")));
         out.push_back (button ({ d.getCentreX() - 60.0f, m.getBottom() - 30.0f, 120.0f, 24.0f }, idExpert, tr ("Expert"), expertOpen,
-                               tr ("Expert: side chain (internal / external), side-chain filters, upward expansion, dry mix, output")));
+                               tr ("Expert: side chain (internal / external, gain and mix per channel), side-chain filters, upward expansion, ducking, wet / dry level and pan")));
         if (expertOpen)
         {
             const auto e = expert();
@@ -880,12 +1104,25 @@ private:
             out.push_back (toggle ({ filterTrack().getCentreX() - 50.0f, filterTrack().getBottom() + 14.0f, 100.0f, 22.0f }, scListen, tr ("Audition")));
             out.push_back (knob ({ 530.0f, e.getY() + 14.0f, 84.0f, 100.0f }, dry, tr ("Dry")));
             out.push_back (knob ({ 630.0f, e.getY() + 14.0f, 84.0f, 100.0f }, P ("Output"), tr ("Output"), 1, true));
+            // round 128: the side-chain gain and mix of each detector channel (left / right, or mid / side), ducking,
+            // the wet and dry pans
+            const bool msMode = v (channelMode) >= 0.5f;
+            const auto ry = e.getY() + 130.0f;
+            out.push_back (knob ({ 10.0f, ry, 70.0f, 96.0f }, scGainL, msMode ? tr ("Gain M") : tr ("Gain L"), 1, true));
+            out.push_back (knob ({ 80.0f, ry, 70.0f, 96.0f }, scMixL, msMode ? tr ("Mix M") : tr ("Mix L"), 0, true));
+            out.push_back (knob ({ 160.0f, ry, 70.0f, 96.0f }, scGainR, msMode ? tr ("Gain S") : tr ("Gain R"), 1, true));
+            out.push_back (knob ({ 230.0f, ry, 70.0f, 96.0f }, scMixR, msMode ? tr ("Mix S") : tr ("Mix R"), 0, true));
+            out.push_back (toggle ({ 330.0f, ry + 36.0f, 110.0f, 22.0f }, ducking, tr ("Ducking")));
+            out.push_back (knob ({ 530.0f, ry, 84.0f, 96.0f }, wetPan, tr ("Wet pan"), 0, true));
+            out.push_back (knob ({ 630.0f, ry, 84.0f, 96.0f }, dryPan, tr ("Dry pan"), 0, true));
         }
         const auto b = barArea();
         const auto cy = b.getCentreY();
-        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 170.0f, 22.0f }, lookaheadOn, tr ("Lookahead"), "Off|On"));
-        out.push_back (barMenu ({ 190.0f, cy - 11.0f, 170.0f, 22.0f }, scExternal, tr ("Side chain"), "Internal|External"));
-        out.push_back (barValue ({ b.getRight() - 150.0f, cy - 11.0f, 140.0f, 22.0f }, P ("Output"), tr ("Out")));
+        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 140.0f, 22.0f }, lookaheadOn, tr ("Lookahead"), "Off|On"));
+        out.push_back (barMenu ({ 155.0f, cy - 11.0f, 145.0f, 22.0f }, scExternal, tr ("Side chain"), "Internal|External"));
+        out.push_back (barMenu ({ 305.0f, cy - 11.0f, 150.0f, 22.0f }, channelMode, tr ("Channel mode"), "Left/Right|Mid/Side"));
+        out.push_back (barValue ({ b.getRight() - 275.0f, cy - 11.0f, 128.0f, 22.0f }, input, tr ("In")));
+        out.push_back (barValue ({ b.getRight() - 142.0f, cy - 11.0f, 132.0f, 22.0f }, P ("Output"), tr ("Out")));
     }
 
     void buttonPressed (const Ctl& c, const juce::MouseEvent&) override
@@ -1034,6 +1271,10 @@ private:
             g.drawHorizontalLine ((int) e.getY(), 0.0f, e.getRight());
             caption (g, { 14.0f, e.getY() + 2.0f, 174.0f, 12.0f }, tr ("Upward expansion"));
             caption (g, { filterTrack().getCentreX() - 70.0f, e.getY() + 2.0f, 140.0f, 12.0f }, tr ("Side chain"));
+            caption (g, { 10.0f, e.getY() + 118.0f, 290.0f, 12.0f }, v (channelMode) >= 0.5f ? tr ("Side-chain mid / side") : tr ("Side-chain left / right"));
+            caption (g, { 530.0f, e.getY() + 118.0f, 184.0f, 12.0f }, tr ("Wet / dry balance"));
+            g.setColour (colour::border.withAlpha (0.5f));
+            g.drawHorizontalLine ((int) (e.getY() + 114.0f), 10.0f, e.getRight() - 10.0f);
         }
     }
 };
@@ -1139,7 +1380,7 @@ private:
             out.push_back (button ({ x, p.getY() + 22.0f, 18.0f, 16.0f }, idMute0 + b, "M", ! bandOn (b), tr ("Bypass the band (the band passes untouched)")));
         }
         out.push_back (button ({ p.getRight() + 8.0f, p.getY() + 2.0f, 50.0f, 20.0f }, idRange, juce::String ((int) rangeView) + " dB", false,
-                               tr ("Gain scale: click to switch between 6, 12 and 30 dB")));
+                               tr ("Gain scale: click to switch between 3, 6, 12 and 30 dB")));
         if (selected >= 0)
         {
             const auto a = panelArea();
@@ -1155,6 +1396,7 @@ private:
             add (tabs ({ a.getX() + 86.0f, a.getY() + 128.0f, 184.0f, 26.0f }, bp (b, fMode), "Compress|Expand"));
             add (knob ({ a.getX() + 290.0f, a.getY() + 112.0f, 66.0f, 54.0f }, bp (b, fRatio), tr ("Ratio"), 0));
             add (knob ({ a.getX() + 366.0f, a.getY() + 112.0f, 66.0f, 54.0f }, bp (b, fKnee), tr ("Knee"), 0));
+            add (knob ({ a.getX() + 446.0f, a.getY() + 112.0f, 66.0f, 54.0f }, bandLookahead0 + b, tr ("Lookahead"), 0));
             out.push_back (button ({ a.getRight() - 72.0f, a.getY() + 8.0f, 20.0f, 20.0f }, idPrev, "<", false, tr ("Previous / next band")));
             out.push_back (button ({ a.getRight() - 50.0f, a.getY() + 8.0f, 20.0f, 20.0f }, idNext, ">", false, tr ("Previous / next band")));
             out.push_back (button ({ a.getRight() - 26.0f, a.getY() + 8.0f, 20.0f, 20.0f }, idClose, "x", false, tr ("Close the band panel (click on the empty display does the same)")));
@@ -1164,8 +1406,8 @@ private:
         static const char* const analyzerNames[] { TR_NOOP ("Off"), TR_NOOP ("Pre"), TR_NOOP ("Post"), TR_NOOP ("Pre + Post") };
         out.push_back (barMenu ({ 10.0f, cy - 11.0f, 170.0f, 22.0f }, slope, tr ("Crossover"), "12 dB/oct|24 dB/oct|48 dB/oct"));
         out.push_back (barValue ({ 190.0f, cy - 11.0f, 150.0f, 22.0f }, lookahead, tr ("Lookahead")));
-        out.push_back (button ({ 350.0f, cy - 11.0f, 160.0f, 22.0f }, idAnalyzer, tr ("Analyzer:") + " " + tr (analyzerNames[analyzer]), false,
-                               tr ("Spectrum analyzer: off, pre, post or pre + post")));
+        out.push_back (button ({ 350.0f, cy - 11.0f, 160.0f, 22.0f }, idAnalyzer, tr ("Analyzer:") + " " + tr (analyzerNames[analyzer]) + (specFrozen ? " *" : ""), false,
+                               tr ("Spectrum analyzer: off, pre, post or pre + post; speed; freeze")));
         out.push_back (barValue ({ bar.getRight() - 390.0f, cy - 11.0f, 110.0f, 22.0f }, mix, tr ("Mix")));
         out.push_back (barValue ({ bar.getRight() - 270.0f, cy - 11.0f, 120.0f, 22.0f }, input, tr ("In")));
         out.push_back (barValue ({ bar.getRight() - 140.0f, cy - 11.0f, 130.0f, 22.0f }, output, tr ("Out")));
@@ -1177,11 +1419,29 @@ private:
         if (c.id == idPrev) selected = (selected + bands - 1) % bands;
         else if (c.id == idNext) selected = (selected + 1) % bands;
         else if (c.id == idClose) selected = -1;
-        else if (c.id == idRange) rangeView = rangeView >= 30.0 ? 6.0 : rangeView >= 12.0 ? 30.0 : 12.0;
-        else if (c.id == idAnalyzer) analyzer = (analyzer + 1) % 4;
+        else if (c.id == idRange) rangeView = rangeView >= 30.0 ? 3.0 : rangeView >= 12.0 ? 30.0 : rangeView >= 6.0 ? 12.0 : 6.0;
+        else if (c.id == idAnalyzer) { showAnalyzerMenu(); return; }
         else if (c.id >= idSolo0 && c.id < idSolo0 + bands) set ({ { bp (c.id - idSolo0, fSolo), v (bp (c.id - idSolo0, fSolo)) >= 0.5f ? 0.0f : 1.0f } });
         else if (c.id >= idMute0 && c.id < idMute0 + bands) set ({ { bp (c.id - idMute0, fEnabled), bandOn (c.id - idMute0) ? 0.0f : 1.0f } });
         repaint();
+    }
+
+    // the analyser's options, as the reference's analyser menu: what it shows, its speed, freeze
+    void showAnalyzerMenu()
+    {
+        static const char* const names[] { TR_NOOP ("Off"), TR_NOOP ("Pre"), TR_NOOP ("Post"), TR_NOOP ("Pre + Post") };
+        static const char* const speeds[] { TR_NOOP ("Very slow"), TR_NOOP ("Slow"), TR_NOOP ("Medium"), TR_NOOP ("Fast"), TR_NOOP ("Very fast") };
+        static const float falls[] { 0.3f, 0.75f, 1.5f, 3.0f, 6.0f };
+        juce::PopupMenu m;
+        for (int k = 0; k < 4; ++k)
+            m.addItem (tr (names[k]), true, analyzer == k, [this, k] { analyzer = k; repaint(); });
+        m.addSeparator();
+        juce::PopupMenu sp;
+        for (int k = 0; k < 5; ++k)
+            sp.addItem (tr (speeds[k]), true, specFall == falls[k], [this, k] { specFall = falls[k]; });
+        m.addSubMenu (tr ("Speed"), sp);
+        m.addItem (tr ("Freeze"), true, specFrozen, [this] { specFrozen = ! specFrozen; repaint(); });
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
     }
 
     void showBandMenu (int b)
@@ -1198,6 +1458,7 @@ private:
             std::vector<std::pair<int, float>> c;
             const auto& in = effectInfo (kind);
             for (int f = 0; f < fieldsPerBand; ++f) c.push_back ({ bp (b, f), in.params[(std::size_t) bp (b, f)].defaultValue });
+            c.push_back ({ bandLookahead0 + b, in.params[(std::size_t) (bandLookahead0 + b)].defaultValue });
             set (c);
         });
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
@@ -1427,7 +1688,7 @@ private:
 class EmberEditor final : public ProEditor
 {
 public:
-    EmberEditor (AudioEngine& e, int t, int s, bool d) : ProEditor (e, t, s, EffectKind::ember, d, 860, 520)
+    EmberEditor (AudioEngine& e, int t, int s, bool d) : ProEditor (e, t, s, EffectKind::ember, d, 960, 540)
     {
         specArea = disp();
         specMinHz = 20.0;
@@ -1436,8 +1697,11 @@ public:
     }
 
 private:
-    enum { idRemove = 1, idPrev, idNext };
+    enum { idRemove = 1, idPrev, idNext, idPower, idSolo, idMute };
     int selected = 0, dragHandle = -1, dragEdge = -1, hoverHandle = -1;
+    int xp (int b, int f) const { return mixsuite::ember::bandExtra (b, f); } // round 128: a band's power, state, tone, feedback, dynamics
+    bool powered (int b) const { return v (xp (b, 0)) >= 0.5f; }
+    mixsuite::ember::BandState state (int b) const { return mixsuite::ember::bandState (v (xp (b, 1))); }
 
     juce::String title() const override { return "Ember Saturator"; }
     juce::String gestures() const override { return tr ("Double-click: split a band  -  drag a band's handle: drive  -  drag a line: crossover"); }
@@ -1447,7 +1711,7 @@ private:
     juce::Rectangle<float> panelArea() const
     {
         const auto d = disp();
-        return { d.getCentreX() - 330.0f, d.getBottom() - 176.0f, 660.0f, 168.0f };
+        return { d.getCentreX() - 420.0f, d.getBottom() - 176.0f, 840.0f, 168.0f };
     }
     int count() const { return mixsuite::ember::bandCount (v (mixsuite::ember::bands)); }
     int fp (int b, int f) const { return mixsuite::ember::bandParam (b, f); }
@@ -1492,31 +1756,52 @@ private:
         const auto a = panelArea();
         const auto b = selected;
         auto add = [&] (Ctl c) { c.colour = peqview::bandColour (b); out.push_back (c); };
-        add (menu ({ a.getX() + 70.0f, a.getY() + 10.0f, 150.0f, 26.0f }, fp (b, 0), {}, "Tube|Tape|Transistor|Fuzz"));
-        add (knob ({ a.getX() + 16.0f, a.getY() + 56.0f, 78.0f, 94.0f }, fp (b, 2), tr ("Mix")));
-        add (knob ({ a.getX() + 196.0f, a.getY() + 24.0f, 132.0f, 144.0f }, fp (b, 1), tr ("Drive"), 2));
-        add (knob ({ a.getX() + 108.0f, a.getY() + 56.0f, 78.0f, 94.0f }, fp (b, 3), tr ("Level"), 1, true));
-        out.push_back (fader ({ a.getX() + 356.0f, a.getY() + 12.0f, 54.0f, 150.0f }, tone, tr ("Tilt"), true));
-        out.push_back (fader ({ a.getX() + 416.0f, a.getY() + 12.0f, 54.0f, 150.0f }, lowCut, tr ("Low cut")));
-        out.push_back (fader ({ a.getX() + 476.0f, a.getY() + 12.0f, 54.0f, 150.0f }, highCut, tr ("High cut")));
+        // Saturn's band panel order (round 128): power, solo / mute, style | MIX, FEEDBACK, FREQ, DYNAMICS | DRIVE |
+        // the band's TONE (bass, mid, treble, presence) | LEVEL; the whole effect's auto gain and dry / wet on the right
+        out.push_back (button ({ a.getX() + 70.0f, a.getY() + 12.0f, 32.0f, 22.0f }, idPower, tr ("On"), powered (b), tr ("Band on / off: a band switched off passes clean")));
+        out.push_back (button ({ a.getX() + 106.0f, a.getY() + 12.0f, 22.0f, 22.0f }, idSolo, "S", state (b) == BandState::solo, tr ("Solo the band")));
+        out.push_back (button ({ a.getX() + 130.0f, a.getY() + 12.0f, 22.0f, 22.0f }, idMute, "M", state (b) == BandState::mute, tr ("Mute the band")));
+        add (menu ({ a.getX() + 160.0f, a.getY() + 10.0f, 150.0f, 26.0f }, fp (b, 0), {}, "Tube|Tape|Transistor|Fuzz"));
+        add (knob ({ a.getX() + 10.0f, a.getY() + 60.0f, 66.0f, 92.0f }, fp (b, 2), tr ("Mix")));
+        add (knob ({ a.getX() + 78.0f, a.getY() + 60.0f, 66.0f, 92.0f }, xp (b, 6), tr ("Feedback")));
+        add (knob ({ a.getX() + 146.0f, a.getY() + 60.0f, 66.0f, 92.0f }, xp (b, 7), tr ("Freq")));
+        add (knob ({ a.getX() + 214.0f, a.getY() + 60.0f, 70.0f, 92.0f }, xp (b, 8), tr ("Dynamics"), 1, true));
+        add (knob ({ a.getX() + 290.0f, a.getY() + 24.0f, 132.0f, 144.0f }, fp (b, 1), tr ("Drive"), 2));
+        add (fader ({ a.getX() + 432.0f, a.getY() + 14.0f, 42.0f, 148.0f }, xp (b, 2), tr ("Bass"), true));
+        add (fader ({ a.getX() + 476.0f, a.getY() + 14.0f, 42.0f, 148.0f }, xp (b, 3), tr ("Mid"), true));
+        add (fader ({ a.getX() + 520.0f, a.getY() + 14.0f, 42.0f, 148.0f }, xp (b, 4), tr ("Treble"), true));
+        add (fader ({ a.getX() + 564.0f, a.getY() + 14.0f, 42.0f, 148.0f }, xp (b, 5), tr ("Presence"), true));
+        add (knob ({ a.getX() + 612.0f, a.getY() + 60.0f, 70.0f, 92.0f }, fp (b, 3), tr ("Level"), 1, true));
         if (count() > 1)
         {
             out.push_back (button ({ a.getRight() - 72.0f, a.getY() + 10.0f, 20.0f, 20.0f }, idPrev, "<", false, tr ("Previous / next band")));
             out.push_back (button ({ a.getRight() - 50.0f, a.getY() + 10.0f, 20.0f, 20.0f }, idNext, ">", false, tr ("Previous / next band")));
             out.push_back (button ({ a.getRight() - 26.0f, a.getY() + 10.0f, 20.0f, 20.0f }, idRemove, "x", false, tr ("Remove the band (its neighbour takes its range)")));
         }
-        out.push_back (toggle ({ a.getRight() - 112.0f, a.getY() + 52.0f, 100.0f, 22.0f }, autoGain, tr ("Auto gain")));
-        out.push_back (knob ({ a.getRight() - 96.0f, a.getY() + 84.0f, 70.0f, 80.0f }, mix, tr ("Dry / wet"), 0));
+        out.push_back (toggle ({ a.getRight() - 140.0f, a.getY() + 52.0f, 128.0f, 22.0f }, autoGain, tr ("Auto gain")));
+        out.push_back (knob ({ a.getRight() - 112.0f, a.getY() + 84.0f, 70.0f, 80.0f }, mix, tr ("Dry / wet"), 0));
         const auto bar = barArea();
         const auto cy = bar.getCentreY();
-        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 190.0f, 22.0f }, xoverSlope, tr ("Crossover"), "12 dB/oct|24 dB/oct|48 dB/oct", { 0.0f, 0.5f, 1.0f }));
-        out.push_back (barMenu ({ 210.0f, cy - 11.0f, 170.0f, 22.0f }, quality, tr ("Oversampling"), "2x|4x|8x", { 0.0f, 0.5f, 1.0f }));
-        out.push_back (barMenu ({ 390.0f, cy - 11.0f, 140.0f, 22.0f }, bands, tr ("Bands"), "1|2|3|4"));
-        out.push_back (barValue ({ bar.getRight() - 150.0f, cy - 11.0f, 140.0f, 22.0f }, output, tr ("Out")));
+        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 160.0f, 22.0f }, xoverSlope, tr ("Crossover"), "12 dB/oct|24 dB/oct|48 dB/oct", { 0.0f, 0.5f, 1.0f }));
+        out.push_back (barMenu ({ 176.0f, cy - 11.0f, 140.0f, 22.0f }, quality, tr ("Oversampling"), "2x|4x|8x", { 0.0f, 0.5f, 1.0f }));
+        out.push_back (barMenu ({ 322.0f, cy - 11.0f, 100.0f, 22.0f }, bands, tr ("Bands"), "1|2|3|4"));
+        out.push_back (barValue ({ 428.0f, cy - 11.0f, 100.0f, 22.0f }, inputGain, tr ("In")));
+        out.push_back (barValue ({ 534.0f, cy - 11.0f, 90.0f, 22.0f }, tone, tr ("Tilt")));
+        out.push_back (barValue ({ 630.0f, cy - 11.0f, 110.0f, 22.0f }, lowCut, tr ("Low cut")));
+        out.push_back (barValue ({ 746.0f, cy - 11.0f, 120.0f, 22.0f }, highCut, tr ("High cut")));
+        out.push_back (barValue ({ bar.getRight() - 90.0f, cy - 11.0f, 82.0f, 22.0f }, output, tr ("Out")));
     }
 
-    // band settings as a block (style, drive, mix, level) to move bands around when splitting / removing
-    std::array<float, 4> bandValues (int b) const { return { v (fp (b, 0)), v (fp (b, 1)), v (fp (b, 2)), v (fp (b, 3)) }; }
+    // band settings as a block (style, drive, mix, level + round 128's power, state, tone, feedback, dynamics) to move
+    // bands around when splitting / removing
+    static constexpr int blockSize = 4 + mixsuite::ember::extraFields;
+    int blockParam (int b, int k) const { return k < 4 ? fp (b, k) : xp (b, k - 4); }
+    std::array<float, blockSize> bandValues (int b) const
+    {
+        std::array<float, blockSize> out {};
+        for (int k = 0; k < blockSize; ++k) out[(std::size_t) k] = v (blockParam (b, k));
+        return out;
+    }
 
     void splitAt (float x)
     {
@@ -1528,7 +1813,7 @@ private:
         std::vector<double> xo;
         for (int i = 0; i < n - 1; ++i) xo.push_back (xoHz (i));
         xo.insert (xo.begin() + at, hz);
-        std::vector<std::array<float, 4>> vals;
+        std::vector<std::array<float, blockSize>> vals;
         for (int b = 0; b < n; ++b) vals.push_back (bandValues (b));
         vals.insert (vals.begin() + at + 1, vals[(std::size_t) at]);
         apply (xo, vals);
@@ -1542,14 +1827,14 @@ private:
         std::vector<double> xo;
         for (int i = 0; i < n - 1; ++i) xo.push_back (xoHz (i));
         xo.erase (xo.begin() + juce::jmin (b, n - 2)); // the line on its right (the last band: on its left)
-        std::vector<std::array<float, 4>> vals;
+        std::vector<std::array<float, blockSize>> vals;
         for (int k = 0; k < n; ++k)
             if (k != b) vals.push_back (bandValues (k));
         apply (xo, vals);
         selected = juce::jmin (b, n - 2);
     }
 
-    void apply (const std::vector<double>& xo, const std::vector<std::array<float, 4>>& vals)
+    void apply (const std::vector<double>& xo, const std::vector<std::array<float, blockSize>>& vals)
     {
         using namespace mixsuite::ember;
         std::vector<std::pair<int, float>> c;
@@ -1557,13 +1842,17 @@ private:
         c.push_back ({ bands, (float) (n - 1) / 3.0f });
         for (int i = 0; i < (int) xo.size(); ++i) c.push_back ({ xover1 + i, crossoverValue (xo[(std::size_t) i]) });
         for (int b = 0; b < n; ++b)
-            for (int f = 0; f < 4; ++f) c.push_back ({ fp (b, f), vals[(std::size_t) b][(std::size_t) f] });
+            for (int f = 0; f < blockSize; ++f) c.push_back ({ blockParam (b, f), vals[(std::size_t) b][(std::size_t) f] });
         set (c);
     }
 
     void buttonPressed (const Ctl& c, const juce::MouseEvent&) override
     {
+        using mixsuite::ember::BandState;
         if (c.id == idRemove) removeBand (selected);
+        else if (c.id == idPower) set ({ { xp (selected, 0), powered (selected) ? 0.0f : 1.0f } });
+        else if (c.id == idSolo) set ({ { xp (selected, 1), state (selected) == BandState::solo ? 0.0f : 0.5f } });
+        else if (c.id == idMute) set ({ { xp (selected, 1), state (selected) == BandState::mute ? 0.0f : 1.0f } });
         else if (c.id == idPrev) selected = (selected + count() - 1) % count();
         else if (c.id == idNext) selected = (selected + 1) % count();
         repaint();
@@ -1663,8 +1952,11 @@ private:
             g.drawRoundedRectangle (h, 4.0f, 1.0f);
             g.setColour (colour::textPrimary);
             g.setFont (font (type::caption, true));
-            g.drawText (caps (text (fp (b, 0))) + "  " + text (fp (b, 1)), juce::Rectangle<float> (region.getX() + 2.0f, h.getY() - 18.0f, region.getWidth() - 4.0f, 14.0f),
-                        juce::Justification::centred, true);
+            juce::String tag = caps (text (fp (b, 0))) + "  " + text (fp (b, 1));
+            if (! powered (b)) tag = tr ("OFF") + "  " + tag;
+            else if (state (b) == mixsuite::ember::BandState::solo) tag = "S  " + tag;
+            else if (state (b) == mixsuite::ember::BandState::mute) tag = "M  " + tag;
+            g.drawText (tag, juce::Rectangle<float> (region.getX() + 2.0f, h.getY() - 18.0f, region.getWidth() - 4.0f, 14.0f), juce::Justification::centred, true);
         }
         for (int i = 1; i < n; ++i)
         {
@@ -1689,7 +1981,7 @@ private:
             g.setColour (colour::textSecondary);
             g.setFont (font (type::small, true));
             g.drawText (tr ("Band {0}", { juce::String (selected + 1) }), juce::Rectangle<float> (a.getX() + 12.0f, a.getY() + 10.0f, 58.0f, 26.0f), juce::Justification::centredLeft, false);
-            caption (g, { a.getX() + 352.0f, a.getY() + 2.0f, 182.0f, 12.0f }, tr ("Tone (all bands)"));
+            caption (g, { a.getX() + 432.0f, a.getY() + 2.0f, 174.0f, 12.0f }, tr ("Tone"));
             // the curve of the band's style, as a small preview
             const auto cv = juce::Rectangle<float> (a.getX() + 228.0f, a.getY() + 10.0f, 0.0f, 0.0f);
             juce::ignoreUnused (cv, fx);
@@ -1913,6 +2205,28 @@ std::unique_ptr<ProEditor> make (AudioEngine& engine, int track, int slot, bool 
     }
 }
 
+// The editor drawn at the window's size (round 128: the originals' windows can be resized): the layout is fixed, the
+// whole editor is scaled (mouse positions follow the transform), the window keeps the editor's proportions.
+class ScaledHolder final : public juce::Component
+{
+public:
+    explicit ScaledHolder (std::unique_ptr<ProEditor> e) : editor (std::move (e))
+    {
+        baseW = juce::jmax (1, editor->getWidth());
+        baseH = juce::jmax (1, editor->getHeight());
+        addAndMakeVisible (*editor);
+        setSize (baseW, baseH);
+    }
+    void resized() override
+    {
+        const auto s = juce::jmin ((float) getWidth() / (float) baseW, (float) getHeight() / (float) baseH);
+        editor->setBounds (0, 0, baseW, baseH);
+        editor->setTransform (juce::AffineTransform::scale (s));
+    }
+    std::unique_ptr<ProEditor> editor;
+    int baseW = 1, baseH = 1;
+};
+
 class ProEditorWindow final : public juce::DocumentWindow
 {
 public:
@@ -1921,7 +2235,16 @@ public:
     {
         setUsingNativeTitleBar (true);
         content = editor.get();
-        setContentOwned (editor.release(), true);
+        auto holder = std::make_unique<ScaledHolder> (std::move (editor));
+        const auto w = holder->baseW, h = holder->baseH;
+        setContentOwned (holder.release(), true);
+        setResizable (true, false);
+        if (auto* c = getConstrainer())
+        {
+            c->setFixedAspectRatio ((double) w / (double) h);
+            c->setMinimumSize (juce::roundToInt (w * 0.7), juce::roundToInt (h * 0.7));
+            c->setMaximumSize (w * 2, h * 2);
+        }
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
         keepAboveMainWindow (*this);

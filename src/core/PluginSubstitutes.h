@@ -146,6 +146,9 @@ std::optional<std::pair<int, int>> autoTuneProKey (const std::vector<std::uint8_
 // The parameters an Auto-Tune Pro state holds (its ParamsData: X<n> = parameter n in real units; [EXEC] round 120:
 // 1 scale, 2 key, 4 retune speed ms, 61 humanize, 90 flex-tune, 62 natural vibrato dB). Empty when not readable.
 std::map<int, double> autoTuneProParams (const std::vector<std::uint8_t>& state);
+// Round 128: the active scale's per-note edits of an Auto-Tune Pro state (legacy <Scales> block): {bypass, remove},
+// bit k = absolute pitch class k. `lynxScale` = vocal::Scale major / minor / chromatic (others: nullopt).
+std::optional<std::pair<std::uint16_t, std::uint16_t>> autoTuneProNoteEdits (const std::vector<std::uint8_t>& state, int key, int lynxScale);
 struct PitchCorrectorScale
 {
     int key = 0;
