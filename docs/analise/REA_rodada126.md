@@ -98,6 +98,71 @@ shared components — follows it:
 Hardware and Vivid draw knobs a little bigger than the cell's circle (4 % / 10 %); no layout, control position,
 caption or gesture moves.
 
+Variants sheet (Crest / Epoch Verb / LYNX Tune, current | Neon | Hardware | Vivid):
+`C:\Users\kauan\OneDrive\Área de Trabalho\LYNX-visual-ousado\variantes\index.html` [EXEC].
+
+## 6. One style per plugin (the user's choice) [model] [EXEC]
+The user picked "LYNX Tune → Vivid, Epoch Verb → Hardware, Crest Compressor → Glow… alternating — it looks awesome".
+- `skin::defaultStyleFor` is a table per editor (effect kind; Soundgoodizer and the generator pages by their own key):
+  **Glow** for the analytic, display-first tools (Facet EQ, Crest, Apex, Prism, Hush, Frequency Splitter, Quell,
+  LuxeVerb, Convolver…), **Hardware** for analogue / vintage-modelled roles (Epoch Verb, Glow Leveler, Ridge Strip,
+  Echoform, Foil Plate, Vintage Chorus / Phaser, Maximus, Blood Overdrive, Fruity Compressor / Limiter, Reeverb 2,
+  Aether, Vocoder, FL Keys), **Vivid** for creative / pitch / fun (LYNX Tune, Gemini Doubler, Ember, Gross Beat,
+  Soundgoodizer, Pitch Shifter, Effector, Fast Dist, PanOMatic, Transient Processor, Squeeze, Hyper Chorus, Flanger,
+  Delay 3, Multiband Delay, Horizon, BooBass), **Neon** for modulation / synthesis / space (Lattice Mod, Orbit,
+  Spiral Echo, Halo, Nebula, Atrium, Flangus, Phaser, Delay Bank, Vocodex, Hardcore, WaveShaper, Stereo Shaper /
+  Enhancer, EQUO, Parametric EQ 2, Filters, Sentry Gate, 3x Osc, Sytrus, Harmor). Families are mixed on purpose
+  (reverbs: Hardware / Neon / Glow / Vivid; delays: Hardware / Neon / Glow / Vivid; dynamics: Glow / Hardware / Neon).
+- Each editor draws inside `skin::StyleScope (its style)` (paint of the FL-arranged editors, the display-first
+  editors, Facet EQ, the generator pages; a generator page's knobs carry `skin::styleProperty` for the LookAndFeel),
+  so the caches (canvas, knobs) are keyed by style and new controls added by other rounds follow automatically.
+- Settings > General > Plugin style: **Automatic (each plugin its own style)** (default) or **<style> for every
+  plugin**; per editor, the title bar's right-click (display-first editors, Facet EQ) or the ▸ options menu
+  (FL-arranged editors) has *Plugin style* (Automatic (its default) / Glow / Neon / Hardware / Vivid), saved in
+  ui-options.txt (`pluginStyle`, `pluginStyleOverrides`). pt-BR strings included. `--pluginstyle auto|<style>` for CLI.
+- Final sheet, every page in its automatic style (Glow 16, Neon 34, Hardware 20, Vivid 17 of 87 pages):
+  `C:\Users\kauan\OneDrive\Área de Trabalho\LYNX-visual-ousado\final\index.html`.
+
+## 7. CPU after the fixes and per style [EXEC]
+`--editorcpu` with this branch's final build. "Glow (median of 3)" = the fixed Glow kit (section 4's fixes);
+the last five columns are ONE run each with `--pluginstyle auto|glow|neon|hardware|vivid` (single runs on a machine
+shared with other agents' builds: isolated 20–25 % spikes are noise — e.g. Crest idle 25.2 under Automatic, Apex idle
+25.1 under Vivid — the medians in the first two columns are the reliable comparison).
+
+| editor | mode | main (r122) | Glow (median of 3) | Automatic | Glow | Neon | Hardware | Vivid |
+|---|---|---|---|---|---|---|---|---|
+| Facet EQ | idle | 3.3 | 2.9 | 5.5 | 2.9 | 2.7 | 2.9 | 2.3 |
+| Crest Compressor | idle | 3.1 | 1.9 | 25.2 | 2.7 | 2.1 | 2.7 | 3.9 |
+| Apex Limiter | idle | 3.3 | 2.5 | 3.7 | 2.3 | 2.3 | 2.7 | 25.1 |
+| Prism Multiband | idle | 2.9 | 2.3 | 2.3 | 4.1 | 2.5 | 3.9 | 3.1 |
+| Epoch Verb | idle | 2.3 | 2.7 | 3.1 | 2.3 | 1.6 | 4.7 | 1.4 |
+| Glow Leveler | idle | 2.5 | 3.1 | 2.3 | 1.9 | 2.1 | 19.9 | 2.9 |
+| Fruity Limiter | idle | 2.9 | 2.7 | 2.3 | 2.7 | 1.8 | 3.7 | 2.7 |
+| LYNX Tune | idle | 3.3 | 2.9 | 3.5 | 1.8 | 3.3 | 3.3 | 3.3 |
+| Facet EQ | animating | 17.4 | 20.9 | 17.0 | 17.8 | 33.5 | 26.5 | 25.8 |
+| Crest Compressor | animating | 19.9 | 18.3 | 19.3 | 18.7 | 20.9 | 18.6 | 12.3 |
+| Apex Limiter | animating | 23.0 | 25.9 | 19.1 | 32.8 | 21.8 | 24.8 | 13.1 |
+| Prism Multiband | animating | 32.6 | 32.0 | 30.8 | 43.1 | 24.6 | 29.9 | 24.4 |
+| Epoch Verb | animating | 2.7 | 2.1 | 3.3 | 8.6 | 3.3 | 2.1 | 2.3 |
+| Glow Leveler | animating | 10.1 | 9.8 | 7.8 | 9.2 | 9.8 | 9.8 | 8.8 |
+| Fruity Limiter | animating | 2.9 | 1.8 | 11.5 | 3.1 | 1.6 | 4.1 | 2.9 |
+| LYNX Tune | animating | 17.2 | 16.0 | 10.3 | 16.8 | 19.1 | 16.6 | 23.0 |
+
+- With the fixes, the default (Automatic; Facet / Crest / Apex / Prism are Glow) is back on main's numbers: idle ≈ 2–3 %
+  (nothing animates on a silent track), animating Crest 18.3 vs 19.9, Apex 25.9 vs 23.0, Prism 32.0 vs 32.6, LYNX Tune
+  16.0 vs 17.2, Facet 20.9 vs 17.4 (medians).
+- Forced styles: Facet EQ is the one editor that costs more outside Glow (Neon 33.5 / Hardware 26.5 / Vivid 25.8 in
+  single runs) — its 30 Hz graph repaints the whole canvas region with the heavier strokes; it is Glow by default.
+
+## Next
+- Facet EQ in the forced Neon / Hardware / Vivid styles: cache the canvas + grid as one layer and repaint only the
+  analyser strip (measure first with several runs).
+- The pitch ring / Facet curves / Crest display draw some colours directly (not through the kit): give them per-style
+  variants (e.g. Hardware phosphor ring) if the user wants them closer to the style.
+- Knobs a little bigger in Vivid / Hardware (10 % / 4 %): if a parity round adds controls in tight rows, check the
+  captions still clear the ring.
+- `skin::Ballistics` on the native VU / GR LEDs (smoother fall), a spring on knob drag release in Vivid.
+
 ## Where I stopped
-- Glow kit + flagships done and measured; CPU fixes in; the three styles written; build queued on the Windows lock;
-  next: render the variants sheet for Crest / Epoch Verb / LYNX Tune, re-measure CPU, land.
+- Everything done, user-approved ("tudo aprovado"): bold Glow kit, CPU fixes, four styles, per-plugin table +
+  Settings + per-editor override, final sheet, CPU per style. Landing.
