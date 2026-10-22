@@ -625,7 +625,7 @@ private:
         out.push_back (toggle ({ 670.0f, by + 76.0f, 82.0f, 20.0f }, autoGain, tr ("Auto gain")));
         out.push_back (knob ({ 680.0f, by + 100.0f, 62.0f, 82.0f }, dryGain, tr ("Dry")));
         // the display's scale (bottom right, like the reference's dB box) and the input meter switch
-        out.push_back (menu ({ p.getRight() - 64.0f, p.getBottom() - 24.0f, 58.0f, 20.0f }, meterScale, {}, "9 dB|18 dB|36 dB|72 dB|90 dB"));
+        out.push_back (menu ({ p.getRight() - 16.0f, p.getBottom() - 20.0f, 60.0f, 20.0f }, meterScale, {}, "9 dB|18 dB|36 dB|72 dB|90 dB"));
         out.push_back (button ({ p.getRight() + 42.0f, main().getY(), 18.0f, 12.0f }, idInMeter, "IN", v (inputMeter) >= 0.5f,
                                tr ("Input meter: show or hide")));
         const auto sy = p.getBottom() - 64.0f;
@@ -641,7 +641,7 @@ private:
             out.push_back (tabs ({ 14.0f, s.getY() + 44.0f, 104.0f, 24.0f }, scExternal, "Int|Ext"));
             out.push_back (knob ({ 130.0f, s.getY() + 12.0f, 70.0f, 82.0f }, scLevel, tr ("Level"), 1, true));
             out.push_back (knob ({ 130.0f, s.getY() + 92.0f, 70.0f, 70.0f }, stereoLink, tr ("Stereo link"), 0));
-            out.push_back (menu ({ 14.0f, s.getY() + 108.0f, 104.0f, 22.0f }, linkMode, tr ("Link mode"), "Stereo|Mid|Side|Mid > side|Side > mid"));
+            out.push_back (menu ({ 14.0f, s.getY() + 108.0f, 104.0f, 22.0f }, linkMode, tr ("Link mode"), "Stereo|Mid only|Side only|Mid > side|Side > mid"));
             for (int b = 0; b < scBands; ++b)
                 out.push_back (menu ({ 216.0f, s.getY() + 16.0f + 46.0f * (float) b, 92.0f, 22.0f }, scParam (b, 0), {},
                                      "Off|Bell|Low shelf|High shelf|Low cut|High cut|Notch|Band pass|Tilt shelf"));
@@ -768,7 +768,8 @@ private:
             // the marks of the chosen scale: six steps over the upper part, two more down to the floor
             const auto s = sc();
             const auto step = -s.knee / 5.0f;
-            const float marks[] { 0.0f, -step, -2.0f * step, -3.0f * step, -4.0f * step, s.knee, s.knee + (s.floor - s.knee) * 0.5f, s.floor + 2.0f };
+            const auto lower = std::round ((s.knee + s.floor) * 0.5f / 3.0f) * 3.0f; // one mark between the knee and the floor
+            const float marks[] { 0.0f, -step, -2.0f * step, -3.0f * step, -4.0f * step, s.knee, lower };
             g.setFont (font (type::caption));
             for (const auto mk : marks)
             {

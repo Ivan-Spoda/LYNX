@@ -1481,7 +1481,7 @@ std::string paramText (EffectKind kind, int param, float v)
             case dryGain: return v <= 0.0f ? "-inf dB" : db (dryDb (v));
             case linkMode:
             {
-                static const char* names[linkModes] { "Stereo", "Mid", "Side", "Mid > side", "Side > mid" };
+                static const char* names[linkModes] { "Stereo", "Mid only", "Side only", "Mid > side", "Side > mid" };
                 return names[(int) linkModeOf (v)];
             }
             case meterScale: return fmt ("%.0f dB", meterRangeDb (v));

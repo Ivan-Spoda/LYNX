@@ -1782,7 +1782,7 @@ Layout crestCompressor()
     v.push_back (onPage (dial (572, 546, 28, "Dry", TR_NOOP ("Dry")), 0));
     v.push_back (onPage (toggle (630, 530, 160, 20, "Auto threshold", TR_NOOP ("Auto threshold")), 0));
     v.push_back (onPage (label (20, 530, 70, 22, TR_NOOP ("Link mode")), 2));
-    v.push_back (onPage (tabs (92, 530, 360, 22, "Link mode", TR_NOOP ("Stereo|Mid|Side|Mid > side|Side > mid")), 2));
+    v.push_back (onPage (tabs (92, 530, 360, 22, "Link mode", TR_NOOP ("Stereo|Mid only|Side only|Mid > side|Side > mid")), 2));
     v.push_back (onPage (label (470, 530, 50, 22, TR_NOOP ("Scale")), 2));
     v.push_back (onPage (tabs (520, 530, 230, 22, "Meter scale", TR_NOOP ("9 dB|18 dB|36 dB|72 dB|90 dB")), 2));
     v.push_back (onPage (toggle (20, 562, 160, 20, "Input meter", TR_NOOP ("Input meter")), 2));
