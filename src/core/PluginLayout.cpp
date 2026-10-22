@@ -1613,9 +1613,11 @@ Layout compressorLayout()
     v.push_back (meter (184, 26, 66, 180, 0, TR_NOOP ("Reduction")));
     v.push_back (slider (Item::vslider, 268, 30, 34, 172, "Makeup", TR_NOOP ("Gain")));
     v.push_back (toggle (314, 30, 94, 20, "Auto gain", TR_NOOP ("Auto gain")));
-    v.push_back (dial (90, 252, 34, "Attack", TR_NOOP ("Attack")));
+    v.push_back (dial (60, 252, 34, "Attack", TR_NOOP ("Attack")));
+    v.push_back (dial (140, 252, 34, "Release", TR_NOOP ("Release")));
     v.push_back (dial (217, 252, 34, "Ratio", TR_NOOP ("Ratio")));
-    v.push_back (dial (340, 252, 34, "Release", TR_NOOP ("Release")));
+    v.push_back (dial (300, 252, 30, "Mix", TR_NOOP ("Mix")));
+    v.push_back (dial (370, 252, 30, "Trim", TR_NOOP ("Trim"), bipolar));
     return l;
 }
 
@@ -1673,10 +1675,15 @@ Layout aetherLayout()
     // two big knobs side by side — the presence / exciter one (MID) on the left, the high shelf (HIGH) on the right —
     // and the output trim between them; LYNX's extra settings (frequencies, character, mix) small under each
     Layout l;
-    l.width = 440;
+    l.width = 530;
     l.height = 270;
     auto& v = l.items;
     v.push_back (section (4, 4, 432, 262, TR_NOOP ("Air")));
+    // round 124: the dynamic air model (Dynamic on) has its own two amounts
+    v.push_back (section (440, 4, 86, 262, TR_NOOP ("Dynamic")));
+    v.push_back (toggle (446, 26, 74, 24, "Dynamic", TR_NOOP ("Dynamic")));
+    v.push_back (dial (483, 100, 30, "Mid air", TR_NOOP ("Mid air")));
+    v.push_back (dial (483, 186, 30, "High air", TR_NOOP ("High air")));
     v.push_back (dial (104, 96, 104, "Harmonics", TR_NOOP ("Mid air"), big));
     v.push_back (dial (336, 96, 104, "Air", TR_NOOP ("High air"), big));
     v.push_back (dial (220, 120, 40, "Output", TR_NOOP ("Trim"), bipolar));
@@ -1924,6 +1931,7 @@ Layout quellDenoiser()
     v.push_back (slider (Item::vslider, 170, 30, 70, 316, "Amount", TR_NOOP ("Amount")));
     v.push_back (value (170, 372, 70, 20, "Amount", 0));
     v.push_back (toggle (22, 372, 96, 22, "Listen", TR_NOOP ("Listen")));
+    v.push_back (toggle (22, 342, 96, 22, "Matched", TR_NOOP ("Matched"))); // round 124: the engine fitted to NS1
     v.push_back (dial (256, 378, 28, "Output", TR_NOOP ("Output"), bipolar));
     return l;
 }
@@ -2313,6 +2321,9 @@ Layout echoformLayout()
     v.push_back (toggle (376, 254, 70, 20, "Phase L", TR_NOOP ("Phase L")));
     v.push_back (toggle (452, 254, 70, 20, "Phase R", TR_NOOP ("Phase R")));
     v.push_back (display (532, 252, 80, 24, "taptempo", "Time L", "Sync L"));
+    // round 124: the hybrid engine (H-Delay's measured loop)
+    v.push_back (label (620, 254, 48, 20, TR_NOOP ("Hybrid")));
+    v.push_back (menuOf (670, 252, 104, 24, "Hybrid", TR_NOOP ("Hybrid"), TR_NOOP ("Off|Clean|Analog"), { 0.0f, 0.5f, 1.0f }));
     // the mode selector along the bottom
     v.push_back (label (8, 254, 52, 20, TR_NOOP ("Mode")));
     v.push_back (menuOf (64, 252, 200, 24, "Mode", TR_NOOP ("Mode"),
