@@ -175,5 +175,40 @@ sensitivity / make-up, both taken from the measured dial laws (the same nulls wi
 Not matched yet: the attack shape on the first milliseconds and the slow creep (env95 ~1 dB), Limit (one setting),
 other sample rates (the idle filter is the 48 kHz one).
 
+## 5. Her chain, stage by stage
+
+[EXEC] Her three takes through the official trials in series (SSL → NS1 → RComp → DeEsser → CLA-2A, the corpus' main
+states, tools/fxmeasure/py/vm123 chainref.py), and each LYNX substitute fed with the real chain's previous stage
+(stagecmp.py). Null / level / spectrum max / env95, dB:
+
+| stage | go | kwe | lu | before (round 113 translations, same inputs) |
+|---|---|---|---|---|
+| SSL E-Channel → Ridge Strip E | −46.9 / +0.01 / 0.03 / 0.10 | −48.0 / +0.01 / 0.04 / 0.09 | −44.4 / −0.02 / 0.05 / 0.11 | −21.7 … −22.3 / +0.25 … +0.44 / 1.9 … 3.0 / 1.1 … 2.3 |
+| RComp → Compressor vintage | −23.8 / +0.29 / 1.50 / 1.41 | −26.0 / 0.00 / 1.48 / 0.63 | −26.6 / +0.13 / 4.08 / 0.72 | −20.6 … −21.4 / +0.37 … +0.41 / 2.4 … 7.8 / 1.9 … 3.2 |
+| DeEsser → Hush classic split | −55.4 / 0.00 / 0.03 / 0.00 | −71.6 / 0.00 / 0.00 / 0.00 | −57.1 / 0.00 / 0.09 / 0.00 | −40.4 … −54.8 / ≤ 0.01 / 0.02 … 0.20 |
+| CLA-2A → Glow opto classic | −28.5 / −0.05 / 0.36 / 0.50 | −33.0 / +0.10 / 0.40 / 0.30 | −30.3 / 0.00 / 0.42 / 0.56 | −17.2 … −17.8 / +0.40 … +1.03 / 1.5 … 3.0 / 1.7 … 1.9 |
+
+(The NS1 stage is round 119's Quell; its multiband phase differs from NS1's, so a running chain through LYNX's own
+NS1 substitute does not null — that stage is outside this round.)
+
 ## Where I stopped / next steps
-- SSL E-Channel and DeEsser done. Next in this round: Renaissance Compressor, CLA-2A.
+- Landed: SSL E-Channel + DeEsser (687fec5), CLA-2A + Renaissance Compressor interim and the chain-position CLA fit
+  (7cc83f6), the E console expander / gate (this commit). Tests: tests/VoiceMatchTests123.inc (golden curves of the real
+  plug-ins at her settings: the SSL's EQ response and compressor stairs, the DeEsser's 6 kHz stairs, the CLA-2A's and
+  RComp's 1 kHz stairs, translations, voicing 0 unchanged).
+- Renaissance Compressor stays at about −25 dB on program material: every model family tried (feed-forward peak,
+  RMS, Hilbert envelope, look-ahead window max, two-path and averaged releases, an FIR-smoothed gain, CMA-ES searches)
+  plateaus there although release curves, stairs and bursts reach −38 … −51 dB. The open clue: on a 150 Hz pulse train
+  the original's gain dips 1.4 dB around each pulse (rising 0.6 ms before it, peaking 0.5 ms after, recovering in
+  ~1 ms) — a per-sample gain law (its ARC) that none of the models reproduces (−17 dB on that signal). Next: identify
+  that law directly (pulse trains of several rates and levels, Manual vs ARC, Warm vs Smooth), then the knob laws
+  away from her state (threshold / ratio / attack / release / Opto / Smooth: measured, not yet translated into laws).
+- CLA-2A: −28 … −33 dB at her chain position, −25 … −29 dB on raw takes; the first milliseconds of the attack and the
+  slow creep (env95 ~0.5–1 dB) are the residue; Limit has one measured setting; other sample rates use the 48 kHz idle
+  response.
+- SSL at 44.1 kHz: −39 dB (the bands are re-scaled from the 48 kHz calibration; measuring the grid at 44.1 kHz would
+  make it exact).
+- The Waves trials still run in demo mode in our host after the user's activation (ASK_USER.md); all renders dodge the
+  mutes, so nothing above is affected.
+- SSL Native Vocalstrip 2 (spec125's suggestion): no official trial is installed on this PC, so it cannot be measured;
+  not started.
