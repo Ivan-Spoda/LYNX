@@ -121,19 +121,22 @@ matches by name).
 | Valhalla Supermassive | Nebula (round 100) | name | every parameter except Clear (a button) |
 | ValhallaShimmer | Halo (round 100) | name | every parameter (bare `parameterN` attributes; mode lists partly not confirmed) |
 | ValhallaFutureVerb | Horizon (round 100) | name | every parameter |
-| Little Plate, Waves RVerb / H-Reverb / TrueVerb | Reeverb 2 (100 % wet, slot dry/wet 25 %) | name / Waves name | — |
+| Soundtoys Little Plate | Foil Plate (round 129; 2 s, 100 % wet, slot dry/wet 25 %; was Reeverb 2) | name | — |
+| Waves RVerb / H-Reverb / TrueVerb | Reeverb 2 (100 % wet, slot dry/wet 25 %) | Waves name | — |
 | FabFilter Pro-R | LuxeVerb (default) | name | — |
 | Waves H-Delay | Echoform (round 119; was Fruity Delay 3) | VST3 class ID [DATA], Waves name | sync (host / BPM / ms), note, time, feedback, ping-pong (pairs) / stereo, mix, output, filters; laws measured on the official trial [EXEC] (round 119 §2) |
 | Waves NS1 | Quell Denoiser (round 119) | Waves name | the one knob (RealWorld 229), Quell fitted to the official trial [EXEC] (round 119 §3) |
 | Waves Doubler (2 / 4 voices) | Gemini Doubler (round 119) | Waves name | every control of voices 1–2, direct, align, shelves, feedback cut, range [EXEC] (round 119 §4) |
-| Waves SuperTap, Soundtoys EchoBoy / PrimalTap, FabFilter Timeless | Fruity Delay 3 | VST2 ID [DATA] (EchoBoy), names | — |
+| Soundtoys EchoBoy / PrimalTap | Echoform (round 129; tape / lo-fi echo, 1/4 note, 25 % feedback, 25 % mix; was Fruity Delay 3) | VST2 ID [DATA] (EchoBoy), names | — |
+| Waves SuperTap, FabFilter Timeless | Fruity Delay 3 | names | — |
 | ValhallaDelay | Echoform (round 101) | VST3 class ID [derived], name | every setting but Era / taps / repeat-swell: mix, style, sync, times, feedback, filters, modulation, shift, pitch, ducking; the 17 modes onto Echoform's 12 characters |
 | ValhallaFreqEcho | Spiral Echo (round 101) | VST3 class ID [derived], name | all 8 settings |
 | ValhallaSpaceModulator | Orbit (round 101) | VST3 class ID [derived], name | all 6 settings |
 | ValhallaUberMod | Lattice Mod (round 101) | VST3 class ID [derived], name | all but DelaySync and InputPan (meaning not confirmed) |
 | Waves L1/L2/L3/L4 | Limiter | Waves name | — |
 | FabFilter Pro-L | Apex Limiter (round 99) | names | — |
-| Waves RComp, CLA-76, CLA-3A, C1, SSLComp, API-2500 | Compressor (2:1 above −15 dBFS, auto gain; round 113) | VST3 class ID [DATA], Waves names | RComp: threshold, ratio, attack, release (ARC), gain, laws measured on the official trial [EXEC] (round 113 §3c) |
+| Waves CLA-76 | Crest Compressor (Bus style fitted to the official trial; round 127) | Waves name | Input, Output, Attack, Release, Ratio (59), Mix (103 → slot dry / wet), fitted at her state [EXEC] (round 127 §3) |
+| Waves RComp, CLA-3A, C1, SSLComp, API-2500 | Compressor (2:1 above −15 dBFS, auto gain; round 113) | VST3 class ID [DATA], Waves names | RComp: threshold, ratio, attack, release (ARC), gain, laws measured on the official trial [EXEC] (round 113 §3c) |
 | FabFilter Pro-C (2 / 3) | Crest Compressor (round 108) | names | Pro-C 3: style, threshold, ratio, knee, range, attack, release, hold, look-ahead, character, side-chain EQ (3 bands), levels, mix, oversampling [EXEC layout] |
 | FabFilter Pro-MB | Prism Multiband (round 108) | names | enabled bands laid out on Prism's four, threshold, ratio, range, mode, knee, attack / release, level, solo, look-ahead, mix [EXEC layout] |
 | FabFilter Pro-G | Sentry Gate (round 108) | names | every control [EXEC layout] |
@@ -145,9 +148,9 @@ matches by name).
 | FabFilter Pro-DS, Harrison De-Esser | Hush De-esser (default; round 96) | names | — |
 | Slate Digital Fresh Air | Aether (neutral without a state; round 96) | name | Mid / High Air → Aether's air shelf gain and frequency, laws measured on the official trial (within 0.5 dB RMS for her settings) [EXEC] (round 113) |
 | Soundtoys Decapitator, FabFilter Saturn | Ember Saturator (drive +1.4 dB, auto gain; round 113) | names | Saturn 2: multiband mode — bands, crossovers, style family, drive, mix, level (round 108) [EXEC layout] |
-| Soundtoys PanMan | Auto-pan (depth 50 %; round 113) | VST2 ID [DATA], name | — |
+| Soundtoys PanMan | Auto-pan (balance swing ±50 % per beat; round 127 fixed round 113's pass-through) | VST2 ID [DATA], name | — |
 
-| Antares Auto-Tune (Pro / Artist / Access / EFX+ / Hybrid) | LYNX Tune | VST3 class ID [DATA] (Auto-Tune Pro), names | Auto-Tune Pro: key and scale (`<Custom ScaleGivenKey / ScaleGivenScale>` [DATA]; scale list 0 major, 1 minor, 2 chromatic [model, round 113 §2]) with a 20 ms retune; otherwise the project's key or a gentle chromatic correction |
+| Antares Auto-Tune (Pro / Artist / Access / EFX+ / Hybrid) | LYNX Tune | VST3 class ID [DATA] (Auto-Tune Pro), names | Auto-Tune Pro: key and scale (`<Custom ScaleGivenKey / ScaleGivenScale>` [DATA]; scale list 0 major, 1 minor, 2 chromatic [model, round 113 §2]) retune, humanize, flex-tune (round 120), detune, transpose, mix, input type, formant / throat, Classic, tracking (round 127); Auto-Tune EFX+: key, scale and note switches, retune, humanize, pitch shift, formant / throat, input type, mix (round 127); otherwise the project's key or a gentle chromatic correction |
 | Waves Tune Real-Time | LYNX Tune | Waves name, names | — (the project's key, else gentle chromatic) |
 
 Not mapped yet (no LYNX module plays their role): Little AlterBoy, Filterverse, Kickstart,

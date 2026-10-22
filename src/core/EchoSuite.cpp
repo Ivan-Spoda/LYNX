@@ -484,6 +484,7 @@ public:
 
         const auto g = feedbackGain (p[feedback]);
         const bool pairsOn = p[pairs] >= 0.5f;
+        const auto polarityL = p[phaseL] >= 0.5f ? -1.0f : 1.0f, polarityR = p[phaseR] >= 0.5f ? -1.0f : 1.0f;
         const auto outGain = (float) std::pow (10.0, outputDb (p[output]) / 20.0);
         wetGain *= outGain;
         const auto ageV = clamp01 (p[age]);
@@ -665,8 +666,8 @@ public:
 
             // width (M / S of the echoes) and the equal-power mix
             const auto m = 0.5f * (echo[0] + echo[1]), sd = 0.5f * (echo[0] - echo[1]) * widthV;
-            l[i] = dryGain * in[0] + wetGain * duckGain * (m + sd);
-            r[i] = dryGain * in[1] + wetGain * duckGain * (m - sd);
+            l[i] = dryGain * in[0] + wetGain * duckGain * (m + sd) * polarityL;
+            r[i] = dryGain * in[1] + wetGain * duckGain * (m - sd) * polarityR;
         }
     }
 
@@ -1344,7 +1345,8 @@ const EffectInfo& echoformInfo()
                                      { "Diffusion", 0.0f }, { "Diffusion size", 1.0f }, { "Low cut", 0.0f }, { "High cut", 1.0f },
                                      { "Mod rate", 0.2738341f }, { "Mod depth", 0.5f }, { "Wow", 0.5f }, { "Flutter", 0.5f },
                                      { "Shift", 0.5f }, { "Shift detune", 0.58f }, { "Pitch", 0.5f }, { "Pitch detune", 0.5f },
-                                     { "Mode", 0.5f / 12.0f }, { "Ducking", 0.0f }, { "Output", 0.5f }, { "Pairs", 0.0f } } };
+                                     { "Mode", 0.5f / 12.0f }, { "Ducking", 0.0f }, { "Output", 0.5f }, { "Pairs", 0.0f },
+                                     { "Phase L", 0.0f }, { "Phase R", 0.0f } } };
     return info;
 }
 
@@ -1373,7 +1375,7 @@ const EffectInfo& latticeInfo()
                                      { "Detune rate", 0.049049f }, { "Detune depth", 0.5f }, { "Vibrato rate", 0.2982456f },
                                      { "Vibrato depth", 0.0f }, { "Over-mod", 0.0f }, { "Drive in", 0.375f }, { "Drive out", 0.75f },
                                      { "Noise", 0.3333333f }, { "Rotate", 0.5f }, { "Smoothing", 0.0990991f }, { "Colour", 0.0f },
-                                     { "Sync", 0.0f }, { "Taps", 6.5f / 24.0f }, { "Diffusion on", 0.0f }, { "Drive on", 0.0f },
+                                     { "Sync", 0.0f }, { "Taps", 1.5f / 24.0f } /* round 129: two taps (one a side), the reference default */, { "Diffusion on", 0.0f }, { "Drive on", 0.0f },
                                      { "Drive post", 1.0f }, { "Half speed", 0.0f } } };
     return info;
 }
@@ -1428,6 +1430,7 @@ std::string paramText (EffectKind kind, int param, float v)
             case mode: return modeName (modeOf (v));
             case output: return fmt ("%+.1f dB", outputDb (v));
             case pairs: return v >= 0.5f ? "pairs" : "alternate";
+            case phaseL: case phaseR: return v >= 0.5f ? "inverted" : "normal";
             default: return fmt ("%.2f", v);
         }
     }

@@ -283,6 +283,17 @@ juce::var effectToVar (const EffectSlot& slot)
         e->setProperty ("state", juce::Base64::toBase64 (slot.state.data(), slot.state.size()));
     if (! slot.samplePath.empty()) // Newtone / Newtime source sample
         e->setProperty ("sample", str (slot.samplePath));
+    if (! slot.presetName.empty()) // the editor's preset name and A/B compare (round 129)
+        e->setProperty ("preset", str (slot.presetName));
+    if (! slot.abOther.empty())
+    {
+        juce::Array<juce::var> other;
+        for (const auto v : slot.abOther)
+            other.add (juce::roundToInt (v * 10000.0f) / 10000.0);
+        e->setProperty ("abOther", other);
+        if (slot.abShowingB)
+            e->setProperty ("abB", true);
+    }
 
     if (slot.kind == EffectKind::plugin)
         e->setProperty ("plugin", pluginToVar (slot.plugin));
@@ -348,6 +359,13 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
     slot.sidechain = juce::jlimit (-1, maxMixerTracks - 1, (int) e.getProperty ("sidechain", -1));
     slot.sidechain2 = juce::jlimit (-1, maxMixerTracks - 1, (int) e.getProperty ("sidechain2", -1));
     slot.samplePath = e.getProperty ("sample", "").toString().toStdString();
+    slot.presetName = e.getProperty ("preset", "").toString().toStdString();
+    if (auto* other = e["abOther"].getArray())
+    {
+        for (int i = 0; i < other->size() && i < maxEffectParams; ++i)
+            slot.abOther.push_back (juce::jlimit (0.0f, 1.0f, (float) (double) (*other)[i]));
+        slot.abShowingB = (bool) e.getProperty ("abB", false);
+    }
     if (e.hasProperty ("state"))
     {
         juce::MemoryOutputStream raw;

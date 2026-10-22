@@ -575,6 +575,7 @@ namespace glow
 {
 double gainDb (float v) noexcept { return lin (v, 0.0, 30.0); }
 double sidechainDb (float v) noexcept { return lin (v, -20.0, 40.0); }
+double trimDb (float v) noexcept { return lin (v, -18.0, 18.0); }
 
 namespace
 {
@@ -591,13 +592,14 @@ public:
         slowAttack = coef (0.400, sr);
         memoryUp = coef (2.0, sr);
         memoryDown = coef (8.0, sr);
+        autoCoef = coef (0.5, sr);
         reset();
     }
 
     void reset() noexcept override
     {
         emph.reset();
-        panel = cellFast = cellSlow = memory = 0.0;
+        panel = cellFast = cellSlow = memory = autoGr = 0.0;
         lastL = lastR = 0.0f;
     }
 
@@ -611,6 +613,8 @@ public:
         emph.shelf (sr, 2500.0, 10.0 * std::clamp ((double) p[emphasis], 0.0, 1.0), true, 0.7);
         const auto makeup = (float) dbToGain (gainDb (p[gain]));
         const auto mx = std::clamp (p[mix], 0.0f, 1.0f);
+        const auto trimGain = (float) dbToGain (trimDb (p[trim]));
+        const auto autoUp = on (p[autoMakeup]);
         double maxGr = 0.0;
 
         for (int i = 0; i < n; ++i)
@@ -634,8 +638,17 @@ public:
             const auto g = (float) (1.0 / (1.0 + conductance));
             lastL = l[i] * g;
             lastR = r[i] * g;
-            l[i] = (lastL * makeup) * mx + l[i] * (1.0f - mx);
-            r[i] = (lastR * makeup) * mx + r[i] * (1.0f - mx);
+            // auto make-up (round 129) [model]: gives back ~2/3 of the slow average reduction, so turning PEAK REDUCTION
+            // up keeps the level roughly where it was (the reference's AUTO MAKEUP; its law is not measured)
+            auto wet = makeup;
+            if (autoUp)
+            {
+                const auto grDb = -gainToDb (g);
+                autoGr = autoCoef * autoGr + (1.0 - autoCoef) * grDb;
+                wet *= (float) dbToGain (0.66 * autoGr);
+            }
+            l[i] = ((lastL * wet) * mx + l[i] * (1.0f - mx)) * trimGain;
+            r[i] = ((lastR * wet) * mx + r[i] * (1.0f - mx)) * trimGain;
             maxGr = std::max (maxGr, -gainToDb (g));
         }
         meters.set ((float) maxGr, 0.0f, inPeak, Meters::peak (l, r, n));
@@ -646,6 +659,7 @@ private:
     Biquad emph;
     double panel = 0, cellFast = 0, cellSlow = 0, memory = 0;
     double panelAttack = 0, panelRelease = 0, fastAttack = 0, fastRelease = 0, slowAttack = 0, memoryUp = 0, memoryDown = 0;
+    double autoGr = 0, autoCoef = 0;
     float lastL = 0, lastR = 0;
     Meters meters;
 };
@@ -1253,7 +1267,7 @@ const EffectInfo& ridgeInfo()
                                      { "Ratio", 0.0f }, { "Comp. threshold", 1.0f }, { "Comp. release", 0.29f }, { "Fast attack", 0.0f },
                                      { "Gate range", 0.0f }, { "Gate threshold", 0.25f }, { "Gate release", 0.29f }, { "Gate fast", 0.0f },
                                      { "Expander", 0.0f }, { "Dynamics on", 1.0f },
-                                     { "Order", 0.0f }, { "Filters to SC", 0.0f }, { "Output", 0.5f }, { "Phase", 0.0f }, { "Comp. mix", 1.0f },
+                                     { "Order", 1.0f }, { "Filters to SC", 0.0f }, { "Output", 0.5f }, { "Phase", 0.0f }, { "Comp. mix", 1.0f },
                                      { "Voicing", 0.0f }, { "Filter split", 0.0f } } };
     return info;
 }
@@ -1261,7 +1275,8 @@ const EffectInfo& ridgeInfo()
 const EffectInfo& glowInfo()
 {
     static const EffectInfo info { "Glow Leveler",
-                                   { { "Peak reduction", 0.0f }, { "Gain", 0.0f }, { "Limit", 0.0f }, { "Emphasis", 0.0f }, { "Mix", 1.0f } } };
+                                   { { "Peak reduction", 0.0f }, { "Gain", 0.0f }, { "Limit", 0.0f }, { "Emphasis", 0.0f }, { "Mix", 1.0f },
+                                     { "Trim", 0.5f }, { "Auto makeup", 0.0f } } };
     return info;
 }
 
@@ -1394,6 +1409,8 @@ std::string paramText (EffectKind kind, int param, float v)
             case gain: return fmt ("%+.1f dB", gainDb (v));
             case mode: return on (v) ? "limit" : "compress";
             case emphasis: case mix: return fmt ("%.0f%%", v * 100.0);
+            case trim: return fmt ("%+.1f dB", trimDb (v));
+            case autoMakeup: return on (v) ? "on" : "off";
             default: return fmt ("%.2f", v);
         }
     }

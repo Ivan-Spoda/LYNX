@@ -150,6 +150,7 @@ target_sources(lynx_core PRIVATE
     src/core/AudioEdit.cpp
     src/core/MixerOps.cpp
     src/core/History.cpp
+    src/core/EffectPresets.cpp
     src/core/SearchQuery.cpp)
 
 # spectral waveforms: band analysis and multi-resolution peak cache
@@ -265,6 +266,7 @@ if(LYNX_BUILD_APP)
         src/ui/ParametricEqEditor.cpp
         src/ui/FacetEqEditor.cpp
         src/ui/ProEditors.cpp
+        src/ui/PluginHeader.cpp
         src/ui/PluginSkin.cpp
         src/ui/PluginEditors.cpp
         src/ui/DynamicsDisplays.cpp
