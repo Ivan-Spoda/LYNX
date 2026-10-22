@@ -275,6 +275,7 @@ void Channel::reset() noexcept
     for (auto& b : bands)
         b.reset();
     env = gr = gr1 = yl = yr = genv = ggr = 0.0;
+    gateOpen = false;
 }
 
 void Channel::design (const Settings& s) noexcept
@@ -347,9 +348,21 @@ void Channel::process (float* l, float* r, int n, const Settings& s) noexcept
         if (gateOn)
         {
             const double lev = std::max (std::abs (a), std::abs (b));
-            genv += (lev > genv ? 1.0 : gD) * (lev - genv);
-            const double target = gl.reduction (gainToDb (genv));
-            ggr += (target > ggr ? gR : gA) * (target - ggr); // more reduction = closing (release), less = opening (attack)
+            genv = lev > genv ? lev : genv + gD * (lev - genv);
+            const double levDb = gainToDb (genv);
+            double target;
+            if (gl.gate)
+            {
+                if (levDb >= gl.threshold) gateOpen = true;
+                else if (levDb < gl.threshold - gl.hysteresis) gateOpen = false;
+                target = gateOpen ? 0.0 : gl.range;
+            }
+            else
+            {
+                const double u = gl.threshold - levDb;
+                target = std::min (gl.range, gl.slope * (u > 30.0 * gl.knee ? u : gl.knee * std::log1p (std::exp (u / gl.knee))));
+            }
+            ggr += (target < ggr ? gA : gR) * (target - ggr); // less reduction = opening (attack), more = closing (release)
             const double g = dbToGain (-ggr);
             a *= g;
             b *= g;
