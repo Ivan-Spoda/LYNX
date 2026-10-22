@@ -1613,9 +1613,11 @@ Layout compressorLayout()
     v.push_back (meter (184, 26, 66, 180, 0, TR_NOOP ("Reduction")));
     v.push_back (slider (Item::vslider, 268, 30, 34, 172, "Makeup", TR_NOOP ("Gain")));
     v.push_back (toggle (314, 30, 94, 20, "Auto gain", TR_NOOP ("Auto gain")));
-    v.push_back (dial (90, 252, 34, "Attack", TR_NOOP ("Attack")));
+    v.push_back (dial (60, 252, 34, "Attack", TR_NOOP ("Attack")));
+    v.push_back (dial (140, 252, 34, "Release", TR_NOOP ("Release")));
     v.push_back (dial (217, 252, 34, "Ratio", TR_NOOP ("Ratio")));
-    v.push_back (dial (340, 252, 34, "Release", TR_NOOP ("Release")));
+    v.push_back (dial (300, 252, 30, "Mix", TR_NOOP ("Mix")));
+    v.push_back (dial (370, 252, 30, "Trim", TR_NOOP ("Trim"), bipolar));
     return l;
 }
 
