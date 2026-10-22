@@ -10,7 +10,7 @@ JUCE and builds anywhere; the app uses JUCE 8.0.4. Everything that differs per O
 | Package | per-user installer (NSIS) + portable .zip | .dmg (ad-hoc signed, **not notarized**) | AppImage + .tar.gz (`install.sh`) |
 | Minimum | Windows 10 x64 | macOS 11 Big Sur | x86_64, glibc 2.39 (Ubuntu 24.04, Debian 13, Fedora 40), X11 or XWayland |
 | Audio drivers | Windows Audio (WASAPI shared / low-latency / exclusive), DirectSound, ASIO, built-in LYNX ASIO | Core Audio | ALSA, JACK (PipeWire through `pipewire-jack`) |
-| Plugin formats | VST3, CLAP, VST2 | VST3, CLAP, Audio Units | VST3, CLAP, LV2 |
+| Plugin formats | VST3, CLAP, VST2 | VST3, CLAP, Audio Units | VST3, CLAP, LV2, VST2 |
 | Plugin sandbox (separate process) | yes (opt-in) | no | no |
 | Settings | `%APPDATA%\LYNX` | `~/Library/Application Support/LYNX` | `$XDG_CONFIG_HOME/LYNX` (`~/.config/LYNX`) |
 | Waveform cache | `%APPDATA%\LYNX\wavecache` | `~/Library/Caches/LYNX/wavecache` | `$XDG_CACHE_HOME/LYNX/wavecache` (`~/.cache/LYNX`) |
@@ -39,7 +39,7 @@ Other per-OS code, kept small and guarded in place:
   class (macOS), SCHED_FIFO 70 when the user's limits allow it (Linux; otherwise unchanged).
 - `engine/DllAsioDevice.cpp`, `asio/` — ASIO and the LYNX ASIO driver: Windows only (ASIO is a Windows driver model).
 - `engine/PluginSandbox.cpp` — out-of-process plugins over Win32 shared memory and events: Windows only for now.
-- `engine/Vst2Format.cpp` — VST2 hosting loads Windows DLLs only (VST2 is deprecated and rare on macOS/Linux).
+- `engine/Vst2Format.cpp` — VST2 hosting loads Windows DLLs and Linux shared objects (`.so`, yabridge bridges included); not macOS (VST2 is deprecated and rare there).
 - `ui/WindowOwner.cpp` — dark native title bar and owned tool windows (Windows); JUCE defaults elsewhere.
 - `ui/Theme.cpp` — Segoe UI on Windows; the system sans-serif elsewhere.
 - `ui/Toolbar.cpp` — process memory (Windows API, `/proc/self/statm` on Linux).

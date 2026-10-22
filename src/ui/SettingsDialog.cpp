@@ -5,6 +5,7 @@
 #include "ui/I18n.h"
 #include "ui/MissingFilesDialog.h"
 #include "ui/Theme.h"
+#include "platform/Paths.h"
 #include "ui/ToolWindow.h"
 
 namespace lynx
@@ -439,7 +440,7 @@ public:
             }, persistent);
 
         pluginFolders = std::make_unique<FolderList> (
-            tr ("Plugin folders"), tr ("Scanned for VST, VST3 and CLAP plugins (Options > Scan for plugins)."),
+            tr ("Plugin folders"), tr ("Scanned for {0} plugins (Options > Scan for plugins).", { platform::pluginFormatNames() }),
             [persistent, sample, &host] {
                 juce::StringArray list;
                 if (persistent)

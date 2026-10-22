@@ -66,22 +66,33 @@ juce::FileSearchPath standardPluginFolders()
         for (const auto* sub : { "VST3", "Components", "CLAP", "VST" })
             paths.add (root.getChildFile (sub));
    #else
-    // VST3 and CLAP specs' Linux folders, LV2's usual ones and the de-facto VST2 ones
-    paths.add (home().getChildFile (".vst3"));
-    paths.add (juce::File ("/usr/lib/vst3"));
-    paths.add (juce::File ("/usr/local/lib/vst3"));
-    paths.add (home().getChildFile (".clap"));
-    paths.add (juce::File ("/usr/lib/clap"));
-    paths.add (juce::File ("/usr/local/lib/clap"));
-    paths.add (home().getChildFile (".lv2"));
-    paths.add (juce::File ("/usr/lib/lv2"));
-    paths.add (juce::File ("/usr/local/lib/lv2"));
-    paths.add (home().getChildFile (".vst"));
-    paths.add (juce::File ("/usr/lib/vst"));
-    paths.add (juce::File ("/usr/local/lib/vst"));
+    // VST3 and CLAP specs' Linux folders, LV2's usual ones and the de-facto VST2 ones; the lib64 variants are where
+    // Fedora, openSUSE and other 64-bit-libdir distributions install them
+    for (const auto* format : { "vst3", "clap", "lv2", "vst" })
+    {
+        paths.add (home().getChildFile (juce::String (".") + format));
+        for (const auto* root : { "/usr/lib", "/usr/local/lib" })
+            paths.add (juce::File (root).getChildFile (format));
+        // only where they exist and are not a link to /usr/lib (Arch), which would list every plugin twice
+        for (const auto* root : { "/usr/lib64", "/usr/local/lib64" })
+            if (const juce::File lib (root); lib.isDirectory() && ! lib.isSymbolicLink() && lib.getChildFile (format).isDirectory()
+                && ! lib.getChildFile (format).isSymbolicLink())
+                paths.add (lib.getChildFile (format));
+    }
    #endif
     paths.add (settingsFolder().getChildFile ("Plugins"));
     return paths;
+}
+
+juce::String pluginFormatNames()
+{
+   #if JUCE_WINDOWS
+    return "VST, VST3, CLAP";
+   #elif JUCE_MAC
+    return "VST3, AU, CLAP";
+   #else
+    return "VST, VST3, CLAP, LV2";
+   #endif
 }
 
 juce::File localFile (const juce::String& path)

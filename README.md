@@ -284,7 +284,7 @@ entry, an icon and the `.lynx` file type (`./install.sh --uninstall` removes it 
 
 | | Windows | macOS | Linux |
 |---|---|---|---|
-| Plugin formats | VST3, CLAP, VST2 | VST3, CLAP, Audio Units | VST3, CLAP, LV2 |
+| Plugin formats | VST3, CLAP, VST2 | VST3, CLAP, Audio Units | VST3, CLAP, LV2, VST2 |
 | Audio drivers | Windows Audio (WASAPI), DirectSound, ASIO, built-in LYNX ASIO driver | Core Audio | ALSA, JACK (PipeWire via `pipewire-jack`) |
 | Out-of-process plugin sandbox | optional | – | – |
 | FL Studio integration (factory samples, plugin database) | FL Studio installation | FL Studio app bundle is looked for (untested) | Windows FL Studio under Wine (`~/.wine` or `$WINEPREFIX`) |

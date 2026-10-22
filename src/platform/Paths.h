@@ -26,6 +26,9 @@ juce::File cacheFolder (const juce::String& name);
 // there): VST3, VST2, CLAP (+ AU components on macOS, LV2 on Linux) and LYNX's own Plugins folder.
 juce::FileSearchPath standardPluginFolders();
 
+// The plugin formats LYNX scans for on this OS, for the UI ("VST, VST3, CLAP, LV2" on Linux).
+juce::String pluginFormatNames();
+
 // A file named by a path stored in a project or written by the FL import: on Windows as it is; on macOS/Linux FL's
 // backslashes become '/' and, when the exact spelling does not exist, the letter case is matched against the disk
 // (FL Studio's data was written for a case-insensitive file system).

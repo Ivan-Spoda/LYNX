@@ -437,6 +437,42 @@ void PluginEffect::process (float* left, float* right, int n, const EffectParams
 
 // ---------------------------------------------------------------------------
 
+namespace
+{
+// LV2 lists plugins by URI from whole folders: lilv reads every entry of a folder it is given as a bundle, so it gets
+// only the folders that hold .lv2 bundles (not the VST2/VST3/CLAP ones, which only filled the log with errors)
+juce::FileSearchPath lv2Folders (const juce::FileSearchPath& paths)
+{
+    juce::FileSearchPath lv2;
+    for (int i = 0; i < paths.getNumPaths(); ++i)
+        if (paths[i].isDirectory() && ! paths[i].findChildFiles (juce::File::findDirectories, false, "*.lv2").isEmpty())
+            lv2.addIfNotAlreadyThere (paths[i]);
+    return lv2;
+}
+
+// The standard folders and the user's scan folders (Plugin manager), without the FL Studio lookup of suggestedFolders
+juce::FileSearchPath lv2SearchFolders()
+{
+    auto folders = platform::standardPluginFolders();
+    juce::StringArray lines;
+    lines.addLines (platform::settingsFile ("plugin-folders.txt").loadFileAsString());
+    for (const auto& line : lines)
+        if (juce::File::isAbsolutePath (line.trim()))
+            folders.addIfNotAlreadyThere (juce::File (line.trim()));
+    return folders;
+}
+
+// The plugin files (VST2/VST3/CLAP) and LV2 URIs found in these folders, by every format that scans.
+juce::StringArray listPluginFiles (juce::AudioPluginFormatManager& formats, const juce::FileSearchPath& paths)
+{
+    juce::StringArray files;
+    for (auto* format : formats.getFormats())
+        if (format->canScanForPlugins())
+            files.addArray (format->searchPathsForPlugins (format->getName() == "LV2" ? lv2Folders (paths) : paths, true, false));
+    return files;
+}
+} // namespace
+
 // Background scan: a thread that runs PluginHost::scan and publishes its progress in PluginHost::state.
 class PluginHost::BackgroundScan final : public juce::Thread
 {
@@ -482,6 +518,12 @@ PluginHost::PluginHost (bool keep)
     : persistent (keep)
 {
     addPluginFormats (formats);
+    // JUCE's LV2 host only knows ~/.lv2 and one of /usr/lib/lv2 or /usr/lib64/lv2: the plugins found elsewhere by a
+    // scan must load in a later session too, before (or without) the next scan
+    if (persistent)
+        for (auto* format : formats.getFormats())
+            if (format->getName() == "LV2")
+                format->searchPathsForPlugins (lv2Folders (lv2SearchFolders()), true, false);
     if (persistent)
     {
         if (auto xml = juce::XmlDocument::parse (settingsFolder().getChildFile ("plugins.xml")))
@@ -649,6 +691,7 @@ void logScanFailure (const juce::String& file, const juce::String& why, juce::ui
         log.deleteFile();
     log.appendText (juce::Time::getCurrentTime().toISO8601 (true) + " | " + file + " | " + why + " | " + juce::String (elapsedMs / 1000.0, 1) + " s\n");
 }
+
 } // namespace
 
 bool PluginHost::scanOne (juce::AudioPluginFormat& format, const juce::String& file)
@@ -714,11 +757,7 @@ bool PluginHost::scanOne (juce::AudioPluginFormat& format, const juce::String& f
 
 int PluginHost::scan (const juce::FileSearchPath& paths, const std::function<bool (float, const juce::String&)>& progress)
 {
-    juce::StringArray files;
-    for (auto* format : formats.getFormats())
-        if (format->canScanForPlugins())
-            files.addArray (format->searchPathsForPlugins (paths, true, false));
-    const auto found = scanFiles (files, progress);
+    const auto found = scanFiles (listPluginFiles (formats, paths), progress);
     if (! stopScan)
         forgetMisses(); // everything was looked at again: the projects' missing plugins may be findable now
     return found;
@@ -796,7 +835,7 @@ void PluginHost::forgetAll()
 
 bool PluginHost::emptyScanIsCurrent (const juce::String& file)
 {
-    if (! persistent)
+    if (! persistent || ! juce::File::isAbsolutePath (file)) // (an LV2 URI has no file date to compare)
         return false;
     const auto stamp = juce::String (juce::File (file).getLastModificationTime().toMilliseconds());
     juce::StringArray lines;
@@ -806,7 +845,7 @@ bool PluginHost::emptyScanIsCurrent (const juce::String& file)
 
 void PluginHost::rememberEmptyScan (const juce::String& file)
 {
-    if (! persistent)
+    if (! persistent || ! juce::File::isAbsolutePath (file))
         return;
     const auto list = settingsFolder().getChildFile ("scan-empty.txt");
     juce::StringArray lines;
@@ -933,7 +972,15 @@ int PluginHost::scanOneFile (const juce::String& formatName, const juce::String&
     juce::OwnedArray<juce::PluginDescription> found;
     for (auto* format : manager.getFormats())
         if (format->getName() == formatName)
+        {
+            // an LV2 URI is looked up in the folders the scan listed it from: JUCE alone knows only ~/.lv2 and one
+            // of /usr/lib/lv2 or /usr/lib64/lv2
+            if (formatName == "LV2" && ! juce::File::isAbsolutePath (file))
+            {
+                format->searchPathsForPlugins (lv2Folders (lv2SearchFolders()), true, false);
+            }
             format->findAllTypesForFile (found, file);
+        }
     juce::XmlElement xml ("PLUGINS");
     for (auto* d : found)
         xml.addChildElement (d->createXml().release());
@@ -1154,12 +1201,10 @@ juce::StringArray PluginHost::filesToScanFor (const std::vector<FlpPluginUse>& u
     }
     // same-named plugin files in the scan folders (listing only: nothing is loaded here)
     const auto folders = pluginFolders();
-    for (auto* format : formats.getFormats())
-        if (format->canScanForPlugins())
-            for (const auto& file : format->searchPathsForPlugins (folders, true, false))
-                for (const auto& [use, entry] : needed)
-                    if (pluginFileMatches (file.toStdString(), use->plugin, entry))
-                        files.addIfNotAlreadyThere (file, true);
+    for (const auto& file : listPluginFiles (formats, folders))
+        for (const auto& [use, entry] : needed)
+            if (pluginFileMatches (file.toStdString(), use->plugin, entry))
+                files.addIfNotAlreadyThere (file, true);
     // known to crash or hang: nothing to learn
     juce::StringArray worth;
     for (const auto& file : files)

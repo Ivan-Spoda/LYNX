@@ -13,6 +13,8 @@
 
 #if JUCE_WINDOWS
  #include <windows.h>
+#elif JUCE_LINUX || JUCE_BSD
+ #include <dlfcn.h>
 #endif
 
 namespace lynx
@@ -121,6 +123,20 @@ abi::Entry entryOf (const juce::String& path)
     auto entry = (abi::Entry) (void*) GetProcAddress (module, "VSTPluginMain");
     if (entry == nullptr)
         entry = (abi::Entry) (void*) GetProcAddress (module, "main");
+    return entry;
+   #elif JUCE_LINUX || JUCE_BSD
+    // a Linux VST2 is a shared object with the same entry points (yabridge's bridges too)
+    static std::mutex mutex;
+    static std::map<juce::String, void*> modules;
+    const std::lock_guard<std::mutex> lock (mutex);
+    auto& module = modules[path];
+    if (module == nullptr)
+        module = dlopen (path.toRawUTF8(), RTLD_NOW | RTLD_LOCAL);
+    if (module == nullptr)
+        return nullptr;
+    auto entry = (abi::Entry) dlsym (module, "VSTPluginMain");
+    if (entry == nullptr)
+        entry = (abi::Entry) dlsym (module, "main");
     return entry;
    #else
     juce::ignoreUnused (path);
@@ -734,6 +750,11 @@ bool Vst2PluginFormat::fileMightContainThisPluginType (const juce::String& path)
     const juce::File f (path);
     // not the DLLs inside a VST3 bundle or a CLAP folder
     return f.hasFileExtension (".dll") && f.existsAsFile() && ! path.containsIgnoreCase (".vst3") && ! path.containsIgnoreCase (".clap");
+   #elif JUCE_LINUX || JUCE_BSD
+    const juce::File f (path);
+    // not the shared objects inside VST3, CLAP or LV2 bundles
+    return f.hasFileExtension (".so") && f.existsAsFile() && ! path.contains (".vst3/") && ! path.contains (".clap/")
+        && ! path.contains (".lv2/");
    #else
     juce::ignoreUnused (path);
     return false;
@@ -763,6 +784,11 @@ juce::StringArray Vst2PluginFormat::searchPathsForPlugins (const juce::FileSearc
         for (const auto& f : directories[i].findChildFiles (juce::File::findFiles, recursive, "*.dll"))
             if (fileMightContainThisPluginType (f.getFullPathName()))
                 found.addIfNotAlreadyThere (f.getFullPathName());
+   #elif JUCE_LINUX || JUCE_BSD
+    for (int i = 0; i < directories.getNumPaths(); ++i)
+        for (const auto& f : directories[i].findChildFiles (juce::File::findFiles, recursive, "*.so"))
+            if (fileMightContainThisPluginType (f.getFullPathName()))
+                found.addIfNotAlreadyThere (f.getFullPathName());
    #else
     juce::ignoreUnused (directories, recursive);
    #endif
@@ -776,6 +802,10 @@ juce::FileSearchPath Vst2PluginFormat::getDefaultLocationsToSearch()
     const auto programs = juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory);
     for (const auto* sub : { "VSTPlugins", "Steinberg/VSTPlugins", "Common Files/VST2", "Common Files/Steinberg/VST2" })
         paths.add (programs.getChildFile (sub));
+   #elif JUCE_LINUX || JUCE_BSD
+    paths.add (juce::File::getSpecialLocation (juce::File::userHomeDirectory).getChildFile (".vst"));
+    for (const auto* folder : { "/usr/lib/vst", "/usr/local/lib/vst", "/usr/lib64/vst", "/usr/local/lib64/vst" })
+        paths.add (juce::File (folder));
    #endif
     return paths;
 }

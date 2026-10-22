@@ -3,6 +3,7 @@
 #include "core/Preferences.h"
 #include "engine/AudioEngine.h"
 #include "engine/PluginHost.h"
+#include "platform/Paths.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
 #include "ui/ToolWindow.h"
@@ -112,6 +113,17 @@ public:
         table.setColour (juce::ListBox::outlineColourId, theme::colour::border);
         table.setOutlineThickness (1);
         addAndMakeVisible (table);
+        // an empty list is not "no plugins": LYNX's own instruments and effects are never listed here (GitHub issue #2)
+        emptyHint.setText (tr ("No third-party plugins found yet ({0}). Press Find new plugins, or add folders with Plugin folders...", { platform::pluginFormatNames() })
+                               + "\n\n"
+                               + tr ("LYNX's own instruments and effects are not listed here: they are always available from the Channel Rack's + button, "
+                                     "a mixer insert slot or the Quick-add palette (F8)."),
+                           juce::dontSendNotification);
+        emptyHint.setFont (theme::font (theme::type::body));
+        emptyHint.setColour (juce::Label::textColourId, theme::colour::textSecondary);
+        emptyHint.setJustificationType (juce::Justification::centred);
+        emptyHint.setInterceptsMouseClicks (false, false);
+        addChildComponent (emptyHint);
 
         progress.setColour (juce::ProgressBar::foregroundColourId, theme::colour::accent);
         progress.setPercentageDisplay (false);
@@ -175,6 +187,7 @@ public:
         scanStatus.setBounds (status);
         area.removeFromBottom (6);
         table.setBounds (area);
+        emptyHint.setBounds (area.withTrimmedTop (table.getHeaderHeight()).reduced (40, 20));
     }
 
 private:
@@ -231,6 +244,7 @@ private:
         visible = prefs::visiblePlugins (rows, search.getText().toStdString(), filter, sort, ! table.getHeader().isSortedForwards());
         table.updateContent();
         table.repaint();
+        emptyHint.setVisible (persistent && rows.empty());
 
         int instruments = 0, effects = 0, failed = 0;
         for (const auto& r : rows)
@@ -461,7 +475,7 @@ private:
 
     juce::TextEditor search;
     std::array<juce::TextButton, 5> filterButtons;
-    juce::Label count, scanStatus;
+    juce::Label count, scanStatus, emptyHint;
     juce::TableListBox table;
     juce::ProgressBar progress { progressValue };
     juce::TextButton scanNew { tr ("Find new plugins") }, rescanAll { tr ("Rescan all...") }, stop { tr ("Stop") },

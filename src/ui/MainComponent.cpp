@@ -3252,7 +3252,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         menu.addSeparator();
         menu.addItem (tr ("Plugin manager..."), [this] { showPluginManager(); });
         const auto scanning = engine.getPluginHost().backgroundScan().running;
-        menu.addItem (scanning ? tr ("Stop the plugin scan") : tr ("Scan for plugins (VST, VST3 and CLAP)"), [this, scanning] {
+        menu.addItem (scanning ? tr ("Stop the plugin scan") : tr ("Scan for plugins ({0})", { platform::pluginFormatNames() }), [this, scanning] {
             if (scanning)
                 engine.getPluginHost().cancelBackgroundScan();
             else

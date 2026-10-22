@@ -8,6 +8,7 @@
 #include "engine/Text.h"
 #include "platform/CrashGuard.h"
 #include "ui/I18n.h"
+#include "platform/Paths.h"
 #include "ui/Theme.h"
 
 namespace lynx
@@ -71,7 +72,7 @@ class ScanThread final : public juce::ThreadWithProgressWindow
 {
 public:
     ScanThread (AudioEngine& e, std::function<void (int)> done)
-        : juce::ThreadWithProgressWindow (tr ("Scanning for plugins (VST, VST3 and CLAP)..."), true, true),
+        : juce::ThreadWithProgressWindow (tr ("Scanning for plugins ({0})...", { platform::pluginFormatNames() }), true, true),
           engine (e),
           onDone (std::move (done))
     {
@@ -198,6 +199,6 @@ void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instrument
         menu.addItem (tr ("(no plugins found; use \"Scan for plugins\")"), false, false, [] {});
 
     menu.addSeparator();
-    menu.addItem (tr ("Scan for plugins (VST, VST3 and CLAP)..."), [&engine] { engine.getPluginHost().startBackgroundScan(); });
+    menu.addItem (tr ("Scan for plugins ({0})...", { platform::pluginFormatNames() }), [&engine] { engine.getPluginHost().startBackgroundScan(); });
 }
 } // namespace lynx

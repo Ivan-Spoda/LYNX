@@ -6,6 +6,7 @@
 #include "engine/FlStudio.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
+#include "platform/Paths.h"
 #include "ui/WindowOwner.h"
 
 namespace lynx
@@ -261,7 +262,7 @@ private:
 
     juce::Label title, intro, flStatus, scanStatus;
     SectionLabel languageLabel { tr ("Language") }, audioLabel { tr ("Audio output") }, flLabel { "FL Studio" },
-        foldersLabel { tr ("Plugin folders (VST, VST3 and CLAP)") };
+        foldersLabel { tr ("Plugin folders ({0})", { platform::pluginFormatNames() }) };
     juce::ComboBox languageBox;
     juce::AudioDeviceSelectorComponent devices;
     juce::StringArray folderList;
