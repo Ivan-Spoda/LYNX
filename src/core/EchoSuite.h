@@ -51,6 +51,8 @@ enum Param
     output,     // round 119: the echoes' level, −18 … +18 dB (0.5 = 0 dB; older projects load the default)
     pairs,      // round 119: ping-pong in pairs — the right side repeats the left echo at full level and the loop
                 // gain applies once per left-right pair (the H-Delay-style ping-pong); off = each side at √gain
+    phaseL,     // round 129: the echoes of the left / right side inverted (the H-Delay's phase L / R buttons)
+    phaseR,
     hybrid,     // round 124: the hybrid echo engine (off / clean / analog) — a plain two-line echo with a level-dependent
                 // gain on every pass, measured on the H-Delay trial (REA_rodada124 §5); off = Echoform as before
     paramCount

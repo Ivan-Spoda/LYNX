@@ -1036,6 +1036,23 @@ class NebulaFx final : public VerbEffect
 public:
     NebulaFx() : VerbEffect (EffectKind::nebula, 4.2, 0.05) {}
 
+    // CLEAR (round 129): the panel's push button flips parameter 13; a flip empties the delay network at once
+    void process (float* left, float* right, int n, const EffectParams& p, double bpm) noexcept override
+    {
+        if (p[13] != lastClear)
+        {
+            if (lastClear >= 0.0f)
+                reset();
+            lastClear = p[13];
+        }
+        VerbEffect::process (left, right, n, p, bpm);
+    }
+
+private:
+    float lastClear = -1.0f;
+
+protected:
+
 protected:
     void configure (const EffectParams& p, double bpm, Settings& s, float& mix) const noexcept override
     {
@@ -1355,12 +1372,13 @@ const EffectInfo& info (EffectKind kind)
                   { "Early send", 0.0f }, { "Diffusion", 1.0f }, { "Type", 0.0f }, { "Space", 0.0f }, { "Low cut", 0.0f } }) };
     static const EffectInfo foilInfo { "Foil Plate",
         params ({ { "Mix", 1.0f }, { "Predelay", 0.0f }, { "Decay", 0.5f }, { "Size", 0.5f }, { "Width", 0.5f },
-                  { "Mod rate", 0.365345f }, { "Mod depth", 0.0f }, { "Low EQ freq", 0.348774f }, { "Low EQ gain", 0.5f },
-                  { "High EQ freq", 0.5f }, { "High EQ gain", 0.5f }, { "Type", 0.0f } }) };
+                  { "Mod rate", 0.365345f }, { "Mod depth", 0.0f }, { "Low EQ freq", 0.343434f }, { "Low EQ gain", 0.5f },
+                  { "High EQ freq", 0.494949f }, { "High EQ gain", 0.5f }, { "Type", 0.0f } }) }; // EQ at 700 Hz / 10 kHz (round 129)
     static const EffectInfo nebulaInfo { "Nebula",
         params ({ { "Mix", 0.5f }, { "Sync", 0.0f }, { "Note", 0.333333f }, { "Delay", 0.5f }, { "Warp", 0.0f },
                   { "Feedback", 0.5f }, { "Density", 0.0f }, { "Width", 1.0f }, { "Low cut", 0.0f }, { "High cut", 1.0f },
-                  { "Mod rate", 0.273834f }, { "Mod depth", 0.5f }, { "Mode", 0.0f } }) };
+                  { "Mod rate", 0.273834f }, { "Mod depth", 0.5f }, { "Mode", 0.0f },
+                  { "Clear", 0.0f } }) }; // round 129: the reference's CLEAR button (any change of the value empties the network)
     static const EffectInfo haloInfo { "Halo",
         params ({ { "Mix", 0.5f }, { "Shift", 1.0f }, { "Feedback", 0.0f }, { "Diffusion", 0.919192f }, { "Size", 0.5f },
                   { "Low cut", 0.0f }, { "High cut", 0.530201f }, { "Mod rate", 0.1f }, { "Mod depth", 0.3f },
@@ -1437,6 +1455,7 @@ std::string paramText (EffectKind kind, int param, float v, double bpm)
         case EffectKind::nebula:
             switch (param)
             {
+                case 13: return "Clear";
                 case 1: return syncNames[choice (v, 4)];
                 case 2: return noteNames[choice (v, 7)];
                 case 3: return ms (nebulaDelayMs (v));
@@ -1451,7 +1470,9 @@ std::string paramText (EffectKind kind, int param, float v, double bpm)
             switch (param)
             {
                 case 1: return fmt ("%+.1f st", haloShiftSemis (v));
-                case 5: return hz (10.0 + 990.0 * v); // the reference reads 10 Hz at 0 (its editor)
+                // round 129: what the engine applies (0 … 250 Hz, off below 5 Hz; configure()) — the display said
+                // 10 … 1000 Hz, the reference editor's range, while the filter never went above 250 Hz
+                case 5: return 250.0 * v < 5.0 ? std::string ("off") : hz (250.0 * v);
                 case 6: return hz (100.0 + 14900.0 * v);
                 case 7: return fmt ("%.2f Hz", 0.05 + 4.95 * v);
                 case 9: return haloModes[choice (v, 3)].name;
