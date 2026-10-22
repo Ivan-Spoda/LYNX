@@ -16,6 +16,7 @@
 // after construction, and every effect reports a latency that does not depend on its parameters, known right
 // after prepare() (REA round 87: PDC is planned before the first block).
 
+#include <algorithm>
 #include <array>
 #include <memory>
 #include <string>
