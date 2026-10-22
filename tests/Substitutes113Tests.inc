@@ -202,16 +202,11 @@ TEST (waves_vocal_states_translated_round113)
         CHECK (e != nullptr);
         return e != nullptr ? makeSubstituteSlot (*e, &id, &translated) : EffectSlot {};
     };
-    // her Renaissance Compressor: release 160 ms (ARC), -15 dB, gain 0, attack 0.5 ms, 2.95:1
+    // her Renaissance Compressor: since round 123 Compressor's "vintage program" voicing (VoiceMatchTests123)
     {
         int n = 0;
         const auto s = slotFor ("RComp", "160.31 -15 0 * * * * * 0.5 2.96 56.23 10 0 0 149.62 120 0 0 1 0.4 0 1.5 0 * * * 100 0", n);
-        CHECK (n == 5 && s.kind == EffectKind::compressor);
-        // Compressor: threshold -60 + 60 v dB, ratio 1 + 19 v, attack 0.1 .. 100 ms, release 10 .. 1000 ms (log)
-        CHECK (std::abs (s.params[0] - 40.0f / 60.0f) < 1e-4f && std::abs (s.params[1] - 1.96f / 19.0f) < 1e-4f);
-        CHECK (std::abs (s.params[2] - (float) (std::log (5.0) / std::log (1000.0))) < 1e-4f);
-        CHECK (std::abs (s.params[3] - (float) (std::log (30.0) / std::log (100.0))) < 1e-4f);
-        CHECK (s.params[4] == 0.0f && s.params[5] == 0.0f); // no auto gain: RComp at gain 0 does not make up
+        CHECK (n == 6 && s.kind == EffectKind::compressor && s.params[6] == 1.0f && std::abs (s.params[0] - 0.75f) < 1e-4f);
     }
     // her DeEsser: 5506 Hz, -24.2 dB, high-pass side chain, split, output
     {
@@ -231,7 +226,7 @@ TEST (waves_vocal_states_translated_round113)
         CHECK (std::abs (r::hfHz (s.params[r::hfFreq]) - 10160.0) < 1.0 && std::abs (r::bandGainDb (s.params[r::hfGain], false) - 4.8) < 0.01);
         CHECK (s.params[r::order] == 1.0f && s.params[r::compFastAttack] == 1.0f && s.params[r::eqOn] == 1.0f && s.params[r::dynOn] == 1.0f);
     }
-    // her CLA-2A: gain 48.96 (+15.5 dB below the threshold), peak reduction 62.6, comp
+    // her CLA-2A: since round 123 Glow Leveler's "opto classic" voicing (VoiceMatchTests123)
     {
         std::string values;
         for (int i = 0; i < 208; ++i)
@@ -239,9 +234,7 @@ TEST (waves_vocal_states_translated_round113)
         int n = 0;
         const auto s = slotFor ("CLA-2A", values.c_str(), n);
         namespace g = mixsuite::glow;
-        CHECK (n == 3 && s.kind == EffectKind::glowLeveler);
-        CHECK (std::abs (g::gainDb (s.params[g::gain]) - 17.0) < 0.05 && std::abs (s.params[g::peakReduction] - 0.8746f) < 0.001f);
-        CHECK (s.params[g::mode] == 0.0f);
+        CHECK (n == 5 && s.kind == EffectKind::glowLeveler && s.params[g::voicing] == 1.0f && s.params[g::mode] == 0.0f);
     }
 }
 

@@ -1,5 +1,6 @@
 #include "core/Effects.h"
 #include "core/MixSuite.h"
+#include "core/VoiceMatch.h"
 #include "core/EchoSuite.h"
 #include "core/LynxTune.h"
 #include "core/LynxVerbs.h"
@@ -168,13 +169,17 @@ private:
 class Compressor final : public Effect
 {
 public:
-    void prepare (double sr) noexcept override { sampleRate = sr; reset(); }
+    void prepare (double sr) noexcept override { sampleRate = sr; vintage.prepare (sr); reset(); }
     void reset() noexcept override
     {
         envelopeDb = 0.0f;
         inPower = outPower = 0.0f;
         autoGain = 1.0f;
+        vintage.reset();
     }
+
+    // round 123: voicing 1 = the measured program-dependent compressor (core/VoiceMatch.h); it delays the audio
+    int latencySamples() const noexcept override { return latency.load (std::memory_order_relaxed); }
 
     // round 129: the editor's meters (Effect::controlOutput): 0 = gain reduction (0..1 over 0..30 dB), 2 / 3 = input /
     // output peak — the level meters the compressors it stands in for show (Renaissance Compressor's three meters)
@@ -186,6 +191,28 @@ public:
 
     void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
     {
+        if (params[6] >= 0.5f)
+        {
+            latency.store (vintage.latency(), std::memory_order_relaxed);
+            float peakIn = 0.0f, peakOut = 0.0f;
+            for (int i = 0; i < n; ++i)
+                peakIn = std::max (peakIn, std::max (std::abs (l[i]), std::abs (r[i])));
+            vmatch::progcomp::Settings v;
+            v.thresholdDb = compThresholdDb (params[0]);
+            v.ratio = compRatio (params[1]);
+            v.attackMs = compAttackMs (params[2]);
+            v.releaseMs = compReleaseMs (params[3]);
+            v.gainDb = compMakeupDb (params[4]);
+            vintage.process (l, r, n, v);
+            for (int i = 0; i < n; ++i)
+                peakOut = std::max (peakOut, std::max (std::abs (l[i]), std::abs (r[i])));
+            useSidechain = false;
+            meterGr.store (std::clamp (vintage.reductionDb() / 30.0f, 0.0f, 1.0f), std::memory_order_relaxed);
+            meterIn.store (std::min (peakIn, 1.0f), std::memory_order_relaxed);
+            meterOut.store (std::min (peakOut, 1.0f), std::memory_order_relaxed);
+            return;
+        }
+        latency.store (0, std::memory_order_relaxed);
         // "Auto gain" (round 107): the long-term level stays where it was (slow in/out power match, ±12 dB), so the
         // compressor shapes the dynamics without making the track quieter. Used where its settings are a guess (a
         // substitute for a missing plugin, whose own makeup gain is unknown).
@@ -251,6 +278,8 @@ public:
 
 private:
     std::atomic<float> meterGr { 0.0f }, meterIn { 0.0f }, meterOut { 0.0f };
+    std::atomic<int> latency { 0 };
+    vmatch::progcomp::Compressor vintage;
     double sampleRate = 44100.0;
     float envelopeDb = 0.0f;
     float inPower = 0.0f, outPower = 0.0f, autoGain = 1.0f;
@@ -2182,7 +2211,7 @@ std::string widthText (const EffectParams& params, int band)
 const EffectInfo& effectInfo (EffectKind kind)
 {
     static const EffectInfo eq { "EQ", { { "Low", 0.5f }, { "Mid", 0.5f }, { "Mid freq.", 0.5f }, { "High", 0.5f }, { "Output", 0.5f } } };
-    static const EffectInfo comp { "Compressor", { { "Threshold", 0.7f }, { "Ratio", 3.0f / 19.0f }, { "Attack", 0.67f }, { "Release", 0.54f }, { "Makeup", 0.0f }, { "Auto gain", 0.0f } } };
+    static const EffectInfo comp { "Compressor", { { "Threshold", 0.7f }, { "Ratio", 3.0f / 19.0f }, { "Attack", 0.67f }, { "Release", 0.54f }, { "Makeup", 0.0f }, { "Auto gain", 0.0f }, { "Voicing", 0.0f } } };
     static const EffectInfo delay { "Delay", { { "Time", 0.3f }, { "Feedback", 0.42f }, { "Mix", 0.3f }, { "Ping-pong", 0.0f }, { "Damping", 0.3f } } };
     static const EffectInfo reverb { "Reverb", { { "Room", 0.6f }, { "Damping", 0.5f }, { "Width", 1.0f }, { "Mix", 0.25f }, { "Dry", 1.0f },
                                                  { "Low cut", 0.0f }, { "High cut", 1.0f }, { "Predelay", 0.0f } } };
@@ -2556,6 +2585,8 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm, 
 {
     if (kind == EffectKind::ridgeStrip && mixsuite::ridge::eVoicing (context)) // round 123: the console's own scales
         return mixsuite::ridge::eParamText (param, v);
+    if (kind == EffectKind::glowLeveler && mixsuite::glow::classic (context))
+        return mixsuite::glow::classicParamText (param, v);
     if (kind == EffectKind::hushDeEsser && mixsuite::hush::classic (context))
         return mixsuite::hush::classicParamText (param, v);
     if (kind == EffectKind::fruityPhaser && param == 0) // the sweep rate follows the frequency range switch
@@ -2593,6 +2624,7 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 case 2: std::snprintf (text, sizeof (text), "%.1f ms", compAttackMs (v)); break;
                 case 3: std::snprintf (text, sizeof (text), "%.0f ms", compReleaseMs (v)); break;
                 case 5: return v >= 0.5f ? "on" : "off";
+                case 6: return v >= 0.5f ? "vintage program" : "classic";
                 default: std::snprintf (text, sizeof (text), "+%.1f dB", compMakeupDb (v)); break;
             }
             return text;

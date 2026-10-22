@@ -2913,3 +2913,5 @@ countries: br
 "Split" = "Divisão"
 "Classic|E console" = "Clássico|Console E"
 "Modern|Classic split" = "Moderno|Clássico dividido"
+"Modern|Opto classic" = "Moderno|Óptico clássico"
+"Classic|Vintage" = "Clássico|Vintage"

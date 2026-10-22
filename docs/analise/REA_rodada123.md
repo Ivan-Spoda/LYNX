@@ -110,5 +110,63 @@ Sweeps (fit per sweep, same laws; takes and pink): threshold −40 … −5 dB a
 (the lowest: −40 dB threshold on one take, where the reference compresses almost all the time); band-pass split −24 …
 −55 dB, band-pass wideband −19 … −48 dB (the band-pass shape is the weak spot), high-pass wideband −32 … −41 dB.
 
+## 3. Renaissance Compressor → Compressor "vintage program" voicing (interim)
+
+[EXEC] Measured: 1 kHz / 100 Hz stairs, bursts (5 ms … 2 s at two levels), pink noise, her takes at her state and 21
+sweeps (threshold × ratio, attack × release in manual, Warm / Smooth × Electro / Opto × ARC / manual). Findings:
+- a **64-sample delay** of the audio (1.33 ms, reported as latency); the static curve is a ~22 dB soft knee centred
+  2.8 dB under the threshold (spec dossier: 18–22 dB);
+- the release depends on how long the reduction was held, even in Manual: after a 5 ms burst the gain is back within
+  1 ms, after 20 ms in ~10 ms, after 0.5–2 s it climbs at a near-constant rate in linear gain (~3.8 /s at 160 ms) and
+  ends abruptly — a fast path plus a slow "program" path;
+- **Warm** makes the gain ripple inside each low-frequency cycle (H3 −45 dBc at 100 Hz, −2 dBFS) and gives *less*
+  reduction than Smooth on voice and noise (0.4–1.5 dB at 8–20 dB of reduction); on steady 1 kHz sines and bursts
+  Warm and Smooth are identical (null −53 / −46 dB).
+
+LYNX (Compressor gets an appended **Voicing** parameter: Classic = its own engine, unchanged; Vintage = this): the
+two-path model fitted at her state (dynfit "rc2"). Her state, reference − LYNX:
+
+| signal | before (round 113 fit) | after |
+|---|---|---|
+| go / kwe / lu | null −20.7 / −18.5 / −20.1 dB, level +0.58 / +0.69 / +0.56, spectrum max 2.9 / 1.4 / 2.5 dB | null −26.7 / −24.7 / −27.3 dB, level +0.18 / +0.03 / +0.11, spectrum max 0.6 / 1.8 / 0.3 dB |
+| pink | −21.2 dB, −0.59 dB | −26.1 dB, −0.23 dB |
+| 1 kHz stairs / bursts | | −48.7 / −42.8 dB |
+
+Not matched yet: the per-sample Warm ripple / ARC law on program material (the −25 dB floor on takes: every model
+family tried — feed-forward peak, RMS, Hilbert envelope, window-max look-ahead, two-path releases — stops there),
+the knob laws away from her state (a per-setting fit of the sweeps generalises poorly: −8 … −38 dB), Opto, Smooth.
+
+## 4. CLA-2A → Glow Leveler "opto classic" voicing (interim)
+
+[EXEC] Measured: stairs at 100 Hz, 300 Hz, 1, 3, 6, 10 kHz, 1 kHz bursts, a 1 kHz tone with a quiet pink probe at five
+levels (the audio path's frequency response under steady reduction), pink noise, her takes, with 20 s of silence
+before every render (the cell keeps a release memory across `reset`), at her states and sweeps of every dial.
+Findings:
+- **static**: a feedback cell C = ((y − Yt)/Y0)^γ above a threshold (1 kHz: Yt −31.2, Y0 −34.3 dBFS, γ 2.39; 0.03
+  rms in log C) — a sharper knee than the spec's pure power law;
+- **side chain**: 3 kHz +4.4, 6 kHz +7.6, 10 kHz +6.9 dB more sensitive than 1 kHz; 100 Hz +2.9 dB (the cell ripples
+  within a 100 Hz cycle: H3 −39 dBc vs −58 at 1 kHz);
+- **audio path**: idle, a 4 Hz high-pass and a 0.7 dB dip around 11.5 kHz (3rd-order fit, −62 dB); under reduction an
+  HF bypass H = g (1 + s/ωz)/(1 + s g′/ωz) (fz 7.6–10.3 kHz, g′ ≈ g + (1 − g)(0.40 − 0.35 g); +6.8 dB at 23 kHz with
+  22 dB of reduction) — the spec's "HF tilt", with the phase back to 0 at Nyquist (a digital section);
+- **dynamics**: attack ~6–8 ms, release hyperbolic (dC/dt ≈ −6.5 C^1.5: half the reduction back in ~60 ms, the rest
+  over seconds), a slow creep of ~1 dB over 0.1–2 s;
+- **dials**: gain → level below the threshold (−51.4 … +38.7 dB, 18 points), peak reduction → sensitivity (no
+  reduction up to 0 dBFS below 40; 62.6 = her: −24.8 dBFS for 3 dB of reduction; 100: −40.5), Hi Freq → a further
+  ±6 dB shift (measured at two peak-reduction settings: separable), Limit → a much steeper cell law.
+
+LYNX (Glow Leveler gets an appended **Voicing** parameter: Modern = its own engine, unchanged; Opto classic = this,
+the dials reading 0 … 100 like the original's): the model above with the fitted dynamics ("cla5"). Reference − LYNX:
+
+| state, signal | before (round 113 fit) | after |
+|---|---|---|
+| main (1761 slots): go / kwe / lu | null −16.0 / −17.2 / −15.7 dB, level +0.04 / +0.83 / +0.56, spectrum max 4.8 / 4.3 / 3.3 dB | null −24.1 / −27.4 / −26.8 dB, level −0.35 / +0.23 / −0.03, spectrum max 0.84 / 0.43 / 0.53 dB |
+| main: pink | −8.6 dB, level −1.58, spectrum max 2.8 dB | −25.2 dB, −0.04 dB, 0.12 dB |
+| CLA-2A_2 / _3 (48.56 / 63.08, 50.16 / 60.48) | | −24.2 … −27.6 dB, level −0.34 … +0.29 |
+| CLA-2A_8 (peak reduction 45.72): go / kwe / lu / pink | | −23.3 / −24.6 / −27.1 / −18.6 dB |
+
+Not matched yet: the attack shape on the first milliseconds and the slow creep (env95 ~1 dB), Limit (one setting),
+other sample rates (the idle filter is the 48 kHz one).
+
 ## Where I stopped / next steps
 - SSL E-Channel and DeEsser done. Next in this round: Renaissance Compressor, CLA-2A.

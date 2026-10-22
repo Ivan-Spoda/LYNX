@@ -106,4 +106,59 @@ private:
     float last = 0.0f;
 };
 } // namespace deesser
+
+// ---- electro-optical leveler (Glow Leveler, voicing "Opto classic") ----
+namespace opto
+{
+struct Settings
+{
+    double gain = 40.0, peakReduction = 46.0, hiFreq = 50.0; // the dials, 0 .. 100
+    bool limit = false;
+};
+double makeupDb (double gainKnob) noexcept;              // the gain dial's level (dB) below the threshold
+double sensitivityDb (double peakReduction, double hiFreq) noexcept; // side-chain level shift vs her state (dB)
+
+class Leveler
+{
+public:
+    void prepare (double sampleRate) noexcept;
+    void reset() noexcept;
+    void process (float* l, float* r, int n, const Settings& s) noexcept;
+    float reductionDb() const noexcept { return last; }
+
+private:
+    double sr = 48000.0;
+    double cf = 0.0, cs = 0.0, el = 0.0, mem = 0.0, yc[2] {}, fx1[2] {}, fy1[2] {}, tx[2][4] {}, ty[2][4] {};
+    Biquad sc;
+    double scDesignedRate = 0.0;
+    float last = 0.0f;
+};
+} // namespace opto
+
+// ---- program-dependent peak compressor (Compressor, voicing "Vintage program") ----
+namespace progcomp
+{
+struct Settings
+{
+    double thresholdDb = -15.0, ratio = 3.0, attackMs = 0.5, releaseMs = 160.0, gainDb = 0.0;
+};
+constexpr int lookahead = 64; // samples at 48 kHz (the original's measured delay, scaled with the rate)
+
+class Compressor
+{
+public:
+    void prepare (double sampleRate) noexcept;
+    void reset() noexcept;
+    void process (float* l, float* r, int n, const Settings& s) noexcept;
+    int latency() const noexcept { return delayLen; }
+    float reductionDb() const noexcept { return last; }
+
+private:
+    double sr = 48000.0;
+    int delayLen = lookahead, pos = 0;
+    std::array<float, 1024> dl {}, dr {};
+    double env = 0.0, grf = 0.0, grs = 0.0;
+    float last = 0.0f;
+};
+} // namespace progcomp
 } // namespace lynx::vmatch
