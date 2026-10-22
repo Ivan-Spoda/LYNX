@@ -1087,9 +1087,12 @@ public:
         {
             accent = flKeys ? skin::colour::azure : boobass || transistorBass ? skin::colour::ember : harmor || sytrus || harmless || morphine ? skin::colour::violet
                                                                                                                                            : skin::colour::crimson;
+            // round 126: the page's own style (FL Keys hardware, BooBass vivid, the synths neon)
+            pageStyle = flKeys ? skin::Style::hardware : boobass || transistorBass ? skin::Style::vivid : skin::Style::neon;
             for (auto& k : knobs)
             {
                 k->getProperties().set (skin::sliderProperty, (juce::int64) accent.getARGB());
+                k->getProperties().set (skin::styleProperty, (int) pageStyle);
                 const auto* item = itemFor (k->getName());
                 if (item == nullptr || (item->type != plugui::Item::knob && item->type != plugui::Item::vslider && item->type != plugui::Item::hslider))
                 {
@@ -1203,6 +1206,7 @@ public:
     void paintLayout (juce::Graphics& g)
     {
         using namespace theme;
+        const skin::StyleScope styleScope (skin::resolve (pageStyle));
         const auto f = layoutFactor();
         const auto& def = engine.getSong().channels[(std::size_t) channel];
         const auto caption = [&] (const char* text, juce::Rectangle<float> r, bool dimmed, juce::Justification j) {
@@ -1221,7 +1225,7 @@ public:
             switch (item.type)
             {
                 case plugui::Item::section:
-                    skin::section (g, r, radius::lg * f, (item.style & plugui::raised) != 0);
+                    skin::section (g, r, radius::lg * f, (item.style & plugui::raised) != 0, accent);
                     if (item.label != nullptr && (item.style & plugui::boxed) == 0)
                         skin::sectionTitle (g, r.withHeight (16.0f * f).translated (0.0f, 1.0f * f), caps (tr (item.label)), accent, juce::jmax (8.0f, 10.0f * f));
                     break;
@@ -1480,6 +1484,7 @@ private:
     AudioEngine& engine;
     int channel;
     juce::Colour accent { skin::colour::crimson }; // the plugin page's accent (ui/PluginSkin.h)
+    skin::Style pageStyle = skin::Style::glow;     // the plugin page's automatic style (round 126)
     bool sakura = true, boobass = false, drumsynth = false, harmless = false, harmor = false, gms = false, morphine = false, ogun = false, autogun = false, transistorBass = false, miniSynth = false, dx10 = false, kepler = false, poizone = false,
          fruitkick = false, bassdrum = false, toxic = false, threeOsc = false, simSynth = false, wasp = false, plucked = false, beepMap = false,
          sawer = false, flKeys = false, granulizer = false, drumaxx = false, slayer = false, fruityDance = false, sytrus = false, wavesFound = false;

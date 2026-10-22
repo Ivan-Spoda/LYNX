@@ -795,10 +795,7 @@ private:
         drawMeter (g, mr.withWidth (14.0f), nw.in, -60.0f, colour::meterLow.withAlpha (0.8f));
         drawMeter (g, mr.withX (mr.getX() + 17.0f).withWidth (14.0f), nw.out, -60.0f, outColour());
         const auto gr = mr.withX (mr.getX() + 34.0f).withWidth (14.0f);
-        g.setColour (colour::bg1);
-        g.fillRect (gr);
-        g.setColour (colour::accent);
-        g.fillRect (gr.withBottom (scale.y (-nw.gr, p)));
+        skin::meterSolid (g, gr, (scale.y (-nw.gr, p) - gr.getY()) / juce::jmax (1.0f, gr.getHeight()), colour::accent, true);
         g.setFont (font (type::caption));
         g.setColour (colour::textDisabled);
         g.drawText ("IN  OUT  GR", mr.withY (m.getY()).withHeight (12.0f).expanded (8.0f, 0.0f), juce::Justification::centred, false);
@@ -1718,8 +1715,10 @@ private:
     juce::String gestures() const override { return tr ("Link: both knobs move together"); }
     bool usesHistory() const override { return true; }
 
-    int pMid() const { return P ("Harmonics"); }
-    int pHigh() const { return P ("Air"); }
+    // the dynamic air model (round 124) has its own two amounts; the classic mode drives the exciter and the shelf
+    bool dynamicModel() const { return v (P ("Dynamic")) >= 0.5f; }
+    int pMid() const { return dynamicModel() ? P ("Mid air") : P ("Harmonics"); }
+    int pHigh() const { return dynamicModel() ? P ("High air") : P ("Air"); }
     juce::Rectangle<float> display() const { return bodyArea().withHeight (206.0f); }
     juce::Rectangle<float> panel() const { return bodyArea().withTrimmedTop (206.0f); }
 
@@ -1750,9 +1749,16 @@ private:
         out.push_back (knob ({ 626.0f, a.getBottom() - 92.0f, 72.0f, 86.0f }, P ("Output"), tr ("Trim"), 0, true));
         const auto b = barArea();
         const auto y = b.getCentreY() - 11.0f;
-        out.push_back (barValue ({ 8.0f, y, 150.0f, 22.0f }, P ("Exciter freq."), tr ("Mid freq")));
-        out.push_back (barValue ({ 162.0f, y, 170.0f, 22.0f }, P ("Character"), tr ("Even / odd")));
-        out.push_back (barValue ({ 336.0f, y, 150.0f, 22.0f }, P ("Air freq."), tr ("High freq")));
+        out.push_back (barValue ({ 8.0f, y, 110.0f, 22.0f }, P ("Dynamic"), tr ("Dynamic")));
+        if (dynamicModel())
+        {
+            out.push_back (barValue ({ 490.0f, y, 110.0f, 22.0f }, P ("Mix"), tr ("Mix")));
+            out.push_back (barValue ({ 604.0f, y, 110.0f, 22.0f }, P ("Output"), tr ("Trim")));
+            return;
+        }
+        out.push_back (barValue ({ 122.0f, y, 120.0f, 22.0f }, P ("Exciter freq."), tr ("Mid freq")));
+        out.push_back (barValue ({ 246.0f, y, 120.0f, 22.0f }, P ("Character"), tr ("Even / odd")));
+        out.push_back (barValue ({ 370.0f, y, 116.0f, 22.0f }, P ("Air freq."), tr ("High freq")));
         out.push_back (barValue ({ 490.0f, y, 110.0f, 22.0f }, P ("Mix"), tr ("Mix")));
         out.push_back (barValue ({ 604.0f, y, 110.0f, 22.0f }, P ("Output"), tr ("Trim")));
     }
@@ -1919,6 +1925,7 @@ public:
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
         keepAboveMainWindow (*this);
+        if (content != nullptr) skin::playOpenAnimation (*content, content->editorStyle()); // round 126: fade / scale in
     }
     void closeButtonPressed() override;
     ProEditor* content = nullptr;

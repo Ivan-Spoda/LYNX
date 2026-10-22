@@ -1,14 +1,15 @@
 // Classic opto leveler laws (round 123), fitted black-box on the official CLA-2A trial at her state (gain 48.96, peak
-// reduction 62.6, compress, Hi Freq 50) and swept dials (tools/fxmeasure/py/vm123, dynfit "cla5"). Included by
-// VoiceMatch.cpp.
-constexpr double y0Db = -33.5282, ytDb = -35.3502, gamma = 2.136934; // C = ((level - Yt) / Y0)^gamma above Yt (peak, dBFS)
-constexpr double attackMs = 13.07847, attackBeta = 0.291478;         // log-domain attack, faster as C grows: tau / (1 + C)^beta
-constexpr double releaseA = 6.551254, releaseN = 1.492985;            // dC/dt = -a C^n
-constexpr double slowShare = 0.597408, attackSlowMs = 24245.26, releaseA2 = 8.157768, releaseN2 = 3.922935;
-constexpr double h2 = 0.007738, h3 = 0.018568;                        // after the make-up
-constexpr double tiltC0 = 0.388895, tiltC1 = 0.235088, tiltHz = 7266.164; // H = g (1 + s/wz) / (1 + s g'/wz)
-constexpr double scHz = 9016.158, scQ = 0.702471, scDb = 9.4372;      // side-chain emphasis (peaking)
-constexpr double memGain = 2.726662, memUpMs = 270.9818, memDownMs = 1.0;
+// reduction 62.6, compress, Hi Freq 50) — stairs, bursts, pink noise and her takes, raw and at their place in her chain
+// (after the SSL / NS1 / RComp / DeEsser trials) — and swept dials (tools/fxmeasure/py/vm123, dynfit "cla5").
+// Included by VoiceMatch.cpp.
+constexpr double y0Db = -33.33189, ytDb = -34.16184, gamma = 2.147392; // C = ((level - Yt) / Y0)^gamma above Yt (peak, dBFS)
+constexpr double attackMs = 12.43423, attackBeta = 0.3359726;         // log-domain attack, faster as C grows: tau / (1 + C)^beta
+constexpr double releaseA = 6.083167, releaseN = 1.560733;            // dC/dt = -a C^n
+constexpr double slowShare = 0.6198693, attackSlowMs = 27033.11, releaseA2 = 16.65784, releaseN2 = 3.937137;
+constexpr double h2 = 0.01176161, h3 = 0.02052627;                        // after the make-up
+constexpr double tiltC0 = 0.4374144, tiltC1 = 0.4175737, tiltHz = 6850.834; // H = g (1 + s/wz) / (1 + s g'/wz)
+constexpr double scHz = 8560.034, scQ = 0.3806853, scDb = 8.317298;      // side-chain emphasis (peaking)
+constexpr double memGain = 2.321769, memUpMs = 162.5647, memDownMs = 1.0;
 constexpr double limitGamma = 12.0, limitShiftDb = 0.88;               // Limit: a much steeper cell law [model: only her
                                                                         // peak reduction measured]
 // the unit's idle response at 48 kHz (3rd order: a 4 Hz high-pass and the ~0.7 dB dip around 12 kHz), measured

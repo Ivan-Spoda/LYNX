@@ -137,12 +137,11 @@ TEST (fresh_air_amounts_become_a_gentle_air_band_round113)
     auto slot = subst113::pluginSlot (fa);
     CHECK (substituteEffectSlot (slot, pluginIdentity (fa)));
     CHECK (slot.kind == EffectKind::aether);
-    // the measured law (official trial, round 113 §3b): mid 0.488 / high 0.374 -> about +8.9 dB from about 6.3 kHz
-    const auto airDb = mixsuite::aether::airDb (slot.params[mixsuite::aether::air]);
-    const auto airHz = mixsuite::aether::airHz (slot.params[mixsuite::aether::airFreq]);
-    CHECK (airDb > 8.5 && airDb < 9.3);
-    CHECK (airHz > 6000.0 && airHz < 6600.0);
-    CHECK (slot.params[mixsuite::aether::harmonics] == 0.0f);
+    // round 124: the dynamic air model takes the two amounts one to one (REA_rodada124 §3)
+    CHECK (slot.params[mixsuite::aether::dynamic] == 1.0f);
+    CHECK (std::abs (slot.params[mixsuite::aether::midAir] - 0.488f) < 1e-6f && std::abs (slot.params[mixsuite::aether::highAir] - 0.374f) < 1e-6f);
+    CHECK (slot.params[mixsuite::aether::harmonics] == 0.0f && slot.params[mixsuite::aether::air] == 0.0f);
+    CHECK (std::abs (slot.params[mixsuite::aether::output] - 0.5f) < 1e-6f); // Trim 0 dB
 }
 
 TEST (gentle_defaults_of_unreadable_vocal_substitutes_round113)
