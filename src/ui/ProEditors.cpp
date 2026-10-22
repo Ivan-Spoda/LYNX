@@ -1017,10 +1017,7 @@ private:
             drawMeter (g, mr.withWidth (14.0f), nw.in, -60.0f, colour::meterLow.withAlpha (0.8f));
         drawMeter (g, mr.withX (mr.getX() + 17.0f).withWidth (14.0f), nw.out, -60.0f, outColour());
         const auto gr = mr.withX (mr.getX() + 34.0f).withWidth (14.0f);
-        g.setColour (colour::bg1);
-        g.fillRect (gr);
-        g.setColour (colour::accent);
-        g.fillRect (gr.withBottom (sc().y (-nw.gr, p)));
+        skin::meterSolid (g, gr, (sc().y (-nw.gr, p) - gr.getY()) / juce::jmax (1.0f, gr.getHeight()), colour::accent, true);
         g.setFont (font (type::caption));
         g.setColour (colour::textDisabled);
         g.drawText ("OUT  GR", mr.withY (m.getY()).withHeight (12.0f).withTrimmedLeft (17.0f).expanded (6.0f, 0.0f), juce::Justification::centred, false);
@@ -2251,6 +2248,7 @@ public:
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
         keepAboveMainWindow (*this);
+        if (content != nullptr) skin::playOpenAnimation (*content, content->editorStyle()); // round 126: fade / scale in
     }
     void closeButtonPressed() override;
     ProEditor* content = nullptr;
