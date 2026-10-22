@@ -113,21 +113,21 @@ K-12/14/20, Loudness), loudness meters (momentary / short term / integrated, tar
 | Display = input / output level / gain reduction history, biggest reductions tagged | ✅ | |
 | GAIN slider on the display's left edge | ✅ | |
 | Output (ceiling) line, draggable | ✅ | |
-| Style button / menu | ⚠️ | 4 styles (Clean, Punch, Loud, Safe) vs 8 |
+| Style button / menu | ✅ | 8 styles (round 128: Clean, Glue, Punch, Dynamic, Dense, Loud, Bus, Safe — LYNX's own names and release laws) |
 | LOOKAHEAD knob | ✅ | 0–5 ms |
-| ATTACK knob | ❌ | |
+| ATTACK knob | ✅ | round 128: 0–10 s (how slowly the slow release stage engages; 0 = at once, the old behaviour) |
 | RELEASE knob | ✅ | |
-| CHANNEL LINKING: TRANSIENTS and RELEASE knobs | ⚠️ | one Link knob |
+| CHANNEL LINKING: TRANSIENTS and RELEASE knobs | ✅ | round 128: two knobs; the release is linked at least as much as the transients |
 | Knob panel folds away («) | ✅ | |
-| ADVANCED panel (»): channel link details, DC offset filter, side-chain triggering | ❌ | |
+| ADVANCED panel (»): channel link details, DC offset filter, side-chain triggering | ⚠️ | round 128: » fold-out with DC offset filter, unity gain, audition limiting; no side-chain triggering |
 | True Peak Limiting (bottom bar) | ✅ | TP button + bar menu |
-| Oversampling (bottom bar) | ❌ | |
-| Dither + noise shaping (bottom bar) | ❌ | |
+| Oversampling (bottom bar) | ❌ | (the 4x true-peak estimator is the only oversampling) |
+| Dither + noise shaping (bottom bar) | ✅ | round 128: Off / 16–24 bits, TPDF; None / Basic / Optimized / Weighted error-feedback shaping |
 | Output level read-out (bottom bar "Out: 0.0 dBTP") | ✅ | |
-| Unity Gain (monitor at the same loudness) | ❌ | |
-| Audition Limiting (hear what is removed) | ❌ | |
+| Unity Gain (monitor at the same loudness) | ✅ | round 128 (Advanced) |
+| Audition Limiting (hear what is removed) | ✅ | round 128 (Advanced) |
 | Meters: output peak bars with holds + gain-reduction meter | ✅ | |
-| Meter scale menu (−16/−32/−48 dB, K-12/14/20) | ❌ | |
+| Meter scale menu (−16/−32/−48 dB, K-12/14/20) | ✅ | round 128: next to TP; rescales the display and the meters |
 | Loudness meter (LUFS momentary / short term / integrated, range, true peak) | ❌ | |
 | True-peak / sample-peak metering switch | ❌ | |
 | Display mode (Slow Down / Fast / Slow / Infinite / Off) | ❌ | |
@@ -230,17 +230,17 @@ output level and pan.
 |---|---|---|
 | Scrolling waveform with the removed part, threshold lines | ✅ | |
 | THRESHOLD and RANGE big knobs, listen (headphones) button | ✅ | |
-| Frequency slider with TWO handles (high-pass and low-pass of the detection band) | ⚠️ | one handle (centre / cut-off); no low-pass handle |
+| Frequency slider with TWO handles (high-pass and low-pass of the detection band) | ✅ | round 128: left = where the band starts, right = where it ends (far right = off), 2–20 kHz |
 | Audition (hear the detection band) | ✅ | |
-| MODE: SINGLE VOCAL / ALLROUND | ❌ | LYNX has "Detection: high-pass / band", which is a different control |
+| MODE: SINGLE VOCAL / ALLROUND | ✅ | round 128 (Allround: the sibilance must also stand out from the full-band level); LYNX's high-pass / band detection stays in the bottom bar |
 | WIDE BAND / SPLIT BAND | ✅ | |
-| SIDE CHAIN In / Ext | ❌ | |
-| STEREO LINK knob with MID switch | ❌ | |
-| LOOKAHEAD knob 0–15 ms with power button | ⚠️ | on / off at a fixed 2 ms |
-| DISPLAY button (hide / show the waveform) | ❌ | |
+| SIDE CHAIN In / Ext | ✅ | round 128: Ext picks the source track (menu) |
+| STEREO LINK knob with MID switch | ✅ | round 128 |
+| LOOKAHEAD knob 0–15 ms with power button | ✅ | round 128 (the look-ahead is the latency; the mixer re-plans its delay compensation) |
+| DISPLAY button (hide / show the waveform) | ✅ | round 128: the window shrinks without it |
 | Oversampling (bottom bar) | ❌ | |
-| In / Out levels (bottom bar) | ⚠️ | Out only |
-| Release | — | Pro-DS has no release control; LYNX keeps its RELEASE knob as an extra |
+| In / Out levels (bottom bar) | ✅ | round 128: In ±12 dB, Out ±12 dB (no pan) |
+| Release | — | Pro-DS has no release control; LYNX keeps RELEASE as an extra (bottom bar) |
 | Input meter with threshold arrow, reduction meter | ✅ | |
 
 ## Ember Saturator ← Saturn 2 (and Decapitator's role)

@@ -603,38 +603,63 @@ private:
 namespace hush
 {
 double hz (float v) noexcept { return logMap (v, 2000.0, 16000.0); }
+double lowPassHz (float v) noexcept { return logMap (v, 2000.0, 20000.0); }
 double thresholdDb (float v) noexcept { return lin (v, -60.0, 0.0); }
 double rangeDb (float v) noexcept { return lin (v, 0.0, 24.0); }
 double releaseMs (float v) noexcept { return logMap (v, 10.0, 250.0); }
 double lookaheadMs() noexcept { return 2.0; }
+double lookaheadTimeMs (float v) noexcept { return std::round (lin (v, 0.0, 15.0) * 100.0) / 100.0; } // (0.01 ms steps: the default is exactly 2 ms)
+float lookaheadTimeValue (double ms) noexcept { return (float) std::clamp (ms / 15.0, 0.0, 1.0); }
 
 namespace
 {
 class DeEsser final : public Effect
 {
 public:
+    explicit DeEsser (const EffectParams* p = nullptr) : primedMs (p != nullptr ? lookaheadTimeMs ((*p)[lookaheadTime]) : lookaheadMs()) {}
+
     void prepare (double rate) noexcept override
     {
         sr = rate;
-        delay.setLength ((int) std::lround (lookaheadMs() * 0.001 * sr)); // fixed: the latency never changes
+        setDelay (primedMs);
         reset();
     }
 
     void reset() noexcept override
     {
         delay.reset();
+        scDelay.reset();
         detect.reset();
+        detectLp.reset();
         listenF.reset();
+        listenLp.reset();
         split.reset();
+        bandLp.reset();
+        bandLp2.reset();
+        topHp.reset();
+        topHp2.reset();
         env = 0.0;
         gr = 0.0;
+        envCh[0] = envCh[1] = grCh[0] = grCh[1] = 0.0;
+        fullEnv = 0.0;
     }
 
     int latencySamples() const noexcept override { return delay.len; }
     float controlOutput (int k) const noexcept override { return meters.read (k); }
+    void setSidechain (const float* l, const float* r) noexcept override { scL = l; scR = r; }
 
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
+        // round 128: the look-ahead time is the delay (and the reported latency; the engine re-plans the delay
+        // compensation when it moves). The default 2 ms is the old fixed value.
+        if (const auto ms = lookaheadTimeMs (p[lookaheadTime]); std::abs (ms - delayMs) > 1e-9)
+            setDelay (ms);
+        const auto inGainDb = lin (p[input], -12.0, 12.0);
+        if (inGainDb != 0.0)
+        {
+            const auto gIn = (float) dbToGain (inGainDb);
+            for (int i = 0; i < n; ++i) { l[i] *= gIn; r[i] *= gIn; }
+        }
         const auto inPeak = Meters::peak (l, r, n);
         const auto f = std::min (hz (p[frequency]), sr * 0.45);
         const bool band = on (p[detector]);
@@ -644,13 +669,41 @@ public:
             detect.filter (sr, 1, f, 0.70710678);
         listenF = detect;
         split.filter (sr, 0, f, 0.70710678);
+        const bool lpOn = p[lowPass] < 0.999f;
+        if (lpOn)
+        {
+            const auto lpHz = std::min (std::max (lowPassHz (p[lowPass]), f * 1.05), sr * 0.45);
+            detectLp.filter (sr, 0, lpHz, 0.70710678);
+            listenLp.filter (sr, 0, lpHz, 0.70710678);
+            bandLp.filter (sr, 0, lpHz, 0.70710678); // Linkwitz-Riley 4th order at the low-pass: band = LP², above = HP²
+            bandLp2 = bandLp;
+            topHp.filter (sr, 1, lpHz, 0.70710678);
+            topHp2 = topHp;
+        }
         const auto thr = thresholdDb (p[threshold]), range = rangeDb (p[hush::range]);
         const bool wide = on (p[mode]), listening = on (p[listen]), ahead = on (p[lookahead]);
+        const bool allroundMode = on (p[allround]), mid = on (p[linkMid]);
+        const bool ext = on (p[external]) && scL != nullptr && scR != nullptr;
+        const auto link = std::clamp ((double) p[stereoLink], 0.0, 1.0);
+        const bool linked = link >= 1.0 || mid;
         const auto release = coef (releaseMs (p[hush::release]) * 0.001, sr);
-        const auto attack = coef (ahead ? lookaheadMs() * 0.001 / 3.0 : 0.0005, sr);
+        const auto attack = coef (ahead ? std::max (delayMs, 0.03) * 0.001 / 3.0 : 0.0005, sr);
         const auto out = (float) dbToGain (lin (p[output], -12.0, 12.0));
         constexpr double knee = 3.0;
         double maxGr = 0.0;
+
+        // gain reduction (dB) wanted for a detected level `s` (and the full-band level in allround mode)
+        auto wanted = [&] (double s, double full) {
+            auto over = gainToDb (s) - thr;
+            if (allroundMode) // the sibilance must also stand out from the whole signal (steady highs in a mix trigger less)
+                over -= 0.5 * std::max (0.0, gainToDb (full) - gainToDb (s) - 6.0);
+            double want = 0.0;
+            if (over > knee)
+                want = over;
+            else if (over > -knee)
+                want = (over + knee) * (over + knee) / (4.0 * knee);
+            return std::min (want, range);
+        };
 
         for (int i = 0; i < n; ++i)
         {
@@ -658,48 +711,114 @@ public:
             float da = a, db = b;
             delay.process (da, db);
             // with lookahead the detector hears the signal before it is played; without, both see the delayed one
-            const auto xa = ahead ? a : da, xb = ahead ? b : db;
-            const auto s = std::max (std::abs (detect.process (xa, 0)), std::abs (detect.process (xb, 1)));
-            env = s > env ? s : release * env + (1.0 - release) * s;
-            const auto over = gainToDb (env) - thr;
-            double want = 0.0;
-            if (over > knee)
-                want = over;
-            else if (over > -knee)
-                want = (over + knee) * (over + knee) / (4.0 * knee);
-            want = std::min (want, range);
-            gr = want > gr ? attack * gr + (1.0 - attack) * want : release * gr + (1.0 - release) * want;
-            const auto g = (float) dbToGain (-gr);
+            auto xa = ahead ? a : da, xb = ahead ? b : db;
+            if (ext)
+            {
+                float sa = scL[i], sb = scR[i];
+                float dsa = sa, dsb = sb;
+                scDelay.process (dsa, dsb);
+                xa = ahead ? sa : dsa;
+                xb = ahead ? sb : dsb;
+            }
+            double sA, sB;
+            if (mid)
+            {
+                auto m = detect.process (0.5f * (xa + xb), 0);
+                if (lpOn) m = detectLp.process (m, 0);
+                sA = sB = std::abs (m);
+            }
+            else
+            {
+                auto ya = detect.process (xa, 0), yb = detect.process (xb, 1);
+                if (lpOn) { ya = detectLp.process (ya, 0); yb = detectLp.process (yb, 1); }
+                sA = std::abs (ya);
+                sB = std::abs (yb);
+            }
+            double full = 0.0;
+            if (allroundMode)
+            {
+                const double fa = std::max (std::abs (xa), std::abs (xb));
+                fullEnv = fa > fullEnv ? fa : release * fullEnv + (1.0 - release) * fa;
+                full = fullEnv;
+            }
+            float gA, gB;
+            if (linked)
+            {
+                const auto s = std::max (sA, sB);
+                env = s > env ? s : release * env + (1.0 - release) * s;
+                const auto want = wanted (env, full);
+                gr = want > gr ? attack * gr + (1.0 - attack) * want : release * gr + (1.0 - release) * want;
+                gA = gB = (float) dbToGain (-gr);
+                maxGr = std::max (maxGr, gr);
+            }
+            else
+            {
+                const auto s = std::max (sA, sB);
+                const double ss[2] { link * s + (1.0 - link) * sA, link * s + (1.0 - link) * sB };
+                for (int c = 0; c < 2; ++c)
+                {
+                    envCh[c] = ss[c] > envCh[c] ? ss[c] : release * envCh[c] + (1.0 - release) * ss[c];
+                    const auto want = wanted (envCh[c], full);
+                    grCh[c] = want > grCh[c] ? attack * grCh[c] + (1.0 - attack) * want : release * grCh[c] + (1.0 - release) * want;
+                    maxGr = std::max (maxGr, grCh[c]);
+                }
+                gA = (float) dbToGain (-grCh[0]);
+                gB = (float) dbToGain (-grCh[1]);
+            }
 
             if (listening)
             {
                 a = listenF.process (da, 0);
                 b = listenF.process (db, 1);
+                if (lpOn) { a = listenLp.process (a, 0); b = listenLp.process (b, 1); }
             }
             else if (wide)
             {
-                a = da * g;
-                b = db * g;
+                a = da * gA;
+                b = db * gB;
             }
-            else
+            else if (! lpOn)
             {
                 // complementary split: low = 2nd-order low-pass, high = input − low (sums back exactly)
                 const auto la = split.process (da, 0), lb = split.process (db, 1);
-                a = la + (da - la) * g;
-                b = lb + (db - lb) * g;
+                a = la + (da - la) * gA;
+                b = lb + (db - lb) * gB;
+            }
+            else
+            {
+                // round 128: only the band between the two handles is turned down; above the low-pass it passes
+                // (the high part is split again at the low-pass by a Linkwitz-Riley pair: flat sum, no notch)
+                const auto la = split.process (da, 0), lb = split.process (db, 1);
+                const auto ha = da - la, hb = db - lb;
+                const auto ma = bandLp2.process (bandLp.process (ha, 0), 0), mb = bandLp2.process (bandLp.process (hb, 1), 1);
+                const auto ta = topHp2.process (topHp.process (ha, 0), 0), tb = topHp2.process (topHp.process (hb, 1), 1);
+                a = la + ma * gA + ta;
+                b = lb + mb * gB + tb;
             }
             l[i] = a * out;
             r[i] = b * out;
-            maxGr = std::max (maxGr, gr);
         }
         meters.set ((float) maxGr, 0.0f, inPeak, Meters::peak (l, r, n));
+        scL = scR = nullptr;
     }
 
 private:
+    void setDelay (double ms) noexcept
+    {
+        delayMs = ms;
+        const auto len = (int) std::lround (ms * 0.001 * sr);
+        delay.setLength (len);
+        scDelay.setLength (len);
+    }
+
     double sr = 44100.0;
-    Delay2<2048> delay;
-    Biquad detect, listenF, split;
-    double env = 0.0, gr = 0.0;
+    double primedMs = 2.0, delayMs = 2.0;
+    Delay2<4096> delay, scDelay;
+    Biquad detect, detectLp, listenF, listenLp, split, bandLp, bandLp2, topHp, topHp2;
+    double env = 0.0, gr = 0.0, fullEnv = 0.0;
+    double envCh[2] {}, grCh[2] {};
+    const float* scL = nullptr;
+    const float* scR = nullptr;
     Meters meters;
 };
 } // namespace
@@ -1348,7 +1467,11 @@ const EffectInfo& hushInfo()
     static const EffectInfo info { "Hush De-esser",
                                    { { "Frequency", 0.53f }, { "Threshold", 0.5f }, { "Range", 0.5f }, { "Wideband", 0.0f },
                                      { "Band detector", 0.0f }, { "Listen", 0.0f }, { "Lookahead", 1.0f }, { "Release", 0.56f },
-                                     { "Output", 0.5f } } };
+                                     { "Output", 0.5f },
+                                     // round 128 (parity with the reference de-esser)
+                                     { "Allround", 0.0f }, { "Low-pass freq.", 1.0f }, { "Lookahead time", 2.0f / 15.0f },
+                                     { "Stereo link", 1.0f }, { "Link mid", 0.0f }, { "External SC", 0.0f }, { "Input", 0.5f },
+                                     { "Display", 1.0f } } };
     return info;
 }
 
@@ -1382,6 +1505,8 @@ const EffectInfo& emberInfo()
                                      { "B4 feedback", 0.0f }, { "B4 fb freq.", 0.6990f }, { "B4 dynamics", 0.5f } } };
     return info;
 }
+
+std::unique_ptr<Effect> makeHush (const EffectParams* params) { return std::make_unique<hush::DeEsser> (params); }
 
 bool isSuiteKind (EffectKind kind) noexcept
 {
@@ -1476,6 +1601,14 @@ std::string paramText (EffectKind kind, int param, float v)
             case range: return fmt ("%.1f dB", rangeDb (v));
             case mode: return on (v) ? "wideband" : "split";
             case detector: return on (v) ? "band" : "high-pass";
+            case allround: return on (v) ? "allround" : "single vocal";
+            case lowPass: return v >= 0.999f ? "off" : hzText (lowPassHz (v));
+            case lookaheadTime: return fmt ("%.1f ms", lookaheadTimeMs (v));
+            case stereoLink: return fmt ("%.0f%%", v * 100.0);
+            case linkMid: return on (v) ? "mid" : "stereo";
+            case external: return on (v) ? "external" : "internal";
+            case input: return fmt ("%+.1f dB", lin (v, -12.0, 12.0));
+            case display: return on (v) ? "shown" : "hidden";
             case release: return fmt ("%.0f ms", releaseMs (v));
             case output: return fmt ("%+.1f dB", lin (v, -12.0, 12.0));
             default: return onOff (v);

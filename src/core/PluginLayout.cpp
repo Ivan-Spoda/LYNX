@@ -1619,9 +1619,9 @@ Layout hushDeEsser()
 {
     Layout l;
     l.width = 460;
-    l.height = 200;
+    l.height = 286;
     auto& v = l.items;
-    v.push_back (section (4, 4, 452, 192, TR_NOOP ("De-esser")));
+    v.push_back (section (4, 4, 452, 278, TR_NOOP ("De-esser")));
     v.push_back (display (12, 26, 200, 78, "hushband"));
     v.push_back (meter (12, 110, 200, 12, 0, TR_NOOP ("Reduction")));
     v.push_back (tabs (12, 130, 98, 20, "Wideband", TR_NOOP ("Split|Wide")));
@@ -1633,6 +1633,15 @@ Layout hushDeEsser()
     v.push_back (dial (412, 58, 40, "Range", TR_NOOP ("Range")));
     v.push_back (dial (300, 142, 32, "Release", TR_NOOP ("Release")));
     v.push_back (dial (376, 142, 32, "Output", TR_NOOP ("Output"), bipolar));
+    // round 128: the reference de-esser's other controls
+    v.push_back (tabs (12, 200, 200, 20, "Allround", TR_NOOP ("Single vocal|Allround")));
+    v.push_back (toggle (12, 230, 64, 20, "Link mid", TR_NOOP ("Mid (M/S)")));
+    v.push_back (toggle (80, 230, 64, 20, "External SC", TR_NOOP ("Ext")));
+    v.push_back (toggle (148, 230, 64, 20, "Display", TR_NOOP ("Display")));
+    v.push_back (dial (250, 228, 30, "Low-pass freq.", TR_NOOP ("Low pass")));
+    v.push_back (dial (310, 228, 30, "Lookahead time", TR_NOOP ("Lookahead")));
+    v.push_back (dial (370, 228, 30, "Stereo link", TR_NOOP ("Stereo link")));
+    v.push_back (dial (430, 228, 30, "Input", TR_NOOP ("Input"), bipolar));
     return l;
 }
 

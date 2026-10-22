@@ -41,10 +41,17 @@ const Interp& interp() { static const Interp i; return i; }
 struct StyleLaw { double slowShare, slowFactor, fastFactor; };
 constexpr StyleLaw laws[styleCount] = {
     { 0.50, 6.0, 1.0 },  // Clean: half of the recovery on a slow stage — least distortion
+    { 0.60, 7.0, 1.2 },  // Glue (round 128): a little more slow stage than Clean — smooth, steady
     { 0.25, 4.0, 0.7 },  // Punch: mostly fast, transients come back quickly
+    { 0.35, 5.0, 0.6 },  // Dynamic (round 128): quick fast stage, some slow stage — keeps the movement
+    { 0.15, 3.5, 0.6 },  // Dense (round 128): between Punch and Loud
     { 0.10, 3.0, 0.5 },  // Loud: fast recovery, the most density
+    { 0.40, 5.0, 0.8 },  // Bus (round 128): moderate, for groups and buses
     { 0.70, 8.0, 1.5 },  // Safe: long, smooth recovery
 };
+
+// error-feedback noise shaping filters (on the quantisation error of the last samples)
+constexpr double shapers[4][3] = { { 0.0, 0.0, 0.0 }, { 1.0, 0.0, 0.0 }, { 2.0, -1.0, 0.0 }, { 1.623, -0.982, 0.109 } };
 
 // running minimum over the last `len` values (monotonic queue in a ring allocated by setCapacity, never on the audio thread)
 class SlidingMin
@@ -90,6 +97,9 @@ public:
         histL.fill (0.0); histR.fill (0.0);
         pos = 0;
         fastL = fastR = slowL = slowR = 1.0;
+        dcXL = dcXR = dcYL = dcYR = 0.0;
+        err = {};
+        rng = 0x9e3779b97f4a7c15ull;
         look = -1; // rebuilt by the next process()
     }
 
@@ -121,6 +131,14 @@ public:
         const double kSlow = 1.0 - std::exp (-1.0 / std::max (1.0, rel * law.slowFactor));
         const bool truePeak = p[5] >= 0.5f;
         const double link = std::clamp ((double) p[6], 0.0, 1.0);
+        const double attackSamples = attackMs (p[pAttack]) * 0.001 * sampleRate;
+        const double kAttack = attackSamples >= 1.0 ? 1.0 - std::exp (-1.0 / attackSamples) : 0.0;
+        const double linkRelease = std::clamp ((double) p[pLinkRelease], 0.0, 1.0);
+        const bool unity = p[pUnity] >= 0.5f, audition = p[pAudition] >= 0.5f, dcFilter = p[pDcFilter] >= 0.5f;
+        if (! dcFilter) dcXL = dcXR = dcYL = dcYR = 0.0;
+        dcR = std::exp (-2.0 * pi * 5.0 / sampleRate);
+        bits = ditherBits (p[pDither]);
+        shaping = noiseShaping (p[pShaping]);
         const auto& ip = interp();
         const int len = (int) inL.size();
         const int pad = maxLook - look;
@@ -130,8 +148,15 @@ public:
         for (int i = 0; i < n; ++i)
         {
             // history for the inter-sample estimate; the detection point is `interpDelay` samples back
-            std::rotate (histL.begin(), histL.begin() + 1, histL.end()); histL.back() = left[i] * gain;
-            std::rotate (histR.begin(), histR.begin() + 1, histR.end()); histR.back() = right[i] * gain;
+            double xl = left[i], xr = right[i];
+            if (dcFilter) // one-pole high pass at ~5 Hz
+            {
+                const double yl = xl - dcXL + dcR * dcYL, yr = xr - dcXR + dcR * dcYR;
+                dcXL = xl; dcXR = xr; dcYL = yl; dcYR = yr;
+                xl = yl; xr = yr;
+            }
+            std::rotate (histL.begin(), histL.begin() + 1, histL.end()); histL.back() = xl * gain;
+            std::rotate (histR.begin(), histR.begin() + 1, histR.end()); histR.back() = xr * gain;
             const double cl = histL[(std::size_t) interpTaps / 2 - 1], cr = histR[(std::size_t) interpTaps / 2 - 1];
             double pl = std::abs (cl), pr = std::abs (cr);
             if (truePeak)
@@ -160,18 +185,27 @@ public:
 
             // release: the gain follows a drop at once and recovers on a fast and a slow stage (mixed by style)
             fastL = aL < fastL ? aL : fastL + (aL - fastL) * kFast;
-            slowL = aL < slowL ? aL : slowL + (aL - slowL) * kSlow;
+            slowL = aL < slowL ? (kAttack > 0.0 ? slowL + (aL - slowL) * kAttack : aL) : slowL + (aL - slowL) * kSlow;
             fastR = aR < fastR ? aR : fastR + (aR - fastR) * kFast;
-            slowR = aR < slowR ? aR : slowR + (aR - slowR) * kSlow;
-            const double gL = std::min (aL, (1.0 - law.slowShare) * fastL + law.slowShare * slowL);
-            const double gR = std::min (aR, (1.0 - law.slowShare) * fastR + law.slowShare * slowR);
+            slowR = aR < slowR ? (kAttack > 0.0 ? slowR + (aR - slowR) * kAttack : aR) : slowR + (aR - slowR) * kSlow;
+            double gL = std::min (aL, (1.0 - law.slowShare) * fastL + law.slowShare * slowL);
+            double gR = std::min (aR, (1.0 - law.slowShare) * fastR + law.slowShare * slowR);
+            if (linkRelease > link) // the release stage linked further than the transients (round 128)
+            {
+                const double shared = std::min (gL, gR), f = (linkRelease - link) / (1.0 - link);
+                gL += f * (shared - gL);
+                gR += f * (shared - gR);
+            }
 
             minGain = std::min (minGain, std::min (gL, gR));
             inPeak = std::max (inPeak, std::max (std::abs (left[i]), std::abs (right[i])));
             inL[(std::size_t) pos] = (float) cl; inR[(std::size_t) pos] = (float) cr;
             const int back = (pos - look + len) % len;
-            const double yl = std::clamp (inL[(std::size_t) back] * gL, -ceiling, ceiling); // safety clip
-            const double yr = std::clamp (inR[(std::size_t) back] * gR, -ceiling, ceiling);
+            double yl = std::clamp (inL[(std::size_t) back] * gL, -ceiling, ceiling); // safety clip
+            double yr = std::clamp (inR[(std::size_t) back] * gR, -ceiling, ceiling);
+            if (audition) { yl = inL[(std::size_t) back] - yl; yr = inR[(std::size_t) back] - yr; } // what is removed
+            if (unity) { yl /= gain; yr /= gain; }
+            if (bits > 0) { yl = dither (yl, 0); yr = dither (yr, 1); }
             // the rest of the maximum look-ahead as plain delay, so the latency never changes
             outL[(std::size_t) pos] = (float) yl; outR[(std::size_t) pos] = (float) yr;
             const int rd = (pos - pad + len) % len;
@@ -185,8 +219,30 @@ public:
     }
 
 private:
+    // TPDF dither at the chosen word length with error-feedback noise shaping
+    double dither (double x, int ch) noexcept
+    {
+        const double scale = std::ldexp (1.0, bits - 1);
+        const auto& h = shapers[shaping];
+        auto& e = err[(std::size_t) ch];
+        const double v = x - (h[0] * e[0] + h[1] * e[1] + h[2] * e[2]);
+        const double tpdf = (rand01() - rand01()); // ±1 LSB, triangular
+        const double q = std::round (v * scale + tpdf) / scale;
+        e[2] = e[1]; e[1] = e[0]; e[0] = q - v;
+        return q;
+    }
+    double rand01() noexcept
+    {
+        rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+        return (double) (rng >> 11) * (1.0 / 9007199254740992.0);
+    }
+
     double sampleRate = 48000.0;
     int maxLook = 240, look = -1, latency = 244;
+    int bits = 0, shaping = 0;
+    std::array<std::array<double, 3>, 2> err {};
+    unsigned long long rng = 0x9e3779b97f4a7c15ull;
+    double dcXL = 0.0, dcXR = 0.0, dcYL = 0.0, dcYR = 0.0, dcR = 0.9993;
     std::vector<float> inL, inR, outL, outR;
     std::array<double, interpTaps> histL {}, histR {};
     std::vector<double> boxL, boxR;
@@ -206,15 +262,26 @@ float releaseValue (double ms) noexcept { return (float) std::clamp (std::log (m
 Style style (float v) noexcept { return (Style) std::clamp ((int) std::lround (v * (styleCount - 1)), 0, styleCount - 1); }
 const char* styleName (Style s) noexcept
 {
-    static const char* names[] = { "Clean", "Punch", "Loud", "Safe" };
+    static const char* names[] = { "Clean", "Glue", "Punch", "Dynamic", "Dense", "Loud", "Bus", "Safe" };
     return names[(int) s];
 }
+double attackMs (float v) noexcept { const double x = std::clamp ((double) v, 0.0, 1.0); return 10000.0 * x * x * x * x; }
+int ditherBits (float v) noexcept
+{
+    static constexpr int b[] { 0, 16, 18, 20, 22, 24 };
+    return b[std::clamp ((int) std::lround (v * 5.0f), 0, 5)];
+}
+int noiseShaping (float v) noexcept { return std::clamp ((int) std::lround (v * 3.0f), 0, 3); }
+int meterScale (float v) noexcept { return std::clamp ((int) std::lround (v * 5.0f), 0, 5); }
 
 const EffectInfo& info()
 {
     static const EffectInfo i { "Apex Limiter",
                                 { { "Gain", 0.0f }, { "Ceiling", 1.0f - 0.1f / 30.0f }, { "Lookahead", 0.2f }, { "Release", releaseValue (150.0) },
-                                  { "Style", 0.0f }, { "True Peak", 1.0f }, { "Link", 1.0f } } };
+                                  { "Style", 0.0f }, { "True Peak", 1.0f }, { "Link", 1.0f },
+                                  // round 128
+                                  { "Attack", 0.0f }, { "Link release", 0.0f }, { "Dither", 0.0f }, { "Noise shaping", 2.0f / 3.0f },
+                                  { "Unity gain", 0.0f }, { "Audition", 0.0f }, { "DC filter", 0.0f }, { "Meter scale", 0.4f } } };
     return i;
 }
 
@@ -228,7 +295,20 @@ std::string paramText (int p, float v)
         case 2: std::snprintf (t, sizeof (t), "%.2f ms", lookaheadMs (v)); break;
         case 3: std::snprintf (t, sizeof (t), releaseMs (v) < 100 ? "%.1f ms" : "%.0f ms", releaseMs (v)); break;
         case 4: return styleName (style (v));
-        case 5: return v >= 0.5f ? "On" : "Off";
+        case 5: case pUnity: case pAudition: case pDcFilter: return v >= 0.5f ? "On" : "Off";
+        case pAttack:
+        {
+            const auto ms = attackMs (v);
+            if (ms < 0.05) return "0 ms";
+            std::snprintf (t, sizeof (t), ms < 10.0 ? "%.2f ms" : ms < 1000.0 ? "%.0f ms" : "%.2f s", ms < 1000.0 ? ms : ms / 1000.0);
+            break;
+        }
+        case pDither:
+            if (ditherBits (v) == 0) return "Off";
+            std::snprintf (t, sizeof (t), "%d bits", ditherBits (v));
+            break;
+        case pShaping: { static const char* n[] = { "None", "Basic", "Optimized", "Weighted" }; return n[noiseShaping (v)]; }
+        case pMeterScale: { static const char* n[] = { "-16 dB", "-32 dB", "-48 dB", "K-12", "K-14", "K-20" }; return n[meterScale (v)]; }
         default: std::snprintf (t, sizeof (t), "%.0f%%", v * 100.0f); break;
     }
     return t;

@@ -137,12 +137,21 @@ double sidechainDb (float v) noexcept; // peak reduction: −20 .. +40 dB into t
 // ---- Hush (de-esser) ----
 namespace hush
 {
-enum Param { frequency, threshold, range, mode, detector, listen, lookahead, release, output, count };
+// Round 128 (parity with the reference de-esser), appended so saved projects keep their meaning, every default
+// leaving the output unchanged: allround (detection mode: 0 single vocal, 1 allround = the sibilance must also stand
+// out from the full-band level), lowPass (the band's upper edge 2 .. 20 kHz; 1 = off), lookaheadTime (0 .. 15 ms, the
+// delay = the latency; default 2 ms), stereoLink (0 .. 100 %), linkMid (detect on the mid signal only), external
+// (detect the slot's side chain), input (±12 dB), display (editor only: show the waveform).
+enum Param { frequency, threshold, range, mode, detector, listen, lookahead, release, output,
+             allround, lowPass, lookaheadTime, stereoLink, linkMid, external, input, display, count };
 double hz (float v) noexcept;          // 2 .. 16 kHz
+double lowPassHz (float v) noexcept;   // 2 .. 20 kHz (v ≥ 0.999 = off)
+double lookaheadTimeMs (float v) noexcept; // 0 .. 15 ms
+float lookaheadTimeValue (double ms) noexcept;
 double thresholdDb (float v) noexcept; // −60 .. 0 dBFS
 double rangeDb (float v) noexcept;     // 0 .. 24 dB
 double releaseMs (float v) noexcept;   // 10 .. 250 ms
-double lookaheadMs() noexcept;         // the fixed lookahead (always reported as latency)
+double lookaheadMs() noexcept;         // the default lookahead (2 ms)
 } // namespace hush
 
 // ---- Aether (air band + exciter) ----
@@ -214,6 +223,8 @@ const EffectInfo& emberInfo();
 
 std::string paramText (EffectKind kind, int param, float v);
 std::unique_ptr<Effect> make (EffectKind kind);
+// Hush with its look-ahead (= latency) known before the first block (round 128)
+std::unique_ptr<Effect> makeHush (const EffectParams* params);
 bool isSuiteKind (EffectKind kind) noexcept;
 
 // Meters the editor shows (written by the audio thread, read by the UI): see Effect::controlOutput.

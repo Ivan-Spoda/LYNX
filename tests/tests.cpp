@@ -15750,3 +15750,4 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "VoiceToolsTests119.inc"
 #include "LoadTests121.inc"
 #include "Parity128Tests.inc"
+#include "Parity128aTests.inc"
