@@ -16,6 +16,7 @@
 #include "core/VocalPitch.h"
 #include "core/VoiceTools.h"
 #include "core/EchoSuite.h"
+#include "core/DynamicsSuite.h"
 
 namespace lynx
 {
@@ -401,11 +402,22 @@ waves = CLA-2A
 preset = Peak reduction=0.30; Gain=0.067
 translate = waves-cla-2a
 
+[waves-cla-76]
+product = CLA-76
+vendor = Waves
+lynx = Crest Compressor
+waves = CLA-76
+# round 127: LYNX's style compressor fitted to the official trial at her one state (the factory "Start Me Up":
+# Input -8.7 dB, Output -16.9 dB, attack 4.3, release 4.31, all buttons, Mix 41.3 %); the RealWorld list is
+# translated (REA_rodada127 §3). Without a readable state: a light 4:1 at Waves' defaults
+translate = waves-cla-76
+preset = Style=0.9; Threshold=0.6; Ratio=0.546; Knee=0.13; Range=0.53; Auto gain=1
+
 [waves-compressors]
-product = Waves compressor (CLA-76 / CLA-3A / C1 / SSLComp / API-2500)
+product = Waves compressor (CLA-3A / C1 / SSLComp / API-2500)
 vendor = Waves
 lynx = Compressor
-waves = CLA-76; CLA-3A; C1 comp; C1comp; SSLComp; API-2500
+waves = CLA-3A; C1 comp; C1comp; SSLComp; API-2500
 preset = Threshold=0.75; Ratio=0.0526; Auto gain=1
 
 [fabfilter-pro-c]
@@ -529,8 +541,9 @@ lynx = Auto-pan
 # [DATA] VST2 unique ID from real projects
 vst2 = StPn
 names = PanMan
-# its state is encoded: a moderate sweep (round 113 meant depth 50 %; round 129: Auto-pan's Depth is bipolar,
-# −100 … +100 %, so 0.5 was 0 % = no movement at all — 0.75 is the +50 % sweep round 113 chose)
+# its state is encoded (round 127: high-entropy payload, not a readable value list; no Soundtoys trial installed), so
+# a moderate sweep: Auto-pan's depth is 2·Depth − 1, so Depth=0.75 swings the balance ±50 % once per beat. Round 113's
+# "Depth=0.5" meant 50 % but mapped to depth 0, an exact pass-through that silently dropped the effect (round 127)
 preset = Depth=0.75
 
 # ---------------------------------------------------------------- vocal pitch correction -> LYNX Tune (round 95)
@@ -952,24 +965,122 @@ using RawTranslator = int (*) (const std::vector<std::uint8_t>& state, EffectSlo
 // 61 Humanize, 90 Flex-Tune (0…100)). Measured black-box on the official trial: a held note is pulled to its target
 // along a first-order curve whose time constant is 1.36 × the retune speed − 3 ms (LYNX Tune's retune is that time
 // constant); Humanize and Flex-Tune map 1:1 onto LYNX Tune's (fitted to the same measurements, LynxTune.cpp).
+// Round 127 (docs/specs/auto-tune-pro.md §3, §7.5): the remaining cheap controls, units from the trial's own
+// parameter texts — X3 Detune (cents, A4 = 440·2^(c/1200); LYNX Tune's reference reaches ±39 c), X74 Transpose
+// (semitones), X92 Wet-Dry Mix (%), X10 Input Type (Soprano, Alto-Tenor, Low Male, Instrument, Bass Instrument →
+// LYNX Tune's ranges, the two instrument types on Instrument), X70 Formant Correction off → formants move with the
+// pitch, X71 Throat Length (%: a longer modelled tract lowers the formants, −12·log2(L/100) semitones [model]),
+// X11 Classic mode ("Auto-Tune 5": no formant correction, no Flex-Tune — the manual) and X9 Tracking (50 = LYNX
+// Tune's default strictness; the rest of the law [model]). All 143 states of her main projects use Detune 0,
+// Transpose 0, Mix 100 %, Alto-Tenor, Throat 100 %, Tracking 50 (round 120 §5), so these only matter elsewhere.
 // Without a readable key the slot keeps the entry's gentle preset.
+int translateAutoTuneEfx (const std::vector<std::uint8_t>& state, EffectSlot& slot);
+std::string attributeIn (const std::string& text, std::size_t from, const std::string& name);
+
 int translateAutoTunePro (const std::vector<std::uint8_t>& state, EffectSlot& slot)
 {
+    if (slot.kind != EffectKind::lynxTune)
+        return 0;
+    if (const auto efx = translateAutoTuneEfx (state, slot); efx > 0)
+        return efx;
     const auto key = autoTuneProKey (state);
-    if (! key || slot.kind != EffectKind::lynxTune)
+    if (! key)
         return 0;
     slot.params[lynxtune::key] = (float) key->first / 11.0f;
     slot.params[lynxtune::scale] = (float) key->second / (float) (vocal::scaleCount - 1);
     const auto x = autoTuneProParams (state);
-    auto at = [&x] (int n, double fallback) {
+    auto has = [&x] (int n) {
         const auto it = x.find (n);
-        return it != x.end() && std::isfinite (it->second) ? it->second : fallback;
+        return it != x.end() && std::isfinite (it->second);
+    };
+    auto at = [&x, &has] (int n, double fallback) { return has (n) ? x.at (n) : fallback; };
+    int n = 2;
+    auto set = [&slot, &n] (int param, double v) {
+        slot.params[(std::size_t) param] = (float) std::clamp (v, 0.0, 1.0);
+        ++n;
     };
     const auto retune = std::clamp (at (4, 20.0), 0.0, 400.0);
-    slot.params[lynxtune::retune] = (float) std::sqrt (std::clamp (1.36 * retune - 3.0, 0.0, 400.0) / 400.0);
-    slot.params[lynxtune::humanize] = (float) std::clamp (at (61, 0.0) / 100.0, 0.0, 1.0);
-    slot.params[lynxtune::flexTune] = (float) std::clamp (at (90, 0.0) / 100.0, 0.0, 1.0);
-    return 5;
+    set (lynxtune::retune, std::sqrt (std::clamp (1.36 * retune - 3.0, 0.0, 400.0) / 400.0));
+    set (lynxtune::humanize, at (61, 0.0) / 100.0);
+    const auto classic = at (11, 0.0) >= 0.5;
+    set (lynxtune::flexTune, classic ? 0.0 : at (90, 0.0) / 100.0);
+    if (has (3))
+        set (lynxtune::reference, (440.0 * std::exp2 (std::clamp (at (3, 0.0), -100.0, 100.0) / 1200.0) - 430.0) / 20.0);
+    if (has (74) && ! classic)
+        set (lynxtune::transpose, (std::clamp (std::round (at (74, 0.0)), -12.0, 12.0) + 12.0) / 24.0);
+    if (has (92))
+        set (lynxtune::mix, at (92, 100.0) / 100.0);
+    if (has (10))
+    {
+        static constexpr int rangeOf[5] { 0, 1, 2, 3, 3 };
+        set (lynxtune::range, rangeOf[std::clamp ((int) std::lround (at (10, 1.0)), 0, 4)] / (double) (lynxtune::rangeCount - 1));
+    }
+    if (has (70) || classic)
+        set (lynxtune::formantPreserve, ! classic && at (70, 1.0) >= 0.5 ? 1.0 : 0.0);
+    if (has (71) && ! classic && at (70, 1.0) >= 0.5)
+        set (lynxtune::formantShift, -12.0 * std::log2 (std::clamp (at (71, 100.0), 50.0, 180.0) / 100.0) / 14.0 + 0.5);
+    if (has (9))
+        set (lynxtune::tracking, std::clamp (at (9, 50.0), 1.0, 100.0) * 0.4 / 50.0);
+    return n;
+}
+
+// Auto-Tune EFX+ (round 127; [DATA] her 6 states, 17 slots): an "<AUTOTUNEEFXPLUS>" element of <PARAM id="p…"
+// value="…"/> in real units. pKey 0…11, pScale (0 Major, 1 Minor, 2 Chromatic — the same list as Auto-Tune Pro: every
+// pScale 2 state has all twelve notes on, every pScale 1 state on key 11 holds B minor's notes), pNoteC … pNoteB = the
+// notes that are targets (absolute pitch classes; one state adds F to B minor), pRetuneSpeed (ms, read with Auto-Tune
+// Pro's law [model: not measured on EFX+]), pHumanize, pPitchShift (semitones), pFormant, pThroatLength (%),
+// pInputType, pDryWetMix (%). Its multi-effect chain (Duet, Tube, Mutate, Vocode, filters) and Auto-Motion patterns
+// have no LYNX Tune equivalent and are left out.
+int translateAutoTuneEfx (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    const auto root = findBytes (state, "<AUTOTUNEEFXPLUS");
+    if (root == std::string::npos || slot.kind != EffectKind::lynxTune)
+        return 0;
+    const std::string text (state.begin() + (std::ptrdiff_t) root, state.end());
+    std::map<std::string, double> v;
+    for (auto p = text.find ("<PARAM "); p != std::string::npos; p = text.find ("<PARAM ", p + 7))
+    {
+        const auto id = attributeIn (text, p, "id");
+        float value = 0;
+        if (! id.empty() && parseFloat (attributeIn (text, p, "value"), value) && std::isfinite (value))
+            v[id] = value;
+    }
+    auto at = [&v] (const char* id, double fallback) {
+        const auto it = v.find (id);
+        return it != v.end() ? it->second : fallback;
+    };
+    if (v.find ("pKey") == v.end() || v.find ("pScale") == v.end())
+        return 0;
+    const int key = std::clamp ((int) std::lround (at ("pKey", 0.0)), 0, 11);
+    static constexpr const char* notes[12] { "pNoteC", "pNoteC#", "pNoteD", "pNoteD#", "pNoteE", "pNoteF",
+                                             "pNoteF#", "pNoteG", "pNoteG#", "pNoteA", "pNoteA#", "pNoteB" };
+    std::uint16_t mask = 0;
+    for (int k = 0; k < 12; ++k)
+        if (at (notes[k], 1.0) >= 0.5)
+            mask = (std::uint16_t) (mask | (1u << k));
+    const int theirs = (int) std::lround (at ("pScale", 2.0));
+    auto scale = theirs == 0 ? vocal::Scale::major : (theirs == 1 ? vocal::Scale::minor : vocal::Scale::chromatic);
+    if (mask == 0)
+        mask = 0xfff;
+    if (vocal::scaleMask (scale, key) != mask)
+        scale = vocal::Scale::custom; // the note switches carry the exact targets
+    auto& p = slot.params;
+    p[lynxtune::key] = (float) key / 11.0f;
+    p[lynxtune::scale] = (float) (int) scale / (float) (vocal::scaleCount - 1);
+    for (int k = 0; k < 12; ++k)
+        p[(std::size_t) (lynxtune::noteC + k)] = ((mask >> k) & 1u) != 0 ? 1.0f : 0.0f;
+    const auto retune = std::clamp (at ("pRetuneSpeed", 20.0), 0.0, 400.0);
+    p[lynxtune::retune] = (float) std::sqrt (std::clamp (1.36 * retune - 3.0, 0.0, 400.0) / 400.0);
+    p[lynxtune::humanize] = (float) std::clamp (at ("pHumanize", 0.0) / 100.0, 0.0, 1.0);
+    p[lynxtune::flexTune] = 0.0f;
+    p[lynxtune::transpose] = (float) ((std::clamp (std::round (at ("pPitchShift", 0.0)), -12.0, 12.0) + 12.0) / 24.0);
+    const auto formant = at ("pFormant", 1.0) >= 0.5;
+    p[lynxtune::formantPreserve] = formant ? 1.0f : 0.0f;
+    p[lynxtune::formantShift] = formant ? (float) std::clamp (-12.0 * std::log2 (std::clamp (at ("pThroatLength", 100.0), 50.0, 180.0) / 100.0) / 14.0 + 0.5, 0.0, 1.0) : 0.5f;
+    static constexpr int rangeOf[5] { 0, 1, 2, 3, 3 };
+    p[lynxtune::range] = (float) rangeOf[std::clamp ((int) std::lround (at ("pInputType", 1.0)), 0, 4)] / (float) (lynxtune::rangeCount - 1);
+    p[lynxtune::mix] = (float) std::clamp (at ("pDryWetMix", 100.0) / 100.0, 0.0, 1.0);
+    return 23;
 }
 
 // Waves Tune Real-Time: the key and scale saved in its state (wavesTuneScale; [DATA] every one of the 11 distinct
@@ -1108,6 +1219,45 @@ int translateWavesCla2a (const std::vector<std::uint8_t>& state, EffectSlot& slo
     slot.params[g::mode] = wavesValue (rw, 112).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
     slot.params[g::emphasis] = 0.0f;
     return 3;
+}
+
+// CLA-76 (106 values): 0 / 1 Input / Output as positive dB magnitudes (−0 … −∞ dB), 2 / 3 Attack / Release knobs
+// 1 … 7, 59 Ratio (0 = 20, 1 = 12, 2 = 8, 3 = 4, 4 = all buttons), 103 Mix %. [EXEC] Read back through the trial's own
+// parameter API with her state loaded (REA_rodada127 §3). Her only state was rendered on the official trial (mix 0 /
+// 100 / 41.3 %: the mix is a linear dry / wet blend, the dry path is exact) and Crest fitted to its wet path: Bus
+// style, threshold −43.7 dB, 7.1:1, 9.3 dB knee, 31.9 dB range (the FET's gain-reduction ceiling), attack 5.9 ms,
+// release 97 ms, +31.6 dB (the all-buttons wet path's small-signal gain) — on her take the null went from −11.5 dB
+// (2:1 Compressor) to −19.9 dB. Other settings move around that point by the manual's laws [model]: the input level
+// moves the threshold and the wet gain dB for dB, the output the wet gain, attack 800 → 20 µs and release
+// 1100 → 50 ms log-spaced over the knobs 1 … 7, the ratio buttons as labelled; the mix becomes the slot's dry / wet.
+int translateWavesCla76 (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    namespace c = dyn::crest;
+    const auto rw = wavesRealWorldParams (state);
+    const auto in = wavesValue (rw, 0), out = wavesValue (rw, 1);
+    if (slot.kind != EffectKind::crestCompressor || ! in || ! out)
+        return 0;
+    const auto at = [&] (std::size_t i, double fallback) { return wavesValue (rw, i).value_or (fallback); };
+    const auto inDb = -std::clamp (*in, 0.0, 120.0), outDb = -std::clamp (*out, 0.0, 120.0);
+    const auto attackKnob = std::clamp (at (2, 3.0), 1.0, 7.0), releaseKnob = std::clamp (at (3, 4.0), 1.0, 7.0);
+    const auto attackLaw = [] (double k) { return 0.8 * std::pow (0.02 / 0.8, (k - 1.0) / 6.0); };
+    const auto releaseLaw = [] (double k) { return 1100.0 * std::pow (50.0 / 1100.0, (k - 1.0) / 6.0); };
+    static constexpr double ratios[5] { 20.0, 12.0, 8.0, 4.0, 7.1 };
+    const int ratioIndex = std::clamp ((int) std::lround (at (59, 3.0)), 0, 4);
+    auto& p = slot.params;
+    p[c::style] = c::styleValue (c::Style::bus);
+    p[c::threshold] = linNorm (-43.7 - (inDb + 8.7), -60.0, 0.0);
+    p[c::ratio] = c::ratioValue (ratios[ratioIndex]);
+    p[c::knee] = linNorm (9.3, 0.0, 72.0);
+    p[c::range] = linNorm (31.9, 0.0, 60.0);
+    p[c::attack] = c::attackValue (5.91 * attackLaw (attackKnob) / attackLaw (4.3));
+    p[c::release] = c::releaseValue (97.0 * releaseLaw (releaseKnob) / releaseLaw (4.31));
+    p[c::autoRelease] = 0.0f;
+    p[c::autoGain] = 0.0f;
+    p[c::mix] = 1.0f;
+    p[c::output] = linNorm (31.6 + (inDb + 8.7) + (outDb + 16.9), -36.0, 36.0);
+    slot.mix = (float) std::clamp (at (103, 100.0) / 100.0, 0.0, 1.0);
+    return 11;
 }
 
 // SSL E-Channel (57 values): 0 comp threshold dB, 1 ratio, 2 fast (1 = on), 3 release s, 11 dynamics bypass, 13 LF
@@ -1329,6 +1479,8 @@ RawTranslator rawTranslatorNamed (std::string_view name)
         return translateWavesDeEsser;
     if (name == "waves-cla-2a")
         return translateWavesCla2a;
+    if (name == "waves-cla-76")
+        return translateWavesCla76;
     return nullptr;
 }
 
@@ -1488,6 +1640,17 @@ std::optional<PitchCorrectorScale> pitchCorrectorScale (const std::vector<std::u
 {
     if (const auto k = autoTuneProKey (state))
         return PitchCorrectorScale { k->first, k->second, vocal::scaleMask ((vocal::Scale) k->second, k->first) };
+    if (findBytes (state, "<AUTOTUNEEFXPLUS") != std::string::npos) // Auto-Tune EFX+ (round 127)
+    {
+        EffectSlot tune = makeEffectSlot (EffectKind::lynxTune);
+        if (translateAutoTuneEfx (state, tune) == 0)
+            return std::nullopt;
+        std::uint16_t mask = 0;
+        for (int k = 0; k < 12; ++k)
+            if (tune.params[(std::size_t) (lynxtune::noteC + k)] >= 0.5f)
+                mask = (std::uint16_t) (mask | (1u << k));
+        return PitchCorrectorScale { lynxtune::keyIndex (tune.params[lynxtune::key]), lynxtune::scaleIndex (tune.params[lynxtune::scale]), mask };
+    }
     return wavesTuneScale (state);
 }
 

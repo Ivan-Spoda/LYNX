@@ -135,7 +135,8 @@ matches by name).
 | ValhallaUberMod | Lattice Mod (round 101) | VST3 class ID [derived], name | all but DelaySync and InputPan (meaning not confirmed) |
 | Waves L1/L2/L3/L4 | Limiter | Waves name | — |
 | FabFilter Pro-L | Apex Limiter (round 99) | names | — |
-| Waves RComp, CLA-76, CLA-3A, C1, SSLComp, API-2500 | Compressor (2:1 above −15 dBFS, auto gain; round 113) | VST3 class ID [DATA], Waves names | RComp: threshold, ratio, attack, release (ARC), gain, laws measured on the official trial [EXEC] (round 113 §3c) |
+| Waves CLA-76 | Crest Compressor (Bus style fitted to the official trial; round 127) | Waves name | Input, Output, Attack, Release, Ratio (59), Mix (103 → slot dry / wet), fitted at her state [EXEC] (round 127 §3) |
+| Waves RComp, CLA-3A, C1, SSLComp, API-2500 | Compressor (2:1 above −15 dBFS, auto gain; round 113) | VST3 class ID [DATA], Waves names | RComp: threshold, ratio, attack, release (ARC), gain, laws measured on the official trial [EXEC] (round 113 §3c) |
 | FabFilter Pro-C (2 / 3) | Crest Compressor (round 108) | names | Pro-C 3: style, threshold, ratio, knee, range, attack, release, hold, look-ahead, character, side-chain EQ (3 bands), levels, mix, oversampling [EXEC layout] |
 | FabFilter Pro-MB | Prism Multiband (round 108) | names | enabled bands laid out on Prism's four, threshold, ratio, range, mode, knee, attack / release, level, solo, look-ahead, mix [EXEC layout] |
 | FabFilter Pro-G | Sentry Gate (round 108) | names | every control [EXEC layout] |
@@ -147,9 +148,9 @@ matches by name).
 | FabFilter Pro-DS, Harrison De-Esser | Hush De-esser (default; round 96) | names | — |
 | Slate Digital Fresh Air | Aether (neutral without a state; round 96) | name | Mid / High Air → Aether's air shelf gain and frequency, laws measured on the official trial (within 0.5 dB RMS for her settings) [EXEC] (round 113) |
 | Soundtoys Decapitator, FabFilter Saturn | Ember Saturator (drive +1.4 dB, auto gain; round 113) | names | Saturn 2: multiband mode — bands, crossovers, style family, drive, mix, level (round 108) [EXEC layout] |
-| Soundtoys PanMan | Auto-pan (depth +50 %; round 113 — the value was 0 % = no movement until round 129) | VST2 ID [DATA], name | — |
+| Soundtoys PanMan | Auto-pan (balance swing ±50 % per beat; round 127 fixed round 113's pass-through) | VST2 ID [DATA], name | — |
 
-| Antares Auto-Tune (Pro / Artist / Access / EFX+ / Hybrid) | LYNX Tune | VST3 class ID [DATA] (Auto-Tune Pro), names | Auto-Tune Pro: key and scale (`<Custom ScaleGivenKey / ScaleGivenScale>` [DATA]; scale list 0 major, 1 minor, 2 chromatic [model, round 113 §2]) with a 20 ms retune; otherwise the project's key or a gentle chromatic correction |
+| Antares Auto-Tune (Pro / Artist / Access / EFX+ / Hybrid) | LYNX Tune | VST3 class ID [DATA] (Auto-Tune Pro), names | Auto-Tune Pro: key and scale (`<Custom ScaleGivenKey / ScaleGivenScale>` [DATA]; scale list 0 major, 1 minor, 2 chromatic [model, round 113 §2]) retune, humanize, flex-tune (round 120), detune, transpose, mix, input type, formant / throat, Classic, tracking (round 127); Auto-Tune EFX+: key, scale and note switches, retune, humanize, pitch shift, formant / throat, input type, mix (round 127); otherwise the project's key or a gentle chromatic correction |
 | Waves Tune Real-Time | LYNX Tune | Waves name, names | — (the project's key, else gentle chromatic) |
 
 Not mapped yet (no LYNX module plays their role): Little AlterBoy, Filterverse, Kickstart,
