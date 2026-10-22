@@ -29,6 +29,11 @@ Trials: Waves (WaveShell 17.1, demo mode) and Valhalla DSP (demos) hosted here; 
 rounds 100 / 101 / 113 / 119 and this round (outside git: `D:\lynx-work\parity129\ref`, `D:\lynx-test-archive`).
 The Soundtoys 5 trials were installed during this round but every one of them stops on its iLok activation window
 until the user starts the trial, so their tables are from the official manuals ("manual only"). Black-box only.
+Late in the round (after the user activated the Waves trials) the Waves shell loaded again and RComp, DeEsser,
+Doubler4, Waves Tune Real-Time, SSL E-Channel, H-Delay and Doubler2 were captured; the tables above agree with those
+captures (RComp: Thresh / Gain faders on the input / output meters, ARC · Electro · Warm, Mix, Trim — the last four
+still missing in LYNX's Compressor; Waves Tune RT: Speed / Note Transition / Tolerance / Vibrato / Correction and the
+range buttons — see its table). Our host still shows their demo banner.
 
 | LYNX engine | Original (trial here) | Config before | Design before | Config after | Design after |
 |---|---|---|---|---|---|
