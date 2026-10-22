@@ -165,10 +165,10 @@ TEST (gentle_defaults_of_unreadable_vocal_substitutes_round113)
         id.state = substtest::wavesComponent ("DeEsser", "8000 2 -24.2 7");
         int translated = 0;
         const auto slot = makeSubstituteSlot (*e, &id, &translated);
-        // round 113 §3c: 0.81 x the frequency, threshold +5 dB, 12 dB range (measured on the official trial)
-        CHECK (translated == 2 && std::abs (mixsuite::hush::hz (slot.params[mixsuite::hush::frequency]) - 6480.0) < 10.0);
-        CHECK (std::abs (mixsuite::hush::thresholdDb (slot.params[mixsuite::hush::threshold]) + 19.2) < 0.1);
-        CHECK (std::abs (mixsuite::hush::rangeDb (slot.params[mixsuite::hush::range]) - 12.0) < 0.1);
+        // round 123: the classic split voicing takes the original's frequency and threshold as they are
+        CHECK (translated == 2 && std::abs (mixsuite::hush::hz (slot.params[mixsuite::hush::frequency]) - 8000.0) < 1.0);
+        CHECK (std::abs (mixsuite::hush::classicThresholdDb (slot.params[mixsuite::hush::threshold]) + 24.2) < 0.01);
+        CHECK (slot.params[mixsuite::hush::voicing] == 1.0f);
         const auto plain = makeSubstituteSlot (*e);
         CHECK (std::abs (mixsuite::hush::hz (plain.params[mixsuite::hush::frequency]) - 5500.0) < 60.0);
         CHECK (std::abs (mixsuite::hush::thresholdDb (plain.params[mixsuite::hush::threshold]) + 20.0) < 0.1);
@@ -219,7 +219,7 @@ TEST (waves_vocal_states_translated_round113)
         const auto s = slotFor ("DeEsser", "5506 2 -24.2 7 0.5 10 * * * * 0 3.98 32 1 0", n);
         namespace h = mixsuite::hush;
         CHECK (n == 5 && s.kind == EffectKind::hushDeEsser);
-        CHECK (std::abs (h::hz (s.params[h::frequency]) - 4460.0) < 10.0 && std::abs (h::thresholdDb (s.params[h::threshold]) + 19.2) < 0.1);
+        CHECK (std::abs (h::hz (s.params[h::frequency]) - 5506.0) < 1.0 && std::abs (h::classicThresholdDb (s.params[h::threshold]) + 24.2) < 0.01);
         CHECK (s.params[h::mode] == 0.0f && s.params[h::detector] == 0.0f && s.params[h::listen] == 0.0f);
     }
     // her SSL E-Channel: since round 123 Ridge Strip's "E" voicing, one to one in the console's units (VoiceMatchTests123)

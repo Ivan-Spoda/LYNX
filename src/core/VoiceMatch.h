@@ -77,4 +77,33 @@ private:
     float lastComp = 0.0f, lastGate = 0.0f;
 };
 } // namespace echannel
+
+// ---- split-band de-esser (Hush De-esser, voicing "Classic split") ----
+namespace deesser
+{
+struct Settings
+{
+    double hz = 5506.0, thresholdDb = -24.2; // the dial's frequency and threshold (-80 .. 0 dB)
+    bool bandPass = false, wideband = false, listen = false;
+    double outputDb = 0.0;
+};
+
+class DeEsser
+{
+public:
+    void prepare (double sampleRate) noexcept;
+    void reset() noexcept;
+    void process (float* l, float* r, int n, const Settings& s) noexcept;
+    float reductionDb() const noexcept { return last; }
+
+private:
+    void design (const Settings& s) noexcept;
+    double sr = 48000.0, designedHz = -1.0;
+    bool designedBp = false;
+    Biquad sc1, sc2;
+    double lpB = 0.0, lpA = 0.0, lpX[2] {}, lpY[2] {};
+    double env = 0.0, gr = 0.0;
+    float last = 0.0f;
+};
+} // namespace deesser
 } // namespace lynx::vmatch

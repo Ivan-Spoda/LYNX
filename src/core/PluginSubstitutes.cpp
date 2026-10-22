@@ -1170,9 +1170,8 @@ int translateWavesRComp (const std::vector<std::uint8_t>& state, EffectSlot& slo
 }
 
 // DeEsser (15 values): 0 frequency Hz, 2 threshold dB, 10 monitor (1 = side chain), 13 side chain (1 = high pass,
-// 2 = band pass), 14 audio (0 = split, 1 = wideband). Her state (5506 Hz, -24.2 dB, high pass, split) is matched by
-// Hush at 0.81 x the frequency, threshold +5 dB, 12 dB range, within 0.9 dB on the 6 kHz stairs (1 kHz untouched in
-// both); the range is not a control of the original (its curve flattens about 10 dB down at full scale).
+// 2 = band pass), 14 audio (0 = split, 1 = wideband). Round 123: Hush's "classic split" voicing is the de-esser measured
+// black-box on the official trial (core/VoiceMatch.h; REA_rodada123 §2), so the controls map one to one.
 int translateWavesDeEsser (const std::vector<std::uint8_t>& state, EffectSlot& slot)
 {
     namespace h = mixsuite::hush;
@@ -1181,13 +1180,11 @@ int translateWavesDeEsser (const std::vector<std::uint8_t>& state, EffectSlot& s
     if (slot.kind != EffectKind::hushDeEsser || ! hz)
         return 0;
     int n = 1;
-    slot.params[h::frequency] = logNorm (*hz * 0.81, 2000.0, 16000.0);
+    slot.params[h::voicing] = 1.0f;
+    slot.params[h::frequency] = logNorm (*hz, 2000.0, 16000.0);
+    slot.params[h::output] = 0.5f;
     if (const auto t = wavesValue (rw, 2))
-    {
-        slot.params[h::threshold] = linNorm (*t + 5.0, -60.0, 0.0);
-        slot.params[h::range] = linNorm (12.0, 0.0, 24.0);
-        ++n;
-    }
+        slot.params[h::threshold] = linNorm (*t, -80.0, 0.0), ++n;
     if (const auto m = wavesValue (rw, 14))
         slot.params[h::mode] = *m >= 0.5 ? 1.0f : 0.0f, ++n;
     if (const auto d = wavesValue (rw, 13))

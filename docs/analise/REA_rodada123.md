@@ -87,5 +87,28 @@ Sweeps (dynamics only, EQ bypassed; take "go" / pink): threshold × ratio grid �
 release 0.1–0.6 s −30 … −40 dB; release 1.2–4 s −17 … −33 dB (the long releases are the weak spot: the release shape
 after long holds is not fully captured).
 
+## 2. DeEsser → Hush De-esser "classic split" voicing
+
+[EXEC] 6 kHz / 1 kHz sine stairs, pink noise at four levels, her three takes, at her state and with threshold −40 / −30
+/ −15 / −5 dB, frequency 2462 / 4141 / 8574 / 14420 Hz and the four side-chain × audio modes. Fitted (dynfit "de2",
+weighted toward her state): side chain = two Butterworth high-pass sections (4th order) at 1.01 × the dial (band-pass:
+two band-pass sections, Q 1.30), an **energy** detector (attack 0.3 ms, release 12 ms), a **7.1 : 1** soft-knee
+(1.26 dB) gain computer 0.6 dB below the dial's threshold (+3.9 dB with the band-pass), Split = a first-order
+crossover at 0.33 × the dial (the attenuation is applied above it, so a sibilant floors near −11 dB: there is no range
+control), Wideband = the whole signal. This agrees with the spec dossier (docs/specs/deesser.md: split ≈ Freq/π, ~7:1,
+energy detector, no range) and corrects Hush's own ∞ ratio, 12 dB range clamp and 2 ms look-ahead for this role. Hush
+gets an appended **Voicing** parameter (Modern = its own engine, unchanged; Classic split = this engine, the original's
+−80 … 0 dB threshold dial); the substitute starts on Classic split.
+
+| her state, signal | before (round 113 fit) | after |
+|---|---|---|
+| go / kwe / lu | null −15.7 / −35.5 / −20.9 dB, spectrum max 2.2 / 0.6 / 1.9 dB | null −37.8 / −50.3 / −43.6 dB, level ±0.02, spectrum max 0.18 / 0.07 / 0.14 dB |
+| pink | −15.1 dB, level −0.34, spectrum max 3.4 dB | −42.1 dB, −0.01 dB, 0.05 dB |
+| 6 kHz stairs | −7.1 dB | −37.6 dB |
+
+Sweeps (fit per sweep, same laws; takes and pink): threshold −40 … −5 dB and frequency 2.5 … 14.4 kHz −26 … −52 dB
+(the lowest: −40 dB threshold on one take, where the reference compresses almost all the time); band-pass split −24 …
+−55 dB, band-pass wideband −19 … −48 dB (the band-pass shape is the weak spot), high-pass wideband −32 … −41 dB.
+
 ## Where I stopped / next steps
-- Landed: SSL E-Channel (this section). Next in this round: DeEsser, Renaissance Compressor, CLA-2A.
+- SSL E-Channel and DeEsser done. Next in this round: Renaissance Compressor, CLA-2A.

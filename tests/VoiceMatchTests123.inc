@@ -86,3 +86,23 @@ TEST (ssl_e_channel_matched_voicing_round123)
     classic.params[r::voicing] = 0.0f;
     CHECK (std::abs (vm123::sineGainDb (classic, 1000.0, -50.0) - 0.879) > 0.5);
 }
+
+TEST (deesser_matched_voicing_round123)
+{
+    using namespace lynx;
+    namespace h = mixsuite::hush;
+    int n = 0;
+    auto s = vm123::wavesSlot ("DeEsser", "5506 2 -24.2 7 0.5 10 * * * * 0 3.98 32 1 0", n);
+    CHECK (n == 5 && s.kind == EffectKind::hushDeEsser && s.params[h::voicing] == 1.0f);
+    CHECK (std::abs (h::hz (s.params[h::frequency]) - 5506.0) < 0.5 && std::abs (h::classicThresholdDb (s.params[h::threshold]) + 24.2) < 1e-3);
+    CHECK (s.params[h::mode] == 0.0f && s.params[h::detector] == 0.0f && s.params[h::listen] == 0.0f);
+    CHECK (formatEffectParam (EffectKind::hushDeEsser, h::threshold, s.params[h::threshold], 120.0, s.params) == "-24.2 dB");
+    // 6 kHz sine: steady gain vs the official plug-in's stairs at her state (no range control: it floors near -11 dB);
+    // 1 kHz passes untouched
+    static constexpr double golden[][2] = { { -30, 0.0 }, { -22, 0.0 }, { -18, -1.414 }, { -14, -4.310 }, { -10, -6.775 }, { -6, -8.630 }, { -2, -9.832 } };
+    double worst = 0.0;
+    for (const auto& g : golden)
+        worst = std::max (worst, std::abs (vm123::sineGainDb (s, 6000.0, g[0]) - g[1]));
+    CHECK (worst < 0.2);
+    CHECK (std::abs (vm123::sineGainDb (s, 1000.0, -2.0)) < 0.05);
+}

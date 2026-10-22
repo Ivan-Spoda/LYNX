@@ -388,4 +388,99 @@ void Channel::process (float* l, float* r, int n, const Settings& s) noexcept
     lastGate = maxGate;
 }
 } // namespace echannel
+
+// ================================================================== split-band de-esser
+// [EXEC] Fitted on the official DeEsser trial (her state and sweeps of threshold -40 .. -5 dB and frequency 2.5 .. 14.4
+// kHz; 6 kHz sine stairs, pink noise, her takes; tools/fxmeasure/py/vm123/decfg.py): the side chain is a 4th-order
+// high-pass (two Butterworth sections) or a band-pass at the dial's frequency, an energy (power) detector with a
+// 0.3 ms attack and a 12 ms release, a 7.1 : 1 soft-knee (1.26 dB) gain computer 0.6 dB below the dial; Split
+// attenuates only what lies above a first-order crossover at 0.33 x the dial's frequency (so the attenuation of a
+// sibilant floors near -11 dB: no range control), Wideband the whole signal. Her state: null -38 / -50 / -44 dB.
+namespace deesser
+{
+namespace
+{
+constexpr double thrOffset = -0.6009, thrSlope = -0.0097, ratio = 7.1171, knee = 1.2597, attackMs = 0.3027, releaseMs = 12.1503;
+constexpr double splitK = 0.3306, splitExp = 0.0491, scK = 1.0120, scExp = -0.0353, bpQ = 1.2988, bpOffset = 3.9011;
+
+void rbj (Biquad& b, int type, double f, double q, double sr) noexcept
+{
+    const double w = 2.0 * pi * std::min (f, sr * 0.49) / sr, cw = std::cos (w), al = std::sin (w) / (2.0 * q);
+    if (type == 0) b.set ((1 + cw) / 2, -(1 + cw), (1 + cw) / 2, 1 + al, -2 * cw, 1 - al); // high-pass
+    else b.set (al, 0.0, -al, 1 + al, -2 * cw, 1 - al);                                     // band-pass (0 dB peak)
+}
+} // namespace
+
+void DeEsser::prepare (double sampleRate) noexcept
+{
+    sr = sampleRate;
+    designedHz = -1.0;
+    reset();
+}
+
+void DeEsser::reset() noexcept
+{
+    sc1.reset();
+    sc2.reset();
+    lpX[0] = lpX[1] = lpY[0] = lpY[1] = 0.0;
+    env = gr = 0.0;
+}
+
+void DeEsser::design (const Settings& s) noexcept
+{
+    const double f = std::clamp (s.hz, 2000.0, 16000.0);
+    if (f == designedHz && s.bandPass == designedBp)
+        return;
+    designedHz = f;
+    designedBp = s.bandPass;
+    const double rel = f / 5506.0;
+    const double fsc = f * scK * std::pow (rel, scExp);
+    rbj (sc1, s.bandPass ? 1 : 0, fsc, s.bandPass ? bpQ : 0.70710678, sr);
+    sc2.b0 = sc1.b0; sc2.b1 = sc1.b1; sc2.b2 = sc1.b2; sc2.a1 = sc1.a1; sc2.a2 = sc1.a2;
+    const double k = std::tan (pi * std::min (f * splitK * std::pow (rel, splitExp), 0.45 * sr) / sr);
+    lpB = k / (1.0 + k);
+    lpA = (k - 1.0) / (k + 1.0);
+}
+
+void DeEsser::process (float* l, float* r, int n, const Settings& s) noexcept
+{
+    design (s);
+    const double T = std::clamp (s.thresholdDb, -80.0, 0.0);
+    const double thr = T + thrOffset + thrSlope * (T + 24.2) + (s.bandPass ? bpOffset : 0.0);
+    const double aA = coefMs (attackMs, sr), aR = coefMs (releaseMs, sr), out = dbToGain (s.outputDb);
+    double maxGr = 0.0;
+    for (int i = 0; i < n; ++i)
+    {
+        const double a = sc2.process (sc1.process (l[i], 0), 0), b = sc2.process (sc1.process (r[i], 1), 1);
+        const double p = 0.5 * (a * a + b * b);
+        env += (p > env ? aA : aR) * (p - env);
+        const double o = 10.0 * std::log10 (std::max (env, 1e-24)) - thr;
+        gr = (1.0 - 1.0 / ratio) * (o > 30.0 * knee ? o : knee * std::log1p (std::exp (o / knee)));
+        const double g = dbToGain (-gr);
+        maxGr = std::max (maxGr, gr);
+        if (s.listen)
+        {
+            l[i] = (float) (a * out);
+            r[i] = (float) (b * out);
+            continue;
+        }
+        double x[2] = { l[i], r[i] };
+        for (int c = 0; c < 2; ++c)
+        {
+            if (s.wideband)
+                x[c] *= g;
+            else
+            {
+                const double lo = lpB * (x[c] + lpX[c]) - lpA * lpY[c];
+                lpX[c] = x[c];
+                lpY[c] = lo;
+                x[c] = lo + (x[c] - lo) * g;
+            }
+        }
+        l[i] = (float) (x[0] * out);
+        r[i] = (float) (x[1] * out);
+    }
+    last = (float) maxGr;
+}
+} // namespace deesser
 } // namespace lynx::vmatch

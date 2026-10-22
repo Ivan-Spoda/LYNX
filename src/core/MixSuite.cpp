@@ -675,6 +675,8 @@ double thresholdDb (float v) noexcept { return lin (v, -60.0, 0.0); }
 double rangeDb (float v) noexcept { return lin (v, 0.0, 24.0); }
 double releaseMs (float v) noexcept { return logMap (v, 10.0, 250.0); }
 double lookaheadMs() noexcept { return 2.0; }
+double classicThresholdDb (float v) noexcept { return lin (v, -80.0, 0.0); }
+bool classic (const EffectParams& p) noexcept { return on (p[voicing]); }
 
 namespace
 {
@@ -685,12 +687,14 @@ public:
     {
         sr = rate;
         delay.setLength ((int) std::lround (lookaheadMs() * 0.001 * sr)); // fixed: the latency never changes
+        classicEngine.prepare (rate);
         reset();
     }
 
     void reset() noexcept override
     {
         delay.reset();
+        classicEngine.reset();
         detect.reset();
         listenF.reset();
         split.reset();
@@ -704,6 +708,22 @@ public:
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
         const auto inPeak = Meters::peak (l, r, n);
+        if (classic (p))
+        {
+            // the measured classic de-esser has no look-ahead; the fixed latency Hush reports is kept as a plain delay
+            vmatch::deesser::Settings c;
+            c.hz = hz (p[frequency]);
+            c.thresholdDb = classicThresholdDb (p[threshold]);
+            c.bandPass = on (p[detector]);
+            c.wideband = on (p[mode]);
+            c.listen = on (p[listen]);
+            c.outputDb = lin (p[output], -12.0, 12.0);
+            classicEngine.process (l, r, n, c);
+            for (int i = 0; i < n; ++i)
+                delay.process (l[i], r[i]);
+            meters.set (classicEngine.reductionDb(), 0.0f, inPeak, Meters::peak (l, r, n));
+            return;
+        }
         const auto f = std::min (hz (p[frequency]), sr * 0.45);
         const bool band = on (p[detector]);
         if (band)
@@ -766,6 +786,7 @@ public:
 private:
     double sr = 44100.0;
     Delay2<2048> delay;
+    vmatch::deesser::DeEsser classicEngine;
     Biquad detect, listenF, split;
     double env = 0.0, gr = 0.0;
     Meters meters;
@@ -1285,7 +1306,7 @@ const EffectInfo& hushInfo()
     static const EffectInfo info { "Hush De-esser",
                                    { { "Frequency", 0.53f }, { "Threshold", 0.5f }, { "Range", 0.5f }, { "Wideband", 0.0f },
                                      { "Band detector", 0.0f }, { "Listen", 0.0f }, { "Lookahead", 1.0f }, { "Release", 0.56f },
-                                     { "Output", 0.5f } } };
+                                     { "Output", 0.5f }, { "Voicing", 0.0f } } };
     return info;
 }
 
@@ -1350,6 +1371,19 @@ std::string fmt (const char* f, double v)
 
 std::string onOff (float v) { return on (v) ? "on" : "off"; }
 } // namespace
+
+namespace hush
+{
+std::string classicParamText (int param, float v)
+{
+    switch (param)
+    {
+        case threshold: return fmt ("%.1f dB", classicThresholdDb (v));
+        case range: case lookahead: case release: return "-";
+        default: return paramText (EffectKind::hushDeEsser, param, v);
+    }
+}
+} // namespace hush
 
 namespace ridge
 {
@@ -1426,6 +1460,7 @@ std::string paramText (EffectKind kind, int param, float v)
             case detector: return on (v) ? "band" : "high-pass";
             case release: return fmt ("%.0f ms", releaseMs (v));
             case output: return fmt ("%+.1f dB", lin (v, -12.0, 12.0));
+            case voicing: return on (v) ? "classic split" : "modern";
             default: return onOff (v);
         }
     }

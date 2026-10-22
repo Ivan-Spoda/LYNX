@@ -2912,3 +2912,4 @@ countries: br
 "Mono or stereo repeats (stereo: the right side shifts the other way)" = "Repetições mono ou estéreo (estéreo: o lado direito desloca no sentido contrário)"
 "Split" = "Divisão"
 "Classic|E console" = "Clássico|Console E"
+"Modern|Classic split" = "Moderno|Clássico dividido"

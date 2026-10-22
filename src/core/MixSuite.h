@@ -150,8 +150,12 @@ double sidechainDb (float v) noexcept; // peak reduction: −20 .. +40 dB into t
 // ---- Hush (de-esser) ----
 namespace hush
 {
-enum Param { frequency, threshold, range, mode, detector, listen, lookahead, release, output, count };
+// round 123: voicing (appended): 0 = Hush's own engine, 1 = the measured classic split de-esser (core/VoiceMatch.h)
+enum Param { frequency, threshold, range, mode, detector, listen, lookahead, release, output, voicing, count };
 double hz (float v) noexcept;          // 2 .. 16 kHz
+double classicThresholdDb (float v) noexcept; // voicing 1: -80 .. 0 dB (the original's dial)
+bool classic (const EffectParams& p) noexcept;
+std::string classicParamText (int param, float v);
 double thresholdDb (float v) noexcept; // −60 .. 0 dBFS
 double rangeDb (float v) noexcept;     // 0 .. 24 dB
 double releaseMs (float v) noexcept;   // 10 .. 250 ms
