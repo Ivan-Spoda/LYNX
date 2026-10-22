@@ -298,6 +298,9 @@ public:
         if (voice[0].line.buf.empty())
             return;
         design (p);
+        float peakIn = 0.0f, peakOut = 0.0f; // the editor's level meters (round 129: the reference's output meters)
+        for (int i = 0; i < n; ++i)
+            peakIn = std::max (peakIn, std::max (std::abs (l[i]), std::abs (r[i])));
         const auto master = (float) dbToGain (outputDb (p[output]));
         const bool dirOn = on (p[directOn]);
         const auto dirGain = dirOn ? (float) dbToGain (gainDb (p[directGain])) : 0.0f;
@@ -394,10 +397,20 @@ public:
             const auto oL = dirGain * (rc * dL + rs * dR), oR = dirGain * (rc * dR - rs * dL);
             l[i] = master * (oL + wetL);
             r[i] = master * (oR + wetR);
+            peakOut = std::max (peakOut, std::max (std::abs (l[i]), std::abs (r[i])));
         }
+        meterIn.store (std::min (peakIn, 1.0f), std::memory_order_relaxed);
+        meterOut.store (std::min (peakOut, 1.0f), std::memory_order_relaxed);
+    }
+
+    // 2 / 3 = input / output peak (round 129)
+    float controlOutput (int k) const noexcept override
+    {
+        return k == 2 ? meterIn.load (std::memory_order_relaxed) : k == 3 ? meterOut.load (std::memory_order_relaxed) : 0.0f;
     }
 
 private:
+    std::atomic<float> meterIn { 0.0f }, meterOut { 0.0f };
     void design (const EffectParams& p) noexcept
     {
         float key[5] { p[lowGain], p[lowFreq], p[highGain], p[highFreq], p[feedbackCut] };

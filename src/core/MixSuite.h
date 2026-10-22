@@ -129,7 +129,10 @@ double compressorCurveDb (const EffectParams& p, double inputDb);
 // ---- Glow Leveler (optical leveler) ----
 namespace glow
 {
-enum Param { peakReduction, gain, mode, emphasis, mix, count };
+// round 129: trim (±18 dB after the mix) and auto make-up appended (the reference's TRIM and AUTO MAKEUP); older
+// projects load their defaults (0 dB, off) and sound the same
+enum Param { peakReduction, gain, mode, emphasis, mix, trim, autoMakeup, count };
+double trimDb (float v) noexcept;   // −18 .. +18 dB
 double gainDb (float v) noexcept;   // 0 .. +30 dB make-up
 double sidechainDb (float v) noexcept; // peak reduction: −20 .. +40 dB into the cell
 } // namespace glow

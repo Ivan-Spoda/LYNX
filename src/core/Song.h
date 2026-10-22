@@ -437,6 +437,12 @@ struct EffectSlot
     // (core/PluginSubstitutes.h): the original reference is kept byte for byte, saved with the project, and the slot
     // goes back to it once the plugin is installed.
     PluginRef substituteFor;
+    // The editor's header (REA round 129, the originals' preset bar and A/B compare): the name of the preset loaded
+    // into the slot ("" = none), and the other one of the two settings A / B (its parameters; empty = B was never
+    // used) with which of them is playing. Saved with the project; the audio only ever sees `params`.
+    std::string presetName;
+    std::vector<float> abOther;
+    bool abShowingB = false;
 
     bool isSubstitute() const noexcept { return ! substituteFor.id.empty() || substituteFor.foreign.format != ForeignPlugin::Format::none; }
 };

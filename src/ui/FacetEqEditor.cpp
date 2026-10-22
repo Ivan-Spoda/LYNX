@@ -10,6 +10,7 @@
 #include "core/RackRenderer.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
+#include "ui/PluginHeader.h"
 #include "ui/PluginSkin.h"
 #include "ui/Theme.h"
 #include "ui/ValueControl.h"
@@ -359,6 +360,7 @@ public:
     void set (std::vector<std::pair<int, float>> changes, bool undoable = true)
     {
         if (current() == nullptr) return;
+        if (undoable) bar.willEdit();
         engine.editSong ([tk = track, sl = slot, changes] (Song& song) {
             auto& params = song.mixer[(std::size_t) tk].effects[(std::size_t) sl].params;
             for (const auto& [p, v] : changes)
@@ -572,6 +574,13 @@ public:
     {
         const auto p = e.position;
         dragging = Drag::none;
+        // the preset bar in the header (round 129's undo / redo, A / B, presets; round 128 wires it into Facet)
+        if (const auto part = bar.partAt (p); part != pluginheader::Part::none)
+        {
+            bar.click (part, *this);
+            return;
+        }
+        bar.beginGesture();
         std::vector<Control> all;
         if (const auto* c = controlAt (p, all))
         {
@@ -743,6 +752,7 @@ public:
     void mouseMove (const juce::MouseEvent& e) override
     {
         mouse = e.position;
+        bar.hover (e.position);
         const auto h = nodeAt (e.position);
         if (h != hover) hover = h;
         // the read-out box stays while the mouse is on its node or inside the box (to reach solo / remove)
@@ -754,6 +764,7 @@ public:
     void mouseExit (const juce::MouseEvent&) override
     {
         mouse = { -1.0f, -1.0f };
+        bar.hoverExit();
         hover = -1;
         tipBand = -1;
         repaint();
@@ -786,6 +797,8 @@ public:
     {
         ui::Hint h;
         const auto p = position.toFloat();
+        if (const auto part = bar.partAt (p); part != pluginheader::Part::none)
+            return { bar.hintFor (part), bar.presetLabel(), false, true };
         std::vector<Control> all;
         if (const auto* c = controlAt (p, all))
         {
@@ -863,11 +876,13 @@ public:
         g.setFont (font (type::small));
         g.drawText (trackName() + "  -  " + tr ("slot {0}", { juce::String (slot + 1) }), juce::Rectangle<float> (58.0f + w, 0.0f, 300.0f, h.getHeight()),
                     juce::Justification::centredLeft, true);
-        // the hint for the graph's gestures, on the right of the title bar
+        // the preset bar (undo / redo, A / B, presets) on the right, the graph's gestures between
+        const auto left = bar.place (h.withTrimmedLeft (w + 300.0f));
+        bar.paint (g, colour::accent);
         g.setColour (colour::textDisabled);
         g.setFont (font (type::caption));
         g.drawText (tr ("Double-click: new band  -  drag: frequency / gain  -  wheel: Q  -  right-click: menu"),
-                    h.withTrimmedLeft (420.0f).withTrimmedRight (12.0f), juce::Justification::centredRight, true);
+                    left.withTrimmedRight (8.0f), juce::Justification::centredRight, true);
     }
 
     void paintBar (juce::Graphics& g, const EffectSlot& fx, const std::vector<Control>& all)
@@ -1507,6 +1522,7 @@ private:
     int selected = -1, hover = -1, tipBand = -1, dragBand = -1, dragParam = -1;
     bool piano = false;
     bool frozen = false; // analyser freeze (editor only)
+    pluginheader::PresetBar bar { engine, track, slot };
     Drag dragging = Drag::none;
     juce::Point<float> dragOffset, dragStart, mouse { -1.0f, -1.0f };
     juce::Rectangle<float> dragRect;

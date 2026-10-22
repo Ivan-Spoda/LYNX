@@ -176,6 +176,14 @@ public:
         autoGain = 1.0f;
     }
 
+    // round 129: the editor's meters (Effect::controlOutput): 0 = gain reduction (0..1 over 0..30 dB), 2 / 3 = input /
+    // output peak — the level meters the compressors it stands in for show (Renaissance Compressor's three meters)
+    float controlOutput (int k) const noexcept override
+    {
+        return k == 0 ? meterGr.load (std::memory_order_relaxed) : k == 2 ? meterIn.load (std::memory_order_relaxed)
+             : k == 3 ? meterOut.load (std::memory_order_relaxed) : 0.0f;
+    }
+
     void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
     {
         // "Auto gain" (round 107): the long-term level stays where it was (slow in/out power match, ±12 dB), so the
@@ -192,9 +200,11 @@ public:
         const auto thresholdGain = dbToGain (threshold);
         const auto sidechain = useSidechain;
         useSidechain = false;
+        float peakIn = 0.0f, peakOut = 0.0f, maxGr = 0.0f;
 
         for (int i = 0; i < n; ++i)
         {
+            peakIn = std::max (peakIn, std::max (std::abs (l[i]), std::abs (r[i])));
             // linked stereo peak detector, "hard knee" curve; below the threshold the log is not needed.
             // With sidechain, the detector listens to the other track (kick ducking)
             const auto peak = sidechain ? (sideL != nullptr ? std::max (std::abs (sideL[i]), std::abs (sideR[i])) : 0.0f)
@@ -224,7 +234,12 @@ public:
 
             l[i] *= gain;
             r[i] *= gain;
+            maxGr = std::max (maxGr, envelopeDb);
+            peakOut = std::max (peakOut, std::max (std::abs (l[i]), std::abs (r[i])));
         }
+        meterGr.store (std::clamp (maxGr / 30.0f, 0.0f, 1.0f), std::memory_order_relaxed);
+        meterIn.store (std::min (peakIn, 1.0f), std::memory_order_relaxed);
+        meterOut.store (std::min (peakOut, 1.0f), std::memory_order_relaxed);
     }
 
     void setSidechain (const float* left, const float* right) noexcept override
@@ -235,6 +250,7 @@ public:
     }
 
 private:
+    std::atomic<float> meterGr { 0.0f }, meterIn { 0.0f }, meterOut { 0.0f };
     double sampleRate = 44100.0;
     float envelopeDb = 0.0f;
     float inPower = 0.0f, outPower = 0.0f, autoGain = 1.0f;
