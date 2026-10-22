@@ -1585,31 +1585,59 @@ Layout ridgeStrip()
     v.push_back (meter (292, 484, 256, 12, 1, TR_NOOP ("Gate")));
     v.push_back (toggle (292, 508, 84, 20, "Dynamics on", TR_NOOP ("Dyn in")));
     v.push_back (tabs (384, 508, 164, 20, "Order", TR_NOOP ("EQ>Dyn|Dyn>EQ")));
+    // the GAIN block (round 129, the reference's): input trim and phase, the output fader beside the input / output
+    // level meter with its peak read-outs
     v.push_back (section (284, 580, 272, 132, TR_NOOP ("Gain")));
-    v.push_back (dial (340, 636, 40, "Input", TR_NOOP ("Input"), bipolar));
-    v.push_back (toggle (390, 626, 60, 20, "Phase", TR_NOOP ("Phase")));
-    v.push_back (dial (496, 636, 40, "Output", TR_NOOP ("Output"), bipolar));
+    v.push_back (dial (322, 628, 36, "Input", TR_NOOP ("Input"), bipolar));
+    v.push_back (toggle (294, 682, 56, 20, "Phase", TR_NOOP ("Phase")));
+    v.push_back (slider (Item::vslider, 370, 600, 34, 106, "Output", TR_NOOP ("Output")));
+    v.push_back (display (420, 598, 130, 110, "iometer"));
+    return l;
+}
+
+Layout compressorLayout()
+{
+    // round 129: LYNX's basic compressor in the role of the Waves Renaissance Compressor (docs/PARITY.md; the official
+    // trial's panel): the threshold fader beside the input / output meters, the gain-reduction meter in the middle with
+    // the ratio under it, the make-up gain fader on the right, attack and release along the bottom
+    Layout l;
+    l.width = 420;
+    l.height = 300;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 412, 292, TR_NOOP ("Compressor")));
+    v.push_back (slider (Item::vslider, 16, 30, 34, 172, "Threshold", TR_NOOP ("Threshold")));
+    v.push_back (display (58, 26, 112, 180, "iometer"));
+    v.push_back (meter (184, 26, 66, 180, 0, TR_NOOP ("Reduction")));
+    v.push_back (slider (Item::vslider, 268, 30, 34, 172, "Makeup", TR_NOOP ("Gain")));
+    v.push_back (toggle (314, 30, 94, 20, "Auto gain", TR_NOOP ("Auto gain")));
+    v.push_back (dial (90, 252, 34, "Attack", TR_NOOP ("Attack")));
+    v.push_back (dial (217, 252, 34, "Ratio", TR_NOOP ("Ratio")));
+    v.push_back (dial (340, 252, 34, "Release", TR_NOOP ("Release")));
     return l;
 }
 
 Layout glowLeveler()
 {
-    // round 114: the optical levelers' classic front panel (the role: Waves CLA-2A / LA-2A), from the official product
-    // pages: GAIN on the left, PEAK REDUCTION on the right, the VU meter between them showing the gain reduction,
-    // the COMPRESS / LIMIT switch under the meter; LYNX's extras (sidechain emphasis, mix) small along the bottom
+    // round 114: the optical levelers' classic front panel (the role: Waves CLA-2A / LA-2A): GAIN on the left, PEAK
+    // REDUCTION on the right, the VU meter between them, the COMPRESS / LIMIT switch under the meter.
+    // Round 129 (docs/PARITY.md, the official trial's panel): the VU DISPLAY selector (input / GR / output) top right,
+    // AUTO MAKEUP under it, and the bottom strip of the reference — HF emphasis (its HI FREQ), MIX, TRIM
     Layout l;
     l.width = 540;
-    l.height = 270;
+    l.height = 300;
     auto& v = l.items;
-    v.push_back (section (4, 4, 532, 262, TR_NOOP ("Optical leveler")));
-    v.push_back (dial (86, 110, 92, "Gain", TR_NOOP ("Gain"), big));
-    v.push_back (dial (454, 110, 92, "Peak reduction", TR_NOOP ("Peak reduction"), big));
-    auto vu = display (170, 28, 200, 136, "vumeter");
+    v.push_back (section (4, 4, 532, 292, TR_NOOP ("Optical leveler")));
+    v.push_back (dial (86, 124, 92, "Gain", TR_NOOP ("Gain"), big));
+    v.push_back (dial (454, 124, 92, "Peak reduction", TR_NOOP ("Peak reduction"), big));
+    auto vu = display (170, 40, 200, 136, "vumeter");
     vu.steps = 0; // live output 0: gain reduction
     v.push_back (vu);
-    v.push_back (tabs (200, 172, 140, 22, "Limit", TR_NOOP ("Compress|Limit")));
-    v.push_back (dial (232, 226, 28, "Emphasis", TR_NOOP ("Emphasis")));
-    v.push_back (dial (308, 226, 28, "Mix", TR_NOOP ("Mix")));
+    v.push_back (display (392, 22, 136, 18, "vusel"));
+    v.push_back (tabs (200, 184, 140, 22, "Limit", TR_NOOP ("Compress|Limit")));
+    v.push_back (toggle (404, 206, 120, 20, "Auto makeup", TR_NOOP ("Auto makeup")));
+    v.push_back (dial (170, 254, 28, "Emphasis", TR_NOOP ("HF emphasis")));
+    v.push_back (dial (270, 254, 28, "Mix", TR_NOOP ("Mix")));
+    v.push_back (dial (370, 254, 28, "Trim", TR_NOOP ("Trim"), bipolar));
     return l;
 }
 
@@ -1942,7 +1970,8 @@ Layout geminiDoubler()
         v.push_back (tabs (540, cy - 11, 136, 22, names[k][9], k == 0 ? TR_NOOP ("L|L+R|L-R") : TR_NOOP ("R|R+L|R-L"), { 1.0f / 6.0f, 0.5f, 5.0f / 6.0f }));
     }
     v.push_back (section (690, 264, 106, 192, TR_NOOP ("Output")));
-    v.push_back (slider (Item::vslider, 724, 290, 38, 150, "Output", nullptr));
+    v.push_back (slider (Item::vslider, 698, 290, 30, 150, "Output", nullptr));
+    v.push_back (display (730, 276, 62, 172, "iometer")); // round 129: the reference's output meters
     return l;
 }
 
@@ -2014,38 +2043,40 @@ Layout epochVerbLayout()
 
 Layout atriumLayout()
 {
-    // six vertical faders on the left (mix, pre-delay, decay, low cut, high cut, early / late balance); the early and
-    // late sections side by side on the right (the reference flips between them with two tabs); type menu below
+    // six vertical faders on the left (mix, pre-delay, decay, low cut, high cut, depth = early / late balance); on the
+    // right the EARLY or the LATE controls, switched by two tabs as on the reference (round 129; the two sections were
+    // side by side before); the reverb mode menu below
     Layout l;
-    l.width = 900;
+    l.width = 640;
     l.height = 300;
+    l.pages = { TR_NOOP ("Early"), TR_NOOP ("Late") };
     auto& v = l.items;
     v.push_back (section (8, 8, 330, 244, nullptr, boxed));
     const char* faders[] = { "Mix", "Predelay", "Decay", "Low cut", "High cut", "Early/late" };
-    const char* captions[] = { TR_NOOP ("Mix"), TR_NOOP ("Predelay"), TR_NOOP ("Decay"), TR_NOOP ("Low cut"), TR_NOOP ("High cut"), TR_NOOP ("Late mix") };
+    const char* captions[] = { TR_NOOP ("Mix"), TR_NOOP ("Predelay"), TR_NOOP ("Decay"), TR_NOOP ("Low cut"), TR_NOOP ("High cut"), TR_NOOP ("Depth") };
     for (int i = 0; i < 6; ++i)
     {
         const auto x = 16.0f + 53.0f * (float) i;
         v.push_back (slider (Item::vslider, x + 8.0f, 18, 32, 196, faders[i], captions[i]));
         v.push_back (value (x, 222, 48, 16, faders[i], 0));
     }
-    v.push_back (section (342, 8, 270, 244, TR_NOOP ("Early")));
-    v.push_back (dial (386, 64, 34, "Early size", TR_NOOP ("Size")));
-    v.push_back (dial (446, 64, 34, "Early cross", TR_NOOP ("Cross")));
-    v.push_back (dial (506, 64, 34, "Early mod rate", TR_NOOP ("Mod rate")));
-    v.push_back (dial (566, 64, 34, "Early mod depth", TR_NOOP ("Mod depth")));
-    v.push_back (dial (386, 168, 34, "Early send", TR_NOOP ("Send")));
-    v.push_back (dial (446, 168, 34, "Diffusion", TR_NOOP ("Diffusion")));
-    v.push_back (dial (506, 168, 34, "Space", TR_NOOP ("Space")));
-    v.push_back (section (616, 8, 276, 244, TR_NOOP ("Late")));
-    v.push_back (dial (662, 64, 34, "Late size", TR_NOOP ("Size")));
-    v.push_back (dial (722, 64, 34, "Late cross", TR_NOOP ("Cross")));
-    v.push_back (dial (782, 64, 34, "Late mod rate", TR_NOOP ("Mod rate")));
-    v.push_back (dial (842, 64, 34, "Late mod depth", TR_NOOP ("Mod depth")));
-    v.push_back (dial (662, 168, 34, "Bass mult", TR_NOOP ("Bass mult")));
-    v.push_back (dial (722, 168, 34, "Bass xover", TR_NOOP ("Bass xover")));
-    v.push_back (dial (782, 168, 34, "High mult", TR_NOOP ("High mult")));
-    v.push_back (dial (842, 168, 34, "High xover", TR_NOOP ("High xover")));
+    v.push_back (section (342, 8, 290, 244, nullptr, boxed));
+    v.push_back (pageTabs (352, 16, 270, 22, TR_NOOP ("Early|Late")));
+    v.push_back (onPage (dial (392, 84, 34, "Early size", TR_NOOP ("Size")), 0));
+    v.push_back (onPage (dial (456, 84, 34, "Early cross", TR_NOOP ("Cross")), 0));
+    v.push_back (onPage (dial (520, 84, 34, "Early mod rate", TR_NOOP ("Mod rate")), 0));
+    v.push_back (onPage (dial (584, 84, 34, "Early mod depth", TR_NOOP ("Mod depth")), 0));
+    v.push_back (onPage (dial (392, 184, 34, "Early send", TR_NOOP ("Send")), 0));
+    v.push_back (onPage (dial (456, 184, 34, "Diffusion", TR_NOOP ("Diffusion")), 0));
+    v.push_back (onPage (dial (520, 184, 34, "Space", TR_NOOP ("Space")), 0));
+    v.push_back (onPage (dial (392, 84, 34, "Late size", TR_NOOP ("Size")), 1));
+    v.push_back (onPage (dial (456, 84, 34, "Late cross", TR_NOOP ("Cross")), 1));
+    v.push_back (onPage (dial (520, 84, 34, "Late mod rate", TR_NOOP ("Mod rate")), 1));
+    v.push_back (onPage (dial (584, 84, 34, "Late mod depth", TR_NOOP ("Mod depth")), 1));
+    v.push_back (onPage (dial (392, 184, 34, "Bass mult", TR_NOOP ("Bass mult")), 1));
+    v.push_back (onPage (dial (456, 184, 34, "Bass xover", TR_NOOP ("Bass xover")), 1));
+    v.push_back (onPage (dial (520, 184, 34, "High mult", TR_NOOP ("High mult")), 1));
+    v.push_back (onPage (dial (584, 184, 34, "High xover", TR_NOOP ("High xover")), 1));
     v.push_back (label (8, 264, 92, 24, TR_NOOP ("Reverb mode"), alignLeft));
     v.push_back (choiceMenu (102, 264, 200, 24, "Type", TR_NOOP ("Type"),
                              TR_NOOP ("Large Room|Medium Room|Bright Room|Large Chamber|Dark Room|Dark Chamber|Dark Space|Deep Space|Mirror Space|Vast Space|Distant Space|Dense Room")));
@@ -2094,6 +2125,7 @@ Layout nebulaLayout()
     v.push_back (dial (176, 84, 84, "Delay", TR_NOOP ("Delay"), big));
     v.push_back (dial (316, 84, 84, "Warp", TR_NOOP ("Warp"), big));
     v.push_back (tabs (114, 216, 168, 24, "Sync", TR_NOOP ("ms|Note|Dotted|Triplet")));
+    v.push_back (toggle (290, 186, 88, 22, "Clear", TR_NOOP ("Clear"), plugui::momentary));
     v.push_back (choiceMenu (290, 216, 88, 24, "Note", TR_NOOP ("Note"), "1/64|1/32|1/16|1/8|1/4|1/2|1/1"));
     v.push_back (section (392, 8, 100, 244, nullptr, boxed));
     v.push_back (dial (442, 50, 40, "Feedback", TR_NOOP ("Feedback")));
@@ -2222,8 +2254,11 @@ Layout echoformLayout()
     v.push_back (stepped (dial (44, k2, d, "Style", TR_NOOP ("Style")), 4));
     // delay: the left time (ms or note) and the second knob of the style: spread, ratio, spacing or the right time
     v.push_back (section (88, top, 188, h, TR_NOOP ("Delay")));
-    v.push_back (when (dial (138, 76, 54, "Time L", TR_NOOP ("Delay"), big), "Sync L", 0.0f, 0.5f));
-    v.push_back (when (stepped (dial (138, 76, 54, "Note L", TR_NOOP ("Delay"), big), 9), "Sync L", 0.5f, 1.0f));
+    // round 129: "Delay L" when the style has a right time (dual, ping-pong), as on the reference
+    v.push_back (when (when (dial (138, 76, 54, "Time L", TR_NOOP ("Delay"), big), "Sync L", 0.0f, 0.5f), "Style", 0.0f, 0.6f));
+    v.push_back (when (when (stepped (dial (138, 76, 54, "Note L", TR_NOOP ("Delay"), big), 9), "Sync L", 0.5f, 1.0f), "Style", 0.0f, 0.6f));
+    v.push_back (when (when (dial (138, 76, 54, "Time L", TR_NOOP ("Delay L"), big), "Sync L", 0.0f, 0.5f), "Style", 0.6f, 1.0f));
+    v.push_back (when (when (stepped (dial (138, 76, 54, "Note L", TR_NOOP ("Delay L"), big), 9), "Sync L", 0.5f, 1.0f), "Style", 0.6f, 1.0f));
     v.push_back (when (dial (228, 76, 54, "Spread", TR_NOOP ("Spread"), (std::uint16_t) (big | bipolar)), "Style", 0.0f, 0.2f));
     v.push_back (when (dial (228, 76, 54, "Ratio", TR_NOOP ("Ratio"), big), "Style", 0.2f, 0.4f));
     v.push_back (when (dial (228, 76, 54, "Spacing", TR_NOOP ("Spacing"), (std::uint16_t) (big | bipolar)), "Style", 0.4f, 0.6f));
@@ -2247,7 +2282,10 @@ Layout echoformLayout()
     v.push_back (dial (488, k2, d, "Diffusion size", TR_NOOP ("Size")));
     // modulation: wow / flutter (tape), rate / depth, shift / detune (shifter), pitch / detune (pitch, reverse, detune)
     const auto tape = 1.0f / 12.0f, shifter = 8.0f / 12.0f, pitch = 9.0f / 12.0f, detune = 11.0f / 12.0f;
-    v.push_back (section (532, top, 80, h, TR_NOOP ("Mod")));
+    // round 129: the section is named after what it holds in the mode (the reference renames it FREQ / PITCH)
+    v.push_back (when (section (532, top, 80, h, TR_NOOP ("Mod")), "Mode", 0.0f, shifter));
+    v.push_back (when (section (532, top, 80, h, TR_NOOP ("Freq")), "Mode", shifter, pitch));
+    v.push_back (when (section (532, top, 80, h, TR_NOOP ("Pitch")), "Mode", pitch, 1.0f));
     v.push_back (when (dial (572, k1, d, "Wow", TR_NOOP ("Wow")), "Mode", 0.0f, tape));
     v.push_back (when (dial (572, k2, d, "Flutter", TR_NOOP ("Flutter")), "Mode", 0.0f, tape));
     v.push_back (when (dial (572, k1, d, "Mod rate", TR_NOOP ("Rate")), "Mode", tape, shifter));
@@ -2266,6 +2304,10 @@ Layout echoformLayout()
     v.push_back (dial (738, k2, d, "Output", TR_NOOP ("Level"), bipolar)); // round 119
     // round 119: ping-pong in pairs (shown with the ping-pong style)
     v.push_back (when (toggle (280, 252, 90, 24, "Pairs", TR_NOOP ("Pairs")), "Style", 0.8f, 1.0f));
+    // round 129: the echoes' polarity per side (H-Delay's phase L / R) and a tap-tempo pad (sets the left time)
+    v.push_back (toggle (376, 254, 70, 20, "Phase L", TR_NOOP ("Phase L")));
+    v.push_back (toggle (452, 254, 70, 20, "Phase R", TR_NOOP ("Phase R")));
+    v.push_back (display (532, 252, 80, 24, "taptempo", "Time L", "Sync L"));
     // the mode selector along the bottom
     v.push_back (label (8, 254, 52, 20, TR_NOOP ("Mode")));
     v.push_back (menuOf (64, 252, 200, 24, "Mode", TR_NOOP ("Mode"),
@@ -2442,7 +2484,7 @@ const std::vector<EffectKind>& ownLayoutKinds()
                                                  EffectKind::foilPlate, EffectKind::nebula, EffectKind::halo, EffectKind::horizon,
                                                  EffectKind::echoform, EffectKind::spiralEcho, EffectKind::orbit, EffectKind::latticeMod,
                                                  EffectKind::crestCompressor, EffectKind::prismMultiband, EffectKind::sentryGate,
-                                                 EffectKind::quellDenoiser, EffectKind::geminiDoubler };
+                                                 EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::compressor };
     return kinds;
 }
 
@@ -2500,6 +2542,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::vocodex: l = vocodexLayout(); break;
         case EffectKind::ridgeStrip: l = ridgeStrip(); break;
         case EffectKind::glowLeveler: l = glowLeveler(); break;
+        case EffectKind::compressor: l = compressorLayout(); break;
         case EffectKind::hushDeEsser: l = hushDeEsser(); break;
         case EffectKind::aether: l = aetherLayout(); break;
         case EffectKind::ember: l = emberLayout(); break;

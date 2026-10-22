@@ -184,9 +184,11 @@ mix = 1
 [soundtoys-littleplate]
 product = Little Plate
 vendor = Soundtoys
-lynx = Reeverb 2
+lynx = Foil Plate
 names = LittlePlate; Little Plate
-preset = Dry=0; Wet=0.8
+# round 129 (docs/PARITY.md): LYNX's plate reverb plays a plate's role (was Reeverb 2); its state is encoded: a
+# 2 s plate, 100 % wet, at the slot's dry / wet 25 % as before
+preset = Decay=0.3; Mix=1
 mix = 0.25
 
 [waves-reverbs]
@@ -220,7 +222,11 @@ waves = SuperTap
 [soundtoys-echoboy]
 product = EchoBoy
 vendor = Soundtoys
-lynx = Fruity Delay 3
+# round 129 (docs/PARITY.md): LYNX's multi-mode echo plays EchoBoy's role (styles, saturation, wow / flutter, note
+# sync; was Fruity Delay 3 at FL's default). Its state is encoded: a tape echo, 1/4 note at the project tempo,
+# 25 % feedback, 25 % mix
+lynx = Echoform
+preset = Mode=0.0415; Sync L=0.6248; Note L=0.4498; Feedback=0.125; Mix=0.25
 # [DATA] VST2 unique ID from real projects
 vst2 = StEB
 names = EchoBoy; EchoBoyJr; EchoBoy Jr
@@ -228,7 +234,9 @@ names = EchoBoy; EchoBoyJr; EchoBoy Jr
 [soundtoys-primaltap]
 product = PrimalTap
 vendor = Soundtoys
-lynx = Fruity Delay 3
+# round 129: Echoform (as EchoBoy), a darker lo-fi tape echo
+lynx = Echoform
+preset = Mode=0.125; Sync L=0.6248; Note L=0.4498; Feedback=0.125; Mix=0.25
 names = PrimalTap; Little PrimalTap; LittlePrimalTap
 
 # Valhalla delay / modulation plugins -> LYNX's delay / modulation suite (round 101). Their saved state is a JUCE
@@ -1342,6 +1350,9 @@ int translateWavesHDelay (const std::vector<std::uint8_t>& state, EffectSlot& sl
     const bool analog = wavesValue (rw, 23).value_or (2.0) >= 0.5;
     p[e::style] = e::styleValue (pingPong ? e::Style::pingPong : e::Style::single);
     p[e::pairs] = pingPong ? 1.0f : 0.0f;
+    // round 129: phase L / R (RealWorld 8 / 9, round 119 §2 [EXEC]; 1 = inverted)
+    p[e::phaseL] = wavesValue (rw, 8).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
+    p[e::phaseR] = wavesValue (rw, 9).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
     const auto note = (int) std::lround (wavesValue (rw, 4).value_or (13.0));
     if (*sync >= 0.5 && *sync < 1.5 && note >= 0 && note <= 19)
     {
