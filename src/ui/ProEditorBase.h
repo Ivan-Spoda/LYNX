@@ -771,6 +771,8 @@ protected:
     std::vector<float> specPre, specPost; // dB per column over `specArea`
     juce::Rectangle<float> specArea;
     double specMinHz = 10.0, specMaxHz = 30000.0;
+    float specFall = 1.5f;   // dB per frame the analyser falls (its speed; round 128)
+    bool specFrozen = false; // the analyser holds its curve (freeze; round 128)
 
     float xForHz (double f, juce::Rectangle<float> a) const
     {
@@ -792,6 +794,7 @@ protected:
             specPre.assign ((std::size_t) columns, -120.0f);
             specPost.assign ((std::size_t) columns, -120.0f);
         }
+        if (specFrozen && ! demo) return;
         if (demo)
         {
             for (int i = 0; i < columns; ++i)
@@ -813,7 +816,7 @@ protected:
         if (written == lastSpectrum)
         {
             for (auto* s : { &specPre, &specPost })
-                for (auto& x : *s) x = juce::jmax (-120.0f, x - 1.5f);
+                for (auto& x : *s) x = juce::jmax (-120.0f, x - specFall);
             return;
         }
         lastSpectrum = written;
@@ -840,7 +843,7 @@ protected:
                 const auto f = hzForX (a.getX() + a.getWidth() * (float) i / (float) (columns - 1), a);
                 const auto db = (float) (20.0 * std::log10 (m * norm + 1e-9) + tiltDb (f));
                 auto& x = out[(std::size_t) i];
-                x = db > x ? db : juce::jmax (db, x - 1.5f);
+                x = db > x ? db : juce::jmax (db, x - specFall);
             }
         }
     }

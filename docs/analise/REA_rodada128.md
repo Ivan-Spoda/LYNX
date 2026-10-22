@@ -113,6 +113,33 @@ mode, detector, look-ahead, listen) [EXEC: `cmp` identical]. Tests: `tests/Parit
   shrinks; In level in the bottom bar (Release moved to the bar too, as the reference has no release knob). Not
   done: oversampling. Pro-DS state translation untouched (vmatch127 owns it).
 
+### 3b. Crest / Sentry / Prism (sub-branch parity128b)
+New parameters are appended to each engine (old projects load them at their defaults) and the defaults leave the
+output bit-identical: the round-108 goldens (tests/DynamicsTests108.inc) run unchanged. Tests:
+tests/Parity128bTests.inc.
+- **Crest Compressor ← Pro-C 3**: `Dry` (−∞ … +36 dB on the original's law: 72 dB per unit above 0.25, amplitude
+  ∝ v² below; added to the mix, so MIX + DRY = the original's wet / dry pair) — the DRY knob sits under AUTO GAIN as in
+  the reference, MIX moved to the bottom bar; `Auto threshold` (rule [model]: effective threshold = the detector
+  input's 3 s RMS level + knob + 18 dB, so the default −18 dB sits at the programme's average level; the AUTO switch
+  above THRESHOLD); `Link mode` Stereo / Mid / Side / Mid > side / Side > mid (the last four detect and process in
+  mid / side; the "x > y" modes apply one channel's gain to the other) in the side-chain panel; `Meter scale` 9 / 18 /
+  36 / 72 / 90 dB (the dB box at the display's bottom right; the display's level scale follows it); `Input meter`
+  (click IN above the meters). Translated from Pro-C 3 [EXEC layout of round 108]: 2 auto threshold, 17 dry gain
+  (relative to the wet gain folded into Output), 26 / 27 link mid-only range + mode, 97 meter scale, 99 input meter.
+  Styles stay 11: Smooth / TTM / Op-El / Mastering would need their own measured families (vmatch's domain).
+- **Sentry Gate ← Pro-G**: `Channel mode` L/R or M/S (bottom bar; the two detector channels become mid / side),
+  expert `SC gain L/R` (−36 … +36 dB) and `SC mix L/R` (−1 … +1: 0 = the channel's own input, towards the first / second
+  channel), `Wet pan` / `Dry pan` (balance), `Ducking` (the gate turned upside down: target = range floor / gate gain;
+  static curve −range − gate), `Input` (−24 … +24 dB, bottom bar). The expert strip grew a second row (side-chain
+  gain / mix, ducking, wet / dry pan). Translated from Pro-G: 12–15, 21, 23, 27, 28.
+- **Prism Multiband ← Pro-MB**: `B1…B4 lookahead` (0–20 ms, default 20 ms = the whole global look-ahead as before;
+  a band's gain is delayed by global − band look-ahead) as a LOOKAHEAD knob in the band panel; translated from each
+  Pro-MB band's look-ahead (base + 12). The gain-scale button cycles 3 / 6 / 12 / 30 dB; the analyser button opens a
+  menu (off / pre / post / pre + post, speed very slow … very fast, freeze) — base helpers `specFall` / `specFrozen`.
+- Not done (noted in docs/PARITY.md): Crest host-sync / MIDI side-chain triggering, audition triggering, 6 side-chain EQ
+  bands, oversampling 16x / 32x; Sentry oversampling; Prism free band placement / 6 bands, per-band expert (side-chain
+  filter, external input, stereo link), processing modes, oversampling, analyser resolution / tilt.
+
 ## Where I stopped
 - Done: §1, §2, docs/PARITY.md (tables + before scores), Desktop page.
 - Next: shared editor header (undo / redo, A/B, presets), then per-engine gaps in the order of §2.

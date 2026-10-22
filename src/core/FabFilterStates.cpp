@@ -200,6 +200,23 @@ int fromProC3 (const State& s, EffectSlot& slot)
     set (scExternal, roundIndex (s.at (21)) == 1 ? 1.0f : 0.0f);
     set (scLevel, linValue (s.at (22), -36.0, 36.0));
     set (stereoLink, clamp01 (2.0 * s.at (26)));
+    // round 128: the link knob's upper half goes "mid-only" (0.75 = 100 %, 50 % mid-only): past the middle of it the
+    // mode (27: Mid, Side, M → S, S → M) becomes ours; auto threshold (2), dry gain (17, level law, relative to the
+    // wet gain that went into our output), meter scale (97), input meter (99)
+    {
+        static constexpr LinkMode modes[4] { LinkMode::mid, LinkMode::side, LinkMode::midToSide, LinkMode::sideToMid };
+        set (linkMode, linkModeValue (s.at (26) > 0.75f ? modes[std::clamp (roundIndex (s.at (27)), 0, 3)] : LinkMode::stereo));
+    }
+    set (autoThreshold, s.at (2) >= 0.5f ? 1.0f : 0.0f);
+    {
+        const auto dryLevel = levelDb (s.at (17));
+        set (dryGain, dryLevel <= -119.0 ? 0.0f : dryValue (dryLevel - levelDb (s.at (15))));
+    }
+    if (s.count > 99)
+    {
+        set (meterScale, (float) std::clamp (roundIndex (s.at (97)), 0, 4) / 4.0f);
+        set (inputMeter, s.at (99) >= 0.5f ? 1.0f : 0.0f);
+    }
     // side-chain EQ: the first three bands that are used and enabled
     static constexpr facet::Shape shapes[10] { facet::Shape::bell, facet::Shape::lowShelf, facet::Shape::lowCut, facet::Shape::highShelf,
                                                facet::Shape::highCut, facet::Shape::notch, facet::Shape::bandPass,
@@ -323,6 +340,7 @@ int fromProMB (const State& s, EffectSlot& slot)
         const auto soloMute = roundIndex (s.at (base + 21));
         set (param (b, fSolo), soloMute == 1 || soloMute == 3 ? 1.0f : 0.0f);
         la = std::max (la, (double) s.at (base + 12));
+        set (Global::bandLookahead0 + b, linValue (s.at (base + 12), 0.0, 20.0)); // round 128: the band's own
         if (b == 0)
         {
             // the slope: the steeper of the band's sides, to our nearest
@@ -376,6 +394,16 @@ int fromProG (const State& s, EffectSlot& slot)
     const auto dryDb = levelDb (s.at (22));
     set (dry, clamp01 (std::pow (10.0, (dryDb - wetDb) / 20.0)));
     set (output, linValue (levelDb (s.at (30)) + wetDb, -24.0, 24.0));
+    // round 128: expert side chain (12 / 14 level dB, 13 / 15 mix −1 … 1), wet / dry pan (21 / 23), channel mode
+    // (27), input level (28)
+    set (scGainL, linValue (s.at (12), -36.0, 36.0));
+    set (scMixL, linValue (s.at (13), -1.0, 1.0));
+    set (scGainR, linValue (s.at (14), -36.0, 36.0));
+    set (scMixR, linValue (s.at (15), -1.0, 1.0));
+    set (wetPan, linValue (s.at (21), -1.0, 1.0));
+    set (dryPan, linValue (s.at (23), -1.0, 1.0));
+    set (channelMode, s.at (27) >= 0.5f ? 1.0f : 0.0f);
+    set (input, linValue (levelDb (s.at (28)), -24.0, 24.0));
     return n;
 }
 

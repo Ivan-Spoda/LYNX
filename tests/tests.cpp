@@ -15751,3 +15751,4 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "LoadTests121.inc"
 #include "Parity128Tests.inc"
 #include "Parity128aTests.inc"
+#include "Parity128bTests.inc"
