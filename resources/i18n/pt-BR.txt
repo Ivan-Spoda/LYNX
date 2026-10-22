@@ -2820,3 +2820,5 @@ countries: br
 "PITCH GRAPH" = "GRÁFICO DE AFINAÇÃO"
 "INPUT" = "ENTRADA"
 "no pitch" = "sem afinação"
+"Split" = "Divisão"
+"Classic|E console" = "Clássico|Console E"

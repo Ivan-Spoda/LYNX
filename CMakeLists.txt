@@ -111,6 +111,7 @@ add_library(lynx_core STATIC
     src/core/FruityFilters.cpp
     src/core/NewtoneFx.cpp
     src/core/MixSuite.cpp
+    src/core/VoiceMatch.cpp
     src/core/EchoSuite.cpp
     src/core/VocalPitch.cpp
     src/core/LynxTune.cpp

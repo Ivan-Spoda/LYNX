@@ -8,6 +8,7 @@
 #include "core/Biquad.h"
 #include "core/Effects.h"
 #include "core/LrCrossover.h"
+#include "core/VoiceMatch.h"
 
 // REA_rodada96. Every formula below is textbook material, cited where it matters:
 //  - biquads: R. Bristow-Johnson, "Cookbook formulae for audio EQ biquad filter coefficients";
@@ -289,6 +290,11 @@ double releaseSeconds (float v) noexcept { return logMap (v, 0.1, 4.0); }
 double gateRangeDb (float v) noexcept { return lin (v, 0.0, 60.0); }
 double gateThresholdDb (float v) noexcept { return lin (v, -80.0, 0.0); }
 double trimDb (float v) noexcept { return lin (v, -20.0, 20.0); }
+double eQ (float v) noexcept { return vmatch::echannel::qFromDial (1.0 - (double) std::clamp (v, 0.0f, 1.0f)); }
+double eCompThresholdDb (float v) noexcept { return lin (v, -20.0, 10.0); }
+double eGateRangeDb (float v) noexcept { return lin (v, 0.0, 40.0); }
+double eGateThresholdDb (float v) noexcept { return lin (v, -30.0, 10.0); }
+bool eVoicing (const EffectParams& p) noexcept { return on (p[voicing]); }
 
 namespace
 {
@@ -378,11 +384,13 @@ public:
     void prepare (double rate) noexcept override
     {
         sr = rate;
+        console.prepare (rate);
         reset();
     }
 
     void reset() noexcept override
     {
+        console.reset();
         for (auto* d : { &audio, &side })
         {
             d->hp1.reset(); d->hp2.reset(); d->lp.reset(); d->lf.reset(); d->lmf.reset(); d->hmf.reset(); d->hf.reset();
@@ -397,6 +405,13 @@ public:
 
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
+        if (eVoicing (p))
+        {
+            const auto inPeak = Meters::peak (l, r, n);
+            console.process (l, r, n, consoleSettings (p));
+            meters.set (console.compReductionDb(), console.gateReductionDb(), inPeak, Meters::peak (l, r, n));
+            return;
+        }
         audio.design (p, sr);
         side.design (p, sr);
         const auto inPeak = Meters::peak (l, r, n);
@@ -486,6 +501,45 @@ public:
     }
 
 private:
+    // E voicing: Ridge's controls in the console's units (the shared ranges use Ridge's own laws)
+    static vmatch::echannel::Settings consoleSettings (const EffectParams& p) noexcept
+    {
+        vmatch::echannel::Settings e;
+        e.inputDb = trimDb (p[input]);
+        e.outputDb = trimDb (p[output]);
+        e.phase = on (p[phase]);
+        e.hpHz = p[hpf] > 0.0f ? hpfHz (p[hpf]) : 0.0;
+        e.lpKHz = p[lpf] > 0.0f ? lpfHz (p[lpf]) / 1000.0 : 0.0;
+        e.lfGain = bandGainDb (p[lfGain], false);
+        e.lfHz = lfHz (p[lfFreq]);
+        e.lfBell = on (p[lfBell]);
+        e.lmfGain = bandGainDb (p[lmfGain], false);
+        e.lmfKHz = lmfHz (p[lmfFreq]) / 1000.0;
+        e.lmfQ = eQ (p[lmfQ]);
+        e.hmfGain = bandGainDb (p[hmfGain], false);
+        e.hmfKHz = hmfHz (p[hmfFreq]) / 1000.0;
+        e.hmfQ = eQ (p[hmfQ]);
+        e.hfGain = bandGainDb (p[hfGain], false);
+        e.hfKHz = hfHz (p[hfFreq]) / 1000.0;
+        e.hfBell = on (p[hfBell]);
+        e.eqOn = on (p[eqOn]);
+        e.compRatio = p[compRatio] <= 0.0005f ? 1.0 : ratio (p[compRatio]);
+        e.compThreshold = eCompThresholdDb (p[compThreshold]);
+        e.compRelease = releaseSeconds (p[ridge::compRelease]);
+        e.compFast = on (p[compFastAttack]);
+        e.expRange = eGateRangeDb (p[gateRange]);
+        e.expThreshold = eGateThresholdDb (p[gateThreshold]);
+        e.expRelease = releaseSeconds (p[ridge::gateRelease]);
+        e.expFast = on (p[gateFastAttack]);
+        e.gate = ! on (p[expander]);
+        e.dynOn = on (p[dynOn]);
+        e.dynamicsAfterEq = ! on (p[order]);
+        e.filtersBeforeDynamics = on (p[filterSplit]);
+        return e;
+    }
+
+    vmatch::echannel::Channel console;
+
     static void filters (EqDesign& d, float& a, float& b) noexcept
     {
         if (d.hpOn)
@@ -1199,7 +1253,8 @@ const EffectInfo& ridgeInfo()
                                      { "Ratio", 0.0f }, { "Comp. threshold", 1.0f }, { "Comp. release", 0.29f }, { "Fast attack", 0.0f },
                                      { "Gate range", 0.0f }, { "Gate threshold", 0.25f }, { "Gate release", 0.29f }, { "Gate fast", 0.0f },
                                      { "Expander", 0.0f }, { "Dynamics on", 1.0f },
-                                     { "Order", 0.0f }, { "Filters to SC", 0.0f }, { "Output", 0.5f }, { "Phase", 0.0f }, { "Comp. mix", 1.0f } } };
+                                     { "Order", 0.0f }, { "Filters to SC", 0.0f }, { "Output", 0.5f }, { "Phase", 0.0f }, { "Comp. mix", 1.0f },
+                                     { "Voicing", 0.0f }, { "Filter split", 0.0f } } };
     return info;
 }
 
@@ -1281,6 +1336,23 @@ std::string fmt (const char* f, double v)
 std::string onOff (float v) { return on (v) ? "on" : "off"; }
 } // namespace
 
+namespace ridge
+{
+std::string eParamText (int param, float v)
+{
+    switch (param)
+    {
+        case lmfQ: case hmfQ: return fmt ("Q %.2f", eQ (v));
+        case lfGain: case lmfGain: case hmfGain: case hfGain: return fmt ("%+.1f dB", bandGainDb (v, false));
+        case compThreshold: return fmt ("%+.1f dB", eCompThresholdDb (v));
+        case gateRange: return v <= 0.0f ? "off" : fmt ("%.1f dB", eGateRangeDb (v));
+        case gateThreshold: return fmt ("%+.1f dB", eGateThresholdDb (v));
+        case curve: return "-";
+        default: return paramText (EffectKind::ridgeStrip, param, v);
+    }
+}
+} // namespace ridge
+
 std::string paramText (EffectKind kind, int param, float v)
 {
     if (kind == EffectKind::ridgeStrip)
@@ -1306,6 +1378,8 @@ std::string paramText (EffectKind kind, int param, float v)
             case gateThreshold: return fmt ("%.1f dB", gateThresholdDb (v));
             case expander: return on (v) ? "expander" : "gate";
             case order: return on (v) ? "dyn > EQ" : "EQ > dyn";
+            case voicing: return on (v) ? "E console" : "classic";
+            case filterSplit: return on (v) ? "split" : "with EQ";
             case phase: return on (v) ? "inverted" : "normal";
             case compMix: return fmt ("%.0f%%", v * 100.0);
             default: return onOff (v);

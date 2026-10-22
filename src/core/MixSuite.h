@@ -102,6 +102,9 @@ enum Param
     compRatio, compThreshold, compRelease, compFastAttack,
     gateRange, gateThreshold, gateRelease, gateFastAttack, expander, dynOn,
     order, filtersToSidechain, output, phase, compMix,
+    // round 123: "E" voicing (0 = Ridge's own engine, 1 = the measured E-type console channel, core/VoiceMatch.h) and
+    // that console's filter split (filters before the dynamics); appended, so older projects load Ridge's own sound
+    voicing, filterSplit,
     count
 };
 
@@ -124,6 +127,13 @@ double trimDb (float v) noexcept;          // ±20 dB (input / output)
 double responseDb (const EffectParams& p, double sampleRate, double hz);
 // Static curve of the compressor: output level for a steady input level (dB), no gate.
 double compressorCurveDb (const EffectParams& p, double inputDb);
+// E voicing: the console's own scales for the controls whose range differs from Ridge's (dial position 0..1)
+double eQ (float v) noexcept;              // mid-band Q 0.1 .. 3.5 (the console's dial, reversed so that up = narrower)
+double eCompThresholdDb (float v) noexcept; // -20 .. +10 dB (console scale)
+double eGateRangeDb (float v) noexcept;     // 0 .. 40 dB
+double eGateThresholdDb (float v) noexcept; // -30 .. +10 dB (console scale)
+bool eVoicing (const EffectParams& p) noexcept;
+std::string eParamText (int param, float v);
 } // namespace ridge
 
 // ---- Glow Leveler (optical leveler) ----
