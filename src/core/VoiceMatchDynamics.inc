@@ -69,27 +69,27 @@ CompLaw compLaw (const Settings& s) noexcept
     return c;
 }
 
+// expander / gate (fitted black-box: 24 threshold x range settings and 12 release / attack settings on stairs, bursts
+// and her take; dynfit "sslx"): feed-forward, peak detector with a 51 ms release, the expander a 1 : 2.5 soft-knee
+// (0.3 dB) slope below the threshold, the gate a switch with 3.9 dB of hysteresis; opening 0.25 ms (fast) / 1.06 ms,
+// closing with 0.43 x the release knob; the console's threshold is 21.8 dB above dBFS peak
 struct GateLaw
 {
-    double range, threshold, attackMs, releaseMs, detectorReleaseMs;
+    double range, threshold, attackMs, releaseMs, detectorReleaseMs, slope, knee, hysteresis;
     bool gate;
-    // reduction (dB, >= 0) for a detector level in dBFS
-    double reduction (double levelDb) const noexcept
-    {
-        if (gate)
-            return levelDb < threshold ? range : 0.0;
-        return std::clamp (threshold - levelDb, 0.0, range);
-    }
 };
 
 GateLaw gateLaw (const Settings& s) noexcept
 {
     GateLaw g {};
-    g.range = s.expRange;
-    g.threshold = s.expThreshold - 16.0;
-    g.attackMs = s.expFast ? 0.1 : 1.5;
-    g.releaseMs = std::max (0.1, s.expRelease) * 1000.0 * 0.25;
-    g.detectorReleaseMs = 30.0;
+    g.range = std::clamp (s.expRange, 0.0, 40.0);
+    g.threshold = std::clamp (s.expThreshold, -30.0, 10.0) - 21.763;
+    g.attackMs = s.expFast ? 0.252 : 1.061;
+    g.releaseMs = std::clamp (s.expRelease, 0.1, 4.0) * 1000.0 * 0.428;
+    g.detectorReleaseMs = 50.92;
+    g.slope = 1.508;
+    g.knee = 0.297;
+    g.hysteresis = 3.859;
     g.gate = s.gate;
     return g;
 }

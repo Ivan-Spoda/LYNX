@@ -74,6 +74,7 @@ private:
     // dynamics state
     double env = 0.0, gr = 0.0, gr1 = 0.0, yl = 0.0, yr = 0.0;
     double genv = 0.0, ggr = 0.0;
+    bool gateOpen = false;
     float lastComp = 0.0f, lastGate = 0.0f;
 };
 } // namespace echannel

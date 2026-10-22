@@ -64,8 +64,12 @@ waveform error). What fits: a **feedback** compressor (the detector hears its ow
 gain smoothing in dB with a fast (1.2–7.5 ms by ratio) or slow (100–170 ms) attack, a **two-part release** (a share
 releasing in ~40 ms, the rest with the knob), the console's own **automatic make-up** (0 … +7 dB, depending on
 threshold and ratio, measured on the stairs; 0 at 1:1). Feed-forward fits were 4–25 dB worse. The laws are an 8 × 8
-grid of threshold × (1 − 1/ratio) plus knob tables (src/core/VoiceMatchDynamics.inc). Not modelled yet: the expander /
-gate (her states: range 0, i.e. off — a placeholder law is in place), "EQ to side chain", Analog.
+grid of threshold × (1 − 1/ratio) plus knob tables (src/core/VoiceMatchDynamics.inc). The expander / gate (her states:
+range 0, i.e. off) was fitted on 36 settings (dynfit "sslx": feed-forward, 51 ms peak detector, a 1 : 2.5 soft-knee
+expander or a gate with 3.9 dB hysteresis, opening 0.25 / 1.06 ms, closing 0.43 × the release knob, threshold 21.8 dB
+above dBFS): expander −35 … −60 dB except release ≥ 1.2 s (−10 … −33 dB), gate −40 … −54 dB on stairs / bursts and
+−2 … −51 dB on her take (a gate's open / close decisions on speech either match or flip a whole syllable). Not
+modelled: "EQ to side chain", Analog.
 
 **Signal flow** at her state (split on, dynamics not at the channel output): input → filters → dynamics → EQ → output,
 confirmed by the whole-state null below.
