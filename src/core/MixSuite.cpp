@@ -575,6 +575,7 @@ namespace glow
 {
 double gainDb (float v) noexcept { return lin (v, 0.0, 30.0); }
 double sidechainDb (float v) noexcept { return lin (v, -20.0, 40.0); }
+bool classic (const EffectParams& p) noexcept { return on (p[voicing]); }
 double trimDb (float v) noexcept { return lin (v, -18.0, 18.0); }
 
 namespace
@@ -593,12 +594,14 @@ public:
         memoryUp = coef (2.0, sr);
         memoryDown = coef (8.0, sr);
         autoCoef = coef (0.5, sr);
+        classicEngine.prepare (rate);
         reset();
     }
 
     void reset() noexcept override
     {
         emph.reset();
+        classicEngine.reset();
         panel = cellFast = cellSlow = memory = autoGr = 0.0;
         lastL = lastR = 0.0f;
     }
@@ -608,6 +611,30 @@ public:
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
         const auto inPeak = Meters::peak (l, r, n);
+        if (classic (p))
+        {
+            vmatch::opto::Settings c;
+            c.peakReduction = 100.0 * std::clamp ((double) p[peakReduction], 0.0, 1.0);
+            c.gain = 100.0 * std::clamp ((double) p[gain], 0.0, 1.0);
+            c.hiFreq = 100.0 * std::clamp ((double) p[emphasis], 0.0, 1.0);
+            c.limit = on (p[mode]);
+            const auto mx = std::clamp (p[mix], 0.0f, 1.0f);
+            const auto trimGain = (float) dbToGain (trimDb (p[trim]));
+            for (int off = 0; off < n; off += maxBlock)
+            {
+                const int m = std::min (maxBlock, n - off);
+                std::copy (l + off, l + off + m, dryL.begin());
+                std::copy (r + off, r + off + m, dryR.begin());
+                classicEngine.process (l + off, r + off, m, c);
+                for (int i = 0; i < m; ++i)
+                {
+                    l[off + i] = (l[off + i] * mx + dryL[(std::size_t) i] * (1.0f - mx)) * trimGain;
+                    r[off + i] = (r[off + i] * mx + dryR[(std::size_t) i] * (1.0f - mx)) * trimGain;
+                }
+            }
+            meters.set (classicEngine.reductionDb(), 0.0f, inPeak, Meters::peak (l, r, n));
+            return;
+        }
         const auto sc = p[peakReduction] <= 0.0f ? 0.0 : dbToGain (sidechainDb (p[peakReduction]));
         const auto gamma = on (p[mode]) ? 9.0 : 2.0; // asymptotic ratio 1 + gamma: about 3:1 (compress), 10:1 (limit)
         emph.shelf (sr, 2500.0, 10.0 * std::clamp ((double) p[emphasis], 0.0, 1.0), true, 0.7);
@@ -655,7 +682,10 @@ public:
     }
 
 private:
+    static constexpr int maxBlock = 1024;
     double sr = 44100.0;
+    vmatch::opto::Leveler classicEngine;
+    std::array<float, maxBlock> dryL {}, dryR {};
     Biquad emph;
     double panel = 0, cellFast = 0, cellSlow = 0, memory = 0;
     double panelAttack = 0, panelRelease = 0, fastAttack = 0, fastRelease = 0, slowAttack = 0, memoryUp = 0, memoryDown = 0;
@@ -1708,7 +1738,7 @@ const EffectInfo& glowInfo()
 {
     static const EffectInfo info { "Glow Leveler",
                                    { { "Peak reduction", 0.0f }, { "Gain", 0.0f }, { "Limit", 0.0f }, { "Emphasis", 0.0f }, { "Mix", 1.0f },
-                                     { "Trim", 0.5f }, { "Auto makeup", 0.0f } } };
+                                     { "Trim", 0.5f }, { "Auto makeup", 0.0f }, { "Voicing", 0.0f } } };
     return info;
 }
 
@@ -1799,6 +1829,18 @@ std::string fmt (const char* f, double v)
 
 std::string onOff (float v) { return on (v) ? "on" : "off"; }
 } // namespace
+
+namespace glow
+{
+std::string classicParamText (int param, float v)
+{
+    switch (param)
+    {
+        case peakReduction: case gain: case emphasis: return fmt ("%.1f", v * 100.0);
+        default: return paramText (EffectKind::glowLeveler, param, v);
+    }
+}
+} // namespace glow
 
 namespace hush
 {

@@ -1627,6 +1627,8 @@ Layout compressorLayout()
     v.push_back (meter (184, 26, 66, 180, 0, TR_NOOP ("Reduction")));
     v.push_back (slider (Item::vslider, 268, 30, 34, 172, "Makeup", TR_NOOP ("Gain")));
     v.push_back (toggle (314, 30, 94, 20, "Auto gain", TR_NOOP ("Auto gain")));
+    // round 123: the voicing — LYNX's classic compressor, or the measured program-dependent one (substitutes start there)
+    v.push_back (tabs (314, 60, 94, 40, "Voicing", TR_NOOP ("Classic|Vintage")));
     v.push_back (dial (60, 252, 34, "Attack", TR_NOOP ("Attack")));
     v.push_back (dial (140, 252, 34, "Release", TR_NOOP ("Release")));
     v.push_back (dial (217, 252, 34, "Ratio", TR_NOOP ("Ratio")));
@@ -1654,6 +1656,8 @@ Layout glowLeveler()
     v.push_back (display (392, 22, 136, 18, "vusel"));
     v.push_back (tabs (200, 184, 140, 22, "Limit", TR_NOOP ("Compress|Limit")));
     v.push_back (toggle (404, 206, 120, 20, "Auto makeup", TR_NOOP ("Auto makeup")));
+    // round 123: the voicing — Glow's own engine, or the measured classic opto leveler (substitutes start there)
+    v.push_back (tabs (12, 206, 160, 22, "Voicing", TR_NOOP ("Modern|Opto classic")));
     v.push_back (dial (170, 254, 28, "Emphasis", TR_NOOP ("HF emphasis")));
     v.push_back (dial (270, 254, 28, "Mix", TR_NOOP ("Mix")));
     v.push_back (dial (370, 254, 28, "Trim", TR_NOOP ("Trim"), bipolar));

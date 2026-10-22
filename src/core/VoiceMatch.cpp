@@ -483,4 +483,176 @@ void DeEsser::process (float* l, float* r, int n, const Settings& s) noexcept
     last = (float) maxGr;
 }
 } // namespace deesser
+
+// ================================================================== electro-optical leveler
+// [EXEC] Fitted on the official CLA-2A trial (tools/fxmeasure/py/vm123: sine stairs at 100 Hz … 10 kHz, 1 kHz bursts,
+// a 1 kHz tone with a quiet pink probe at five levels, pink noise, her takes; dynfit "cla5"). A feedback leveler: the
+// side chain hears the cell's output through a peaking emphasis (+9.4 dB at 9 kHz); the cell's conductance C follows
+// the light — C = ((level - Yt) / Y0)^gamma above a threshold — with an attack in the log domain that speeds up with C,
+// a hyperbolic release (dC/dt = -a C^n: about half the reduction back in 60 ms, the rest over seconds) and a slow
+// second conductance; the audio sees g = 1 / (1 + C) with a high-frequency bypass that opens under reduction (the
+// measured tilt: up to +7 dB at 20 kHz), then the gain dial's make-up, a little 2nd / 3rd harmonic, and the unit's
+// idle response (a 4 Hz high-pass and a 0.7 dB dip around 12 kHz, measured).
+namespace opto
+{
+namespace
+{
+#include "core/VoiceMatchOpto.inc"
+} // namespace
+
+void Leveler::prepare (double sampleRate) noexcept
+{
+    sr = sampleRate;
+    reset();
+}
+
+void Leveler::reset() noexcept
+{
+    cf = cs = el = mem = 0.0;
+    for (int c = 0; c < 2; ++c)
+    {
+        yc[c] = fx1[c] = fy1[c] = 0.0;
+        for (int k = 0; k < 4; ++k)
+            tx[c][k] = ty[c][k] = 0.0;
+    }
+    sc.reset();
+}
+
+void Leveler::process (float* l, float* r, int n, const Settings& s) noexcept
+{
+    const double dt = 1.0 / sr;
+    if (scDesignedRate != sr)
+    {
+        scDesignedRate = sr;
+        const double A = std::pow (10.0, scDb / 40.0), w = 2.0 * pi * std::min (scHz, 0.45 * sr) / sr, al = std::sin (w) / (2.0 * scQ), cw = std::cos (w);
+        sc.set (1 + al * A, -2 * cw, 1 - al * A, 1 + al / A, -2 * cw, 1 - al / A);
+    }
+    const double shift = sensitivityDb (s.peakReduction, s.hiFreq) + (s.limit ? limitShiftDb : 0.0);
+    const double Y0 = dbToGain (y0Db + shift), Yt = dbToGain (ytDb + shift), gam = s.limit ? limitGamma : gamma;
+    const double mk = dbToGain (makeupDb (s.gain) + idleMakeupDb);
+    const double cA = 1.0 - std::exp (-dt * 1000.0 / attackSlowMs), mUp = 1.0 - std::exp (-dt * 1000.0 / memUpMs), mDn = 1.0 - std::exp (-dt * 1000.0 / memDownMs);
+    const double K = 2.0 * sr;
+    // the idle response measured at 48 kHz; other rates take its bilinear analog prototype (approximate)
+    const double* tb = idleB;
+    const double* ta = idleA;
+    double maxGr = 0.0;
+    for (int i = 0; i < n; ++i)
+    {
+        const double e0 = sc.process ((float) yc[0], 0), e1 = sc.process ((float) yc[1], 1);
+        el = std::max (std::abs (e0), std::abs (e1)); // the light follows the drive within the sample (fitted)
+        const double ct = (el > Yt ? std::pow ((el - Yt) / Y0, gam) : 0.0) * (1.0 + memGain * mem);
+        const double ctf = (1.0 - slowShare) * ct, cts = slowShare * ct;
+        if (ctf > cf)
+        {
+            double cd = std::log1p (cf);
+            cd += (std::log1p (ctf) - cd) * (1.0 - std::exp (-dt * 1000.0 * std::pow (1.0 + cf, attackBeta) / attackMs));
+            cf = std::expm1 (cd);
+        }
+        else
+            cf = std::max (ctf, cf - dt * releaseA * std::pow (cf, releaseN));
+        if (cts > cs)
+            cs += (cts - cs) * cA;
+        else
+            cs = std::max (cts, cs - dt * releaseA2 * std::pow (cs, releaseN2));
+        const double g = 1.0 / (1.0 + cf + cs);
+        mem += ((1.0 - g) > mem ? mUp : mDn) * ((1.0 - g) - mem);
+        const double gp = g + (1.0 - g) * (tiltC0 - tiltC1 * g);
+        const double wz = 2.0 * pi * tiltHz * (1.0 + g);
+        const double a0 = 1.0 + K * gp / wz, b0 = g * (1.0 + K / wz) / a0, b1 = g * (1.0 - K / wz) / a0, a1 = (1.0 - K * gp / wz) / a0;
+        float* ch[2] = { &l[i], &r[i] };
+        for (int c = 0; c < 2; ++c)
+        {
+            const double x = *ch[c];
+            const double y = b0 * x + b1 * fx1[c] - a1 * fy1[c];
+            fx1[c] = x;
+            fy1[c] = y;
+            yc[c] = y;
+            double o = y * mk;
+            o = o + h2 * o * o + h3 * o * o * o;
+            for (int j = 3; j > 0; --j) { tx[c][j] = tx[c][j - 1]; ty[c][j] = ty[c][j - 1]; }
+            tx[c][0] = o;
+            const double t = tb[0] * tx[c][0] + tb[1] * tx[c][1] + tb[2] * tx[c][2] + tb[3] * tx[c][3] - ta[1] * ty[c][1] - ta[2] * ty[c][2] - ta[3] * ty[c][3];
+            ty[c][0] = t;
+            *ch[c] = (float) t;
+        }
+        maxGr = std::max (maxGr, -gainToDb (g));
+    }
+    last = (float) maxGr;
+}
+} // namespace opto
+
+// ================================================================== program-dependent peak compressor
+// [EXEC] Fitted on the official Renaissance Compressor trial at her state (-15 dB, 2.95:1, 0.5 ms, 160 ms, ARC, Warm,
+// Electro) on 1 kHz stairs, tone bursts, pink noise and her takes (dynfit "rc2"): a 64-sample (1.33 ms at 48 kHz)
+// delay of the audio against the detector, a linked peak detector (9 ms release), a 21.7 dB-wide soft knee 2.8 dB
+// under the threshold, a fast gain path (attack 2.1 x the knob, release 25 ms) and a slow "program" path that
+// charges in ~220 ms and releases at a constant rate in linear gain (3.8 /s x 160 ms / the release knob) — so short
+// peaks recover in milliseconds and long phrases slowly (its ARC / Electro behaviour at her state). Her takes:
+// null -26 dB (stairs and bursts -40 … -50 dB). [model] The knob laws away from her state, ARC / manual, Opto and
+// Smooth are not separated yet (REA_rodada123 §3).
+namespace progcomp
+{
+namespace
+{
+constexpr double thrOffset = -2.8056, kneeDb = 21.7431, ratioScale = 1.3191, attackScale = 2.1395, fastReleaseMs = 24.5151;
+constexpr double slowChargeMs = 222.5718, slowRate = 3.8413, slowShape = -1.1528, detectorReleaseMs = 9.2761;
+} // namespace
+
+void Compressor::prepare (double sampleRate) noexcept
+{
+    sr = sampleRate;
+    delayLen = std::clamp ((int) std::lround (lookahead * sr / 48000.0), 1, (int) dl.size() - 1);
+    reset();
+}
+
+void Compressor::reset() noexcept
+{
+    dl.fill (0.0f);
+    dr.fill (0.0f);
+    pos = 0;
+    env = grf = grs = 0.0;
+}
+
+void Compressor::process (float* l, float* r, int n, const Settings& s) noexcept
+{
+    const double T = s.thresholdDb + thrOffset, R = 1.0 + (std::max (1.0, s.ratio) - 1.0) * ratioScale, W = kneeDb;
+    const double aA = coefMs (std::max (0.01, s.attackMs) * attackScale, sr), fR = coefMs (fastReleaseMs, sr), sC = coefMs (slowChargeMs, sr);
+    const double dR = coefMs (detectorReleaseMs, sr), relK = 160.0 / std::max (1.0, s.releaseMs), dt = 1.0 / sr;
+    const double makeup = s.gainDb, trim = dbToGain (s.trimDb);
+    const int N = (int) dl.size();
+    double maxGr = 0.0;
+    for (int i = 0; i < n; ++i)
+    {
+        const double a = std::max (std::abs ((double) l[i]), std::abs ((double) r[i]));
+        env = a > env ? a : env + dR * (a - env);
+        const double x = gainToDb (env), o = x - T;
+        double y;
+        if (2.0 * o < -W) y = x;
+        else if (2.0 * std::abs (o) <= W) y = x + (1.0 / R - 1.0) * (o + W / 2.0) * (o + W / 2.0) / (2.0 * W);
+        else y = T + o / R;
+        const double target = std::max (0.0, x - y);
+        grf += (target > grf ? aA : fR) * (target - grf);
+        if (grf > grs)
+            grs += sC * (grf - grs);
+        else
+        {
+            double gs = dbToGain (-grs);
+            gs += slowRate * relK * (1.0 + slowShape * (1.0 - gs)) * dt;
+            grs = gs >= 1.0 ? 0.0 : -gainToDb (gs);
+            grs = std::max (grs, grf);
+        }
+        const double gr = std::max (grf, grs);
+        maxGr = std::max (maxGr, gr);
+        const double g = (dbToGain (makeup - gr) * s.mix + (1.0 - s.mix)) * trim;
+        dl[(std::size_t) pos] = l[i];
+        dr[(std::size_t) pos] = r[i];
+        int rd = pos - delayLen;
+        if (rd < 0) rd += N;
+        l[i] = (float) (dl[(std::size_t) rd] * g);
+        r[i] = (float) (dr[(std::size_t) rd] * g);
+        if (++pos == N) pos = 0;
+    }
+    last = (float) maxGr;
+}
+} // namespace progcomp
 } // namespace lynx::vmatch

@@ -106,3 +106,39 @@ TEST (deesser_matched_voicing_round123)
     CHECK (worst < 0.2);
     CHECK (std::abs (vm123::sineGainDb (s, 1000.0, -2.0)) < 0.05);
 }
+
+TEST (opto_and_program_compressor_voicings_round123)
+{
+    using namespace lynx;
+    // her CLA-2A: gain 48.96, peak reduction 62.6, compress, Hi Freq 50 -> Glow Leveler "opto classic", dials 1:1
+    std::string values;
+    for (int i = 0; i < 208; ++i)
+        values += i == 38 ? "48.96 " : i == 74 ? "62.6 " : i == 153 ? "50 " : "0 ";
+    int n = 0;
+    auto s = vm123::wavesSlot ("CLA-2A", values.c_str(), n);
+    namespace g = mixsuite::glow;
+    CHECK (n == 5 && s.kind == EffectKind::glowLeveler && s.params[g::voicing] == 1.0f);
+    CHECK (std::abs (s.params[g::peakReduction] - 0.626f) < 1e-5f && std::abs (s.params[g::gain] - 0.4896f) < 1e-5f);
+    // 1 kHz steady gain vs the official plug-in's stairs: +16.0 dB below the threshold, -1.2 dB at -6 dBFS (her state)
+    CHECK (std::abs (vm123::sineGainDb (s, 1000.0, -50.0) - 15.98) < 0.1);
+    CHECK (std::abs (vm123::sineGainDb (s, 1000.0, -6.0) - (-1.2)) < 0.6);
+    // the gain dial's measured law (level below the threshold) and the peak reduction / Hi Freq sensitivity shifts
+    CHECK (std::abs (vmatch::opto::makeupDb (80.0) - 33.68) < 1e-9 && std::abs (vmatch::opto::sensitivityDb (62.6, 50.0)) < 1e-9);
+    CHECK (std::abs (vmatch::opto::sensitivityDb (80.0, 0.0) - (-34.05 + 24.78 + 6.15)) < 1e-9);
+
+    // her Renaissance Compressor -> Compressor "vintage program": -15 dB, 2.96:1, 0.5 ms, 160 ms, gain 0
+    n = 0;
+    auto c = vm123::wavesSlot ("RComp", "160.31 -15 0 * * * * * 0.5 2.96 56.23 10 0 0 149.62 120 0 0 1 0.4 0 1.5 0 * * * 100 0", n);
+    CHECK (n == 6 && c.kind == EffectKind::compressor && c.params[8] == 1.0f && c.params[6] == 1.0f);
+    // 1 kHz steady gain vs the official plug-in's stairs at her state: 0 / -0.4 / -1.8 / -4.6 / -8.5 / -12.8 dB
+    static constexpr double golden[][2] = { { -30, 0.0 }, { -24, -0.4 }, { -18, -1.8 }, { -12, -4.6 }, { -6, -8.5 }, { 0, -12.8 } };
+    double worst = 0.0;
+    for (const auto& gd : golden)
+        worst = std::max (worst, std::abs (vm123::sineGainDb (c, 1000.0, gd[0]) - gd[1]));
+    CHECK (worst < 0.35);
+    auto fx = makeEffect (c);
+    fx->prepare (48000.0);
+    std::vector<float> l (256, 0.0f), r (256, 0.0f);
+    fx->process (l.data(), r.data(), 256, c.params, 120.0);
+    CHECK (fx->latencySamples() == vmatch::progcomp::lookahead);
+}

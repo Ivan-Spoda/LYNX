@@ -141,7 +141,11 @@ namespace glow
 {
 // round 129: trim (±18 dB after the mix) and auto make-up appended (the reference's TRIM and AUTO MAKEUP); older
 // projects load their defaults (0 dB, off) and sound the same
-enum Param { peakReduction, gain, mode, emphasis, mix, trim, autoMakeup, count };
+// round 123: voicing (appended): 0 = Glow's own engine, 1 = the measured classic opto leveler (core/VoiceMatch.h), where
+// peak reduction / gain / emphasis read 0 .. 100 like the original's dials (emphasis = its Hi Freq)
+enum Param { peakReduction, gain, mode, emphasis, mix, trim, autoMakeup, voicing, count };
+bool classic (const EffectParams& p) noexcept;
+std::string classicParamText (int param, float v);
 double trimDb (float v) noexcept;   // −18 .. +18 dB
 double gainDb (float v) noexcept;   // 0 .. +30 dB make-up
 double sidechainDb (float v) noexcept; // peak reduction: −20 .. +40 dB into the cell
