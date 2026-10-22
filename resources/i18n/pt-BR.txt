@@ -2910,3 +2910,6 @@ countries: br
 "Offset of the modulated delay" = "Deslocamento do delay modulado"
 "How many delay taps a side" = "Quantos taps de delay por lado"
 "Mono or stereo repeats (stereo: the right side shifts the other way)" = "Repetições mono ou estéreo (estéreo: o lado direito desloca no sentido contrário)"
+"Split" = "Divisão"
+"Classic|E console" = "Clássico|Console E"
+"Modern|Classic split" = "Moderno|Clássico dividido"

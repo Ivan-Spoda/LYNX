@@ -1,4 +1,5 @@
 #include "core/PluginSubstitutes.h"
+#include "core/VoiceMatch.h"
 
 #include <algorithm>
 #include <cctype>
@@ -456,9 +457,9 @@ translate = pro-g
 product = SSL E-Channel
 vendor = Waves
 lynx = Ridge Strip
-# [DATA] class ID (stereo component) and <PluginName> from real projects; LYNX's channel strip (round 96). Round 113:
-# filters, EQ, compressor and output are translated from the RealWorld list (measured on the official trial,
-# docs/analise/REA_rodada113.md §3c); without a readable state it starts neutral
+# [DATA] class ID (stereo component) and <PluginName> from real projects. Round 123: Ridge Strip's "E" voicing is the
+# console measured black-box on the official trial (every EQ band / filter from impulse responses, the feedback
+# compressor from stairs, bursts and her takes), so the RealWorld list maps one to one (REA_rodada123.md)
 vst3 = 5354535648437353736c6368616e6e65
 waves = SSLChannel
 translate = waves-ssl-channel
@@ -1169,9 +1170,8 @@ int translateWavesRComp (const std::vector<std::uint8_t>& state, EffectSlot& slo
 }
 
 // DeEsser (15 values): 0 frequency Hz, 2 threshold dB, 10 monitor (1 = side chain), 13 side chain (1 = high pass,
-// 2 = band pass), 14 audio (0 = split, 1 = wideband). Her state (5506 Hz, -24.2 dB, high pass, split) is matched by
-// Hush at 0.81 x the frequency, threshold +5 dB, 12 dB range, within 0.9 dB on the 6 kHz stairs (1 kHz untouched in
-// both); the range is not a control of the original (its curve flattens about 10 dB down at full scale).
+// 2 = band pass), 14 audio (0 = split, 1 = wideband). Round 123: Hush's "classic split" voicing is the de-esser measured
+// black-box on the official trial (core/VoiceMatch.h; REA_rodada123 §2), so the controls map one to one.
 int translateWavesDeEsser (const std::vector<std::uint8_t>& state, EffectSlot& slot)
 {
     namespace h = mixsuite::hush;
@@ -1180,13 +1180,11 @@ int translateWavesDeEsser (const std::vector<std::uint8_t>& state, EffectSlot& s
     if (slot.kind != EffectKind::hushDeEsser || ! hz)
         return 0;
     int n = 1;
-    slot.params[h::frequency] = logNorm (*hz * 0.81, 2000.0, 16000.0);
+    slot.params[h::voicing] = 1.0f;
+    slot.params[h::frequency] = logNorm (*hz, 2000.0, 16000.0);
+    slot.params[h::output] = 0.5f;
     if (const auto t = wavesValue (rw, 2))
-    {
-        slot.params[h::threshold] = linNorm (*t + 5.0, -60.0, 0.0);
-        slot.params[h::range] = linNorm (12.0, 0.0, 24.0);
-        ++n;
-    }
+        slot.params[h::threshold] = linNorm (*t, -80.0, 0.0), ++n;
     if (const auto m = wavesValue (rw, 14))
         slot.params[h::mode] = *m >= 0.5 ? 1.0f : 0.0f, ++n;
     if (const auto d = wavesValue (rw, 13))
@@ -1260,15 +1258,15 @@ int translateWavesCla76 (const std::vector<std::uint8_t>& state, EffectSlot& slo
     return 11;
 }
 
-// SSL E-Channel (57 values): 0 comp threshold dB, 1 ratio, 2 fast (1 = on), 3 release s, 11 dynamics bypass, 13 LF
-// bell, 14/15 LF gain dB / Hz, 16/17/18 LMF gain / kHz / Q, 19/20/21 HMF, 22 HF bell, 23/24 HF gain / kHz, 25 EQ bypass,
-// 27 HP Hz (< 16 = out), 30 output gain dB. [EXEC] Its bands are broader than Ridge's: each band was measured alone
-// (impulse at -60 dBFS) and Ridge's band fitted to it (0.03-0.5 dB RMS): HF shelf at 0.36 x the frequency, 0.8 x
-// the gain; HMF at 1.37 x, 0.8 x the gain, Q 0.5 + 0.27 x (Q - 0.5); LF shelf cuts are gentle at 60 Hz (0.32 x the
-// gain from about 400 Hz) and boosts 0.75 x at 2.4 x the frequency; HP 116 Hz is Ridge's 99 Hz. The dynamics run
-// before the EQ; the compressor at threshold - 15.7 dB and 1 + 0.375 x (ratio - 1) (soft knee) plus the original's
-// +0.9 dB make-up. Her whole state: 0.7 dB RMS on the stairs, 1 dB RMS (40 Hz - 18 kHz) on pink noise at -40 dBFS.
-// LMF (0 dB in every state surveyed) and the expander are taken at face value [model].
+// SSL E-Channel (57 values; RW index: 0 comp threshold dB, 1 ratio, 2 fast (1 = on), 3 release s, 5 expander threshold,
+// 6 range, 7 gate (1) / expander (0), 8 expander fast attack, 9 expander release, 11 dynamics bypass, 12 dynamics to
+// channel out, 13 LF bell, 14/15 LF gain / Hz, 16/17/18 LMF gain / kHz / Q, 19/20/21 HMF, 22 HF bell, 23/24 HF gain / kHz,
+// 25 EQ bypass, 26 EQ to dynamics side chain, 27 HP Hz (< 17 = out), 28 LP kHz (30 = out), 29 filter split (1 = on),
+// 30 output dB, 31 analog, 39 phase, 40 input dB). Round 123: Ridge Strip's "E" voicing (core/VoiceMatch.h) is the
+// console measured black-box on the official trial — every EQ band and filter from its impulse responses, the
+// feedback compressor and expander from sine stairs, tone bursts, noise and her takes — so the controls map one to
+// one in the console's own units (docs/analise/REA_rodada123.md). Not translated: analog (off in every state of her
+// corpus), EQ to the dynamics side chain.
 int translateWavesSslChannel (const std::vector<std::uint8_t>& state, EffectSlot& slot)
 {
     namespace r = mixsuite::ridge;
@@ -1276,58 +1274,47 @@ int translateWavesSslChannel (const std::vector<std::uint8_t>& state, EffectSlot
     if (slot.kind != EffectKind::ridgeStrip || rw.size() < 31)
         return 0;
     const auto at = [&] (std::size_t i, double fallback) { return wavesValue (rw, i).value_or (fallback); };
-    const auto interp = [] (double x, std::initializer_list<std::pair<double, double>> pts) {
-        auto prev = *pts.begin();
-        if (x <= prev.first)
-            return prev.second;
-        for (const auto& p : pts)
-        {
-            if (x <= p.first)
-                return prev.second + (p.second - prev.second) * (x - prev.first) / (p.first - prev.first);
-            prev = p;
-        }
-        return prev.second;
-    };
     const auto gain = [] (double db) { return linNorm (db, -15.0, 15.0); };
-    const auto q = [] (double v) { return logNorm (0.5 + (v - 0.5) * 0.27, 0.5, 2.5); };
     auto& p = slot.params;
+    p[r::voicing] = 1.0f;
     p[r::curve] = 0.0f;
-    p[r::lpf] = 0.0f;
-    p[r::order] = 1.0f;
+    p[r::input] = linNorm (at (40, 0.0), -20.0, 20.0);
+    p[r::output] = linNorm (at (30, 0.0), -20.0, 20.0);
+    p[r::phase] = at (39, 0.0) > 0.5 ? 1.0f : 0.0f;
     const auto hp = at (27, 0.0);
-    p[r::hpf] = hp >= 16.0 ? logNorm (interp (hp, { { 16, 9 }, { 50, 27 }, { 116, 99 }, { 250, 194 }, { 350, 272 } }), 16.0, 350.0) : 0.0f;
-    const auto lfDb = at (14, 0.0), lfHz = at (15, 100.0);
-    if (lfDb < 0.0)
-    {
-        p[r::lfGain] = gain (lfDb * interp (lfHz, { { 60, 0.32 }, { 200, 0.88 } }));
-        p[r::lfFreq] = logNorm (std::min (450.0, lfHz * 6.7), 30.0, 450.0);
-    }
-    else
-    {
-        p[r::lfGain] = gain (lfDb * interp (lfHz, { { 60, 0.75 }, { 400, 1.08 } }));
-        p[r::lfFreq] = logNorm (std::min (450.0, lfHz * 2.4), 30.0, 450.0);
-    }
+    p[r::hpf] = hp >= 16.5 ? std::max (1e-4f, logNorm (std::min (hp, 350.0), 16.0, 350.0)) : 0.0f;
+    const auto lpk = at (28, 30.0);
+    // Ridge's low-pass law runs 22 kHz (dial 0) .. 3 kHz (dial 1), log
+    p[r::lpf] = lpk < 25.0 ? std::max (1e-4f, (float) std::clamp (std::log (22000.0 / (lpk * 1000.0)) / std::log (22000.0 / 3000.0), 0.0, 1.0)) : 0.0f;
+    p[r::lfGain] = gain (at (14, 0.0));
+    p[r::lfFreq] = logNorm (at (15, 60.0), 30.0, 450.0);
     p[r::lfBell] = at (13, 0.0) > 0.5 ? 1.0f : 0.0f;
-    p[r::lmfGain] = gain (at (16, 0.0) * 0.65);
+    p[r::lmfGain] = gain (at (16, 0.0));
     p[r::lmfFreq] = logNorm (at (17, 0.5) * 1000.0, 200.0, 2500.0);
-    p[r::lmfQ] = q (at (18, 1.5));
-    p[r::hmfGain] = gain (at (19, 0.0) * 0.8);
-    p[r::hmfFreq] = logNorm (at (20, 3.5) * 1370.0, 600.0, 7000.0);
-    p[r::hmfQ] = q (at (21, 1.5));
-    p[r::hfGain] = gain (at (23, 0.0) * 0.8);
-    p[r::hfFreq] = logNorm (at (24, 8.0) * 360.0, 1500.0, 16000.0);
+    p[r::lmfQ] = (float) (1.0 - vmatch::echannel::dialFromQ (at (18, 2.5)));
+    p[r::hmfGain] = gain (at (19, 0.0));
+    p[r::hmfFreq] = logNorm (at (20, 3.5) * 1000.0, 600.0, 7000.0);
+    p[r::hmfQ] = (float) (1.0 - vmatch::echannel::dialFromQ (at (21, 1.5)));
+    p[r::hfGain] = gain (at (23, 0.0));
+    p[r::hfFreq] = logNorm (at (24, 8.0) * 1000.0, 1500.0, 16000.0);
     p[r::hfBell] = at (22, 0.0) > 0.5 ? 1.0f : 0.0f;
     p[r::eqOn] = at (25, 0.0) > 0.5 ? 0.0f : 1.0f;
     const auto ratio = std::max (1.0, at (1, 1.0));
-    const bool dynOn = at (11, 0.0) < 0.5;
-    p[r::compRatio] = (float) std::sqrt (std::clamp ((ratio - 1.0) * 0.375 / 19.0, 0.0, 1.0));
-    p[r::compThreshold] = linNorm (at (0, 0.0) - 15.7, -40.0, 0.0);
-    p[r::compRelease] = logNorm (std::max (0.1, at (3, 0.35)), 0.1, 4.0);
-    p[r::compFastAttack] = at (2, 0.0) == 1.0 ? 1.0f : 0.0f;
-    p[r::gateRange] = 0.0f;
-    p[r::dynOn] = dynOn ? 1.0f : 0.0f;
-    p[r::output] = linNorm (at (30, 0.0) + (dynOn && ratio > 1.01 ? 0.9 : 0.0), -20.0, 20.0);
-    return 20;
+    p[r::compRatio] = ratio > 1000.0 ? 1.0f : (float) std::sqrt (std::clamp ((ratio - 1.0) / 19.0, 0.0, 0.998));
+    p[r::compThreshold] = linNorm (at (0, 0.0), -20.0, 10.0);
+    p[r::compRelease] = logNorm (std::clamp (at (3, 0.4), 0.1, 4.0), 0.1, 4.0);
+    p[r::compFastAttack] = at (2, 2.0) == 1.0 ? 1.0f : 0.0f;
+    p[r::gateRange] = linNorm (at (6, 0.0), 0.0, 40.0);
+    p[r::gateThreshold] = linNorm (at (5, -30.0), -30.0, 10.0);
+    p[r::gateRelease] = logNorm (std::clamp (at (9, 0.2), 0.1, 4.0), 0.1, 4.0);
+    p[r::gateFastAttack] = at (8, 0.0) > 0.5 ? 1.0f : 0.0f;
+    p[r::expander] = at (7, 0.0) > 0.5 ? 0.0f : 1.0f;
+    p[r::dynOn] = at (11, 0.0) > 0.5 ? 0.0f : 1.0f;
+    p[r::order] = at (12, 0.0) > 0.5 ? 0.0f : 1.0f; // Ridge: on = dynamics before the EQ
+    p[r::filterSplit] = at (29, 1.0) == 1.0 ? 1.0f : 0.0f;
+    p[r::filtersToSidechain] = 0.0f;
+    p[r::compMix] = 1.0f;
+    return 30;
 }
 
 // H-Delay (RealWorld list, round 119): 1 sync (0 BPM, 1 host, 2 ms), 2 BPM, 3 delay ms, 4 note (3 per length: triplet,

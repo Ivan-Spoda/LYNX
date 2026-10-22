@@ -2554,6 +2554,10 @@ const EffectInfo& effectInfo (EffectKind kind)
 
 std::string formatEffectParam (EffectKind kind, int param, float v, double bpm, const EffectParams& context)
 {
+    if (kind == EffectKind::ridgeStrip && mixsuite::ridge::eVoicing (context)) // round 123: the console's own scales
+        return mixsuite::ridge::eParamText (param, v);
+    if (kind == EffectKind::hushDeEsser && mixsuite::hush::classic (context))
+        return mixsuite::hush::classicParamText (param, v);
     if (kind == EffectKind::fruityPhaser && param == 0) // the sweep rate follows the frequency range switch
         return phaserfx::sweepText (v, context[3] > 0.5f);
     if (kind == EffectKind::parametricEq && peq::flLaw (context) && param >= 0 && param < peq::slopeParam + peq::bands)
