@@ -19,6 +19,7 @@
 #include "engine/AudioEngine.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
+#include "ui/PluginHeader.h"
 #include "ui/PluginSkin.h"
 #include "ui/Theme.h"
 #include "ui/ValueControl.h"
@@ -232,6 +233,7 @@ protected:
     void set (std::vector<std::pair<int, float>> changes, bool undoable = true)
     {
         if (current() == nullptr) return;
+        if (undoable) bar.willEdit();
         linkChanges (changes);
         engine.editSong ([tk = track, sl = slot, changes] (Song& song) {
             auto& params = song.mixer[(std::size_t) tk].effects[(std::size_t) sl].params;
@@ -349,6 +351,11 @@ protected:
     void mouseDown (const juce::MouseEvent& e) override
     {
         dragCtl = -1;
+        if (const auto part = bar.partAt (e.position); part != pluginheader::Part::none)
+        {
+            bar.click (part, *this);
+            return;
+        }
         if (e.mods.isPopupMenu() && headerArea().contains (e.position)) // round 126: the editor's style
         {
             juce::PopupMenu m;
@@ -358,6 +365,7 @@ protected:
             m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
             return;
         }
+        bar.beginGesture();
         Ctl c;
         if (controlAt (e.position, c))
         {
@@ -456,6 +464,7 @@ protected:
     void mouseMove (const juce::MouseEvent& e) override
     {
         mouse = e.position;
+        bar.hover (e.position);
         bodyMove (e.position);
         anim.setHot (controlIndexAt (e.position));
         repaint();
@@ -463,6 +472,7 @@ protected:
     void mouseExit (const juce::MouseEvent&) override
     {
         mouse = { -1.0f, -1.0f };
+        bar.hoverExit();
         bodyMove (mouse);
         anim.setHot (-1);
         repaint();
@@ -478,6 +488,8 @@ protected:
     ui::Hint hintAt (juce::Point<int> position) override
     {
         const auto p = position.toFloat();
+        if (const auto part = bar.partAt (p); part != pluginheader::Part::none)
+            return { bar.hintFor (part), bar.presetLabel(), false, true };
         Ctl c;
         if (controlAt (p, c))
         {
@@ -533,9 +545,11 @@ protected:
         g.setFont (font (type::small));
         g.drawText (trackName() + "  -  " + tr ("slot {0}", { juce::String (slot + 1) }), juce::Rectangle<float> (58.0f + w, 0.0f, 220.0f, h.getHeight()),
                     juce::Justification::centredLeft, true);
+        const auto left = bar.place (h.withTrimmedLeft (w + 270.0f));
+        bar.paint (g, accent);
         g.setColour (colour::textDisabled);
         g.setFont (font (type::caption));
-        g.drawText (gestures(), h.withTrimmedLeft (w + 270.0f).withTrimmedRight (12.0f), juce::Justification::centredRight, true);
+        g.drawText (gestures(), left.withTrimmedRight (8.0f), juce::Justification::centredRight, true);
     }
 
     // the colour a control is drawn in: the plugin's accent unless the editor gave it its own
@@ -892,6 +906,7 @@ protected:
     int track, slot;
     EffectKind kind;
     bool demo = false;
+    pluginheader::PresetBar bar { engine, track, slot }; // undo / redo, A / B, presets (round 129)
     juce::Colour accent;   // the plugin family's accent (ui/PluginSkin.h)
     skin::Animator anim;   // hover fades (runs only while something moves)
     int silentRun = historyLength; // consecutive silent history columns (the history starts silent) (an idle display is not repainted)

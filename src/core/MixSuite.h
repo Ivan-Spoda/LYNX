@@ -102,6 +102,9 @@ enum Param
     compRatio, compThreshold, compRelease, compFastAttack,
     gateRange, gateThreshold, gateRelease, gateFastAttack, expander, dynOn,
     order, filtersToSidechain, output, phase, compMix,
+    // round 123: "E" voicing (0 = Ridge's own engine, 1 = the measured E-type console channel, core/VoiceMatch.h) and
+    // that console's filter split (filters before the dynamics); appended, so older projects load Ridge's own sound
+    voicing, filterSplit,
     count
 };
 
@@ -124,12 +127,22 @@ double trimDb (float v) noexcept;          // ±20 dB (input / output)
 double responseDb (const EffectParams& p, double sampleRate, double hz);
 // Static curve of the compressor: output level for a steady input level (dB), no gate.
 double compressorCurveDb (const EffectParams& p, double inputDb);
+// E voicing: the console's own scales for the controls whose range differs from Ridge's (dial position 0..1)
+double eQ (float v) noexcept;              // mid-band Q 0.1 .. 3.5 (the console's dial, reversed so that up = narrower)
+double eCompThresholdDb (float v) noexcept; // -20 .. +10 dB (console scale)
+double eGateRangeDb (float v) noexcept;     // 0 .. 40 dB
+double eGateThresholdDb (float v) noexcept; // -30 .. +10 dB (console scale)
+bool eVoicing (const EffectParams& p) noexcept;
+std::string eParamText (int param, float v);
 } // namespace ridge
 
 // ---- Glow Leveler (optical leveler) ----
 namespace glow
 {
-enum Param { peakReduction, gain, mode, emphasis, mix, count };
+// round 129: trim (±18 dB after the mix) and auto make-up appended (the reference's TRIM and AUTO MAKEUP); older
+// projects load their defaults (0 dB, off) and sound the same
+enum Param { peakReduction, gain, mode, emphasis, mix, trim, autoMakeup, count };
+double trimDb (float v) noexcept;   // −18 .. +18 dB
 double gainDb (float v) noexcept;   // 0 .. +30 dB make-up
 double sidechainDb (float v) noexcept; // peak reduction: −20 .. +40 dB into the cell
 } // namespace glow
@@ -137,8 +150,12 @@ double sidechainDb (float v) noexcept; // peak reduction: −20 .. +40 dB into t
 // ---- Hush (de-esser) ----
 namespace hush
 {
-enum Param { frequency, threshold, range, mode, detector, listen, lookahead, release, output, count };
+// round 123: voicing (appended): 0 = Hush's own engine, 1 = the measured classic split de-esser (core/VoiceMatch.h)
+enum Param { frequency, threshold, range, mode, detector, listen, lookahead, release, output, voicing, count };
 double hz (float v) noexcept;          // 2 .. 16 kHz
+double classicThresholdDb (float v) noexcept; // voicing 1: -80 .. 0 dB (the original's dial)
+bool classic (const EffectParams& p) noexcept;
+std::string classicParamText (int param, float v);
 double thresholdDb (float v) noexcept; // −60 .. 0 dBFS
 double rangeDb (float v) noexcept;     // 0 .. 24 dB
 double releaseMs (float v) noexcept;   // 10 .. 250 ms

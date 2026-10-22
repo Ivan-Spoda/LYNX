@@ -2,6 +2,7 @@
 #include "core/LoadTrace.h"
 #include "core/DynamicsSuite.h"
 #include "core/MixSuite.h"
+#include "core/VoiceTools.h"
 
 #include "core/WorkerPool.h"
 #include "core/Denormals.h"
@@ -1103,8 +1104,9 @@ void RackRenderer::applyTrackEq (const MixerTrack& track, int t, float* l, float
 // effects whose controlOutput() an editor shows live
 static bool hasLiveMeters (EffectKind kind) noexcept
 {
+    // round 129: the voice tools (Quell's reduction meter was never published) and the basic compressor's meters
     return mixsuite::isSuiteKind (kind) || dyn::isDynKind (kind) || kind == EffectKind::lynxTune || kind == EffectKind::facetEq
-           || kind == EffectKind::apexLimiter;
+           || kind == EffectKind::apexLimiter || voicetools::isVoiceKind (kind) || kind == EffectKind::compressor;
 }
 
 void RackRenderer::setSidechain (const RackState& state, const EffectSlot& slot, Effect& effect, int track) noexcept

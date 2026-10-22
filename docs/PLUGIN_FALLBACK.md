@@ -121,12 +121,14 @@ matches by name).
 | Valhalla Supermassive | Nebula (round 100) | name | every parameter except Clear (a button) |
 | ValhallaShimmer | Halo (round 100) | name | every parameter (bare `parameterN` attributes; mode lists partly not confirmed) |
 | ValhallaFutureVerb | Horizon (round 100) | name | every parameter |
-| Little Plate, Waves RVerb / H-Reverb / TrueVerb | Reeverb 2 (100 % wet, slot dry/wet 25 %) | name / Waves name | — |
+| Soundtoys Little Plate | Foil Plate (round 129; 2 s, 100 % wet, slot dry/wet 25 %; was Reeverb 2) | name | — |
+| Waves RVerb / H-Reverb / TrueVerb | Reeverb 2 (100 % wet, slot dry/wet 25 %) | Waves name | — |
 | FabFilter Pro-R | LuxeVerb (default) | name | — |
 | Waves H-Delay | Echoform (round 119; was Fruity Delay 3) | VST3 class ID [DATA], Waves name | sync (host / BPM / ms), note, time, feedback, ping-pong (pairs) / stereo, mix, output, filters; laws measured on the official trial [EXEC] (round 119 §2) |
 | Waves NS1 | Quell Denoiser (round 119) | Waves name | the one knob (RealWorld 229), Quell fitted to the official trial [EXEC] (round 119 §3) |
 | Waves Doubler (2 / 4 voices) | Gemini Doubler (round 119) | Waves name | every control of voices 1–2, direct, align, shelves, feedback cut, range [EXEC] (round 119 §4) |
-| Waves SuperTap, Soundtoys EchoBoy / PrimalTap, FabFilter Timeless | Fruity Delay 3 | VST2 ID [DATA] (EchoBoy), names | — |
+| Soundtoys EchoBoy / PrimalTap | Echoform (round 129; tape / lo-fi echo, 1/4 note, 25 % feedback, 25 % mix; was Fruity Delay 3) | VST2 ID [DATA] (EchoBoy), names | — |
+| Waves SuperTap, FabFilter Timeless | Fruity Delay 3 | names | — |
 | ValhallaDelay | Echoform (round 101) | VST3 class ID [derived], name | every setting but Era / taps / repeat-swell: mix, style, sync, times, feedback, filters, modulation, shift, pitch, ducking; the 17 modes onto Echoform's 12 characters |
 | ValhallaFreqEcho | Spiral Echo (round 101) | VST3 class ID [derived], name | all 8 settings |
 | ValhallaSpaceModulator | Orbit (round 101) | VST3 class ID [derived], name | all 6 settings |
