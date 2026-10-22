@@ -129,7 +129,7 @@ TEST (opto_and_program_compressor_voicings_round123)
     // her Renaissance Compressor -> Compressor "vintage program": -15 dB, 2.96:1, 0.5 ms, 160 ms, gain 0
     n = 0;
     auto c = vm123::wavesSlot ("RComp", "160.31 -15 0 * * * * * 0.5 2.96 56.23 10 0 0 149.62 120 0 0 1 0.4 0 1.5 0 * * * 100 0", n);
-    CHECK (n == 6 && c.kind == EffectKind::compressor && c.params[6] == 1.0f);
+    CHECK (n == 6 && c.kind == EffectKind::compressor && c.params[8] == 1.0f && c.params[6] == 1.0f);
     // 1 kHz steady gain vs the official plug-in's stairs at her state: 0 / -0.4 / -1.8 / -4.6 / -8.5 / -12.8 dB
     static constexpr double golden[][2] = { { -30, 0.0 }, { -24, -0.4 }, { -18, -1.8 }, { -12, -4.6 }, { -6, -8.5 }, { 0, -12.8 } };
     double worst = 0.0;

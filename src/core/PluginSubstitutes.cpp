@@ -1149,7 +1149,8 @@ std::optional<double> wavesValue (const std::vector<double>& rw, std::size_t i)
 float logNorm (double v, double lo, double hi) { return (float) std::clamp (std::log (v / lo) / std::log (hi / lo), 0.0, 1.0); }
 float linNorm (double v, double lo, double hi) { return (float) std::clamp ((v - lo) / (hi - lo), 0.0, 1.0); }
 
-// Renaissance Compressor (28 values): 0 release ms, 1 threshold dB, 2 gain dB, 8 attack ms, 9 ratio, 17 ARC (0) / manual.
+// Renaissance Compressor (28 values): 0 release ms, 1 threshold dB, 2 gain dB, 8 attack ms, 9 ratio, 17 ARC (0) / manual,
+// 26 mix %, 27 trim dB.
 // Round 123: Compressor's "vintage program" voicing is the compressor measured black-box on the official trial at her
 // state (core/VoiceMatch.h; REA_rodada123 §3), taking threshold, ratio, attack, release and gain as they are.
 int translateWavesRComp (const std::vector<std::uint8_t>& state, EffectSlot& slot)
@@ -1164,7 +1165,9 @@ int translateWavesRComp (const std::vector<std::uint8_t>& state, EffectSlot& slo
     slot.params[3] = logNorm (wavesValue (rw, 0).value_or (160.0), 10.0, 1000.0);
     slot.params[4] = linNorm (wavesValue (rw, 2).value_or (0.0), 0.0, 24.0);
     slot.params[5] = 0.0f;
-    slot.params[6] = 1.0f;
+    slot.params[6] = (float) std::clamp (wavesValue (rw, 26).value_or (100.0) / 100.0, 0.0, 1.0); // mix %
+    slot.params[7] = linNorm (wavesValue (rw, 27).value_or (0.0), -18.0, 18.0);                  // trim dB
+    slot.params[8] = 1.0f;                                                                         // vintage voicing
     return 6;
 }
 

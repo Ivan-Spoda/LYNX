@@ -618,7 +618,7 @@ void Compressor::process (float* l, float* r, int n, const Settings& s) noexcept
     const double T = s.thresholdDb + thrOffset, R = 1.0 + (std::max (1.0, s.ratio) - 1.0) * ratioScale, W = kneeDb;
     const double aA = coefMs (std::max (0.01, s.attackMs) * attackScale, sr), fR = coefMs (fastReleaseMs, sr), sC = coefMs (slowChargeMs, sr);
     const double dR = coefMs (detectorReleaseMs, sr), relK = 160.0 / std::max (1.0, s.releaseMs), dt = 1.0 / sr;
-    const double makeup = s.gainDb;
+    const double makeup = s.gainDb, trim = dbToGain (s.trimDb);
     const int N = (int) dl.size();
     double maxGr = 0.0;
     for (int i = 0; i < n; ++i)
@@ -643,7 +643,7 @@ void Compressor::process (float* l, float* r, int n, const Settings& s) noexcept
         }
         const double gr = std::max (grf, grs);
         maxGr = std::max (maxGr, gr);
-        const double g = dbToGain (makeup - gr);
+        const double g = (dbToGain (makeup - gr) * s.mix + (1.0 - s.mix)) * trim;
         dl[(std::size_t) pos] = l[i];
         dr[(std::size_t) pos] = r[i];
         int rd = pos - delayLen;

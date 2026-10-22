@@ -191,7 +191,7 @@ public:
 
     void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
     {
-        if (params[6] >= 0.5f)
+        if (params[8] >= 0.5f)
         {
             latency.store (vintage.latency(), std::memory_order_relaxed);
             float peakIn = 0.0f, peakOut = 0.0f;
@@ -203,6 +203,8 @@ public:
             v.attackMs = compAttackMs (params[2]);
             v.releaseMs = compReleaseMs (params[3]);
             v.gainDb = compMakeupDb (params[4]);
+            v.mix = std::clamp ((double) params[6], 0.0, 1.0);
+            v.trimDb = -18.0 + 36.0 * std::clamp ((double) params[7], 0.0, 1.0);
             vintage.process (l, r, n, v);
             for (int i = 0; i < n; ++i)
                 peakOut = std::max (peakOut, std::max (std::abs (l[i]), std::abs (r[i])));
@@ -228,6 +230,10 @@ public:
         const auto sidechain = useSidechain;
         useSidechain = false;
         float peakIn = 0.0f, peakOut = 0.0f, maxGr = 0.0f;
+        // round 129: parallel mix (dry with the compressed signal) and a trim after it (±18 dB); older projects load
+        // 100 % / 0 dB
+        const auto wetMix = std::clamp (params[6], 0.0f, 1.0f);
+        const auto trim = dbToGain (-18.0f + 36.0f * std::clamp (params[7], 0.0f, 1.0f));
 
         for (int i = 0; i < n; ++i)
         {
@@ -259,8 +265,8 @@ public:
                 gain *= autoGain;
             }
 
-            l[i] *= gain;
-            r[i] *= gain;
+            l[i] = (l[i] * gain * wetMix + l[i] * (1.0f - wetMix)) * trim;
+            r[i] = (r[i] * gain * wetMix + r[i] * (1.0f - wetMix)) * trim;
             maxGr = std::max (maxGr, envelopeDb);
             peakOut = std::max (peakOut, std::max (std::abs (l[i]), std::abs (r[i])));
         }
@@ -2211,7 +2217,8 @@ std::string widthText (const EffectParams& params, int band)
 const EffectInfo& effectInfo (EffectKind kind)
 {
     static const EffectInfo eq { "EQ", { { "Low", 0.5f }, { "Mid", 0.5f }, { "Mid freq.", 0.5f }, { "High", 0.5f }, { "Output", 0.5f } } };
-    static const EffectInfo comp { "Compressor", { { "Threshold", 0.7f }, { "Ratio", 3.0f / 19.0f }, { "Attack", 0.67f }, { "Release", 0.54f }, { "Makeup", 0.0f }, { "Auto gain", 0.0f }, { "Voicing", 0.0f } } };
+    static const EffectInfo comp { "Compressor", { { "Threshold", 0.7f }, { "Ratio", 3.0f / 19.0f }, { "Attack", 0.67f }, { "Release", 0.54f }, { "Makeup", 0.0f }, { "Auto gain", 0.0f },
+                                                  { "Mix", 1.0f }, { "Trim", 0.5f }, { "Voicing", 0.0f } } }; // round 129: the RComp role's MIX and TRIM
     static const EffectInfo delay { "Delay", { { "Time", 0.3f }, { "Feedback", 0.42f }, { "Mix", 0.3f }, { "Ping-pong", 0.0f }, { "Damping", 0.3f } } };
     static const EffectInfo reverb { "Reverb", { { "Room", 0.6f }, { "Damping", 0.5f }, { "Width", 1.0f }, { "Mix", 0.25f }, { "Dry", 1.0f },
                                                  { "Low cut", 0.0f }, { "High cut", 1.0f }, { "Predelay", 0.0f } } };
@@ -2624,7 +2631,9 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 case 2: std::snprintf (text, sizeof (text), "%.1f ms", compAttackMs (v)); break;
                 case 3: std::snprintf (text, sizeof (text), "%.0f ms", compReleaseMs (v)); break;
                 case 5: return v >= 0.5f ? "on" : "off";
-                case 6: return v >= 0.5f ? "vintage program" : "classic";
+                case 6: std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f); break;
+                case 7: std::snprintf (text, sizeof (text), "%+.1f dB", -18.0f + 36.0f * v); break;
+                case 8: return v >= 0.5f ? "vintage program" : "classic";
                 default: std::snprintf (text, sizeof (text), "+%.1f dB", compMakeupDb (v)); break;
             }
             return text;

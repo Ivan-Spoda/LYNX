@@ -1615,9 +1615,11 @@ Layout compressorLayout()
     v.push_back (toggle (314, 30, 94, 20, "Auto gain", TR_NOOP ("Auto gain")));
     // round 123: the voicing — LYNX's classic compressor, or the measured program-dependent one (substitutes start there)
     v.push_back (tabs (314, 60, 94, 40, "Voicing", TR_NOOP ("Classic|Vintage")));
-    v.push_back (dial (90, 252, 34, "Attack", TR_NOOP ("Attack")));
+    v.push_back (dial (60, 252, 34, "Attack", TR_NOOP ("Attack")));
+    v.push_back (dial (140, 252, 34, "Release", TR_NOOP ("Release")));
     v.push_back (dial (217, 252, 34, "Ratio", TR_NOOP ("Ratio")));
-    v.push_back (dial (340, 252, 34, "Release", TR_NOOP ("Release")));
+    v.push_back (dial (300, 252, 30, "Mix", TR_NOOP ("Mix")));
+    v.push_back (dial (370, 252, 30, "Trim", TR_NOOP ("Trim"), bipolar));
     return l;
 }
 

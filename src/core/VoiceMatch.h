@@ -141,6 +141,7 @@ namespace progcomp
 struct Settings
 {
     double thresholdDb = -15.0, ratio = 3.0, attackMs = 0.5, releaseMs = 160.0, gainDb = 0.0;
+    double mix = 1.0, trimDb = 0.0; // parallel mix (the dry path is delayed with the wet one) and the trim after it
 };
 constexpr int lookahead = 64; // samples at 48 kHz (the original's measured delay, scaled with the rate)
 

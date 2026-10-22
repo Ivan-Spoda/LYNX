@@ -206,7 +206,7 @@ TEST (waves_vocal_states_translated_round113)
     {
         int n = 0;
         const auto s = slotFor ("RComp", "160.31 -15 0 * * * * * 0.5 2.96 56.23 10 0 0 149.62 120 0 0 1 0.4 0 1.5 0 * * * 100 0", n);
-        CHECK (n == 6 && s.kind == EffectKind::compressor && s.params[6] == 1.0f && std::abs (s.params[0] - 0.75f) < 1e-4f);
+        CHECK (n == 6 && s.kind == EffectKind::compressor && s.params[8] == 1.0f && std::abs (s.params[0] - 0.75f) < 1e-4f);
     }
     // her DeEsser: 5506 Hz, -24.2 dB, high-pass side chain, split, output
     {
