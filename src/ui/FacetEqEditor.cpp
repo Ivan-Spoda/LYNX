@@ -493,6 +493,15 @@ public:
     {
         const auto p = e.position;
         dragging = Drag::none;
+        if (e.mods.isPopupMenu() && headerArea().contains (p)) // round 126: the editor's style
+        {
+            juce::PopupMenu m;
+            skin::addStyleMenu (m, skin::styleKey (EffectKind::facetEq), [safe = juce::Component::SafePointer<juce::Component> (this)] {
+                if (safe != nullptr) safe->repaint();
+            });
+            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+            return;
+        }
         std::vector<Control> all;
         if (const auto* c = controlAt (p, all))
         {
@@ -742,6 +751,7 @@ public:
     void paint (juce::Graphics& g) override
     {
         using namespace theme;
+        const skin::StyleScope styleScope (skin::styleFor (EffectKind::facetEq)); // round 126: one style per plugin
         g.fillAll (colour::bg0);
         const auto* fx = current();
         if (fx == nullptr)
@@ -1413,7 +1423,7 @@ public:
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
         keepAboveMainWindow (*this);
-        if (auto* c = getContentComponent()) skin::playOpenAnimation (*c); // round 126: fade / scale in
+        if (auto* c = getContentComponent()) skin::playOpenAnimation (*c, skin::styleFor (EffectKind::facetEq)); // round 126: fade / scale in
     }
 
     void closeButtonPressed() override;

@@ -306,9 +306,14 @@ public:
 
     // --- painting ------------------------------------------------------------------------------------
 
+    // this editor's style (round 126: one per plugin, alternating; Settings may force one)
+    int styleKey() const { return skin::styleKey (kind, layout == &plugui::soundgoodizerLayout()); }
+    skin::Style editorStyle() const { return skin::styleFor (kind, layout == &plugui::soundgoodizerLayout()); }
+
     void paint (juce::Graphics& g) override
     {
         using namespace theme;
+        const skin::StyleScope styleScope (editorStyle());
         skin::canvas (g, getLocalBounds().toFloat(), accent);
         const auto* fx = current();
 
@@ -2479,6 +2484,9 @@ public:
         juce::PopupMenu menu;
         if (presets.getNumItems() > 0)
             menu.addSubMenu (tr ("Presets"), presets);
+        skin::addStyleMenu (menu, styleKey(), [safe = juce::Component::SafePointer<NativeEffectEditor> (this)] {
+            if (safe != nullptr) safe->repaint();
+        });
         menu.addItem (tr ("Reset to defaults"), [this] {
             const auto& info = effectInfo (kind);
             presetName = {};
@@ -2602,7 +2610,7 @@ public:
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
         keepAboveMainWindow (*this);
-        if (auto* c = getContentComponent()) skin::playOpenAnimation (*c); // round 126: fade / scale in
+        skin::playOpenAnimation (*editor, editor->editorStyle()); // round 126: fade / scale in
     }
 
     void closeButtonPressed() override;

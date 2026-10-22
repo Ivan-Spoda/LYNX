@@ -476,10 +476,14 @@ public:
             return;
         }
 
-        if (args.contains ("--pluginstyle")) // round 126: the editors' style for this run (glow, neon, hardware, vivid)
+        if (args.contains ("--pluginstyle")) // round 126: force one style for this run (glow, neon, hardware, vivid; auto = per plugin)
         {
             const auto i = args.indexOf ("--pluginstyle");
-            if (i + 1 < args.size()) lynx::skin::setStyle (lynx::skin::styleFromName (args[i + 1].unquoted()));
+            if (i + 1 < args.size())
+            {
+                const auto name = args[i + 1].unquoted();
+                lynx::skin::setForcedStyle (name.equalsIgnoreCase ("auto") ? -1 : (int) lynx::skin::styleFromName (name));
+            }
         }
 
         if (args.contains ("--plugui"))

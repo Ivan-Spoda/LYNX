@@ -113,17 +113,46 @@ void valuePlate (juce::Graphics&, juce::Rectangle<float> area, float corner);
 // Neon, Hardware or Vivid (ui/PluginStyles.inc). Only the drawing changes; layouts and gestures never do.
 enum class Style { glow = 0, neon, hardware, vivid };
 inline constexpr int styleCount = 4;
+// the style the kit draws in right now (editors set it for their paint with StyleScope)
 Style style();
 void setStyle (Style);
 const char* styleName (Style);            // English; translated with tr()
 Style styleFromName (const juce::String&); // "neon", "Hardware"... (unknown: glow)
+
+// Per plugin (the user's choice, round 126): every editor has its own style, alternating across the set so it feels
+// varied — LYNX Tune Vivid, Epoch Verb Hardware, Crest Compressor Glow... Settings can force one style everywhere
+// (-1 = automatic, per plugin), and an editor's header menu can override its own (saved with the UI options).
+int forcedStyle();
+void setForcedStyle (int styleOrMinusOne);
+int styleKey (EffectKind, bool soundgoodizer = false); // the key of an editor in the override table
+Style defaultStyleFor (int key);                        // the built-in table
+Style styleFor (EffectKind, bool soundgoodizer = false); // forced > override > table
+Style resolve (Style automatic);                        // forced, or `automatic`
+int overrideFor (int key);                              // −1: none
+void setOverride (int key, int styleOrMinusOne);
+juce::String overridesToString();
+void overridesFromString (const juce::String&);
+inline std::function<void()> onStyleSettingsChanged; // the main window saves its UI options
+// adds "Plugin style" (Automatic / Glow / Neon / Hardware / Vivid) for one editor to a menu; `changed` repaints it
+void addStyleMenu (juce::PopupMenu&, int key, std::function<void()> changed);
+inline constexpr const char* styleProperty = "lynxSkinStyle"; // a generator page's knob: its page's automatic style
+
+// draws with a style until the end of the scope
+struct StyleScope
+{
+    explicit StyleScope (Style s) : saved (style()) { setStyle (s); }
+    ~StyleScope() { setStyle (saved); }
+    StyleScope (const StyleScope&) = delete;
+    StyleScope& operator= (const StyleScope&) = delete;
+    Style saved;
+};
 
 // --- effects level (round 126) --------------------------------------------------------------------
 // "Reduced effects" (Settings > General): no glows, blooms, grain or open animation, for weak GPUs / old machines
 bool reducedEffects();
 void setReducedEffects (bool);
 // an editor window's opening: its content fades and scales in (≤ 220 ms); nothing when effects are reduced
-void playOpenAnimation (juce::Component& content);
+void playOpenAnimation (juce::Component& content, Style = Style::glow);
 
 // --- typography ----------------------------------------------------------------------------------
 inline juce::Colour captionColour() { return juce::Colour (0xff8c919c); }

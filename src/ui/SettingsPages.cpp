@@ -126,10 +126,11 @@ public:
         wavesBox.onChange = [this] { change ([&] { options.waveSpectral = wavesBox.getSelectedId() == 2; }); };
         toggle (stereoWaves, tr ("Stereo (left and right channels apart)"), options.waveStereo, [this] (bool on) { options.waveStereo = on; });
         styleLabel (pluginStyleLabel, tr ("Plugin style"));
+        pluginStyleBox.addItem (tr ("Automatic (each plugin its own style)"), 1);
         for (int i = 0; i < skin::styleCount; ++i)
-            pluginStyleBox.addItem (tr (skin::styleName ((skin::Style) i)), i + 1);
-        pluginStyleBox.setSelectedId (juce::jlimit (0, skin::styleCount - 1, options.pluginStyle) + 1, juce::dontSendNotification);
-        pluginStyleBox.onChange = [this] { change ([&] { options.pluginStyle = pluginStyleBox.getSelectedId() - 1; }); };
+            pluginStyleBox.addItem (tr ("{0} for every plugin", { tr (skin::styleName ((skin::Style) i)) }), i + 2);
+        pluginStyleBox.setSelectedId (juce::jlimit (-1, skin::styleCount - 1, options.pluginStyle) + 2, juce::dontSendNotification);
+        pluginStyleBox.onChange = [this] { change ([&] { options.pluginStyle = pluginStyleBox.getSelectedId() - 2; }); };
         toggle (reducedEffects, tr ("Reduced effects in plugin editors (no glows or animations, for slower graphics cards)"), options.reducedEffects,
                 [this] (bool on) { options.reducedEffects = on; });
 
@@ -211,7 +212,7 @@ private:
         scaleBox.setBounds (r.row (scaleLabel, 120));
         wavesBox.setBounds (r.row (wavesLabel, 0));
         stereoWaves.setBounds (r.indented (24));
-        pluginStyleBox.setBounds (r.row (pluginStyleLabel, 220));
+        pluginStyleBox.setBounds (r.row (pluginStyleLabel, 300));
         reducedEffects.setBounds (r.full (24));
 
         r.section (startupTitle);

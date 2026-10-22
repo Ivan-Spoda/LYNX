@@ -1916,7 +1916,7 @@ public:
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
         keepAboveMainWindow (*this);
-        if (auto* c = getContentComponent()) skin::playOpenAnimation (*c); // round 126: fade / scale in
+        if (content != nullptr) skin::playOpenAnimation (*content, content->editorStyle()); // round 126: fade / scale in
     }
     void closeButtonPressed() override;
     ProEditor* content = nullptr;

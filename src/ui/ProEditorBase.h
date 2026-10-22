@@ -349,6 +349,15 @@ protected:
     void mouseDown (const juce::MouseEvent& e) override
     {
         dragCtl = -1;
+        if (e.mods.isPopupMenu() && headerArea().contains (e.position)) // round 126: the editor's style
+        {
+            juce::PopupMenu m;
+            skin::addStyleMenu (m, skin::styleKey (kind), [safe = juce::Component::SafePointer<juce::Component> (this)] {
+                if (safe != nullptr) safe->repaint();
+            });
+            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+            return;
+        }
         Ctl c;
         if (controlAt (e.position, c))
         {
@@ -484,9 +493,15 @@ protected:
     }
 
     // --- painting ------------------------------------------------------------------------------------
+public:
+    skin::Style editorStyle() const { return skin::styleFor (kind); } // round 126: one style per plugin
+
+protected:
+
     void paint (juce::Graphics& g) override
     {
         using namespace theme;
+        const skin::StyleScope styleScope (editorStyle());
         skin::canvas (g, getLocalBounds().toFloat(), accent);
         const auto* fx = current();
         if (fx == nullptr)

@@ -1,5 +1,6 @@
 #include "ui/PluginSkin.h"
 
+#include "ui/I18n.h"
 #include "ui/WindowOwner.h"
 
 #include <cstdint>
@@ -136,7 +137,7 @@ void cachedLayer (juce::Graphics& g, juce::Rectangle<float> a, juce::Colour acce
 
 struct OpenAnimation final : private juce::Timer
 {
-    explicit OpenAnimation (juce::Component& c) : target (&c), t0 (juce::Time::getMillisecondCounterHiRes())
+    OpenAnimation (juce::Component& c, Style st) : target (&c), t0 (juce::Time::getMillisecondCounterHiRes()), animStyle (st)
     {
         apply (0.0f);
         startTimerHz (60);
@@ -149,7 +150,7 @@ struct OpenAnimation final : private juce::Timer
         const auto b = target->getLocalBounds().toFloat();
         // Vivid springs (a small overshoot), the others glide
         const auto spring = 1.0f - std::exp (-6.0f * u) * std::cos (u * 9.0f);
-        const auto s = currentStyle == Style::vivid ? 0.9f + 0.1f * spring : 0.955f + 0.045f * e;
+        const auto s = animStyle == Style::vivid ? 0.9f + 0.1f * spring : 0.955f + 0.045f * e;
         target->setTransform (u >= 1.0f ? juce::AffineTransform() : juce::AffineTransform::scale (s, s, b.getCentreX(), b.getCentreY()));
     }
     void timerCallback() override
@@ -164,6 +165,7 @@ struct OpenAnimation final : private juce::Timer
     }
     juce::Component::SafePointer<juce::Component> target;
     double t0;
+    Style animStyle;
 };
 } // namespace
 
@@ -189,10 +191,115 @@ Style styleFromName (const juce::String& name)
     return Style::glow;
 }
 
-void playOpenAnimation (juce::Component& content)
+void playOpenAnimation (juce::Component& content, Style st)
 {
     if (reduced) return;
-    new OpenAnimation (content); // deletes itself when done (or when the content goes away)
+    new OpenAnimation (content, st); // deletes itself when done (or when the content goes away)
+}
+
+// --- per-plugin styles -----------------------------------------------------------------------------
+
+namespace
+{
+int forced = -1;
+std::map<int, int> overrides;
+constexpr int soundgoodizerKey = 1000;
+} // namespace
+
+int forcedStyle() { return forced; }
+void setForcedStyle (int s) { forced = s >= 0 && s < styleCount ? s : -1; }
+int styleKey (EffectKind kind, bool soundgoodizer) { return soundgoodizer ? soundgoodizerKey : (int) kind; }
+
+Style defaultStyleFor (int key)
+{
+    using K = EffectKind;
+    constexpr auto G = Style::glow, N = Style::neon, H = Style::hardware, V = Style::vivid;
+    if (key == soundgoodizerKey) return V;
+    switch ((K) key)
+    {
+        // the user's picks
+        case K::lynxTune: return V;
+        case K::epochVerb: return H;
+        case K::crestCompressor: return G;
+        // analytic, display-first tools: Glow
+        case K::facetEq: case K::apexLimiter: case K::prismMultiband: case K::hushDeEsser: case K::frequencySplitter: case K::quellDenoiser:
+        case K::fruityMultiband: case K::fruitySend: case K::fruityBalance: case K::luxeVerb: case K::convolver: case K::fruityDelay2:
+        case K::fruityChorus: case K::fruitySoftClipper: case K::reeverb1: case K::peakController:
+            return G;
+        // analogue / vintage-modelled roles: Hardware
+        case K::glowLeveler: case K::ridgeStrip: case K::foilPlate: case K::echoform: case K::vintageChorus: case K::vintagePhaser: case K::maximus:
+        case K::fruityBloodOverdrive: case K::fruityCompressor: case K::fruityLimiter: case K::reeverb2: case K::aether: case K::vocoder:
+            return H;
+        // creative, pitch and fun: Vivid
+        case K::geminiDoubler: case K::ember: case K::grossBeat: case K::flPitchShifter: case K::fruityFastDist: case K::effector:
+        case K::fruityPanOMatic: case K::transientProcessor: case K::squeeze: case K::hyperChorus: case K::fruityFlanger: case K::fruityDelay3:
+        case K::multibandDelay: case K::horizon: case K::distructor:
+            return V;
+        // modulation, synthesis and space: Neon
+        case K::latticeMod: case K::orbit: case K::spiralEcho: case K::halo: case K::nebula: case K::atrium: case K::fruityFlangus:
+        case K::fruityPhaser: case K::fruityDelayBank: case K::vocodex: case K::hardcore: case K::fruityWaveShaper: case K::stereoShaper:
+        case K::stereoEnhancer: case K::equo: case K::parametricEq: case K::fruityFilter: case K::fruityFreeFilter: case K::sentryGate:
+        case K::pitchShift: case K::spreader:
+            return N;
+        default: return G;
+    }
+}
+
+Style resolve (Style automatic) { return forced >= 0 ? (Style) forced : automatic; }
+
+Style styleFor (EffectKind kind, bool soundgoodizer)
+{
+    if (forced >= 0) return (Style) forced;
+    const auto key = styleKey (kind, soundgoodizer);
+    if (const auto o = overrideFor (key); o >= 0) return (Style) o;
+    return defaultStyleFor (key);
+}
+
+int overrideFor (int key)
+{
+    const auto it = overrides.find (key);
+    return it != overrides.end() ? it->second : -1;
+}
+
+void setOverride (int key, int s)
+{
+    if (s >= 0 && s < styleCount) overrides[key] = s;
+    else overrides.erase (key);
+}
+
+juce::String overridesToString()
+{
+    juce::StringArray parts;
+    for (const auto& [k, s] : overrides) parts.add (juce::String (k) + ":" + styleName ((Style) s));
+    return parts.joinIntoString (",");
+}
+
+void overridesFromString (const juce::String& text)
+{
+    overrides.clear();
+    for (const auto& part : juce::StringArray::fromTokens (text, ",", ""))
+        if (part.containsChar (':'))
+            setOverride (part.upToFirstOccurrenceOf (":", false, false).getIntValue(), (int) styleFromName (part.fromFirstOccurrenceOf (":", false, false)));
+}
+
+void addStyleMenu (juce::PopupMenu& menu, int key, std::function<void()> changed)
+{
+    juce::PopupMenu sub;
+    const auto now = overrideFor (key);
+    auto apply = [key, changed] (int s) {
+        setOverride (key, s);
+        if (onStyleSettingsChanged) onStyleSettingsChanged();
+        if (changed) changed();
+    };
+    sub.addItem (tr ("Automatic ({0})", { tr (styleName (defaultStyleFor (key))) }), true, now < 0, [apply] { apply (-1); });
+    for (int i = 0; i < styleCount; ++i)
+        sub.addItem (tr (styleName ((Style) i)), true, now == i, [apply, i] { apply (i); });
+    if (forced >= 0)
+    {
+        sub.addSeparator();
+        sub.addItem (tr ("Settings force one style for every plugin"), false, false, [] {});
+    }
+    menu.addSubMenu (tr ("Plugin style"), sub);
 }
 
 // a bloom is a cached sprite per colour and strength (a radial gradient is costly per pixel; a blit is not)
