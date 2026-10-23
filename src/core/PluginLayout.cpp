@@ -1822,6 +1822,16 @@ Layout emberLayout()
             v.push_back (item);
         }
     }
+    // round 135: the Decapitator role's voicing row, switches and the wide filter ranges
+    l.height = 760;
+    v.push_back (section (4, 640, 512, 116, TR_NOOP ("Voicing")));
+    v.push_back (tabs (12, 664, 496, 20, "Voice", TR_NOOP ("Style menu|Tape pre|Console|Grit|Triode|Pentode"), { 0.0f, 0.2f, 0.4f, 0.6f, 0.8f, 1.0f }));
+    v.push_back (toggle (12, 696, 80, 20, "Punish", TR_NOOP ("Punish")));
+    v.push_back (toggle (96, 696, 76, 20, "Thump", TR_NOOP ("Thump")));
+    v.push_back (toggle (176, 696, 76, 20, "Steep", TR_NOOP ("Steep")));
+    v.push_back (toggle (12, 726, 110, 20, "Wide cuts", TR_NOOP ("Wide cuts")));
+    v.push_back (dial (340, 712, 22, "Low cut (wide)", TR_NOOP ("Low cut")));
+    v.push_back (dial (440, 712, 22, "High cut (wide)", TR_NOOP ("High cut")));
     return l;
 }
 

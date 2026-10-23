@@ -1633,8 +1633,11 @@ private:
         else
             inc = std::max (bpm, 1.0) / 60.0 / sampleRate / (stepBeats (p[stepNote]) * (dir == Direction::both ? 2.0 * (steps - 1) : steps));
         // rhythm steps follow the song position (like the FL source); the LFO runs freely
-        if (src == Source::steps)
+        if (src == Source::steps && beats != syncedBeats) // a new song position: back on the grid
+        {
             lfo = beats / (stepBeats (p[stepNote]) * (dir == Direction::both ? 2.0 * (steps - 1) : steps));
+            syncedBeats = beats;
+        }
         // steps glide over up to a third of a step (Smoothing 100 %), or jump (0 %)
         const auto stepSec = stepBeats (p[stepNote]) * 60.0 / std::max (bpm, 1.0);
         const auto glide = 1.0 - std::exp (-1.0 / (sampleRate * (0.0005 + 0.35 * soft * stepSec)));
@@ -1699,7 +1702,7 @@ private:
         return dcY[c];
     }
 
-    double sampleRate = 44100.0, beats = 0.0, lfo = 0.0, smooth = 0.0;
+    double sampleRate = 44100.0, beats = 0.0, lfo = 0.0, smooth = 0.0, syncedBeats = -1.0;
     float current = 0.5f, dcA = 0.999f, dcX[2] {}, dcY[2] {};
     std::atomic<float> position { 0.5f }, peakIn { 0.0f }, peakOut { 0.0f };
 };
