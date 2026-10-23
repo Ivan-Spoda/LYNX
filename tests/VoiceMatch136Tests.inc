@@ -162,3 +162,40 @@ TEST (rhythm_pan_follows_the_trials_pattern_round136)
         std::printf ("  pan power %.4f\n", std::sqrt (2.0 * (a + b) / 480.0) / 0.25);
     CHECK (std::abs (std::sqrt (2.0 * (a + b) / 480.0) / 0.25 - 1.0) < 0.02);
 }
+
+TEST (alterboy_substitute_plays_her_usual_setting_round136)
+{
+    using namespace lynx;
+    PluginIdentity id;
+    id.format = ForeignPlugin::Format::vst2;
+    id.name = "Little AlterBoy";
+    const auto* e = findPluginSubstitute (id, false);
+    CHECK (e != nullptr && e->effect == EffectKind::lynxTune);
+    if (e == nullptr)
+        return;
+    auto slot = makeSubstituteSlot (*e);
+    CHECK (slot.params[(size_t) lynxtune::driveStage] > 0.5f);
+    CHECK (std::abs (lynxtune::formantSemitones (slot.params[(size_t) lynxtune::formantShift]) - 1.2) < 0.01);
+    // [EXEC] the reference's Drive 4.6 (Transpose mode, pitch / formant 0): a 200 Hz sine at −20 dBFS comes out
+    // +5.1 dB, at −8 dBFS +0.9 dB (the drive's output compensation); LYNX Tune with every note bypassed + the stage
+    for (int k = 0; k < 12; ++k)
+        slot.params[(size_t) (lynxtune::bypassC + k)] = 1.0f;
+    slot.params[(size_t) lynxtune::formantShift] = 0.5f;
+    for (const auto [in, gain] : { std::pair { -20.0, 5.1 }, std::pair { -8.0, 0.9 } })
+    {
+        const int n = 48000;
+        std::vector<float> l (n), r (n);
+        for (int i = 0; i < n; ++i)
+            l[(size_t) i] = r[(size_t) i] = (float) (std::pow (10.0, in / 20.0) * std::sin (2.0 * 3.141592653589793 * 200.0 * i / 48000.0));
+        auto fx = makeEffect (slot);
+        fx->prepare (48000.0);
+        for (int off = 0; off < n; off += 512)
+            fx->process (l.data() + off, r.data() + off, std::min (512, n - off), slot.params, 120.0);
+        double a = 0;
+        for (int i = n / 2; i < n; ++i) a += l[(size_t) i] * (double) l[(size_t) i];
+        const auto outDb = 10.0 * std::log10 (a / (n / 2)) - (in - 3.0103);
+        if (std::getenv ("LYNX_TEST_VERBOSE"))
+            std::printf ("  alterboy drive 4.6 in %.0f: %+.2f dB (%+.1f)\n", in, outDb, gain);
+        CHECK (std::abs (outDb - gain) < 1.0);
+    }
+}

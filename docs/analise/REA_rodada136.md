@@ -121,9 +121,32 @@ Each of her 50 states was assigned to one of 12 measured behaviours (pan traject
 The first ~200 ms after a reset (the trial glides in from hard left); the analog stage's loud peaks (−0.2 dB on her
 loudest take); the LF section (20–100 Hz residual −18 dB on one take).
 
+## 3. Little AlterBoy → LYNX Tune (new substitute; before: none — the slot was left out, i.e. dry)
+
+[EXEC] The trial resynthesises even at neutral settings (latency 2419 samples, −2.7 dB, null vs the input −10.8 dB),
+so a waveform null is not a target; spectra, level and the pitch behaviour are.
+- Quantize: snaps to the nearest semitone (~85–90 % of the way on steady detuned tones) within ~10–15 ms; Transpose:
+  pitch shift only. → LYNX Tune chromatic at the fastest retune; Transpose = every note bypassed.
+- Formant: the same direction as LYNX Tune's shift (up = brighter); the trial's formant-up also lowers the lows
+  (−6 dB at +6 st), LYNX Tune's does not [model gap]. LYNX Tune gets an appended "Wide formant" (±12 st) for her
+  −12 st state.
+- Drive (200 Hz stairs, drive 0 … 10): y = K·(s(G·x + b) − s(b)), G = −2.65 + 3.65·drive dB, K = +0.75 − 1.99·drive
+  dB (an output compensation: the ceiling drops as the drive rises), c 1.27, p 2.05, b 0.34 — levels within 0.5 dB,
+  H2 / H3 within a few dB. LYNX Tune gets an appended "Drive stage" + "Drive" (+ "Output").
+
+Her states, her three takes (1/3-octave RMS / max dB; level):
+
+| state (slots) | settings | before (dry) | after |
+|---|---|---|---|
+| 0 (875; 1200+ with its twins) | Quantize, formant +1.2, drive 4.6 | 3.3–4.9 / 6.8–12.1; −2.6…+0.6 | **1.5–2.1 / 3.3–5.5; +0.2…+0.9** |
+| 2 (52) | Transpose −12, formant −12, drive 5.5 | 10.8–12.8 / 33–34; −3.2…+0.7 | **1.8–3.7 / 4.1–10.4; 0…+0.8** |
+
+Left: LYNX Tune's own resynthesis at neutral settings adds +3–4 dB at 158–200 Hz on her lowest take (an engine
+matter, not this role); the trial's formant-up low cut; Robot mode (1 slot) plays as Quantize.
+
 ## Where I stopped
 - Batch 1 (this commit): the state read-back + hash tables, Decapitator → Ember Classic (style A), PanMan → Auto-pan
   Rhythm, editor routing (Ember in Classic opens the layout editor with the Classic controls), tests
   `tests/VoiceMatch136Tests.inc`.
-- Next: style A at high drive and the other styles; Little AlterBoy (no substitute yet — the largest of the four,
-  1307 slots); EchoBoy; FL renders of her projects vs LYNX; RComp / CLA-2A / NS1 residue.
+- Batch 1 also: Little AlterBoy → LYNX Tune (§3).
+- Next: style A at high drive and the other styles; EchoBoy; FL renders of her projects vs LYNX; RComp / CLA-2A / NS1 residue.

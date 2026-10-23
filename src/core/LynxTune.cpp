@@ -39,6 +39,7 @@ int scaleIndex (float v) noexcept { return stepped (v, vocal::scaleCount); }
 int keyIndex (float v) noexcept { return stepped (v, 12); }
 double retuneMs (float v) noexcept { return 400.0 * (double) v * (double) v; }
 double formantSemitones (float v) noexcept { return 14.0 * ((double) std::clamp (v, 0.0f, 1.0f) - 0.5); }
+double formantSemitones (float v, bool wide) noexcept { return (wide ? 24.0 : 14.0) * ((double) std::clamp (v, 0.0f, 1.0f) - 0.5); }
 int transposeSemitones (float v) noexcept { return stepped (v, 25) - 12; }
 double referenceHz (float v) noexcept { return 430.0 + 20.0 * (double) std::clamp (v, 0.0f, 1.0f); }
 int midiChannelIndex (float v) noexcept
@@ -101,6 +102,10 @@ const EffectInfo& info()
         e.params.push_back ({ "Onset delay", 1.0f / 3.0f });                    // 500 ms
         e.params.push_back ({ "Onset rate", 1.0f / 3.0f });                     // 500 ms
         e.params.push_back ({ "More scales", 0.0f });
+        e.params.push_back ({ "Drive stage", 0.0f }); // round 136
+        e.params.push_back ({ "Drive", 0.0f });
+        e.params.push_back ({ "Wide formant", 0.0f });
+        e.params.push_back ({ "Output", 0.5f });
         return e;
     }();
     return i;
@@ -130,6 +135,9 @@ std::string paramText (int param, float v)
         case formantPreserve:
         case lowLatency: return onOff();
         case formantShift: std::snprintf (t, sizeof t, "%+.1f st", formantSemitones (v)); return t;
+        case driveStage: case wideFormant: return onOff();
+        case drive: std::snprintf (t, sizeof t, "%.1f", 10.0 * v); return t;
+        case outputTrim: std::snprintf (t, sizeof t, "%+.1f dB", -24.0 + 48.0 * v); return t;
         case transpose: std::snprintf (t, sizeof t, "%+d st", transposeSemitones (v)); return t;
         case reference: std::snprintf (t, sizeof t, "%.1f Hz", referenceHz (v)); return t;
         case range: return rangeName (rangeIndex (v));
@@ -233,7 +241,16 @@ public:
         const auto human = std::clamp ((double) p[humanize], 0.0, 1.0);
         const auto flex = std::clamp ((double) p[flexTune], 0.0, 1.0);
         const auto trans = (double) transposeSemitones (p[transpose]);
-        const auto fShift = std::exp2 (formantSemitones (p[formantShift]) / 12.0);
+        const auto fShift = std::exp2 (formantSemitones (p[formantShift], p[wideFormant] >= 0.5f) / 12.0);
+        // round 136: the drive stage — [EXEC] the voice shifter's Drive on 200 Hz stairs (−40 … 0 dBFS, drive 0 … 10):
+        // y = K·(s(G·x + b) − s(b)), s(v) = v / (1 + |v / c|^p)^(1/p), G = −2.646 + 3.653·drive dB, K = 0.751 − 1.988·drive
+        // dB, c 1.2707, p 2.0545, b 0.341 (levels within 0.5 dB, H2 / H3 within a few dB, REA_rodada136 §3)
+        const bool driveOn = p[driveStage] >= 0.5f;
+        const double dv = 10.0 * std::clamp ((double) p[drive], 0.0, 1.0);
+        const double dG = std::pow (10.0, (-2.646 + 3.6529 * dv) / 20.0), dK = std::pow (10.0, (0.751 - 1.9875 * dv) / 20.0);
+        const double trimGain = std::pow (10.0, (-24.0 + 48.0 * std::clamp ((double) p[outputTrim], 0.0, 1.0)) / 20.0);
+        auto side = [] (double v) { return v / std::pow (1.0 + std::pow (std::abs (v / 1.2707), 2.0545), 1.0 / 2.0545); };
+        const double sideB = side (0.341);
         const auto preserve = p[formantPreserve] >= 0.5f;
         const auto wet = std::clamp (p[mix], 0.0f, 1.0f);
         const auto dt = 1.0 / sr;
@@ -382,9 +399,12 @@ public:
             const auto d0 = dry[rd], d1 = dry[rd + dryRing];
             ++dryPos;
 
-            l[i] = d0 + wet * (y[0] - d0);
+            if (driveOn)
+                for (auto& v : y)
+                    v = (float) (dK * (side (dG * v + 0.341) - sideB));
+            l[i] = (float) (trimGain * (d0 + wet * (y[0] - d0)));
             if (stereo)
-                r[i] = d1 + wet * (y[1] - d1);
+                r[i] = (float) (trimGain * (d1 + wet * (y[1] - d1)));
         }
 
         meterSung.store ((float) sung, std::memory_order_relaxed);

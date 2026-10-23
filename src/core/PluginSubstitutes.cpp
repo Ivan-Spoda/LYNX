@@ -566,6 +566,20 @@ names = PanMan
 preset = Voicing=1; Rate=0.8505; Sync=0; Width=0.7171; Offset=0.5; Smoothing=0.9925; Pattern=0; Amount=0.9981; Start phase=0.9917; Analog=0.5; Output=0.5
 translate = soundtoys-panman
 
+[soundtoys-littlealterboy]
+product = Little AlterBoy
+vendor = Soundtoys
+lynx = LYNX Tune
+# [DATA] VST2 unique ID from real projects
+vst2 = StLa
+names = Little AlterBoy; LittleAlterBoy
+# round 136 (REA_rodada136 §3): LYNX Tune as the voice shifter — Quantize = chromatic snapping at the fastest retune,
+# Transpose = every note bypassed (pitch shift only), the formant shift, the measured Drive stage and the mix. Its
+# state is encoded (not decoded here); her 52 saved states are known by the hash of the encoded preset; any other
+# state: her most used one (Quantize, formant +1.2 st, drive 4.6)
+preset = Scale=0; Retune=0; Humanize=0; Formant preserve=1; Formant shift=0.585714; Transpose=0.5; Mix=1; Drive stage=1; Drive=0.46; Output=0.5
+translate = soundtoys-littlealterboy
+
 # ---------------------------------------------------------------- vocal pitch correction -> LYNX Tune (round 95)
 [antares-auto-tune]
 product = Auto-Tune Pro
@@ -1593,8 +1607,47 @@ int translateSoundtoysPanMan (const std::vector<std::uint8_t>& state, EffectSlot
     return 0;
 }
 
+int translateSoundtoysAlterBoy (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    namespace t = lynxtune;
+    if (slot.kind != EffectKind::lynxTune || slot.params.size() < (std::size_t) t::count)
+        return 0;
+    const auto h = presetHash (state);
+    for (const auto& st : alterBoyStates)
+    {
+        if (st.hash != h)
+            continue;
+        const double pitch = -12.0 + 24.0 * st.v[0], formant = -12.0 + 24.0 * st.v[1];
+        const int mode = std::clamp ((int) std::lround (st.v[4] * 2.0), 0, 2); // transpose, quantize, robot
+        auto& p = slot.params;
+        p[(std::size_t) t::scale] = 0.0f; // chromatic
+        p[(std::size_t) t::retune] = 0.0f;
+        p[(std::size_t) t::humanize] = 0.0f;
+        p[(std::size_t) t::flexTune] = 0.0f;
+        for (int k = 0; k < 12; ++k)
+        {
+            p[(std::size_t) (t::noteC + k)] = 1.0f;
+            p[(std::size_t) (t::bypassC + k)] = mode == 0 ? 1.0f : 0.0f; // Transpose: no correction
+        }
+        p[(std::size_t) t::transpose] = (float) ((std::clamp (std::lround (pitch), -12L, 12L) + 12) / 24.0);
+        const bool wide = std::abs (formant) > 7.0;
+        p[(std::size_t) t::wideFormant] = wide ? 1.0f : 0.0f;
+        p[(std::size_t) t::formantShift] = (float) std::clamp (formant / (wide ? 24.0 : 14.0) + 0.5, 0.0, 1.0);
+        p[(std::size_t) t::formantPreserve] = st.v[5] >= 0.5f ? 0.0f : 1.0f; // formant link: the formants follow the pitch
+        p[(std::size_t) t::driveStage] = 1.0f;
+        p[(std::size_t) t::drive] = st.v[2];
+        p[(std::size_t) t::mix] = st.v[3];
+        p[(std::size_t) t::outputTrim] = 0.5f;
+        slot.mix = 1.0f;
+        return 8;
+    }
+    return 0;
+}
+
 RawTranslator rawTranslatorNamed (std::string_view name)
 {
+    if (name == "soundtoys-littlealterboy")
+        return translateSoundtoysAlterBoy;
     if (name == "soundtoys-decapitator")
         return translateSoundtoysDecapitator;
     if (name == "soundtoys-panman")

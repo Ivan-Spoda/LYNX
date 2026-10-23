@@ -54,6 +54,12 @@ enum Param : int
     vibratoDelay,            // onset delay 0…1500 ms after a note starts
     vibratoOnset,            // onset rate (fade-in) 0…1500 ms
     moreScales,              // 0 = the Scale parameter; else whole tone / diminished
+    // round 136 (appended, off by default): the drive stage of the voice-shifter role it plays (measured black-box on
+    // the reference, REA_rodada136 §3), a wider formant range and an output trim
+    driveStage,              // on / off
+    drive,                   // 0 … 10
+    wideFormant,             // on: Formant shift reaches ±12 semitones
+    outputTrim,              // −24 … +24 dB
     count
 };
 
@@ -68,6 +74,7 @@ int scaleIndex (float v) noexcept;
 int keyIndex (float v) noexcept;
 double retuneMs (float v) noexcept;
 double formantSemitones (float v) noexcept;
+double formantSemitones (float v, bool wide) noexcept; // round 136: ±12 when wide
 int transposeSemitones (float v) noexcept;
 double referenceHz (float v) noexcept;
 int midiChannelIndex (float v) noexcept; // −1 = off, else the channel index (0-based)
