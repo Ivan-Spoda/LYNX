@@ -87,6 +87,10 @@ public:
         bool recordNotes = true;        // notes played (MIDI and PC keyboard)
         bool recordAudio = true;        // audio of the armed inserts' inputs
         bool askWhatToRecord = true;    // the record button asks first ("What would you like to record?")
+        // FL's record menu "Options" (REA round 134): arming recording also starts playback; the armed inserts are
+        // disarmed when a take stops
+        bool startsPlayback = false;
+        bool disarmOnStop = false;
     };
     const RecordOptions& getRecordOptions() const noexcept { return recordOptions; }
     void setRecordOptions (const RecordOptions& options);
@@ -133,6 +137,15 @@ public:
     void setAudioRecordingArmed (bool armed);
     bool isAudioRecordingArmed() const noexcept { return audioArmed; }
     juce::String getLastRecordingError() const { return recordingError; }
+    // Where takes are written and how they are named (FL's project data folder, REA round 134): `folder` is
+    // "<project folder>/Audio/Recorded" for a saved project (the global recordings folder otherwise), files are
+    // "<projectStem>_<yyyy-mm-dd hh-mm-ss>_<insert name>.wav". UI thread.
+    void setRecordingTarget (const juce::File& folder, const juce::String& projectStem);
+    juce::File getRecordingFolder() const { return recordingFolder; }
+    static juce::File defaultRecordingFolder();
+    // The take files written since LYNX started (or since forgetRecordings), oldest first. UI thread.
+    const std::vector<juce::File>& getSessionRecordings() const noexcept { return sessionRecordings; }
+    void forgetRecordings (const std::vector<juce::File>& files);
 
     // --- external audio input through the mixer (REA_rodada88) ---
     // Names of the open device's input channels (all of them, open or not); empty without an input device.
@@ -275,6 +288,8 @@ public:
         int trimSamples = 0;  // PDC: discards this much from the start and renders the same amount extra at the end
         int ditherBits = 0;   // > 0: TPDF dither (with noise shaping unless ditherShaping is false) for this bit depth
         bool ditherShaping = true;
+        // FL's "HQ for all plugins": render qualities and HQ switches on (off: the playback quality)
+        bool hqAllPlugins = true;
         // receives every rendered block after the PDC trim (left, right, frames), like `output` does
         std::function<void (const float*, const float*, int)> capture;
     };
@@ -424,6 +439,9 @@ private:
     // audio recording
     bool audioArmed = false;
     juce::String recordingError;
+    juce::File recordingFolder = defaultRecordingFolder();
+    juce::String recordingStem;
+    std::vector<juce::File> sessionRecordings;
     juce::TimeSliceThread recordThread { "LYNX recording" };
     RecordingNotice recordingNotice;
     void notify (InputIssue issue, int track = 0, const juce::String& detail = {});

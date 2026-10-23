@@ -151,7 +151,7 @@ target_sources(lynx_core PRIVATE
     src/core/MixerOps.cpp
     src/core/History.cpp
     src/core/EffectPresets.cpp
-    src/core/SearchQuery.cpp)
+    src/core/SearchQuery.cpp src/core/SearchIndex.cpp)
 
 # spectral waveforms: band analysis and multi-resolution peak cache
 target_sources(lynx_core PRIVATE

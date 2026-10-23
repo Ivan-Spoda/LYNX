@@ -1176,14 +1176,17 @@ void MainComponent::loadUiSettings()
             PlaylistComponent::editPatternsIn = juce::jlimit (0, 2, line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
         else if (key == "autosaveMinutes")
             autosaveMinutes = prefs::clampAutosaveMinutes (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
+        else if (key == "askUnusedRecordings")
+            askUnusedRecordings = on;
         else if (key == "autosaveKeep")
             autosaveKeep = prefs::clampAutosaveKeep (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
         else if (key == "undoLevels")
             engine.setUndoLevels (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
-        else if (key == "askWhatToRecord" || key == "recordNotes" || key == "recordAudio")
+        else if (key == "askWhatToRecord" || key == "recordNotes" || key == "recordAudio" || key == "recordStartsPlayback" || key == "disarmOnStop")
         {
             auto o = engine.getRecordOptions();
-            (key == "askWhatToRecord" ? o.askWhatToRecord : key == "recordNotes" ? o.recordNotes : o.recordAudio) = on;
+            (key == "askWhatToRecord" ? o.askWhatToRecord : key == "recordNotes" ? o.recordNotes : key == "recordAudio" ? o.recordAudio
+             : key == "disarmOnStop" ? o.disarmOnStop : o.startsPlayback) = on;
             engine.setRecordOptions (o);
         }
     }
@@ -1213,10 +1216,13 @@ void MainComponent::saveUiSettings()
                                       + "\ntoolbarSeparators=" + juce::String (toolbarLayout.separators ? 1 : 0)
                                       + "\ntoolbarVisible=" + juce::String (toolbarLayout.visible ? 1 : 0)
                                       + "\nautosaveMinutes=" + juce::String (autosaveMinutes) + "\nautosaveKeep=" + juce::String (autosaveKeep)
+                                      + "\naskUnusedRecordings=" + juce::String (askUnusedRecordings ? 1 : 0)
                                       + "\nundoLevels=" + juce::String (engine.getUndoLevels())
                                       + "\naskWhatToRecord=" + juce::String (engine.getRecordOptions().askWhatToRecord ? 1 : 0)
                                       + "\nrecordNotes=" + juce::String (engine.getRecordOptions().recordNotes ? 1 : 0)
-                                      + "\nrecordAudio=" + juce::String (engine.getRecordOptions().recordAudio ? 1 : 0) + "\n");
+                                      + "\nrecordAudio=" + juce::String (engine.getRecordOptions().recordAudio ? 1 : 0)
+                                      + "\nrecordStartsPlayback=" + juce::String (engine.getRecordOptions().startsPlayback ? 1 : 0)
+                                      + "\ndisarmOnStop=" + juce::String (engine.getRecordOptions().disarmOnStop ? 1 : 0) + "\n");
 }
 
 // --- transport -----------------------------------------------------------------------------------
@@ -1620,6 +1626,8 @@ void MainComponent::toggleRecording()
     if (! engine.getRecordOptions().askWhatToRecord || ! persistent)
     {
         engine.setRecording (true);
+        if (engine.getRecordOptions().startsPlayback && ! engine.getTransport().playing.load()) // FL's "Recording starts playback"
+            engine.startPlayback();
         return;
     }
 
@@ -1645,6 +1653,8 @@ void MainComponent::toggleRecording()
         if (choice == recordChoiceAudio && safe->engine.getArmedInserts().empty())
             safe->armSelectedInsertForAudio();
         safe->engine.setRecording (true);
+        if (o.startsPlayback && ! safe->engine.getTransport().playing.load()) // FL's "Recording starts playback"
+            safe->engine.startPlayback();
     });
 }
 
@@ -1686,14 +1696,22 @@ void MainComponent::showRecordMenu()
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.recordAudio = ! r.recordAudio; }); });
     menu.addItem (tr ("Ask what to record when recording starts"), true, o.askWhatToRecord,
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.askWhatToRecord = ! r.askWhatToRecord; }); });
+    // FL's "Options" section (REA round 134)
+    menu.addSectionHeader (tr ("Options"));
+    menu.addItem (tr ("Recording starts playback"), true, o.startsPlayback,
+                  [set] { set ([] (AudioEngine::RecordOptions& r) { r.startsPlayback = ! r.startsPlayback; }); });
+    menu.addItem (tr ("Disarm the inserts when recording stops"), true, o.disarmOnStop,
+                  [set] { set ([] (AudioEngine::RecordOptions& r) { r.disarmOnStop = ! r.disarmOnStop; }); });
     menu.addItem (tr ("Record into the audio editor..."), [this] { openAudioEditor (engine); });
     menu.addSeparator();
     menu.addItem (tr ("Arm the selected mixer insert for audio (choose its input)..."), [this] { armSelectedInsertForAudio(); });
     menu.addItem (tr ("Audio settings (input device)..."), [this] { openSettings ((int) SettingsPage::audio); });
-    menu.addItem (tr ("Open recordings folder"), [] {
-        juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").createDirectory();
-        juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings").startAsProcess();
+    menu.addItem (tr ("Open recordings folder"), [this] {
+        const auto folder = engine.getRecordingFolder();
+        folder.createDirectory();
+        folder.startAsProcess();
     });
+    menu.addItem (tr ("Delete unused recordings and save..."), [this] { deleteUnusedRecordingsAndSave(); });
     menu.addSeparator();
     addRecordOptions (menu);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (recordMenuButton.isVisible() ? (juce::Component*) &recordMenuButton
@@ -2257,6 +2275,9 @@ void MainComponent::timerCallback()
 
     // the Browser's "Project folder" follows the project's file (.lynx, or the .flp it was imported from)
     browser.setProjectFile (currentFile != juce::File() ? currentFile : importedFlpFile);
+    // and so does where audio is recorded ("<project folder>/Audio/Recorded", FL-like take names)
+    engine.setRecordingTarget (recordingFolderFor (currentFile != juce::File() ? currentFile : importedFlpFile),
+                               projectName.isNotEmpty() ? juce::File::createLegalFileName (projectName) : juce::String());
 
     // a backup copy every few minutes (Settings › General) when there are changes
     // (not in the middle of a recording: FL also postpones the timed backup until the transport is free)
@@ -2373,6 +2394,8 @@ void MainComponent::timerCallback()
 void MainComponent::updateTitle()
 {
     repaint (titleArea); // the project name in the toolbar
+    if (! engine.isModified()) // what is on disk now: the reference for "unused recordings" after a Discard
+        savedSamples = safety::referencedSamples (engine.getSong());
 
     if (auto* window = getTopLevelComponent())
         window->setName ((engine.isModified() ? "* " : "")
@@ -2393,7 +2416,7 @@ void MainComponent::confirmDiscard (std::function<void()> then)
 {
     if (! engine.isModified())
     {
-        then();
+        offerToDeleteUnusedRecordings (true, std::move (then));
         return;
     }
 
@@ -2403,12 +2426,121 @@ void MainComponent::confirmDiscard (std::function<void()> then)
                                  {
                                      save (false);
                                      if (! engine.isModified()) // saved (did not cancel "save as")
-                                         then();
+                                         offerToDeleteUnusedRecordings (true, then);
                                  }
                                  else if (result == 2)
-                                     then();
+                                     offerToDeleteUnusedRecordings (false, then);
                              }),
                              true);
+}
+
+juce::File MainComponent::recordingFolderFor (const juce::File& projectFile) const
+{
+    // FL records into the project data folder's "Audio\Recorded" (REA round 134); LYNX's data folder is the folder of
+    // the project file. Unsaved projects record into the global recordings folder.
+    return projectFile == juce::File() ? AudioEngine::defaultRecordingFolder()
+                                       : projectFile.getParentDirectory().getChildFile (safety::recordedSubfolder);
+}
+
+namespace
+{
+// FL's Keep / Delete question about recorded files nothing uses (FLEngine FUN_00ed1380, REA round 134)
+void askKeepOrDelete (const juce::String& message, const std::vector<juce::File>& files, std::function<void (bool)> done)
+{
+    juce::String list;
+    for (std::size_t i = 0; i < files.size() && i < 8; ++i)
+        list << "\n  " << files[i].getFileName();
+    if (files.size() > 8)
+        list << "\n  " << tr ("...and {0} more", { juce::String ((int) files.size() - 8) });
+
+    auto* w = new juce::AlertWindow (tr ("Unused recordings"), message + list, juce::MessageBoxIconType::QuestionIcon);
+    w->addButton (tr ("Keep"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    w->addButton (tr ("Delete"), 1);
+    w->enterModalState (true, juce::ModalCallbackFunction::create ([done] (int result) { done (result == 1); }), true);
+}
+
+// to the recycle bin when the system has one (FL's "Delete recorded files to recycle bin")
+int removeFiles (const std::vector<juce::File>& files)
+{
+    int removed = 0;
+    for (const auto& f : files)
+        removed += f.existsAsFile() && (f.moveToTrash() || f.deleteFile());
+    return removed;
+}
+} // namespace
+
+void MainComponent::offerToDeleteUnusedRecordings (bool keepsCurrentState, std::function<void()> then)
+{
+    // the takes of this session the project on disk will not use: deleted takes, undone recordings, a project closed
+    // without saving (FL: "You created ... sample file(s) that are no longer used if the project isn't saved")
+    std::vector<std::string> recorded;
+    for (const auto& f : engine.getSessionRecordings())
+        if (f.existsAsFile())
+            recorded.push_back (f.getFullPathName().toStdString());
+    const auto referenced = keepsCurrentState ? safety::referencedSamples (engine.getSong()) : savedSamples;
+    std::vector<juce::File> unused;
+    for (const auto& path : safety::unusedRecordings (recorded, referenced))
+        unused.emplace_back (juce::String::fromUTF8 (path.c_str()));
+
+    if (unused.empty() || ! askUnusedRecordings || ! persistent)
+    {
+        then();
+        return;
+    }
+
+    askKeepOrDelete (unused.size() == 1 ? tr ("You recorded 1 audio file that this project will not use.")
+                                        : tr ("You recorded {0} audio files that this project will not use.", { juce::String ((int) unused.size()) }),
+                     unused, [safe = juce::Component::SafePointer<MainComponent> (this), unused, then] (bool remove) {
+                         if (safe == nullptr)
+                             return;
+                         if (remove)
+                             removeFiles (unused);
+                         safe->engine.forgetRecordings (unused); // asked once per file
+                         then();
+                     });
+}
+
+void MainComponent::deleteUnusedRecordingsAndSave()
+{
+    // FL's Tools › Macros "Delete unused files and save project", for the files this project recorded: every take in
+    // its recording folder (and this session's takes elsewhere) that no channel or clip uses
+    if (currentFile == juce::File())
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Delete unused recordings"),
+                                                tr ("Save the project first: its recordings are kept next to it, in {0}.", { juce::String (safety::recordedSubfolder) }));
+        return;
+    }
+    std::vector<std::string> recorded;
+    const auto stem = currentFile.getFileNameWithoutExtension() + "_";
+    for (const auto& f : recordingFolderFor (currentFile).findChildFiles (juce::File::findFiles, false, "*.wav"))
+        if (f.getFileName().startsWithIgnoreCase (stem)) // other projects in the same folder record there too
+            recorded.push_back (f.getFullPathName().toStdString());
+    for (const auto& f : engine.getSessionRecordings())
+        if (f.existsAsFile())
+            recorded.push_back (f.getFullPathName().toStdString());
+    std::vector<juce::File> unused;
+    for (const auto& path : safety::unusedRecordings (recorded, safety::referencedSamples (engine.getSong())))
+        unused.emplace_back (juce::String::fromUTF8 (path.c_str()));
+
+    if (unused.empty())
+    {
+        save (false);
+        ui::postHint ({ tr ("No unused recordings. Project saved."), {}, false, false }, 4000);
+        return;
+    }
+    askKeepOrDelete (tr ("This project has {0} unused recording(s). Deleting them cannot be undone (they go to the recycle bin).",
+                         { juce::String ((int) unused.size()) }),
+                     unused, [safe = juce::Component::SafePointer<MainComponent> (this), unused] (bool remove) {
+                         if (safe == nullptr)
+                             return;
+                         if (remove)
+                         {
+                             const auto n = removeFiles (unused);
+                             safe->engine.forgetRecordings (unused);
+                             ui::postHint ({ tr ("Deleted {0} unused recording(s).", { juce::String (n) }), {}, false, false }, 4000);
+                         }
+                         safe->save (false);
+                     });
 }
 
 namespace
@@ -2603,6 +2735,65 @@ void MainComponent::collectSamples()
                                       text << "\n\n" << tr ("Not on this PC (left out):") << "\n" << result.missing.joinIntoString ("\n");
                                   juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Collect project samples"), text);
                               });
+}
+
+void MainComponent::saveToNewProjectFolder()
+{
+    // FL's "Save to new project folder...": <chosen name>/<name>.lynx, so the project gets its own data folder (its
+    // recordings go to <name>/Audio/Recorded). This session's takes still in the global recordings folder move along
+    // (copied there, the project uses the copies; the originals are then offered for deletion as unused).
+    const auto start = currentFile != juce::File() ? currentFile.getParentDirectory()
+                                                   : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("LYNX/Projects");
+    start.createDirectory();
+    fileChooser = std::make_unique<juce::FileChooser> (tr ("Save to new project folder"),
+                                                       start.getChildFile (projectName.isNotEmpty() ? juce::File::createLegalFileName (projectName) : juce::String ("untitled")),
+                                                       juce::String ("*") + ProjectFile::extension);
+    fileChooser->launchAsync (juce::FileBrowserComponent::saveMode, [safe = juce::Component::SafePointer<MainComponent> (this)] (const juce::FileChooser& chooser) {
+        const auto chosen = chooser.getResult();
+        if (safe == nullptr || chosen == juce::File())
+            return;
+        const auto name = chosen.getFileNameWithoutExtension();
+        auto folder = chosen.getParentDirectory().getChildFile (name);
+        if (folder.exists() && ! folder.findChildFiles (juce::File::findFilesAndDirectories, false).isEmpty())
+            folder = folder.getNonexistentSibling (false);
+        if (! folder.createDirectory())
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not save"),
+                                                    tr ("Could not create the folder {0}", { folder.getFullPathName() }));
+            return;
+        }
+        auto& self = *safe;
+        const auto recorded = folder.getChildFile (safety::recordedSubfolder);
+        std::map<std::string, std::string> relink;
+        const auto used = safety::referencedSamples (self.engine.getSong());
+        for (const auto& take : self.engine.getSessionRecordings())
+            if (take.existsAsFile() && take.isAChildOf (AudioEngine::defaultRecordingFolder())
+                && std::any_of (used.begin(), used.end(), [&take] (const std::string& p) { return safety::samePath (p, take.getFullPathName().toStdString()); }))
+            {
+                recorded.createDirectory();
+                const auto copy = recorded.getNonexistentChildFile (take.getFileNameWithoutExtension(), take.getFileExtension(), false);
+                if (take.copyFileTo (copy))
+                    relink[take.getFullPathName().toStdString()] = copy.getFullPathName().toStdString();
+            }
+        if (! relink.empty())
+            self.engine.editSong ([&relink] (Song& song) { applyRelocations (song, relink); });
+
+        const auto file = folder.getChildFile (name + ProjectFile::extension);
+        juce::String error;
+        self.engine.capturePluginStates();
+        if (! ProjectFile::save (self.engine.getSong(), file, error))
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not save"), error);
+            return;
+        }
+        self.engine.markSaved();
+        self.rememberRecent (file);
+        self.currentFile = file;
+        self.projectName = name;
+        self.importedSuffix = {};
+        self.updateTitle();
+        ui::postHint ({ tr ("Saved in its own folder: {0}", { folder.getFullPathName() }), {}, false, false }, 5000);
+    });
 }
 
 void MainComponent::startSession()
@@ -2899,6 +3090,7 @@ void MainComponent::openSettings (int page)
         o.undoLevels = safe->engine.getUndoLevels();
         o.autosaveMinutes = safe->autosaveMinutes;
         o.autosaveKeep = safe->autosaveKeep;
+        o.askUnusedRecordings = safe->askUnusedRecordings;
         o.pluginSandbox = pluginSandboxEnabled();
         o.pluginSubstitutes = pluginSubstitutesEnabled();
         return o;
@@ -2942,6 +3134,7 @@ void MainComponent::openSettings (int page)
         self.engine.setUndoLevels (o.undoLevels);
         self.autosaveMinutes = prefs::clampAutosaveMinutes (o.autosaveMinutes);
         self.autosaveKeep = prefs::clampAutosaveKeep (o.autosaveKeep);
+        self.askUnusedRecordings = o.askUnusedRecordings;
         self.autosaveTicks = 0;
         self.saveUiSettings();
         if (o.language != i18n::saved())
@@ -3179,7 +3372,9 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         menu.addItem (tr ("Save") + shortcutText ("file.save"), [this] { save (false); });
         menu.addItem (tr ("Save as...") + shortcutText ("file.saveAs"), [this] { save (true); });
         menu.addItem (tr ("Save new version") + shortcutText ("file.saveNewVersion"), [this] { saveNewVersion(); });
+        menu.addItem (tr ("Save to new project folder..."), [this] { saveToNewProjectFolder(); });
         menu.addItem (tr ("Save as template..."), [this] { saveAsTemplate(); });
+        menu.addItem (tr ("Delete unused recordings and save..."), [this] { deleteUnusedRecordingsAndSave(); });
         menu.addItem (tr ("Revert to last backup..."), [this] { revertToLastBackup(); });
         menu.addSeparator();
         menu.addItem (tr ("Export audio...") + shortcutText ("file.export"), [this] { exportAudio(); });

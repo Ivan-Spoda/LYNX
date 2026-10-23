@@ -105,6 +105,10 @@ struct RackState
     std::vector<SendTap> sendTaps;
     std::vector<std::vector<int>> slotTap; // [track][slot]: index into sendTaps, or −1
     std::vector<std::vector<int>> mixerLayers;        // inserts with no dependencies among them, in order
+    // "Allow threaded processing" off (PluginRef::threaded, REA round 134): those channels / inserts always run on the
+    // calling (audio) thread, the others may go to the workers. Same layers as mixerLayers.
+    std::vector<int> threadedChannels, audioThreadChannels;
+    std::vector<std::vector<int>> threadedLayers, audioThreadLayers;
     bool parallel = false;                            // worth splitting across threads
     void buildMixerGraph();
 

@@ -12,6 +12,17 @@
 
 namespace lynx
 {
+// The block FL's wrapper uses (Fruity Wrapper FUN_00870670, REA round 134): "Use fixed size buffers" alone = 2 ms
+// of audio rounded up to a multiple of 4 samples (88 at 44.1 kHz, 96 at 48 kHz); with "Process maximum size buffers"
+// the host's maximum block (LYNX: the audio device's buffer) - more latency.
+inline int flFixedBlockSize (double sampleRate, int deviceBlock, bool maximumSize) noexcept
+{
+    if (maximumSize)
+        return std::max (16, deviceBlock);
+    const auto twoMs = (int) (sampleRate * 2.0 / 1000.0 + 0.5);
+    return std::max (16, (twoMs + 3) & ~3);
+}
+
 class FixedBlock
 {
 public:

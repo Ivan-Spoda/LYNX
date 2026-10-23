@@ -2,9 +2,14 @@
 
 #include "core/FlpImport.h"
 #include "core/ProjectContents.h"
+#include "core/SearchIndex.h"
 #include "core/SearchQuery.h"
+#include "platform/Paths.h"
+
+#include <mutex>
 #include "engine/PluginHost.h"
 #include "engine/Text.h"
+#include "ui/HintBar.h"
 #include "ui/I18n.h"
 #include "ui/Icons.h"
 #include "ui/PlaylistComponent.h"
@@ -29,33 +34,95 @@ bool isListed (const juce::File& f)
 
 constexpr int maxResults = 500;
 
+// The search index (core/SearchIndex.h, REA round 134): one per process, shared by every Browser and search, kept in
+// the settings folder between sessions. Before a search only the folders' modification times are read; the folders
+// that changed are listed again ("dirty folders", like FL's browser cache).
+struct SharedIndex
+{
+    std::mutex lock;
+    search::Index index;
+    bool loaded = false;
+
+    static SharedIndex& get()
+    {
+        static SharedIndex shared;
+        return shared;
+    }
+    static juce::File file() { return platform::settingsFile ("browser-index.txt"); }
+
+    // caller holds `lock`
+    void loadOnce()
+    {
+        if (loaded)
+            return;
+        loaded = true;
+        if (const auto f = file(); f.existsAsFile() && f.getSize() < 256 * 1024 * 1024)
+            if (! index.fromText (f.loadFileAsString().toStdString()))
+                index.clear();
+    }
+    void save() { file().replaceWithText (juce::String::fromUTF8 (index.toText().c_str())); }
+};
+
+search::FileSystem diskFileSystem()
+{
+    search::FileSystem fs;
+    fs.separator = juce::File::getSeparatorChar() == '\\' ? '\\' : '/';
+    fs.folderTime = [] (const std::string& path) -> std::int64_t {
+        const juce::File folder (juce::String::fromUTF8 (path.c_str()));
+        return folder.isDirectory() ? folder.getLastModificationTime().toMilliseconds() : -1;
+    };
+    fs.list = [] (const std::string& path) {
+        search::FolderListing listing;
+        const juce::File folder (juce::String::fromUTF8 (path.c_str()));
+        if (! folder.isDirectory())
+            return listing;
+        listing.exists = true;
+        listing.time = folder.getLastModificationTime().toMilliseconds();
+        auto children = folder.findChildFiles (juce::File::findFilesAndDirectories, false, "*");
+        children.sort();
+        for (const auto& c : children)
+        {
+            if (c.isDirectory())
+                listing.subfolders.push_back (c.getFileName().toStdString());
+            else if (isListed (c))
+                listing.files.push_back (c.getFileName().toStdString());
+        }
+        return listing;
+    };
+    return fs;
+}
+
+// Brings the index of these folders up to date; true when something was listed again (and saved).
+bool refreshIndex (const juce::Array<juce::File>& roots, const std::function<bool()>& shouldStop)
+{
+    auto& shared = SharedIndex::get();
+    const std::lock_guard<std::mutex> guard (shared.lock);
+    shared.loadOnce();
+    const auto fs = diskFileSystem();
+    int listed = 0;
+    for (const auto& root : roots)
+        listed += shared.index.refresh (root.getFullPathName().toStdString(), fs, shouldStop);
+    if (listed > 0)
+        shared.save();
+    return listed > 0;
+}
+
 juce::Array<juce::File> searchFiles (const juce::Array<juce::File>& roots, const juce::String& query, bool& truncated,
                                      const std::function<bool()>& shouldStop)
 {
-    const auto parsed = search::parse (query.toStdString());
+    refreshIndex (roots, shouldStop);
     juce::Array<juce::File> found;
     truncated = false;
+    if (shouldStop())
+        return found;
 
+    std::vector<std::string> paths;
     for (const auto& root : roots)
-        for (const auto& entry : juce::RangedDirectoryIterator (root, true, "*", juce::File::findFiles))
-        {
-            if (shouldStop())
-                return found;
-
-            const auto file = entry.getFile();
-
-            if (! isListed (file) || ! search::matches (parsed, file.getFileName().toStdString()))
-                continue;
-
-            found.addIfNotAlreadyThere (file);
-
-            if (found.size() >= maxResults)
-            {
-                truncated = true;
-                return found;
-            }
-        }
-
+        paths.push_back (root.getFullPathName().toStdString());
+    auto& shared = SharedIndex::get();
+    const std::lock_guard<std::mutex> guard (shared.lock);
+    for (const auto& path : shared.index.find (query.toStdString(), paths, (std::size_t) maxResults, truncated))
+        found.add (juce::File (juce::String::fromUTF8 (path.c_str())));
     return found;
 }
 
@@ -190,6 +257,19 @@ private:
     juce::Array<juce::File> roots;
     juce::String query;
     std::function<void (juce::Array<juce::File>, bool)> done;
+};
+
+// Refreshes the search index of every Browser folder at low priority (FL's automatic indexing), so the first search
+// of a session reads the index instead of the disk.
+class IndexJob final : public juce::Thread
+{
+public:
+    explicit IndexJob (juce::Array<juce::File> r) : juce::Thread ("LYNX browser index"), roots (std::move (r)) {}
+    ~IndexJob() override { stopThread (5000); }
+    void run() override { refreshIndex (roots, [this] { return threadShouldExit(); }); }
+
+private:
+    juce::Array<juce::File> roots;
 };
 
 // --- the tree (and, flat, the search results) ---------------------------------------------------------
@@ -1536,6 +1616,13 @@ BrowserComponent::BrowserComponent (AudioEngine& e)
     tabs = std::make_unique<TabBar> (*this);
     addAndMakeVisible (*tabs);
 
+    juce::Timer::callAfterDelay (4000, [safe = juce::Component::SafePointer<BrowserComponent> (this)] {
+        if (safe == nullptr || safe->indexJob != nullptr || safe->roots.isEmpty())
+            return;
+        safe->indexJob = std::make_unique<IndexJob> (safe->roots);
+        safe->indexJob->startThread (juce::Thread::Priority::background);
+    });
+
     searchBox.setTextToShowWhenEmpty (tr ("Search (Ctrl+F): kick -loop, snare OR clap, hat*.wav"), theme::colour::textDisabled);
     searchBox.addListener (this);
     searchBox.setEscapeAndReturnKeysConsumed (true);
@@ -1724,6 +1811,7 @@ BrowserComponent::~BrowserComponent()
 {
     engine.removeChangeListener (this);
     job.reset();
+    indexJob.reset();
     engine.previewFile ({});
 }
 
@@ -1944,6 +2032,11 @@ void BrowserComponent::runSearch()
             return;
 
         safe->results->setFiles (found, scope, found.isEmpty() ? tr ("Nothing found for \"{0}\".", { query }) : juce::String());
+        // FL's hint bar after a search: "Found 51 files" (REA round 134)
+        if (! found.isEmpty())
+            ui::postHint ({ truncated ? tr ("Found more than {0} files", { juce::String (found.size()) })
+                                      : found.size() == 1 ? tr ("Found 1 file") : tr ("Found {0} files", { juce::String (found.size()) }), {}, false, false },
+                          4000);
 
         if (truncated)
             safe->results->setStatus (tr ("Showing the first {0} results.", { juce::String (maxResults) }));

@@ -93,7 +93,7 @@ public:
                                                                  &pluginsTitle, &languageLabel, &languageBox, &languageNote, &scaleLabel, &scaleBox,
                                                                  &wavesLabel, &wavesBox, &stereoWaves, &pluginStyleLabel, &pluginStyleBox, &reducedEffects, &splash, &startupSound, &scanAtStart,
                                                                  &typingPiano, &keepEditors, &rememberSeek, &editInLabel, &editInBox, &undoLabel,
-                                                                 &undoBox, &autosaveLabel, &autosaveBox, &keepLabel, &keepBox, &openBackups,
+                                                                 &undoBox, &autosaveLabel, &autosaveBox, &keepLabel, &keepBox, &openBackups, &unusedTakes,
                                                                  &sandbox, &sandboxNote, &substitutes, &substitutesNote, &managePlugins, &manageShortcuts, &shortcutsNote })
             add (*c);
 
@@ -181,6 +181,9 @@ public:
             autosaveFolder().startAsProcess();
         };
 
+        toggle (unusedTakes, tr ("When a project closes, offer to delete the recordings it no longer uses"), options.askUnusedRecordings,
+                [this] (bool on) { options.askUnusedRecordings = on; });
+
         toggle (sandbox, tr ("Run plugins in a separate process (protects LYNX from crashes)"), options.pluginSandbox,
                 [this] (bool on) { options.pluginSandbox = on; });
         styleNote (sandboxNote, tr ("Applies to plugins opened from now on; reopen the project to move the others."));
@@ -233,6 +236,7 @@ private:
             openBackups.setBounds (row.removeFromLeft (juce::jmin (row.getWidth(), 170)));
         }
         keepBox.setBounds (r.row (keepLabel, 120));
+        unusedTakes.setBounds (r.full (24));
 
         r.section (pluginsTitle);
         sandbox.setBounds (r.full (24));
@@ -282,7 +286,7 @@ private:
         backupTitle { tr ("Backup") }, pluginsTitle { tr ("Plugins and shortcuts") };
     juce::Label languageLabel, languageNote, scaleLabel, wavesLabel, pluginStyleLabel, editInLabel, undoLabel, autosaveLabel, keepLabel, sandboxNote, substitutesNote, shortcutsNote;
     juce::ComboBox languageBox, scaleBox, wavesBox, pluginStyleBox, editInBox, undoBox, autosaveBox, keepBox;
-    juce::ToggleButton stereoWaves, reducedEffects, splash, startupSound, scanAtStart, typingPiano, keepEditors, rememberSeek, sandbox, substitutes;
+    juce::ToggleButton stereoWaves, reducedEffects, splash, startupSound, scanAtStart, typingPiano, keepEditors, rememberSeek, sandbox, substitutes, unusedTakes;
     juce::TextButton openBackups { tr ("Open backup folder") }, managePlugins { tr ("Plugin manager...") }, manageShortcuts { tr ("Manage shortcuts...") };
 };
 

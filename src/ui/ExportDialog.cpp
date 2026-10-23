@@ -42,6 +42,8 @@ public:
 
             onDone (ok);
         }
+        else if (ok && reveal)
+            file.revealToUser(); // "Show the file(s) when complete"
         else if (ok)
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Export complete"),
                                                     file.getFullPathName() + "\n\n"
@@ -57,6 +59,9 @@ private:
     std::unique_ptr<ExportJob> job;
     juce::File file;
     std::function<void (bool)> onDone;
+public:
+    bool reveal = false;
+private:
     juce::String error;
     bool ok = false;
 };
@@ -128,7 +133,9 @@ public:
 
     void threadComplete (bool cancelled) override
     {
-        if (! cancelled)
+        if (! cancelled && options.showWhenDone && written > 0)
+            baseFile.getParentDirectory().startAsProcess();
+        else if (! cancelled)
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Stems exported"),
                                                     tr ("{0} file(s) in {1}", { juce::String (written), baseFile.getParentDirectory().getFullPathName() }));
 
@@ -272,7 +279,7 @@ public:
         combo (ditherLabel, tr ("Dither"), ditherBox, { tr ("Off"), tr ("TPDF"), tr ("TPDF + noise shaping") },
                tr ("Hides the rounding noise of 16 and 24 bit files (noise shaping moves it where the ear is least sensitive)"));
 
-        for (auto* t : { &normalizeToggle, &masterFxToggle, &trimToggle })
+        for (auto* t : { &normalizeToggle, &masterFxToggle, &trimToggle, &hqToggle, &showToggle })
         {
             t->onClick = [this] { readControls(); };
             addAndMakeVisible (t);
@@ -283,6 +290,11 @@ public:
         normalizeToggle.setTooltip (tr ("Raises or lowers the whole file so its loudest peak reaches full scale"));
         masterFxToggle.setTooltip (tr ("Off: the Master insert's effects are bypassed for the export"));
         trimToggle.setTooltip (tr ("Removes the silence plugin latency compensation adds at the start"));
+        hqToggle.setButtonText (tr ("HQ for all plugins"));
+        showToggle.setButtonText (tr ("Show the file(s) when complete"));
+        showToggle.setTooltip (tr ("Opens the file manager on the exported file when the export is done"));
+        hqToggle.setTooltip (tr ("Plugins with a separate render quality use it, and HQ switches are turned on for the export. "
+                                 "Off: the export uses the playback quality, so it sounds exactly like what you heard"));
 
         infoLabel.setFont (theme::font (theme::type::small));
         infoLabel.setColour (juce::Label::textColourId, theme::colour::textSecondary);
@@ -299,7 +311,7 @@ public:
         cancelButton.onClick = [this] { close(); };
 
         writeControls();
-        setSize (620, 404);
+        setSize (620, 430);
     }
 
     // --snapshot: the window with this format chosen (0 WAV, 1 MP3, 2 OGG, 3 FLAC) and a few options set
@@ -328,13 +340,19 @@ public:
         warningLabel.setBounds (buttons);
         area.removeFromBottom (8);
 
-        auto mix = area.removeFromBottom (58);
+        auto mix = area.removeFromBottom (84);
         optionsTitle.setBounds (mix.removeFromTop (26));
         mix.removeFromTop (4);
         auto mixRow = mix.removeFromTop (24);
         normalizeToggle.setBounds (mixRow.removeFromLeft (200));
         masterFxToggle.setBounds (mixRow.removeFromLeft (150));
         trimToggle.setBounds (mixRow);
+        mix.removeFromTop (2);
+        {
+            auto row2 = mix.removeFromTop (24);
+            hqToggle.setBounds (row2.removeFromLeft (200));
+            showToggle.setBounds (row2.removeFromLeft (260));
+        }
         area.removeFromBottom (6);
 
         auto left = area.removeFromLeft ((area.getWidth() - 24) / 2);
@@ -432,6 +450,8 @@ private:
         normalizeToggle.setToggleState (options.normalize, n);
         masterFxToggle.setToggleState (options.masterEffects, n);
         trimToggle.setToggleState (options.trimPdc, n);
+        hqToggle.setToggleState (options.hqAllPlugins, n);
+        showToggle.setToggleState (options.showWhenDone, n);
         refresh();
     }
 
@@ -464,6 +484,8 @@ private:
         options.normalize = normalizeToggle.getToggleState();
         options.masterEffects = masterFxToggle.getToggleState();
         options.trimPdc = trimToggle.getToggleState();
+        options.hqAllPlugins = hqToggle.getToggleState();
+        options.showWhenDone = showToggle.getToggleState();
         options = clamped (options);
 
         if (options.format != previousFormat)
@@ -494,7 +516,10 @@ private:
 
         const auto& song = engine.getSong();
         const auto seconds = exportMusicSeconds (song, options);
-        auto info = tr ("Total time: {0}", { juce::String (formatDuration (seconds)) });
+        // FL's line: "Length: 144 bars  Total time: 3'57''  Disk space: 38.76 MB" (REA round 134)
+        const auto bars = lengthInBars (seconds, song.bpm, song.beatsPerBar);
+        auto info = tr ("Length: {0} bars", { juce::String (bars, bars < 10.0 && std::abs (bars - std::round (bars)) > 0.01 ? 1 : 0) }) + "  ·  "
+                    + tr ("Total time: {0}", { juce::String (formatDuration (seconds)) });
         if (options.tail == TailMode::leave)
             info << " " << tr ("(+ tail up to {0} s)", { juce::String ((int) options.maxTailSeconds) });
         if (options.format == Format::mp3 && mp3SampleRate (options.sampleRate) != options.sampleRate)
@@ -503,6 +528,8 @@ private:
             info << "  ·  " << tr ("{0} file(s)", { juce::String ((int) stemTracks (song).size() + (options.stemsIncludeMaster ? 1 : 0)) });
         else if (options.stems == Stems::channels)
             info << "  ·  " << tr ("{0} file(s)", { juce::String ((int) stemChannels (song, options.range).size() + (options.stemsIncludeMaster ? 1 : 0)) });
+        if (options.stems == Stems::none)
+            info << "  ·  " << tr ("Disk space: {0}", { juce::File::descriptionOfSizeInBytes (estimatedBytes (options, seconds)) });
         infoLabel.setText (info, juce::dontSendNotification);
 
         juce::String warning;
@@ -552,7 +579,9 @@ private:
 
                                   auto job = std::make_unique<ExportJob> (engineRef.getSong(), o, file);
                                   close(); // deletes this panel: no `this` after this point
-                                  (new ExportThread (std::move (job), file))->launchThread();
+                                  auto* thread = new ExportThread (std::move (job), file);
+                                  thread->reveal = o.showWhenDone;
+                                  thread->launchThread();
                               });
     }
 
@@ -569,7 +598,7 @@ private:
     Segmented formatButtons { { "WAV", "MP3", "OGG", "FLAC" } };
     juce::Label depthLabel, bitrateLabel, compressionLabel, rateLabel, channelsLabel, ditherLabel;
     juce::ComboBox depthBox, mp3Box, oggBox, flacLevelBox, rateBox, channelsBox, ditherBox;
-    juce::ToggleButton normalizeToggle, masterFxToggle, trimToggle;
+    juce::ToggleButton normalizeToggle, masterFxToggle, trimToggle, hqToggle, showToggle;
     juce::Label infoLabel, warningLabel;
     juce::TextButton exportButton { tr ("Export...") }, cancelButton { tr ("Cancel") };
     std::unique_ptr<juce::FileChooser> chooser;

@@ -155,10 +155,21 @@ juce::PopupMenu pluginProcessingMenu (AudioEngine& engine, const PluginRef& curr
 
     juce::PopupMenu menu;
     menu.addItem (tr ("Use fixed size buffers (adds latency)"), true, current.fixedBuffers, [toggle] { toggle (&PluginRef::fixedBuffers); });
+    // FL's options of fixed buffers (REA round 134): 2 ms blocks, or the whole device buffer
+    menu.addItem (tr ("Process maximum size buffers (more latency, only when necessary)"), current.fixedBuffers, current.fixedBuffers && current.maxSizeBuffers,
+                  [toggle] { toggle (&PluginRef::maxSizeBuffers); });
     // with Options › "Run plugins in a separate process" on, every plugin already runs in one
     const auto all = pluginSandboxEnabled();
     menu.addItem (all ? tr ("Run in a separate process (on for all plugins in Options)") : tr ("Run in a separate process"), ! all,
                   all || current.separateProcess, [toggle] { toggle (&PluginRef::separateProcess); });
+    // FL's "Allow threaded processing" (on by default): off keeps this plugin on the audio thread itself, for plugins
+    // that misbehave when called from several threads. Nothing is re-created.
+    menu.addItem (tr ("Allow threaded processing"), true, current.threaded, [&engine, find] {
+        engine.editSong ([find] (Song& song) {
+            if (auto* ref = find (song))
+                ref->threaded = ! ref->threaded;
+        });
+    });
     return menu;
 }
 

@@ -128,6 +128,7 @@ private:
     std::unique_ptr<TabBar> tabs;
     class SearchJob;
     std::unique_ptr<SearchJob> job;
+    std::unique_ptr<juce::Thread> indexJob; // brings the search index up to date in the background after start
     juce::TextEditor searchBox;
     std::unique_ptr<juce::FileChooser> chooser;
     int tab = allTab;

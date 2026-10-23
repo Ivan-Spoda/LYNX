@@ -58,6 +58,22 @@ std::string uniqueName (const std::string& stem, const std::function<bool (const
 // is the version number; "Mix_v2" has none, so it becomes "Mix_v2_2").
 std::string nextVersionName (const std::string& stem, const std::function<bool (const std::string&)>& taken);
 
+// --- recordings (REA round 134) -------------------------------------------------------------------------------------
+// FL's name for a recorded take: "<project>_<yyyy-mm-dd hh-mm-ss>_<insert name>" ("untitled" without a project name;
+// no "_<insert>" part when `insertName` is empty). Without extension; the caller makes it unique (uniqueName) and legal.
+std::string recordingName (const std::string& projectStem, int year, int month, int day, int hour, int minute, int second,
+                           const std::string& insertName);
+
+// The folder a project records into, relative to the project file's folder (FL's project data folder "Audio\Recorded").
+inline constexpr const char* recordedSubfolder = "Audio/Recorded";
+
+// Paths compared the way the file system would (separators unified; case folded, as on Windows and macOS).
+bool samePath (const std::string& a, const std::string& b);
+
+// Recordings made in this session that the project will no longer use: the files of `recorded` that `referenced`
+// (the samples of the project as it will stay on disk) does not contain, once each, in recording order.
+std::vector<std::string> unusedRecordings (const std::vector<std::string>& recorded, const std::vector<std::string>& referenced);
+
 // --- sample paths ---------------------------------------------------------------------------------------------------
 // True for paths that are relative ("samples/kick.wav"): no drive letter, no leading separator.
 bool isRelativePath (const std::string& path);

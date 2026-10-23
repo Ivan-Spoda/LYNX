@@ -244,6 +244,10 @@ juce::var pluginToVar (const PluginRef& p)
         o->setProperty ("fixedBuffers", true);
     if (p.separateProcess)
         o->setProperty ("separateProcess", true);
+    if (! p.threaded)
+        o->setProperty ("threaded", false);
+    if (p.maxSizeBuffers)
+        o->setProperty ("maxSizeBuffers", true);
     return juce::var (o.release());
 }
 
@@ -257,6 +261,8 @@ PluginRef pluginFromVar (const juce::var& v)
         p.foreign = {};
     p.fixedBuffers = (bool) v.getProperty ("fixedBuffers", false);
     p.separateProcess = (bool) v.getProperty ("separateProcess", false);
+    p.threaded = (bool) v.getProperty ("threaded", true);
+    p.maxSizeBuffers = (bool) v.getProperty ("maxSizeBuffers", false);
     return p;
 }
 
@@ -934,6 +940,8 @@ juce::String toJson (const Song& song)
         o->setProperty ("pan", t.pan);
         o->setProperty ("muted", t.muted);
         o->setProperty ("solo", t.solo);
+        if (! t.threaded)
+            o->setProperty ("threaded", false);
 
         if (! t.toMaster)
             o->setProperty ("toMaster", false);
@@ -1422,6 +1430,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             track.pan = juce::jlimit (-1.0f, 1.0f, (float) t.getProperty ("pan", 0.0));
             track.muted = (bool) t.getProperty ("muted", false);
             track.solo = (bool) t.getProperty ("solo", false);
+            track.threaded = (bool) t.getProperty ("threaded", true);
             track.toMaster = (bool) t.getProperty ("toMaster", true);
             track.masterLevel = juce::jlimit (0.0f, maxFaderGain, (float) (double) t.getProperty ("masterLevel", 1.0));
             track.stereo = juce::jlimit (-1.0f, 1.0f, (float) (double) t.getProperty ("stereo", 0.0));

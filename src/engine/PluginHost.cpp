@@ -108,16 +108,20 @@ int bufferChannels (const juce::AudioPluginInstance& plugin)
 namespace
 {
 std::atomic<int> fixedBlockSamples { 512 };
+std::atomic<double> fixedBlockRate { 44100.0 };
 }
 
-int fixedPluginBlock() noexcept
+int fixedPluginBlock (bool maximumSize) noexcept
 {
-    return fixedBlockSamples.load (std::memory_order_relaxed);
+    return juce::jlimit (16, PluginHost::maxBlockSize,
+                         flFixedBlockSize (fixedBlockRate.load (std::memory_order_relaxed), fixedBlockSamples.load (std::memory_order_relaxed), maximumSize));
 }
 
-void setFixedPluginBlock (int samples) noexcept
+void setFixedPluginBlock (int deviceBlock, double sampleRate) noexcept
 {
-    fixedBlockSamples.store (juce::jlimit (16, PluginHost::maxBlockSize, samples), std::memory_order_relaxed);
+    fixedBlockSamples.store (juce::jlimit (16, PluginHost::maxBlockSize, deviceBlock), std::memory_order_relaxed);
+    if (sampleRate > 0.0)
+        fixedBlockRate.store (sampleRate, std::memory_order_relaxed);
 }
 
 // ---------------------------------------------------------------------------
@@ -1740,7 +1744,7 @@ std::shared_ptr<Instrument> PluginHost::makeInstrument (const PluginRef& ref, do
 {
     juce::String why;
     if (auto instance = instantiate (ref, sampleRate, &why))
-        return std::make_shared<PluginInstrument> (std::move (instance), maxBlockSize, ref.fixedBuffers ? fixedPluginBlock() : 0);
+        return std::make_shared<PluginInstrument> (std::move (instance), maxBlockSize, ref.fixedBuffers ? fixedPluginBlock (ref.maxSizeBuffers) : 0);
 
     {
         const std::scoped_lock lock (failuresLock);
@@ -1755,7 +1759,7 @@ std::shared_ptr<Effect> PluginHost::makeEffect (const PluginRef& ref, double sam
 {
     juce::String why;
     if (auto instance = instantiate (ref, sampleRate, &why))
-        return std::make_shared<PluginEffect> (std::move (instance), maxBlockSize, ref.fixedBuffers ? fixedPluginBlock() : 0);
+        return std::make_shared<PluginEffect> (std::move (instance), maxBlockSize, ref.fixedBuffers ? fixedPluginBlock (ref.maxSizeBuffers) : 0);
 
     {
         const std::scoped_lock lock (failuresLock);

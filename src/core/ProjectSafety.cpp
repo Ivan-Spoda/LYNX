@@ -173,6 +173,47 @@ std::string joinPath (const std::string& folder, const std::string& relative)
     return (folder.back() == '/' || folder.back() == '\\') ? folder + rel : folder + sep + rel;
 }
 
+std::string recordingName (const std::string& projectStem, int year, int month, int day, int hour, int minute, int second,
+                           const std::string& insertName)
+{
+    char stamp[32];
+    std::snprintf (stamp, sizeof (stamp), "%04d-%02d-%02d %02d-%02d-%02d", year, month, day, hour, minute, second);
+    auto name = (projectStem.empty() ? std::string ("untitled") : projectStem) + "_" + stamp;
+    if (! insertName.empty())
+        name += "_" + insertName;
+    return name;
+}
+
+bool samePath (const std::string& a, const std::string& b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (std::size_t i = 0; i < a.size(); ++i)
+    {
+        auto x = (unsigned char) a[i], y = (unsigned char) b[i];
+        if (x == '\\')
+            x = '/';
+        if (y == '\\')
+            y = '/';
+        if (std::tolower (x) != std::tolower (y))
+            return false;
+    }
+    return true;
+}
+
+std::vector<std::string> unusedRecordings (const std::vector<std::string>& recorded, const std::vector<std::string>& referenced)
+{
+    std::vector<std::string> unused;
+    for (const auto& file : recorded)
+    {
+        const auto same = [&file] (const std::string& other) { return samePath (file, other); };
+        if (file.empty() || std::any_of (referenced.begin(), referenced.end(), same) || std::any_of (unused.begin(), unused.end(), same))
+            continue;
+        unused.push_back (file);
+    }
+    return unused;
+}
+
 std::vector<std::string> referencedSamples (const Song& song)
 {
     std::vector<std::string> paths;

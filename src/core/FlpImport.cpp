@@ -1139,7 +1139,10 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             }
 
         if (c.pluginName == "Fruity Wrapper" && parseFlWrapper (c.pluginState, def.plugin.foreign))
+        {
             def.plugin.name = def.plugin.foreign.name;
+            applyFlWrapperOptions (def.plugin.foreign, def.plugin);
+        }
 
         // Fruit Kick, MiniSynth, ... (REA_rodada10): approximated by the internal synth; the channel LFOs are kept
         bool adoptedFromPlugin = false;
@@ -2019,6 +2022,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     // the app swaps in the installed plugin; without it, the slot is removed
                     made = makeEffectSlot (EffectKind::plugin);
                     made->plugin.name = foreign.name;
+                    applyFlWrapperOptions (foreign, made->plugin);
                     made->plugin.foreign = std::move (foreign);
                 }
                 else

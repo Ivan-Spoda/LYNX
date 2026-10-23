@@ -12,6 +12,7 @@
 #include "core/LoadTrace.h"
 #include "core/Instruments.h"
 #include "core/Dither.h"
+#include "core/ProjectSafety.h"
 #include "core/SoftClip.h"
 #include "engine/ChannelRackProcessor.h"
 #include "engine/DllAsioDevice.h"
@@ -240,7 +241,10 @@ float AudioEngine::renderOffline (const RenderOptions& options)
 
     constexpr int blockSize = 512;
     constexpr float silence = 3.0e-5f; // ~ -90 dB
-    setOfflineRendering (true); // instruments with FL render-quality settings use them (Sytrus)
+    // "HQ for all plugins" (REA round 134): engines with FL render-quality settings use them (Sytrus) and HQ switches
+    // are forced on; without it the export keeps the playback quality
+    setOfflineRendering (options.hqAllPlugins);
+    setHqForAllPlugins (options.hqAllPlugins);
     setPluginsRenderMode (true); // and hosted plugins are told an export is running (FL: "notify about rendering mode")
     transport.sampleRate.store (sampleRate);
     graph.setPlayConfigDetails (0, 2, sampleRate, blockSize);
@@ -319,6 +323,7 @@ float AudioEngine::renderOffline (const RenderOptions& options)
     graph.releaseResources();
     setPluginsRenderMode (false);
     setOfflineRendering (false);
+    setHqForAllPlugins (false);
     return cancelled ? -1.0f : peak;
 }
 
@@ -557,20 +562,28 @@ void AudioEngine::startAudioTake()
     if (! withoutInput.empty())
         notify (InputIssue::insertWithoutInput, withoutInput.front());
 
-    const auto folder = juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings");
-    folder.createDirectory();
+    auto folder = recordingFolder;
+    if (! folder.createDirectory()) // e.g. a read-only project folder: the global recordings folder
+        folder = defaultRecordingFolder(), folder.createDirectory();
     takeSampleRate = device->getCurrentSampleRate();
     takeLatency = device->getInputLatencyInSamples() + device->getOutputLatencyInSamples();
-    const auto stamp = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S");
+    const auto now = juce::Time::getCurrentTime();
     juce::WavAudioFormat wav;
 
     for (auto& take : wanted)
     {
-        auto name = "Take " + stamp;
+        // FL's name (REA round 134): "<project>_<yyyy-mm-dd hh-mm-ss>_<insert name>", "_2", "_3"... when taken
+        juce::String insert;
         if (take.track > 0)
-            name << " - " << (song.mixer[(std::size_t) take.track].name.empty() ? "Insert " + juce::String (take.track)
-                                                                                 : juce::String::fromUTF8 (song.mixer[(std::size_t) take.track].name.c_str()));
-        take.file = folder.getNonexistentChildFile (juce::File::createLegalFileName (name), ".wav");
+            insert = song.mixer[(std::size_t) take.track].name.empty() ? "Insert " + juce::String (take.track)
+                                                                       : juce::String::fromUTF8 (song.mixer[(std::size_t) take.track].name.c_str());
+        const auto name = juce::File::createLegalFileName (juce::String::fromUTF8 (
+            safety::recordingName (recordingStem.toStdString(), now.getYear(), now.getMonth() + 1, now.getDayOfMonth(), now.getHours(),
+                                   now.getMinutes(), now.getSeconds(), insert.toStdString()).c_str()));
+        const auto unique = safety::uniqueName (name.toStdString(), [&folder] (const std::string& n) {
+            return folder.getChildFile (juce::String::fromUTF8 (n.c_str()) + ".wav").exists();
+        });
+        take.file = folder.getChildFile (juce::String::fromUTF8 (unique.c_str()) + ".wav");
         auto stream = take.file.createOutputStream();
 
         if (stream == nullptr)
@@ -617,7 +630,15 @@ void AudioEngine::finishAudioTake()
     }
 
     for (auto& take : done)
+    {
         take.writer.reset(); // drains the queue and closes the WAV
+        if (take.file.existsAsFile())
+            sessionRecordings.push_back (take.file);
+    }
+
+    if (recordOptions.disarmOnStop) // FL's "Disarm on stop"
+        for (const auto t : std::vector<int> (armedInserts))
+            setInsertArmed (t, false);
 
     const auto frames = takeFrames.exchange (0);
     const auto startTick = takeStartTick.exchange (-1.0);
@@ -678,6 +699,24 @@ void AudioEngine::finishAudioTake()
             s.playlist.push_back (clip);
         }
     });
+}
+
+juce::File AudioEngine::defaultRecordingFolder()
+{
+    return juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Recordings");
+}
+
+void AudioEngine::setRecordingTarget (const juce::File& folder, const juce::String& projectStem)
+{
+    recordingFolder = folder == juce::File() ? defaultRecordingFolder() : folder;
+    recordingStem = projectStem;
+}
+
+void AudioEngine::forgetRecordings (const std::vector<juce::File>& files)
+{
+    sessionRecordings.erase (std::remove_if (sessionRecordings.begin(), sessionRecordings.end(),
+                                             [&files] (const juce::File& f) { return std::find (files.begin(), files.end(), f) != files.end(); }),
+                             sessionRecordings.end());
 }
 
 std::vector<std::string> AudioEngine::getInputChannelNames() const
@@ -2013,7 +2052,8 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
     rtStats.deviceRestarted();
     transport.sampleRate.store (device->getCurrentSampleRate());
-    setFixedPluginBlock (device->getCurrentBufferSizeSamples()); // FL's fixed size buffers = the device buffer
+    // FL's fixed size buffers: 2 ms, or the device buffer with "Process maximum size buffers" (REA round 134)
+    setFixedPluginBlock (device->getCurrentBufferSizeSamples(), device->getCurrentSampleRate());
 
     // the callback gets the open input channels only, in order: map device channel -> callback index
     const auto active = device->getActiveInputChannels();
