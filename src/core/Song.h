@@ -815,7 +815,7 @@ struct Song
     // First insert that no channel uses (or the last one, if all are taken).
     int nextFreeInsert() const;
 
-    // End of the last clip, rounded up to a bar (minimum 1 bar).
+    // End of the last clip, rounded up to a bar (minimum 1 bar; with no clip, the current pattern's length).
     std::int64_t songLength() const noexcept;
 
     // Removes a pattern and fixes the clips and the current index.
@@ -866,6 +866,13 @@ struct Song
 // maxEffectSlots slots run): {slot index, destination insert}. The renderer, the PDC plan and the routing order
 // all enumerate them this way.
 std::vector<std::pair<int, int>> fruitySendsOf (const Song& song, int track);
+
+// Pattern clips follow their pattern's length, like FL's: after an edit, the clips of a pattern whose length
+// changed get the new length when they had the old one and start at the pattern's start (an auto-sized clip;
+// a clip resized or cut by hand keeps its length). `before` = patternLengths (song) before the edit.
+// (Issue #4: a pattern set to 2 bars still looped 1 bar in Song mode.)
+std::vector<std::int64_t> patternLengths (const Song& song);
+void followPatternLengths (const std::vector<std::int64_t>& before, Song& song);
 
 // Copy of the song ready for export: always in song mode (the current pattern becomes a clip
 // if `wholeSong` is false or the Playlist is empty), with `tailTicks` of silence at the end

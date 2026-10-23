@@ -3068,6 +3068,9 @@ countries: br
 "Found more than {0} files" = "Encontrados mais de {0} arquivos"
 "Found 1 file" = "Encontrado 1 arquivo"
 "Found {0} files" = "Encontrados {0} arquivos"
+"MIDI input: blinks when a connected device sends MIDI. Click to reconnect the MIDI inputs." = "Entrada MIDI: pisca quando um dispositivo conectado envia MIDI. Clique para reconectar as entradas MIDI."
+"No MIDI input is open." = "Nenhuma entrada MIDI está aberta."
+"Open: {0}" = "Abertas: {0}"
 
 # Round 133 (issue #3): MIDI CC automation of plugins, Envelope / Formula Controller, MIDI Out
 "Key value" = "Valor da tecla"

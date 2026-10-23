@@ -100,6 +100,29 @@ private:
     double shown = -1.0;
 };
 
+// A small light that blinks while MIDI arrives from the enabled input devices (like FL's MIDI activity light).
+// A click reconnects the MIDI inputs (closes and opens them again).
+class MidiActivityLight final : public juce::Component,
+                                public juce::SettableTooltipClient,
+                                public ui::HintSource
+{
+public:
+    // `count` = the engine's running count of received messages; call ~30 times a second.
+    void update (std::uint32_t count, const juce::StringArray& activeInputs);
+    bool isLit() const noexcept { return litFrames > 0; }
+    void paint (juce::Graphics& g) override;
+    void mouseUp (const juce::MouseEvent& e) override;
+    ui::Hint hintAt (juce::Point<int> position) override;
+
+    std::function<void()> onReconnect;
+
+private:
+    std::uint32_t lastCount = 0;
+    bool seenCount = false;
+    int litFrames = 0;
+    juce::StringArray inputs;
+};
+
 // CPU load, memory used by LYNX and the polyphony (notes sounding now), in two rows.
 class PerformanceMeter final : public juce::Component,
                                public ui::HintSource
