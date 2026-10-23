@@ -163,6 +163,8 @@ struct SamplerSettings
     float cutoff = 20000.0f;   // channel filter (Hz); low-pass at 20 kHz with no resonance = off
     float resonance = 0.0f;    // 0..1
     int filterType = 0;        // 0 low-pass, 1 band-pass, 2 high-pass, 3 band-stop
+    float gainDb = 0.0f;       // the Sampler's Gain knob (dB, -24..+24): a level boost/cut of the sample before the
+                               // channel volume (FL's Sampler has none: its closest is the "Normalize" precomputed effect)
     ModEnvelope filterEnv;     // shifts the cutoff (octaves)
     ModEnvelope pitchEnv;      // shifts the pitch (semitones)
     std::array<ChannelLfo, lfoTargets> lfo {}; // per LfoTarget

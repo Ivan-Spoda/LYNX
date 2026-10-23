@@ -16,6 +16,21 @@ void PreviewPlayer::play (std::shared_ptr<const SampleData> sample, bool loop, f
         pending = std::move (sample);
         pendingLoop = loop;
         pendingGain = newGain;
+        pendingBrowser = false;
+        hasPending = true;
+    }
+}
+
+void PreviewPlayer::playBrowser (std::shared_ptr<const SampleData> sample, float newGain)
+{
+    std::shared_ptr<const SampleData> old;
+    {
+        const juce::SpinLock::ScopedLockType sl (lock);
+        old = std::move (retired);
+        pending = std::move (sample);
+        pendingLoop = false;
+        pendingGain = newGain;
+        pendingBrowser = true;
         hasPending = true;
     }
 }
@@ -34,6 +49,7 @@ void PreviewPlayer::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
             hasPending = false;
             looping = pendingLoop;
             gain = pendingGain;
+            browser = pendingBrowser;
             position = 0.0;
         }
     }
@@ -50,13 +66,14 @@ void PreviewPlayer::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     const auto rate = current->sampleRate / deviceRate;
     auto* outL = buffer.getWritePointer (0);
     auto* outR = buffer.getWritePointer (1);
+    const auto level = gain * (browser ? volume.load (std::memory_order_relaxed) : 1.0f);
 
     for (int i = 0; i < buffer.getNumSamples() && position < last; ++i)
     {
         const auto index = (std::size_t) position;
         const auto frac = (float) (position - (double) index);
-        outL[i] = gain * (l[index] + frac * (l[index + 1] - l[index]));
-        outR[i] = gain * (r[index] + frac * (r[index + 1] - r[index]));
+        outL[i] = level * (l[index] + frac * (l[index + 1] - l[index]));
+        outR[i] = level * (r[index] + frac * (r[index + 1] - r[index]));
         position += rate;
 
         if (looping && position >= last)
