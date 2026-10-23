@@ -1087,7 +1087,14 @@ Layout lynxTune()
     adv (knob (398, 420, 34, "Onset rate", TR_NOOP ("ONSET RATE"), 452, showValue));
     adv (label (470, 368, 300, 16, TR_NOOP ("Pitch tracking"), alignLeft));
     adv (toggle (470, 400, 150, 20, "Ignore vibrato", TR_NOOP ("Ignore vibrato")));
-    adv (label (470, 430, 320, 14, TR_NOOP ("Notes are picked from the pitch with its vibrato smoothed"), alignLeft | dim));
+    adv (label (470, 430, 160, 14, TR_NOOP ("Notes are picked from the pitch"), alignLeft | dim));
+    adv (label (470, 444, 160, 14, TR_NOOP ("with its vibrato smoothed"), alignLeft | dim));
+    // round 136: the voice-shifter extras (the Drive stage it measured, a ±12 st formant range, an output trim)
+    adv (label (640, 368, 150, 16, TR_NOOP ("Voice shifter"), alignLeft));
+    adv (toggle (640, 386, 150, 18, "Drive stage", TR_NOOP ("Drive stage")));
+    adv (toggle (640, 408, 150, 18, "Wide formant", TR_NOOP ("Formant ±12 st")));
+    adv (knob (672, 446, 22, "Drive", TR_NOOP ("DRIVE"), 462, showValue));
+    adv (knob (748, 446, 22, "Output", TR_NOOP ("OUTPUT"), 462, showValue | bipolar));
     // --- the keyboard: BYPASS / REMOVE modes, LATCH, four octaves (a key edits its note name in every octave)
     v.push_back (section (0, 482, 800, 128, TR_NOOP ("TARGET NOTES")));
     v.push_back (display (8, 502, 784, 102, "tunekeys"));

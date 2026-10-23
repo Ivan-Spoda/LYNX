@@ -3077,3 +3077,10 @@ countries: br
 "Punish" = "Punir"
 "Steep" = "Íngreme"
 "Thump" = "Peso"
+# round 136: LYNX Tune's voice-shifter extras
+"Notes are picked from the pitch" = "As notas são escolhidas pela afinação"
+"with its vibrato smoothed" = "com o vibrato suavizado"
+"Voice shifter" = "Deslocador de voz"
+"Drive stage" = "Estágio de drive"
+"Formant ±12 st" = "Formante ±12 st"
+"DRIVE" = "DRIVE"

@@ -34,7 +34,7 @@ double dbToGain (double db) noexcept { return std::pow (10.0, db / 20.0); }
 // The five styles' constants, fitted on the official trial (REA_rodada136 §1; tmp/vox136/lab). Style A is the one
 // every state of her corpus uses; E, N, T, P are fitted the same way on the same signal set.
 const StyleModel styleTable[styleCount] {
-    StyleModel { -0.351015, 3.28943, 9.75, -1.26617, 1228.81, -0.786086, 1358.49, -0.927797, 0.531944, 1.65601, 1.40043, 2.58905, -0.301061, -0.627837, 84.6102, 326.687, 16.3483,
+    StyleModel { -0.255358, 3.28943, 9.75, -1.14311, 424.977, -0.326658, 1090.62, -0.367324, 0.539481, 1.51943, 1.53834, 2.58446, -0.356477, -1.10167, 69.6495, 124.432, 16.5416,
                  { -0.050348522, 0.45404479, 0.79960583, -0.25489203, 0.00071080674, 0.13172658, -0.18265066, 0.1758486, -0.13859833, 0.089003814, -0.046502489, 0.012880354, 0.0057738622, -0.013574345, 0.012208355, -0.0082160702 } },
     StyleModel {},
     StyleModel {},
