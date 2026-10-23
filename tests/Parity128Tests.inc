@@ -54,7 +54,7 @@ TEST (facet_round128_parameters_default_to_the_old_behaviour)
 {
     using namespace lynx::facet;
     const auto p = facet103::defaults();
-    CHECK (info().params.size() == 88 && paramCount == 88 && paramCount <= lynx::maxEffectParams);
+    CHECK (info().params.size() == (std::size_t) paramCount && paramCount >= 88 && characterParam == 88 && paramCount <= lynx::maxEffectParams); // round 135 appended Character
     for (int b = 0; b < bands; ++b)
     {
         CHECK (bandPower (p, b));

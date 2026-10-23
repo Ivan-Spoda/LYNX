@@ -162,8 +162,11 @@ namespace hush
 // (detect the slot's side chain), input (±12 dB), display (editor only: show the waveform).
 // round 123 (vmatch123): voicing at 9 — 0 = Hush's own engine, 1 = the measured classic split de-esser
 // (core/VoiceMatch.h); round 128's controls follow it.
+// round 135 (appended): oversampling (off, 2x, 4x, 8x) — Hush's own voicing applies its gain at the high rate (the
+// measured classic voicing is left as it is); latency + the oversampler's.
 enum Param { frequency, threshold, range, mode, detector, listen, lookahead, release, output, voicing,
-             allround, lowPass, lookaheadTime, stereoLink, linkMid, external, input, display, count };
+             allround, lowPass, lookaheadTime, stereoLink, linkMid, external, input, display, oversampling, count };
+int oversamplingOf (float v) noexcept; // 1 (off), 2, 4, 8
 double hz (float v) noexcept;          // 2 .. 16 kHz
 double lowPassHz (float v) noexcept;   // 2 .. 20 kHz (v ≥ 0.999 = off)
 double lookaheadTimeMs (float v) noexcept; // 0 .. 15 ms

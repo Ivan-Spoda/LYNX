@@ -25,17 +25,22 @@ Round 128 covers the FabFilter / Slate / Antares roles (below). Round 129 covers
 
 # FabFilter / Slate / Antares roles (round 128)
 
-| LYNX engine | Original (trial here) | Config before | Design before | Config after | Design after |
-|---|---|---|---|---|---|
-| Facet EQ | Pro-Q 4 (v4.1.3) | 6 | 8 | 8 | 8 |
-| Apex Limiter | Pro-L 2 (v2.2.6) | 4 | 7 | 7 | 8 |
-| Crest Compressor | Pro-C 3 (v3.0.2) | 6 | 7 | 8 | 8 |
-| Prism Multiband | Pro-MB (v1.3.3) | 4 | 6 | 5 | 6 |
-| Sentry Gate | Pro-G (v1.4.2) | 6 | 7 | 8 | 8 |
-| Hush De-esser | Pro-DS (v1.3.2) | 4 | 6 | 7 | 8 |
-| Ember Saturator | Saturn 2 (v2.1.3); Decapitator role (not installed) | 3 | 6 | 6 | 7 |
-| Aether | Fresh Air (v1.1.7) | 8 | 8 | 9 | 8 |
-| LYNX Tune | Auto-Tune Pro (v11.6, Auto mode) | 5 | 6 | 7 | 7 |
+| LYNX engine | Original (trial here) | Config before | Design before | Config after | Design after | Config 135 | Design 135 |
+|---|---|---|---|---|---|---|---|
+| Facet EQ | Pro-Q 4 (v4.1.3) | 6 | 8 | 8 | 8 | 9 | 8 |
+| Apex Limiter | Pro-L 2 (v2.2.6) | 4 | 7 | 7 | 8 | 9 | 9 |
+| Crest Compressor | Pro-C 3 (v3.0.2) | 6 | 7 | 8 | 8 | 8 | 8 |
+| Prism Multiband | Pro-MB (v1.3.3) | 4 | 6 | 5 | 6 | 7 | 7 |
+| Sentry Gate | Pro-G (v1.4.2) | 6 | 7 | 8 | 8 | 9 | 8 |
+| Hush De-esser | Pro-DS (v1.3.2) | 4 | 6 | 7 | 8 | 8 | 8 |
+| Ember Saturator | Saturn 2 (v2.1.3); Decapitator role (not installed) | 3 | 6 | 6 | 7 | 6 | 7 |
+| Aether | Fresh Air (v1.1.7) | 8 | 8 | 9 | 8 | 9 | 8 |
+| LYNX Tune | Auto-Tune Pro (v11.6, Auto mode) | 5 | 6 | 7 | 7 | 8 | 7 |
+
+Columns "135" = round 135 (parity135f, `docs/analise/REA_rodada135f.md`): Apex's loudness meter, true / sample peak
+metering, display modes, oversampling and side-chain triggering; oversampling in Sentry and Hush; Prism up to six
+bands (double-click splits a band), band pan, external side chain; Crest's wet / dry pan; Facet's Flat Tilt / All
+Pass shapes and Character; LYNX Tune's Learn (scale from MIDI) and Classic mode.
 
 After = round 128 (per-plugin tables below and `docs/analise/REA_rodada128.md`). The shared header (undo / redo, A/B,
 presets) is round 129's PresetBar, reused here (no second system); the scores include it.
@@ -74,7 +79,7 @@ range.
 | Full-window spectrum + EQ curve, nodes on the curve | ✅ | |
 | Double-click empty space = new band; drag = frequency / gain; wheel = Q | ✅ | |
 | Bands | ⚠️ | 8 bands (original: 24) |
-| Shapes | ⚠️ | Bell, Low/High Shelf, Low/High Cut, Notch, Band Pass, Tilt Shelf (no Flat Tilt, no All Pass) |
+| Shapes | ✅ | Bell, Low/High Shelf, Low/High Cut, Notch, Band Pass, Tilt Shelf; round 135: Flat Tilt (a constant slope over ±5 octaves) and All Pass (phase only), translated from Pro-Q 4 states (were a tilt shelf / dropped) |
 | Slopes | ⚠️ | 6–96 dB/oct; no 0 dB/oct, no Brickwall |
 | Floating band panel: shape, slope, FREQ, GAIN, Q, band ◀ n ▶, close | ✅ | |
 | Band panel: power button (bypass one band) | ✅ | round 128: the band's coloured power button (also in the node tip and the band menu); a band switched off keeps its settings and shows a hollow node |
@@ -87,7 +92,7 @@ range.
 | Right-click a node: shape, slope, dynamic range, solo, reset, remove | ✅ | |
 | Processing: Zero Latency / Natural Phase / Linear Phase | ✅ | |
 | Linear-phase resolution | ❌ | fixed |
-| Character (Clean / Subtle / Warm) | ❌ | |
+| Character (Clean / Subtle / Warm) | ✅ | round 135: in the Processing menu (shown after the mode in the bottom bar); LYNX's own soft-knee curves on the output, unity below about −20 dBFS (the reference's law is not measured) |
 | Gain scale | ✅ | |
 | Output level | ✅ | |
 | Output pan / pan mode, phase invert | ✅ | round 128: PAN in the bottom bar (left / right or mid / side), polarity in OUT's right-click menu |
@@ -119,19 +124,19 @@ K-12/14/20, Loudness), loudness meters (momentary / short term / integrated, tar
 | RELEASE knob | ✅ | |
 | CHANNEL LINKING: TRANSIENTS and RELEASE knobs | ✅ | round 128: two knobs; the release is linked at least as much as the transients |
 | Knob panel folds away («) | ✅ | |
-| ADVANCED panel (»): channel link details, DC offset filter, side-chain triggering | ⚠️ | round 128: » fold-out with DC offset filter, unity gain, audition limiting; no side-chain triggering |
+| ADVANCED panel (»): channel link details, DC offset filter, side-chain triggering | ✅ | round 128: » fold-out with DC offset filter, unity gain, audition limiting; round 135: side-chain triggering |
 | True Peak Limiting (bottom bar) | ✅ | TP button + bar menu |
-| Oversampling (bottom bar) | ❌ | (the 4x true-peak estimator is the only oversampling) |
+| Oversampling (bottom bar) | ⚠️ | round 135: Off / 2x / 4x / 8x in the bottom bar (the limiter runs at the high rate; latency + the oversampler's); the original goes to 32x |
 | Dither + noise shaping (bottom bar) | ✅ | round 128: Off / 16–24 bits, TPDF; None / Basic / Optimized / Weighted error-feedback shaping |
 | Output level read-out (bottom bar "Out: 0.0 dBTP") | ✅ | |
 | Unity Gain (monitor at the same loudness) | ✅ | round 128 (Advanced) |
 | Audition Limiting (hear what is removed) | ✅ | round 128 (Advanced) |
 | Meters: output peak bars with holds + gain-reduction meter | ✅ | |
 | Meter scale menu (−16/−32/−48 dB, K-12/14/20) | ✅ | round 128: next to TP; rescales the display and the meters |
-| Loudness meter (LUFS momentary / short term / integrated, range, true peak) | ❌ | |
-| True-peak / sample-peak metering switch | ❌ | |
-| Display mode (Slow Down / Fast / Slow / Infinite / Off) | ❌ | |
-| External side chain | ❌ | |
+| Loudness meter (LUFS momentary / short term / integrated, range, true peak) | ✅ | round 135: LOUDNESS button on the display → a panel at the right: short-term and momentary bars with the target line (−23 … −9 LUFS), integrated, short term, momentary, range (LU) and peak read-outs, Reset; ITU-R BS.1770-4 / EBU R 128 (K-weighting, 400 ms / 3 s, gated integration, EBU Tech 3342 range), checked on the EBU test cases |
+| True-peak / sample-peak metering switch | ✅ | round 135: in the loudness panel; the output meter and its hold follow it (4x true-peak interpolation) |
+| Display mode (Slow Down / Fast / Slow / Infinite / Off) | ✅ | round 135: menu beside the meter scale — Fast (10 ms a pixel), Slow, Slow down (recent fast, the past compressed), Infinite (0.5 s a pixel, ~11 minutes), Off (meters only) |
+| External side chain | ✅ | round 135: "Side-chain triggering" (Advanced): the slot's side chain triggers the limiting, the ceiling still holds the programme |
 
 ## Crest Compressor ← Pro-C 3
 
@@ -155,7 +160,7 @@ lookahead, meter scale, knee display, input meter.
 | Character Off / Tube / Diode / Bright, pre / post, drive | ✅ | |
 | AUTO GAIN | ✅ | |
 | DRY knob (dry level, parallel compression) | ✅ | round 128: DRY under AUTO GAIN (−∞ … +36 dB, the original's law); MIX moved to the bottom bar (0–100 %, the original goes to 200 %) |
-| Wet / dry pan (mid / side balance) | ❌ | |
+| Wet / dry pan (mid / side balance) | ✅ | round 135: WET PAN / DRY PAN in the side-chain panel (left / right balance of each path) |
 | SIDE CHAIN panel: listen, level, stereo link, detector EQ with nodes | ✅ | 3 EQ bands (original: 6) |
 | Side chain Internal / External | ✅ | |
 | Side chain Host Sync / MIDI triggering | ❌ | |
@@ -179,15 +184,15 @@ lookahead on, expert mode, display range, analyser options.
 | Original feature | LYNX | Note |
 |---|---|---|
 | Spectrum window with band regions and nodes | ✅ | |
-| Click / drag in empty space = create a band anywhere; bands with gaps | ❌ | 4 contiguous bands (switching one on = "adding") |
-| Up to 6 bands | ❌ | 4 |
+| Click / drag in empty space = create a band anywhere; bands with gaps | ⚠️ | round 135: double-click the empty display = a new band there (the band under the mouse splits at that frequency, the new one starts as its copy); right-click → Split / Remove the band; bands stay contiguous — a band switched off is the gap |
+| Up to 6 bands | ✅ | round 135: 1–6 bands (the band count; 4 = the old engine sample for sample); Pro-MB states translate up to six |
 | Node: drag up / down = range, left / right = move band; edges = crossovers | ✅ | |
 | Wheel = threshold | ✅ | |
 | S / M buttons per band | ✅ | |
 | Floating band panel: power, THRESHOLD, RANGE, ATTACK, RELEASE, OUTPUT, mode, RATIO, KNEE | ✅ | |
 | LOOKAHEAD per band | ✅ | round 128: LOOKAHEAD in the band panel (0–20 ms, capped by the global look-ahead, which sets the latency); translated from Pro-MB |
-| EXPERT (»): side-chain filtering, external side chain, stereo link per band | ❌ | |
-| Band output pan (mid / side) | ❌ | |
+| EXPERT (»): side-chain filtering, external side chain, stereo link per band | ⚠️ | round 135: external side chain (bottom bar Int / Ext: the detectors hear the side chain split by the same crossovers); no side-chain filtering or per-band stereo link |
+| Band output pan (mid / side) | ⚠️ | round 135: PAN in the band panel (left / right balance of the band); no mid / side |
 | Crossover slope per band 6–48 dB/oct | ⚠️ | one global slope 12 / 24 / 48 |
 | Processing mode Linear / Dynamic / Minimum phase | ❌ | |
 | Oversampling | ❌ | |
@@ -215,7 +220,7 @@ pan, oversampling Off / 2x / 4x, expert mode, channel mode L/R or M/S, input / o
 | EXPERT: side-chain GAIN + L/R MIX (two channels) | ✅ | round 128: GAIN / MIX per detector channel (L / R, or M / S); translated from Pro-G |
 | EXPERT: WET + PAN, DRY + PAN | ✅ | round 128: WET PAN / DRY PAN next to DRY / OUTPUT; translated |
 | Channel mode Left/Right or Mid/Side (bottom bar) | ✅ | round 128: bottom bar; the detector channels become mid / side; translated |
-| Oversampling (bottom bar) | ❌ | |
+| Oversampling (bottom bar) | ✅ | round 135: Off / 2x / 4x / 8x (the gain is applied at the high rate; latency + the oversampler's); the look-ahead switch stays under its knob |
 | In / Out levels (bottom bar) | ✅ | round 128: In added (−24 … +24 dB); translated |
 | Level meter | ✅ | |
 
@@ -238,7 +243,7 @@ output level and pan.
 | STEREO LINK knob with MID switch | ✅ | round 128 |
 | LOOKAHEAD knob 0–15 ms with power button | ✅ | round 128 (the look-ahead is the latency; the mixer re-plans its delay compensation) |
 | DISPLAY button (hide / show the waveform) | ✅ | round 128: the window shrinks without it |
-| Oversampling (bottom bar) | ❌ | |
+| Oversampling (bottom bar) | ✅ | round 135: Off / 2x / 4x / 8x for Hush's own voicing (the band and its gain at the high rate; the measured classic voicing has none) |
 | In / Out levels (bottom bar) | ✅ | round 128: In ±12 dB, Out ±12 dB (no pan) |
 | Release | — | Pro-DS has no release control; LYNX keeps RELEASE as an extra (bottom bar) |
 | Input meter with threshold arrow, reduction meter | ✅ | |
@@ -306,10 +311,10 @@ edits (Remove / Bypass, Latched / Momentary), Hold, Auto Key.
 | Hold (freeze the read-out) | ✅ | round 128: click the ring (HOLD lights) |
 | Scales | ⚠️ | 16: the modern list (chromatic, major, minor, harmonic / melodic minor, modes, pentatonics, blues, whole tone, diminished) + custom; no historical tunings (Pythagorean, just, 19/24/31/53-tone …) |
 | Auto Key (detect the key) | ✅ | round 128: button under Scale; key + major / minor from what was sung while the editor is open (pitch-class time, Krumhansl–Kessler profiles) |
-| Learn (scale from MIDI) | ❌ | |
+| Learn (scale from MIDI) | ✅ | round 135 (the original's "Learn Scale from MIDI" switch, read from its parameter list): LEARN SCALE (correction section, top right): while on, the notes played on the MIDI channel build the custom scale (switching it on starts a new one) and are not used as targets |
 | Keyboard at the bottom: click a note = remove / bypass, latch | ✅ | round 128: four-octave keyboard with BYPASS / REMOVE modes and LATCH; a key edits its note name in every octave (no single-octave edits) |
 | Per-note Bypass (pass uncorrected) vs Remove | ✅ | round 128 (translated from the state's legacy scale edits) |
-| Classic mode | ❌ | |
+| Classic mode | ✅ | round 135: CLASSIC (correction section, top left): the short-latency path with the same retune. [EXEC] Auto-Tune Pro hosted black-box: "Use Classic Mode DSP" leaves the retune trajectory unchanged (452 Hz at 150 ms: the same pitch at every point to 0.1 Hz) and drops the latency from 2670 to 37 samples; LYNX's classic = its low-latency mode |
 | Formant Correction on / off | ✅ | |
 | Throat Length | ⚠️ | "Formant shift" in semitones instead of a throat length % |
 | Transpose ±12 | ✅ | |

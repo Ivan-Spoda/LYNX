@@ -121,6 +121,9 @@ const EffectInfo& info()
         e.params.push_back ({ "Onset delay", 1.0f / 3.0f });                    // 500 ms
         e.params.push_back ({ "Onset rate", 1.0f / 3.0f });                     // 500 ms
         e.params.push_back ({ "More scales", 0.0f });
+        // round 135f
+        e.params.push_back ({ "Learn MIDI", 0.0f });
+        e.params.push_back ({ "Classic", 0.0f });
         // round 135w (the real-time corrector's controls)
         e.params.push_back ({ "Speed link", 1.0f });
         e.params.push_back ({ "Speed", speedValue (15.0) });
@@ -161,6 +164,8 @@ std::string paramText (int param, float v)
         case mix: std::snprintf (t, sizeof t, "%.0f%%", 100.0 * v); return t;
         case tracking: std::snprintf (t, sizeof t, "%.0f%%", 100.0 * v); return t;
         case formantPreserve:
+        case learnMidi:
+        case classicMode:
         case lowLatency: return onOff();
         case formantShift: std::snprintf (t, sizeof t, "%+.1f st", formantSemitones (v)); return t;
         case transpose: std::snprintf (t, sizeof t, "%+d st", transposeSemitones (v)); return t;
@@ -224,7 +229,10 @@ public:
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
         const auto rg = rangeIndex (p[range]);
-        const auto low = p[lowLatency] >= 0.5f;
+        // round 135: Classic runs the short-latency path. [EXEC] Auto-Tune Pro hosted black-box: "Use Classic Mode DSP"
+        // keeps the retune trajectory (a 452 Hz tone at 150 ms: the same pitch at every point to 0.1 Hz) and drops the
+        // reported latency from 2670 to 37 samples
+        const auto low = p[lowLatency] >= 0.5f || p[classicMode] >= 0.5f;
         if (rg != curRange || low != curLow)
             configure (rg, low);
 
@@ -261,15 +269,16 @@ public:
 
         // MIDI targets: the pitch classes held on the source channel (none held: the scale)
         const auto ch = midiChannelIndex (p[midiChannel]);
+        std::uint16_t heldMask = 0;
         if (ch >= 0 && held != nullptr && ch < heldCount)
         {
-            std::uint16_t m = 0;
             for (int k = 0; k < 128; ++k)
                 if ((held[ch][(std::size_t) (k >> 6)] >> (k & 63)) & 1u)
-                    m = (std::uint16_t) (m | (1u << (k % 12)));
-            if (m != 0)
-                mask = m;
+                    heldMask = (std::uint16_t) (heldMask | (1u << (k % 12)));
+            if (heldMask != 0 && p[learnMidi] < 0.5f) // learning (round 135): the notes teach the scale instead
+                mask = heldMask;
         }
+        meterHeld.store ((float) heldMask / 4096.0f, std::memory_order_relaxed);
 
         const auto aRef = referenceHz (p[reference]);
         const auto tau = retuneMs (p[retune]) * 0.001;
@@ -474,6 +483,7 @@ public:
             case 2: return std::clamp (0.5f + meterShift.load (std::memory_order_relaxed) / 4.0f, 0.0f, 1.0f);
             case 3: return meterIn.load (std::memory_order_relaxed);  // round 135w: input peak
             case 4: return meterOut.load (std::memory_order_relaxed); // round 135w: output peak
+            case 5: return meterHeld.load (std::memory_order_relaxed); // round 135f: held MIDI pitch classes
             default: return 0.0f;
         }
     }
@@ -509,7 +519,7 @@ private:
     const NoteMask* held = nullptr;
     int heldCount = 0;
     std::atomic<int> latencyNow { 1200 };
-    std::atomic<float> meterSung { -1.0f }, meterTarget { -1.0f }, meterShift { 0.0f };
+    std::atomic<float> meterSung { -1.0f }, meterTarget { -1.0f }, meterShift { 0.0f }, meterHeld { 0.0f };
     std::atomic<float> meterIn { 0.0f }, meterOut { 0.0f };
     double candidateTime = 0.0; // round 135w: Tolerance time
     int candidate = -1;

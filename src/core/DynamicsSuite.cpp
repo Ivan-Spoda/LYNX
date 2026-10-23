@@ -193,6 +193,7 @@ Character characterOf (float v) noexcept { return (Character) pick (v, 4); }
 double driveDb (float v) noexcept { return lin (v, -24.0, 24.0); }
 double scLevelDb (float v) noexcept { return lin (v, -36.0, 36.0); }
 int oversamplingOf (float v) noexcept { return 1 << pick (v, 4); }
+double panOf (float v) noexcept { return std::clamp ((double) v * 2.0 - 1.0, -1.0, 1.0); }
 double trimDb (float v) noexcept { return lin (v, -36.0, 36.0); }
 LinkMode linkModeOf (float v) noexcept { return (LinkMode) pick (v, linkModes); }
 float linkModeValue (LinkMode m) noexcept { return (float) (int) m / (float) (linkModes - 1); }
@@ -740,6 +741,16 @@ private:
             }
         }
 
+        float wetA = 1.0f, wetB = 1.0f, dryA = 1.0f, dryB = 1.0f;
+        {
+            const auto balance = [] (double pan, float& a, float& b) {
+                if (pan > 0.0) a = (float) (1.0 - pan);
+                else if (pan < 0.0) b = (float) (1.0 + pan);
+            };
+            balance (panOf (p[wetPan]), wetA, wetB);
+            balance (panOf (p[dryPan]), dryA, dryB);
+        }
+        const bool panned = wetA != 1.0f || wetB != 1.0f || dryA != 1.0f || dryB != 1.0f;
         for (int i = 0; i < n; ++i)
         {
             float a = wl[(std::size_t) i], b = wr[(std::size_t) i];
@@ -757,7 +768,12 @@ private:
             float da = dl[(std::size_t) i], db = dr[(std::size_t) i];
             dryLa.process (da, db);
             dryDelay.process (da, db);
-            if (dryG > 0.0f) // round 128: the dry level added on top (parallel compression)
+            if (panned) // round 135: the wet and dry paths balanced on their own
+            {
+                l[i] = (a * mx * wetA + da * ((1.0f - mx) + dryG) * dryA) * outGain;
+                r[i] = (b * mx * wetB + db * ((1.0f - mx) + dryG) * dryB) * outGain;
+            }
+            else if (dryG > 0.0f) // round 128: the dry level added on top (parallel compression)
             {
                 l[i] = (da + (a - da) * mx + da * dryG) * outGain;
                 r[i] = (db + (b - db) * mx + db * dryG) * outGain;
@@ -878,14 +894,23 @@ double bandCurve (const EffectParams& p, int b, double x) noexcept
 
 using Split = LrSplit;
 
-std::array<double, 3> crossovers (const EffectParams& p) noexcept
+} // namespace
+
+int bandCount (const EffectParams& p) noexcept { return 1 + pick (p[bandCountParam], bands); }
+float bandCountValue (int n) noexcept { return (float) (std::clamp (n, 1, bands) - 1) / (float) (bands - 1); }
+double panOf (float v) noexcept { return std::clamp ((double) v * 2.0 - 1.0, -1.0, 1.0); }
+
+std::array<double, bands - 1> crossovers (const EffectParams& p) noexcept
 {
-    std::array<double, 3> f { crossoverHz (p[xover1]), crossoverHz (p[xover2]), crossoverHz (p[xover3]) };
-    f[1] = std::max (f[1], f[0] * 1.05);
-    f[2] = std::max (f[2], f[1] * 1.05);
+    std::array<double, bands - 1> f {};
+    for (int k = 0; k < bands - 1; ++k)
+    {
+        f[(std::size_t) k] = crossoverHz (p[(std::size_t) crossoverParam (k)]);
+        if (k > 0)
+            f[(std::size_t) k] = std::max (f[(std::size_t) k], f[(std::size_t) (k - 1)] * 1.05);
+    }
     return f;
 }
-} // namespace
 
 double bandStaticDb (const EffectParams& p, int b, double inputDb)
 {
@@ -898,20 +923,24 @@ double responseDb (const EffectParams& p, const double* bandGainDb, double sampl
 {
     const auto f = crossovers (p);
     const auto slope = slopeDbOct (p[Global::slope]);
-    std::array<Split, 3> s;
-    for (int k = 0; k < 3; ++k)
-        s[(std::size_t) k].design (sampleRate, f[(std::size_t) k], slope);
+    const auto nb = bandCount (p);
     const auto w = 2.0 * pi * hz / sampleRate;
-    // bands of the tree: B0 = L1, B1 = H1·L2, B2 = H1·H2·L3, B3 = H1·H2·H3; out = x + Σ (g − 1)·Bk
-    const auto l1 = s[0].response (false, w), h1 = s[0].response (true, w);
-    const auto l2 = s[1].response (false, w), h2 = s[1].response (true, w);
-    const auto l3 = s[2].response (false, w), h3 = s[2].response (true, w);
-    const std::complex<double> band[4] { l1, h1 * l2, h1 * h2 * l3, h1 * h2 * h3 };
+    // bands of the tree: B0 = L1, B1 = H1·L2, B2 = H1·H2·L3, …, the last = H1·…·H(n−1); out = x + Σ (g − 1)·Bk
+    std::array<std::complex<double>, bands> band {};
+    std::complex<double> rest { 1.0, 0.0 };
+    for (int k = 0; k < nb - 1; ++k)
+    {
+        Split s;
+        s.design (sampleRate, f[(std::size_t) k], slope);
+        band[(std::size_t) k] = rest * s.response (false, w);
+        rest *= s.response (true, w);
+    }
+    band[(std::size_t) (nb - 1)] = rest;
     bool solo = false;
-    for (int b = 0; b < bands; ++b)
+    for (int b = 0; b < nb; ++b)
         solo = solo || on (p[(std::size_t) param (b, fSolo)]);
     std::complex<double> y = solo ? std::complex<double> {} : std::complex<double> { 1.0, 0.0 };
-    for (int b = 0; b < bands; ++b)
+    for (int b = 0; b < nb; ++b)
     {
         const auto g = dbToGain (bandGainDb[b]);
         if (solo)
@@ -949,6 +978,8 @@ public:
     {
         for (auto& s : split)
             s.reset();
+        for (auto& s : scSplit)
+            s.reset();
         delay.reset();
         for (auto& d : bandDelay)
             d.reset();
@@ -960,6 +991,11 @@ public:
 
     int latencySamples() const noexcept override { return latency.load (std::memory_order_relaxed); }
     float controlOutput (int k) const noexcept override { return meters.read (k); }
+    void setSidechain (const float* l, const float* r) noexcept override
+    {
+        scL = l;
+        scR = r;
+    }
 
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
@@ -967,14 +1003,20 @@ public:
         configure (p);
         const auto f = crossovers (p);
         const auto slope = slopeDbOct (p[Global::slope]);
+        const auto nb = bandCount (p);
         if (! designed || f != lastF || slope != lastSlope)
         {
-            for (int k = 0; k < 3; ++k)
+            for (int k = 0; k < bands - 1; ++k)
+            {
                 split[(std::size_t) k].design (sr, f[(std::size_t) k], slope);
+                scSplit[(std::size_t) k].design (sr, f[(std::size_t) k], slope);
+            }
             lastF = f;
             lastSlope = slope;
             designed = true;
         }
+        // round 135: the detectors hear the slot's side chain, split by the same crossovers
+        const bool external = on (p[scExternal]) && scL != nullptr && scR != nullptr;
         const auto inPeak = blockPeak (l, r, n);
         const auto inGain = (float) dbToGain (trimDb (p[input]));
         const auto outGain = (float) dbToGain (trimDb (p[output]));
@@ -982,9 +1024,13 @@ public:
 
         std::array<double, bands> aA {}, aR {}, level {};
         std::array<bool, bands> enabled {}, soloed {};
+        std::array<float, bands> panL {}, panR {};
         bool anySolo = false;
-        for (int b = 0; b < bands; ++b)
+        for (int b = 0; b < nb; ++b)
         {
+            const auto pan = (float) panOf (p[(std::size_t) bandPanParam (b)]);
+            panL[(std::size_t) b] = pan > 0.0f ? 1.0f - pan : 1.0f;
+            panR[(std::size_t) b] = pan < 0.0f ? 1.0f + pan : 1.0f;
             aA[(std::size_t) b] = coef (attackMs (p[(std::size_t) param (b, fAttack)]), sr);
             aR[(std::size_t) b] = coef (releaseMs (p[(std::size_t) param (b, fRelease)]), sr);
             level[(std::size_t) b] = levelDb (p[(std::size_t) param (b, fLevel)]);
@@ -992,7 +1038,7 @@ public:
             soloed[(std::size_t) b] = on (p[(std::size_t) param (b, fSolo)]);
             anySolo = anySolo || soloed[(std::size_t) b];
             // round 128: a band's own look-ahead (≤ the global one): its gain waits for the difference
-            const auto bandLa = std::min (laMs, lookaheadMs (p[(std::size_t) (bandLookahead0 + b)]));
+            const auto bandLa = std::min (laMs, lookaheadMs (p[(std::size_t) bandLookaheadParam (b)]));
             gainDelay[(std::size_t) b].setLength (std::max (0, laSamples - (int) std::lround (bandLa * 0.001 * sr)));
         }
         std::array<double, bands> extreme {};
@@ -1000,24 +1046,45 @@ public:
         for (int i = 0; i < n; ++i)
         {
             const float xl = l[i] * inGain, xr = r[i] * inGain;
-            float bl[bands], br[bands];
-            float lo, hi, lo2, hi2;
-            split[0].run (xl, 0, bl[0], hi);
-            split[1].run (hi, 0, bl[1], hi2);
-            split[2].run (hi2, 0, bl[2], bl[3]);
-            split[0].run (xr, 1, br[0], lo);
-            split[1].run (lo, 1, br[1], lo2);
-            split[2].run (lo2, 1, br[2], br[3]);
+            float bl[bands], br[bands], sl0[bands], sr0[bands];
+            {
+                // the crossover tree: each split takes the high part of the one before
+                float hl = xl, hr = xr;
+                for (int k = 0; k < nb - 1; ++k)
+                {
+                    float nl, nr;
+                    split[(std::size_t) k].run (hl, 0, bl[k], nl);
+                    split[(std::size_t) k].run (hr, 1, br[k], nr);
+                    hl = nl;
+                    hr = nr;
+                }
+                bl[nb - 1] = hl;
+                br[nb - 1] = hr;
+                if (external)
+                {
+                    float el = scL[i] * inGain, er = scR[i] * inGain;
+                    for (int k = 0; k < nb - 1; ++k)
+                    {
+                        float nl, nr;
+                        scSplit[(std::size_t) k].run (el, 0, sl0[k], nl);
+                        scSplit[(std::size_t) k].run (er, 1, sr0[k], nr);
+                        el = nl;
+                        er = nr;
+                    }
+                    sl0[nb - 1] = el;
+                    sr0[nb - 1] = er;
+                }
+            }
 
             float dl = xl, dr = xr;
             delay.process (dl, dr); // the look-ahead: the audio waits, the detectors don't
             float yl = anySolo ? 0.0f : dl, yr = anySolo ? 0.0f : dr;
-            for (int b = 0; b < bands; ++b)
+            for (int b = 0; b < nb; ++b)
             {
                 float g = 1.0f;
                 if (enabled[(std::size_t) b])
                 {
-                    const auto m = std::max (std::abs (bl[b]), std::abs (br[b]));
+                    const auto m = external ? std::max (std::abs (sl0[b]), std::abs (sr0[b])) : std::max (std::abs (bl[b]), std::abs (br[b]));
                     const auto x = std::max (-120.0, 20.0 * std::log10 ((double) m + 1e-12));
                     auto& e = env[(std::size_t) b];
                     e = x > e ? aA[(std::size_t) b] * e + (1.0 - aA[(std::size_t) b]) * x
@@ -1030,27 +1097,29 @@ public:
                 g = gainDelay[(std::size_t) b].process (g);
                 float sl = bl[b], sr2 = br[b];
                 bandDelay[(std::size_t) b].process (sl, sr2);
+                const auto gl = g * panL[(std::size_t) b], gr = g * panR[(std::size_t) b];
                 if (anySolo)
                 {
                     if (soloed[(std::size_t) b])
                     {
-                        yl += g * sl;
-                        yr += g * sr2;
+                        yl += gl * sl;
+                        yr += gr * sr2;
                     }
                 }
-                else if (g != 1.0f)
+                else if (gl != 1.0f || gr != 1.0f)
                 {
-                    yl += (g - 1.0f) * sl;
-                    yr += (g - 1.0f) * sr2;
+                    yl += (gl - 1.0f) * sl;
+                    yr += (gr - 1.0f) * sr2;
                 }
             }
             l[i] = (dl + (yl - dl) * mx) * outGain;
             r[i] = (dr + (yr - dr) * mx) * outGain;
         }
         for (int b = 0; b < bands; ++b)
-            meters.set (b, (float) std::clamp (extreme[(std::size_t) b] / 30.0, -1.0, 1.0));
+            meters.set (bandMeter (b), b < nb ? (float) std::clamp (extreme[(std::size_t) b] / 30.0, -1.0, 1.0) : 0.0f);
         meters.set (4, inPeak);
         meters.set (5, blockPeak (l, r, n));
+        scL = scR = nullptr;
     }
 
 private:
@@ -1077,8 +1146,10 @@ private:
             p[i] = info.params[i].defaultValue;
         return p;
     }();
-    std::array<Split, 3> split;
-    std::array<double, 3> lastF {};
+    std::array<Split, bands - 1> split, scSplit;
+    std::array<double, bands - 1> lastF {};
+    const float* scL = nullptr;
+    const float* scR = nullptr;
     int lastSlope = 0;
     bool designed = false;
     StereoDelay delay;
@@ -1174,6 +1245,7 @@ public:
     {
         sr = rate;
         laOn = -1;
+        osFactor = 0;
         configure (lastParams);
         reset();
     }
@@ -1184,6 +1256,8 @@ public:
         gainDelay.reset();
         hp.reset();
         lp.reset();
+        for (auto& o : os) o.reset();
+        osGain.reset();
         level = 0.0;
         gain = 0.0;
         holdLeft = 0;
@@ -1197,7 +1271,25 @@ public:
         scR = r;
     }
 
-    void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
+    void process (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept override
+    {
+        if (n > maxBlock) // the oversampled path works on blocks of at most maxBlock samples
+        {
+            const auto* sl = scL;
+            const auto* sr2 = scR;
+            for (int i = 0; i < n; i += maxBlock)
+            {
+                if (sl != nullptr && sr2 != nullptr) { scL = sl + i; scR = sr2 + i; }
+                processBlock (l + i, r + i, std::min (maxBlock, n - i), p, bpm);
+            }
+            scL = scR = nullptr;
+            return;
+        }
+        processBlock (l, r, n, p, bpm);
+    }
+
+private:
+    void processBlock (float* l, float* r, int n, const EffectParams& p, double) noexcept
     {
         lastParams = p;
         configure (p);
@@ -1246,6 +1338,7 @@ public:
         const auto la = laOn > 0 ? lookaheadMs (p[lookahead]) : 0.0;
         gainDelay.setLength (std::max (0, laSamples - (int) std::lround (la * 0.001 * sr)));
         double maxGr = 0.0;
+        const bool over = osFactor > 1;
 
         for (int i = 0; i < n; ++i)
         {
@@ -1301,6 +1394,13 @@ public:
             const auto g = gainDelay.process ((float) gain);
             float a = l[i], b = r[i];
             delay.process (a, b);
+            if (over) // round 135: the gain is upsampled with the audio and applied at the high rate (below)
+            {
+                gains[(std::size_t) i] = g;
+                l[i] = a;
+                r[i] = b;
+                continue;
+            }
             if (panned)
             {
                 l[i] = (a * g * wetA + a * dryGain * dryA) * outGain;
@@ -1312,24 +1412,59 @@ public:
                 r[i] = (b * g + b * dryGain) * outGain;
             }
         }
+        if (over)
+        {
+            const auto m = n * osFactor;
+            if (listen) // the side chain heard through the same path (the latency stays)
+                for (int c = 0; c < 2; ++c)
+                    os[(std::size_t) c].process (c == 0 ? l : r, n, [] (float x) noexcept { return x; });
+            else
+            {
+                int k = 0;
+                osGain.process (gains.data(), n, [&] (float x) noexcept { upGain[(std::size_t) std::min (k++, m - 1)] = x; return 0.0f; });
+                for (int c = 0; c < 2; ++c)
+                {
+                    const auto wet = (c == 0 ? wetA : wetB) * outGain, dryK = (c == 0 ? dryA : dryB) * dryGain * outGain;
+                    int j = 0;
+                    os[(std::size_t) c].process (c == 0 ? l : r, n, [&] (float x) noexcept {
+                        return x * upGain[(std::size_t) std::min (j++, m - 1)] * wet + x * dryK;
+                    });
+                }
+            }
+        }
         meters.set (0, (float) std::clamp (maxGr / 30.0, 0.0, 1.0));
         meters.set (2, inPeak);
         meters.set (3, blockPeak (l, r, n));
         scL = scR = nullptr;
     }
 
-private:
-    // the look-ahead switch sets the latency (10 ms), the knob only how much of it the detector leads
+    // the look-ahead switch sets the latency (10 ms), the knob only how much of it the detector leads; the
+    // oversampler adds its own (round 135)
     void configure (const EffectParams& p) noexcept
     {
         const int want = on (p[lookaheadOn]) ? 1 : 0;
-        if (want == laOn)
+        const int factor = crest::oversamplingOf (p[oversampling]);
+        if (want == laOn && factor == osFactor)
             return;
+        if (factor != osFactor)
+        {
+            osFactor = factor;
+            for (auto& o : os) { o.setFactor (std::max (2, factor)); o.reset(); }
+            osGain.setFactor (std::max (2, factor));
+            osGain.reset();
+        }
         laOn = want;
         laSamples = want ? (int) std::lround (0.010 * sr) : 0;
         delay.setLength (laSamples);
-        latency.store (laSamples, std::memory_order_relaxed);
+        latency.store (laSamples + (osFactor > 1 ? mixsuite::Oversampler::latency() : 0), std::memory_order_relaxed);
     }
+
+    static constexpr int maxBlock = 1024, maxFactor = 8;
+    int osFactor = 0;
+    std::array<mixsuite::Oversampler, 2> os;
+    mixsuite::Oversampler osGain;
+    std::array<float, maxBlock> gains {};
+    std::array<float, maxBlock * maxFactor> upGain {};
 
     double sr = 48000.0;
     int laOn = -1, laSamples = 0;
@@ -1368,7 +1503,8 @@ const EffectInfo& crestInfo()
                                      { "SC3 shape", 0.0f }, { "SC3 freq.", 0.80f }, { "SC3 gain", 0.5f }, { "SC3 Q", 0.5f }, { "SC3 slope", 0.125f },
                                      { "Oversampling", 0.0f }, { "Auto gain", 1.0f }, { "Mix", 1.0f }, { "Input", 0.5f }, { "Output", 0.5f },
                                      { "Dry", 0.0f }, { "Auto threshold", 0.0f }, { "Link mode", 0.0f }, { "Meter scale", 0.75f },
-                                     { "Input meter", 1.0f } } };
+                                     { "Input meter", 1.0f },
+                                     { "Wet pan", 0.5f }, { "Dry pan", 0.5f } } }; // round 135
     return info;
 }
 
@@ -1380,11 +1516,13 @@ const EffectInfo& prismInfo()
             { "B1 threshold", "B1 ratio", "B1 range", "B1 expand", "B1 knee", "B1 attack", "B1 release", "B1 level", "B1 on", "B1 solo" },
             { "B2 threshold", "B2 ratio", "B2 range", "B2 expand", "B2 knee", "B2 attack", "B2 release", "B2 level", "B2 on", "B2 solo" },
             { "B3 threshold", "B3 ratio", "B3 range", "B3 expand", "B3 knee", "B3 attack", "B3 release", "B3 level", "B3 on", "B3 solo" },
-            { "B4 threshold", "B4 ratio", "B4 range", "B4 expand", "B4 knee", "B4 attack", "B4 release", "B4 level", "B4 on", "B4 solo" }
+            { "B4 threshold", "B4 ratio", "B4 range", "B4 expand", "B4 knee", "B4 attack", "B4 release", "B4 level", "B4 on", "B4 solo" },
+            { "B5 threshold", "B5 ratio", "B5 range", "B5 expand", "B5 knee", "B5 attack", "B5 release", "B5 level", "B5 on", "B5 solo" },
+            { "B6 threshold", "B6 ratio", "B6 range", "B6 expand", "B6 knee", "B6 attack", "B6 release", "B6 level", "B6 on", "B6 solo" }
         };
         // defaults: −18 dB, 4.5 : 1, range −12 dB (downward), knee 24 dB, attack 20 %, release 20 %, 0 dB, on
         const float defaults[prism::fieldsPerBand] { prism::thresholdValue (-18.0), 0.6f, 0.3f, 0.0f, 0.5f, 0.2f, 0.2f, 0.5f, 1.0f, 0.0f };
-        for (int b = 0; b < prism::bands; ++b)
+        for (int b = 0; b < prism::legacyBands; ++b)
             for (int f = 0; f < prism::fieldsPerBand; ++f)
                 i.params.push_back ({ names[b][f], defaults[f] });
         i.params.push_back ({ "Crossover 1", prism::crossoverValue (120.0) });
@@ -1397,6 +1535,19 @@ const EffectInfo& prismInfo()
         i.params.push_back ({ "Output", 0.5f });
         for (const auto* n : { "B1 lookahead", "B2 lookahead", "B3 lookahead", "B4 lookahead" })
             i.params.push_back ({ n, 1.0f }); // 20 ms: each band leads by the whole global look-ahead (as before)
+        // round 135: bands 5 and 6, crossovers 4 and 5, their look-aheads, the band count (4), each band's output pan,
+        // the external side chain
+        for (int b = prism::legacyBands; b < prism::bands; ++b)
+            for (int f = 0; f < prism::fieldsPerBand; ++f)
+                i.params.push_back ({ names[b][f], defaults[f] });
+        i.params.push_back ({ "Crossover 4", prism::crossoverValue (10000.0) });
+        i.params.push_back ({ "Crossover 5", prism::crossoverValue (14000.0) });
+        i.params.push_back ({ "B5 lookahead", 1.0f });
+        i.params.push_back ({ "B6 lookahead", 1.0f });
+        i.params.push_back ({ "Bands", prism::bandCountValue (4) });
+        for (const auto* n : { "B1 pan", "B2 pan", "B3 pan", "B4 pan", "B5 pan", "B6 pan" })
+            i.params.push_back ({ n, 0.5f });
+        i.params.push_back ({ "External SC", 0.0f });
         return i;
     }();
     return info;
@@ -1412,7 +1563,8 @@ const EffectInfo& sentryInfo()
                                      { "Output", 0.5f },
                                      { "Channel mode", 0.0f }, { "SC gain L", 0.5f }, { "SC mix L", 0.5f }, { "SC gain R", 0.5f },
                                      { "SC mix R", 0.5f }, { "Wet pan", 0.5f }, { "Dry pan", 0.5f }, { "Ducking", 0.0f },
-                                     { "Input", 0.5f } } };
+                                     { "Input", 0.5f },
+                                     { "Oversampling", 0.0f } } }; // round 135
     return info;
 }
 
@@ -1486,15 +1638,21 @@ std::string paramText (EffectKind kind, int param, float v)
             }
             case meterScale: return fmt ("%.0f dB", meterRangeDb (v));
             case inputMeter: return on (v) ? "shown" : "hidden";
+            case wetPan: case dryPan:
+            {
+                const auto x = panOf (v);
+                return std::abs (x) < 0.005 ? std::string ("C") : fmt (x < 0 ? "%.0f%% L" : "%.0f%% R", std::abs (x) * 100.0);
+            }
             default: return on (v) ? "on" : "off";
         }
     }
     if (kind == EffectKind::prismMultiband)
     {
         using namespace prism;
-        if (param < bands * fieldsPerBand)
+        const bool bandField = param < legacyBands * fieldsPerBand || (param >= band5 && param < band5 + 2 * fieldsPerBand);
+        if (bandField)
         {
-            switch (param % fieldsPerBand)
+            switch ((param < band5 ? param : param - band5) % fieldsPerBand)
             {
                 case fThreshold: return fmt ("%.1f dB", thresholdDb (v));
                 case fRatio: return ratioText (ratioOf (v));
@@ -1508,12 +1666,20 @@ std::string paramText (EffectKind kind, int param, float v)
         }
         switch (param)
         {
-            case xover1: case xover2: case xover3: return hzText (crossoverHz (v));
+            case xover1: case xover2: case xover3: case xover4: case xover5: return hzText (crossoverHz (v));
+            case bandCountParam: return std::to_string (1 + pick (v, bands));
+            case scExternal: return on (v) ? "external" : "internal";
             case slope: return std::to_string (slopeDbOct (v)) + " dB/oct";
             case lookahead: return v <= 0.0f ? "off" : msText (lookaheadMs (v));
             case mix: return fmt ("%.0f%%", v * 100.0);
             case input: case output: return db (trimDb (v));
-            default: return msText (lookaheadMs (v)); // the bands' own look-ahead
+            default:
+                if (param >= bandPan0 && param < bandPan0 + bands)
+                {
+                    const auto x = panOf (v);
+                    return std::abs (x) < 0.005 ? std::string ("C") : fmt (x < 0 ? "%.0f%% L" : "%.0f%% R", std::abs (x) * 100.0);
+                }
+                return msText (lookaheadMs (v)); // the bands' own look-ahead
         }
     }
     if (kind == EffectKind::sentryGate)
@@ -1540,6 +1706,7 @@ std::string paramText (EffectKind kind, int param, float v)
             case upRatio: return fmt ("%.2f : 1", upRatioOf (v));
             case dry: return fmt ("%.0f%%", v * 100.0);
             case output: case input: return db (lin (v, -24.0, 24.0));
+            case oversampling: return crest::oversamplingOf (v) == 1 ? "off" : std::to_string (crest::oversamplingOf (v)) + "x";
             case channelMode: return on (v) ? "Mid/Side" : "Left/Right";
             case scGainL: case scGainR: return db (scGainDb (v));
             case scMixL: case scMixR: return fmt ("%+.2f", mixOf (v));

@@ -1284,6 +1284,40 @@ public:
         g.setFont (font (juce::jmax (8.0f, 10.0f * s), true));
         g.drawText (tr ("Auto Key"), r, juce::Justification::centred);
     }
+    // LEARN (round 135): while LYNX Tune's "Learn scale" is on, every pitch class held on its MIDI channel joins the
+    // custom scale (switching learning on starts a new scale)
+    void learnScaleFromMidi()
+    {
+        const auto* fx = current();
+        if (fx == nullptr || fx->kind != EffectKind::lynxTune)
+            return;
+        const bool on = fx->params[(std::size_t) lynxtune::learnMidi] >= 0.5f;
+        if (! on)
+        {
+            learning = false;
+            return;
+        }
+        if (! learning)
+        {
+            learning = true;
+            learned = 0;
+        }
+        const auto held = (unsigned) std::lround (liveMeter (5) * 4096.0f) & 0xfffu;
+        if ((held & ~learned) == 0)
+            return;
+        learned |= held;
+        std::vector<std::pair<int, float>> changes { { lynxtune::scale, (float) (int) vocal::Scale::custom / (float) (vocal::scaleCount - 1) },
+                                                     { lynxtune::moreScales, 0.0f } };
+        for (int pc = 0; pc < 12; ++pc)
+        {
+            changes.push_back ({ lynxtune::noteC + pc, ((learned >> pc) & 1u) != 0 ? 1.0f : 0.0f });
+            changes.push_back ({ lynxtune::bypassC + pc, 0.0f });
+        }
+        setParams (changes);
+    }
+    bool learning = false;
+    unsigned learned = 0;
+
     // AUTO KEY: the key and major / minor scale of what was sung while the editor was open (time per pitch class)
     void autoKey (juce::Rectangle<float> r)
     {
@@ -3139,6 +3173,7 @@ private:
     void timerCallback() override
     {
         if (! isShowing()) return; // a hidden editor costs nothing
+        learnScaleFromMidi();
         // an idle display (silent track: meters unchanged for longer than the longest history) is not redrawn
         float meters = 0.0f;
         for (int k = 0; k < 6; ++k) meters += liveMeter (k) * (float) (k + 1);

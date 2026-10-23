@@ -1065,6 +1065,9 @@ Layout lynxTune()
     v.push_back (display (300, 116, 200, 200, "pitchring"));
     v.push_back (knob (574, 224, 60, "Natural vibrato", TR_NOOP ("NATURAL VIBRATO"), 284, bipolar | showValue));
     v.push_back (knob (700, 200, 104, "Humanize", TR_NOOP ("HUMANIZE"), 284, big | showValue));
+    // round 135: CLASSIC (the older correctors' retune) and LEARN (the scale from the notes played on the MIDI channel)
+    v.push_back (toggle (12, 116, 90, 18, "Classic", TR_NOOP ("Classic")));
+    v.push_back (toggle (690, 116, 104, 18, "Learn MIDI", TR_NOOP ("Learn scale")));
     // --- pitch graph / advanced (pages)
     v.push_back (section (0, 336, 800, 142, nullptr, boxed));
     v.push_back (pageTabs (8, 340, 330, 20, TR_NOOP ("Pitch graph|Advanced|Real-time")));
@@ -1694,9 +1697,9 @@ Layout hushDeEsser()
 {
     Layout l;
     l.width = 460;
-    l.height = 286;
+    l.height = 316;
     auto& v = l.items;
-    v.push_back (section (4, 4, 452, 278, TR_NOOP ("De-esser")));
+    v.push_back (section (4, 4, 452, 308, TR_NOOP ("De-esser")));
     v.push_back (display (12, 26, 200, 78, "hushband"));
     v.push_back (meter (12, 110, 200, 12, 0, TR_NOOP ("Reduction")));
     v.push_back (tabs (12, 130, 98, 20, "Wideband", TR_NOOP ("Split|Wide")));
@@ -1719,6 +1722,9 @@ Layout hushDeEsser()
     v.push_back (dial (310, 228, 30, "Lookahead time", TR_NOOP ("Lookahead")));
     v.push_back (dial (370, 228, 30, "Stereo link", TR_NOOP ("Stereo link")));
     v.push_back (dial (430, 228, 30, "Input", TR_NOOP ("Input"), bipolar));
+    // round 135: oversampling (Hush's own voicing)
+    v.push_back (label (12, 286, 90, 20, TR_NOOP ("Oversampling")));
+    v.push_back (tabs (104, 286, 176, 20, "Oversampling", TR_NOOP ("Off|2x|4x|8x")));
     return l;
 }
 
@@ -1913,6 +1919,9 @@ Layout crestCompressor()
     // round 128 (Pro-C 3 parity): dry level and auto threshold; link mode and the display options on their own page
     v.push_back (onPage (dial (572, 546, 28, "Dry", TR_NOOP ("Dry")), 0));
     v.push_back (onPage (toggle (630, 530, 160, 20, "Auto threshold", TR_NOOP ("Auto threshold")), 0));
+    // round 135: the wet and dry paths' balance
+    v.push_back (onPage (dial (680, 566, 20, "Wet pan", TR_NOOP ("Wet pan"), bipolar), 0));
+    v.push_back (onPage (dial (750, 566, 20, "Dry pan", TR_NOOP ("Dry pan"), bipolar), 0));
     v.push_back (onPage (label (20, 530, 70, 22, TR_NOOP ("Link mode")), 2));
     v.push_back (onPage (tabs (92, 530, 360, 22, "Link mode", TR_NOOP ("Stereo|Mid only|Side only|Mid > side|Side > mid")), 2));
     v.push_back (onPage (label (470, 530, 50, 22, TR_NOOP ("Scale")), 2));
@@ -1943,24 +1952,26 @@ Layout prismMultiband()
     Layout l;
     l.width = 900;
     l.height = 560;
-    l.pages = { TR_NOOP ("Band 1"), TR_NOOP ("Band 2"), TR_NOOP ("Band 3"), TR_NOOP ("Band 4") };
+    l.pages = { TR_NOOP ("Band 1"), TR_NOOP ("Band 2"), TR_NOOP ("Band 3"), TR_NOOP ("Band 4"), TR_NOOP ("Band 5"), TR_NOOP ("Band 6") };
     auto& v = l.items;
     // the bands are the display: click one to edit it, drag a crossover line to move it
     v.push_back (display (8, 8, 884, 330, "prismbands"));
     // the selected band's panel
     v.push_back (section (8, 344, 884, 126, nullptr, boxed));
-    v.push_back (pageTabs (16, 352, 232, 22, TR_NOOP ("Band 1|Band 2|Band 3|Band 4")));
-    static const char* names[4][10] {
+    v.push_back (pageTabs (16, 352, 348, 22, TR_NOOP ("Band 1|Band 2|Band 3|Band 4|Band 5|Band 6")));
+    static const char* names[6][10] {
         { "B1 threshold", "B1 ratio", "B1 range", "B1 expand", "B1 knee", "B1 attack", "B1 release", "B1 level", "B1 on", "B1 solo" },
         { "B2 threshold", "B2 ratio", "B2 range", "B2 expand", "B2 knee", "B2 attack", "B2 release", "B2 level", "B2 on", "B2 solo" },
         { "B3 threshold", "B3 ratio", "B3 range", "B3 expand", "B3 knee", "B3 attack", "B3 release", "B3 level", "B3 on", "B3 solo" },
-        { "B4 threshold", "B4 ratio", "B4 range", "B4 expand", "B4 knee", "B4 attack", "B4 release", "B4 level", "B4 on", "B4 solo" } };
-    for (int b = 0; b < 4; ++b)
+        { "B4 threshold", "B4 ratio", "B4 range", "B4 expand", "B4 knee", "B4 attack", "B4 release", "B4 level", "B4 on", "B4 solo" },
+        { "B5 threshold", "B5 ratio", "B5 range", "B5 expand", "B5 knee", "B5 attack", "B5 release", "B5 level", "B5 on", "B5 solo" },
+        { "B6 threshold", "B6 ratio", "B6 range", "B6 expand", "B6 knee", "B6 attack", "B6 release", "B6 level", "B6 on", "B6 solo" } };
+    for (int b = 0; b < 6; ++b) // round 135: up to six bands
     {
         auto add = [&] (LayoutItem i) { i.colour = b; v.push_back (onPage (std::move (i), b)); };
         add (toggle (16, 384, 56, 22, names[b][8], TR_NOOP ("On")));
         add (toggle (78, 384, 60, 22, names[b][9], TR_NOOP ("Solo")));
-        add (tabs (16, 414, 232, 22, names[b][3], TR_NOOP ("Compress|Expand")));
+        add (tabs (16, 414, 160, 22, names[b][3], TR_NOOP ("Compress|Expand")));
         add (dial (312, 398, 46, names[b][0], TR_NOOP ("Threshold"), big));
         add (dial (402, 398, 46, names[b][2], TR_NOOP ("Range"), big | bipolar));
         add (dial (484, 398, 36, names[b][1], TR_NOOP ("Ratio")));
@@ -1968,16 +1979,24 @@ Layout prismMultiband()
         add (dial (628, 398, 36, names[b][5], TR_NOOP ("Attack")));
         add (dial (700, 398, 36, names[b][6], TR_NOOP ("Release")));
         add (dial (788, 398, 40, names[b][7], TR_NOOP ("Level"), bipolar));
-        static const char* las[4] { "B1 lookahead", "B2 lookahead", "B3 lookahead", "B4 lookahead" };
+        static const char* las[6] { "B1 lookahead", "B2 lookahead", "B3 lookahead", "B4 lookahead", "B5 lookahead", "B6 lookahead" };
         add (dial (858, 398, 22, las[b], TR_NOOP ("Lookahead"))); // round 128: the band's own look-ahead
+        static const char* pans[6] { "B1 pan", "B2 pan", "B3 pan", "B4 pan", "B5 pan", "B6 pan" };
+        add (dial (200, 395, 22, pans[b], TR_NOOP ("Pan"), bipolar)); // round 135
     }
     // global bar
     v.push_back (label (8, 482, 50, 22, TR_NOOP ("Slope")));
     v.push_back (tabs (56, 482, 200, 22, "Slope", TR_NOOP ("12 dB/oct|24 dB/oct|48 dB/oct")));
-    v.push_back (dial (300, 504, 24, "Crossover 1", TR_NOOP ("Crossover 1")));
-    v.push_back (dial (380, 504, 24, "Crossover 2", TR_NOOP ("Crossover 2")));
-    v.push_back (dial (460, 504, 24, "Crossover 3", TR_NOOP ("Crossover 3")));
-    v.push_back (dial (580, 504, 24, "Lookahead", TR_NOOP ("Lookahead")));
+    // round 135: the band count, crossovers 4–5, the external side chain
+    v.push_back (label (8, 510, 50, 22, TR_NOOP ("Bands")));
+    v.push_back (tabs (56, 510, 200, 22, "Bands", "1|2|3|4|5|6"));
+    v.push_back (toggle (56, 538, 140, 18, "External SC", TR_NOOP ("External input")));
+    v.push_back (dial (290, 504, 24, "Crossover 1", TR_NOOP ("Crossover 1")));
+    v.push_back (dial (350, 504, 24, "Crossover 2", TR_NOOP ("Crossover 2")));
+    v.push_back (dial (410, 504, 24, "Crossover 3", TR_NOOP ("Crossover 3")));
+    v.push_back (dial (470, 504, 24, "Crossover 4", TR_NOOP ("Crossover 4")));
+    v.push_back (dial (530, 504, 24, "Crossover 5", TR_NOOP ("Crossover 5")));
+    v.push_back (dial (600, 504, 24, "Lookahead", TR_NOOP ("Lookahead")));
     v.push_back (dial (660, 504, 24, "Mix", TR_NOOP ("Mix")));
     v.push_back (dial (740, 504, 24, "Input", TR_NOOP ("Input"), bipolar));
     v.push_back (dial (820, 504, 24, "Output", TR_NOOP ("Output"), bipolar));
@@ -1988,7 +2007,7 @@ Layout sentryGate()
 {
     Layout l;
     l.width = 680;
-    l.height = 480;
+    l.height = 510;
     auto& v = l.items;
     // left: threshold (big) with ratio and range under it
     v.push_back (dial (86, 84, 92, "Threshold", TR_NOOP ("Threshold"), big));
@@ -2026,6 +2045,9 @@ Layout sentryGate()
                                                                  { "Input", TR_NOOP ("Input") } };
     for (int k = 0; k < 7; ++k)
         v.push_back (dial (220.0f + 68.0f * (float) k, 438, 22, expert[k].first, expert[k].second, bipolar));
+    // round 135: oversampling (the reference's bottom bar)
+    v.push_back (label (8, 482, 90, 22, TR_NOOP ("Oversampling")));
+    v.push_back (tabs (96, 482, 176, 22, "Oversampling", TR_NOOP ("Off|2x|4x|8x")));
     return l;
 }
 

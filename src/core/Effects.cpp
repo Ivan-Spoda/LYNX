@@ -3126,6 +3126,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return facet::make (&slot.params);
     if (dyn::isDynKind (slot.kind)) // their look-ahead / oversampling latency known before the first block
         return dyn::make (slot.kind, &slot.params);
+    if (slot.kind == EffectKind::apexLimiter) // round 135: the oversampling latency known before the first block
+        return apex::make (&slot.params);
     if (slot.kind == EffectKind::hyperChorus)
         return hyperchorusfx::make (hyperchorusfx::instanceOf (slot.state));
     if (slot.kind == EffectKind::vintageChorus)

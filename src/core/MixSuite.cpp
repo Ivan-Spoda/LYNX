@@ -744,13 +744,34 @@ public:
         gr = 0.0;
         envCh[0] = envCh[1] = grCh[0] = grCh[1] = 0.0;
         fullEnv = 0.0;
+        for (auto& o : os) o.reset();
+        for (auto& o : osBand) o.reset();
+        for (auto& o : osGain) o.reset();
     }
 
-    int latencySamples() const noexcept override { return delay.len; }
+    int latencySamples() const noexcept override { return delay.len + (osFactor > 1 ? Oversampler::latency() : 0); }
     float controlOutput (int k) const noexcept override { return meters.read (k); }
     void setSidechain (const float* l, const float* r) noexcept override { scL = l; scR = r; }
 
-    void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
+    void process (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept override
+    {
+        if (n > maxBlock) // the oversampled path works on blocks of at most maxBlock samples
+        {
+            const auto* sl = scL;
+            const auto* sr2 = scR;
+            for (int i = 0; i < n; i += maxBlock)
+            {
+                if (sl != nullptr && sr2 != nullptr) { scL = sl + i; scR = sr2 + i; }
+                processBlock (l + i, r + i, std::min (maxBlock, n - i), p, bpm);
+            }
+            scL = scR = nullptr;
+            return;
+        }
+        processBlock (l, r, n, p, bpm);
+    }
+
+private:
+    void processBlock (float* l, float* r, int n, const EffectParams& p, double) noexcept
     {
         // round 128: the look-ahead time is the delay (and the reported latency; the engine re-plans the delay
         // compensation when it moves). The default 2 ms is the old fixed value.
@@ -763,6 +784,15 @@ public:
             for (int i = 0; i < n; ++i) { l[i] *= gIn; r[i] *= gIn; }
         }
         const auto inPeak = Meters::peak (l, r, n);
+        // round 135: oversampling (Hush's own voicing): the gain and the band it acts on are upsampled with the audio
+        const auto factor = classic (p) ? 1 : oversamplingOf (p[oversampling]);
+        if (factor != osFactor)
+        {
+            osFactor = factor;
+            for (auto* bank : { &os, &osBand, &osGain })
+                for (auto& o : *bank) { o.setFactor (std::max (2, factor)); o.reset(); }
+        }
+        const bool over = osFactor > 1;
         if (classic (p))
         {
             // the measured classic de-esser has no look-ahead; the fixed latency Hush reports is kept as a plain delay
@@ -890,6 +920,31 @@ public:
                 b = listenF.process (db, 1);
                 if (lpOn) { a = listenLp.process (a, 0); b = listenLp.process (b, 1); }
             }
+            else if (over)
+            {
+                // output = input + band × (gain − 1): the band (whole signal, above the split, or between the two
+                // handles) and the gain go to the high rate below
+                float ba = da, bb = db;
+                if (! wide)
+                {
+                    const auto la = split.process (da, 0), lb = split.process (db, 1);
+                    ba = da - la;
+                    bb = db - lb;
+                    if (lpOn)
+                    {
+                        ba = bandLp2.process (bandLp.process (ba, 0), 0);
+                        bb = bandLp2.process (bandLp.process (bb, 1), 1);
+                        topHp2.process (topHp.process (da - la, 0), 0); // (kept running: switching back stays smooth)
+                        topHp2.process (topHp.process (db - lb, 1), 1);
+                    }
+                }
+                bandBuf[0][(std::size_t) i] = ba;
+                bandBuf[1][(std::size_t) i] = bb;
+                gainBuf[0][(std::size_t) i] = gA - 1.0f;
+                gainBuf[1][(std::size_t) i] = gB - 1.0f;
+                a = da;
+                b = db;
+            }
             else if (wide)
             {
                 a = da * gA;
@@ -916,11 +971,32 @@ public:
             l[i] = a * out;
             r[i] = b * out;
         }
+        if (over)
+        {
+            const auto m = n * osFactor;
+            for (int c = 0; c < 2; ++c)
+            {
+                auto* x = c == 0 ? l : r;
+                if (listening)
+                {
+                    os[(std::size_t) c].process (x, n, [] (float v) noexcept { return v; });
+                    continue;
+                }
+                auto& ub = upBand[(std::size_t) c];
+                auto& ug = upGain[(std::size_t) c];
+                int k = 0, j = 0, q = 0;
+                osBand[(std::size_t) c].process (bandBuf[(std::size_t) c].data(), n, [&] (float v) noexcept { ub[(std::size_t) std::min (k++, m - 1)] = v; return 0.0f; });
+                osGain[(std::size_t) c].process (gainBuf[(std::size_t) c].data(), n, [&] (float v) noexcept { ug[(std::size_t) std::min (j++, m - 1)] = v; return 0.0f; });
+                os[(std::size_t) c].process (x, n, [&] (float v) noexcept {
+                    const auto at = (std::size_t) std::min (q++, m - 1);
+                    return v + ub[at] * ug[at] * out;
+                });
+            }
+        }
         meters.set ((float) maxGr, 0.0f, inPeak, Meters::peak (l, r, n));
         scL = scR = nullptr;
     }
 
-private:
     void setDelay (double ms) noexcept
     {
         delayMs = ms;
@@ -929,6 +1005,11 @@ private:
         scDelay.setLength (len);
     }
 
+    static constexpr int maxBlock = 1024, maxFactor = 8;
+    int osFactor = 1;
+    std::array<Oversampler, 2> os, osBand, osGain;
+    std::array<std::array<float, maxBlock>, 2> bandBuf {}, gainBuf {};
+    std::array<std::array<float, maxBlock * maxFactor>, 2> upBand {}, upGain {};
     double sr = 44100.0;
     double primedMs = 2.0, delayMs = 2.0;
     Delay2<4096> delay, scDelay;
@@ -1751,7 +1832,8 @@ const EffectInfo& hushInfo()
                                      // round 128 (parity with the reference de-esser)
                                      { "Allround", 0.0f }, { "Low-pass freq.", 1.0f }, { "Lookahead time", 2.0f / 15.0f },
                                      { "Stereo link", 1.0f }, { "Link mid", 0.0f }, { "External SC", 0.0f }, { "Input", 0.5f },
-                                     { "Display", 1.0f } } };
+                                     { "Display", 1.0f },
+                                     { "Oversampling", 0.0f } } }; // round 135
     return info;
 }
 
@@ -1832,6 +1914,7 @@ std::string onOff (float v) { return on (v) ? "on" : "off"; }
 
 namespace glow
 {
+
 std::string classicParamText (int param, float v)
 {
     switch (param)
@@ -1844,6 +1927,8 @@ std::string classicParamText (int param, float v)
 
 namespace hush
 {
+int oversamplingOf (float v) noexcept { return 1 << std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * 3.0f), 0, 3); }
+
 std::string classicParamText (int param, float v)
 {
     switch (param)
@@ -1939,6 +2024,7 @@ std::string paramText (EffectKind kind, int param, float v)
             case release: return fmt ("%.0f ms", releaseMs (v));
             case output: return fmt ("%+.1f dB", lin (v, -12.0, 12.0));
             case voicing: return on (v) ? "classic split" : "modern";
+            case oversampling: return oversamplingOf (v) == 1 ? "off" : std::to_string (oversamplingOf (v)) + "x";
             default: return onOff (v);
         }
     }
