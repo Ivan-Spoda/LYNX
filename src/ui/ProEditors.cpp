@@ -201,7 +201,7 @@ private:
                                tr ("Output ceiling: drag up or down (the bottom bar's Out does the same)")));
         out.push_back (button ({ d.getRight() - 46.0f, d.getBottom() - 26.0f, 40.0f, 20.0f }, idTp, "TP", v (5) >= 0.5f,
                                tr ("True peak: the ceiling also holds between the samples (4x interpolation)")));
-        out.push_back (button ({ d.getRight() - 300.0f, d.getBottom() - 26.0f, 84.0f, 20.0f }, idLoudness, tr ("Loudness"), loudnessShown(),
+        out.push_back (button ({ d.getRight() - 232.0f, d.getY() + 18.0f, 84.0f, 20.0f }, idLoudness, tr ("Loudness"), loudnessShown(),
                                tr ("Loudness meter: momentary, short term and integrated LUFS, loudness range, peak")));
         {
             auto dm = menu ({ d.getRight() - 210.0f, d.getBottom() - 26.0f, 86.0f, 20.0f }, apex::pDisplayMode, {}, "Fast|Slow|Slow down|Infinite|Off");
