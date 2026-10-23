@@ -445,8 +445,9 @@ private:
     int pThr() const { return P ("Threshold"); }
     juce::Rectangle<float> wave() const
     {
-        return displayShown() ? bodyArea().withTrimmedRight (112.0f).withHeight (190.0f).reduced (0.0f, 4.0f)
-                              : bodyArea().withTrimmedRight (112.0f).withHeight (0.0f).translated (0.0f, -4.0f);
+        // round 135w: 142 px on the right for the IN / GR / OUT meters and their scale (was 112: IN / GR)
+        return displayShown() ? bodyArea().withTrimmedRight (142.0f).withHeight (190.0f).reduced (0.0f, 4.0f)
+                              : bodyArea().withTrimmedRight (142.0f).withHeight (0.0f).translated (0.0f, -4.0f);
     }
     // round 135w: the input meter moved left to make room for the output meter (In | GR | Out)
     juce::Rectangle<float> meters() const { return { (float) getWidth() - 100.0f, headerH + 18.0f, 26.0f, bodyArea().getHeight() - 26.0f }; }

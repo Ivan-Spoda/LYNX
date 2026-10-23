@@ -3,6 +3,9 @@
 Sub-round of parity135 (branch `feature/parity135w`). English-first; clean-room; third-party plugins black-box only
 (hosted in our own host, public parameter API, test signals; nothing decompiled, no assets / presets / names copied).
 Evidence markers: [EXEC] measured here, [DATA] read from saved states, [MANUAL] from the vendor guide, [model] our law.
+No Waves plug-in was hosted or measured in this sub-round: the Waves trials on this PC run in demo mode (periodic audio
+mutes), so Waves facts here come from earlier rounds' captures (parameter lists / RealWorld probes, not demo-muted
+audio). The only new audio measurement is EchoBoy's (Soundtoys, activated trial).
 
 ## 1. Echoform (docs/PARITY.md: H-Delay, ValhallaDelay, EchoBoy / PrimalTap rows)
 New parameters, appended after `hybrid` (every default = the old sound): Tempo source + BPM (30–300), Start side,

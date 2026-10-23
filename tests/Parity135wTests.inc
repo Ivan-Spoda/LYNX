@@ -53,7 +53,7 @@ TEST (echoform_new_params_keep_old_defaults_round135w)
     CHECK (p[e::tapA] == 1.0f && p[e::tapD] == 1.0f && p[e::freeze] == 0.0f && p[e::startSide] == 0.0f);
     // own BPM: a quarter note at 150 BPM whatever the project's tempo
     p[e::syncL] = 0.5f; // note
-    p[e::noteL] = 0.65f; // index 6 = 1/4
+    p[e::noteL] = 0.45f; // index 4 = 1/4
     CHECK (std::abs (e::sideMs (p, false, 120.0) - 500.0) < 1e-6);
     p[e::tempoSource] = 1.0f;
     p[e::ownBpm] = e::bpmValue (150.0);
@@ -269,4 +269,30 @@ TEST (rcomp_switches_and_limiter_round135w)
     p[11] = 1.0f;
     const auto smooth = run (p, 0.5f).first;
     CHECK (smooth > warm);
+}
+
+TEST (layouts_round135w)
+{
+    using namespace lynx;
+    // LYNX Tune's "Real-time" page holds the real-time corrector's controls; Gemini's voices 3–4 sit on page 1
+    const auto& tune = plugui::layoutFor (EffectKind::lynxTune);
+    CHECK (tune.pages.size() == 3);
+    int onReal = 0;
+    for (const auto& item : tune.items)
+        if (item.page == 2 && item.param != nullptr)
+        {
+            ++onReal;
+            CHECK (plugui::paramIndex (EffectKind::lynxTune, item.param) >= lynxtune::speedLink);
+        }
+    CHECK (onReal == 7);
+    const auto& gemini = plugui::layoutFor (EffectKind::geminiDoubler);
+    CHECK (gemini.pages.size() == 2);
+    for (const auto& item : gemini.items)
+        if (item.param != nullptr && std::string (item.param).rfind ("V3 ", 0) == 0)
+            CHECK (item.page == 1);
+    // every parameter named by the new layouts exists
+    for (const auto kind : { EffectKind::echoform, EffectKind::compressor, EffectKind::lynxTune, EffectKind::geminiDoubler })
+        for (const auto& item : plugui::layoutFor (kind).items)
+            if (item.param != nullptr && plugui::isValueControl (item.type))
+                CHECK (plugui::paramIndex (kind, item.param) >= 0);
 }
