@@ -1,4 +1,6 @@
 #include "engine/AudioEngine.h"
+
+#include "core/ValueMath.h"
 #include "platform/Paths.h"
 #include "engine/FlStudio.h"
 
@@ -213,6 +215,7 @@ void AudioEngine::buildInitialGraph()
     auto metronome = graph.addNode (std::make_unique<Metronome> (transport));
     auto previewOwned = std::make_unique<PreviewPlayer>();
     preview = previewOwned.get();
+    preview->setVolume (controls::previewGain (previewVolume));
     auto previewNode = graph.addNode (std::move (previewOwned));
 
     for (int channel = 0; channel < 2; ++channel)
@@ -421,7 +424,7 @@ void AudioEngine::copyScope (float* destination, int count) const noexcept
 void AudioEngine::previewFile (const juce::File& file)
 {
     if (preview != nullptr)
-        preview->play (file.existsAsFile() ? samples.load (file.getFullPathName()) : nullptr);
+        preview->playBrowser (file.existsAsFile() ? samples.load (file.getFullPathName()) : nullptr);
 }
 
 void AudioEngine::setInputScale (int scale, int root) noexcept
@@ -440,6 +443,13 @@ void AudioEngine::previewSample (std::shared_ptr<const SampleData> sample, bool 
 {
     if (preview != nullptr)
         preview->play (std::move (sample), loop, gain);
+}
+
+void AudioEngine::setPreviewVolume (double volume) noexcept
+{
+    previewVolume = controls::clampUtilityVolume (volume);
+    if (preview != nullptr)
+        preview->setVolume (controls::previewGain (previewVolume));
 }
 
 double AudioEngine::getPreviewPosition() const noexcept
