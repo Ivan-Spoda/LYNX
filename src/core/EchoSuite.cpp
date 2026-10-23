@@ -390,6 +390,79 @@ double sideMs (const EffectParams& p, bool right, double bpm) noexcept
 
 double bpmOf (float v) noexcept { return 30.0 + 270.0 * (double) clamp01 (v); }
 float bpmValue (double bpm) noexcept { return (float) std::clamp ((bpm - 30.0) / 270.0, 0.0, 1.0); }
+
+// round 137: Rhythm mode. Measured black-box on EchoBoy (REA_rodada137 §2, impulses at 60 and 120 BPM): `repeats`
+// evenly spaced slots (slot 0 = the input itself, not heard on the first pass), levels falling by `decay` dB from the
+// first slot to the last one that fits, equal-power normalised over those slots (1 / √slots with no decay); the
+// pattern spans 2 beats whatever the spacing (taps past it are dropped) and the feedback replays it every 2 beats.
+int eraOf (float v) noexcept { return std::clamp ((int) std::lround (clamp01 (v) * 2.0f), 0, 2); }
+
+// round 137 [EXEC] ValhallaDelay demo, first repeat of an impulse (300 ms, no feedback / modulation), Past → Present
+// → Future: Tape 8 kHz −10.1 / −7.1 / −6.5 dB, Digital 12 kHz −44.9 / −6.6 / −6.3, LoFi 8 kHz −10.0 / −5.3 / −1.8,
+// BBD 4 kHz −27 / −17 / −8, Analog 8 kHz rises by 13 / 24 dB; HiFi and Clarity unchanged. Fitted as cut-off factors
+// on the mode's loop low-pass (the 2-pole tape roll-off, the steep BBD / analog / digital filters).
+double eraBandwidth (Mode m, int e) noexcept
+{
+    e = std::clamp (e, 0, 2);
+    if (e == 0)
+        return 1.0;
+    switch (m)
+    {
+        case Mode::tape: return e == 1 ? 1.13 : 1.27;
+        case Mode::lofi: return e == 1 ? 1.45 : 2.2;
+        case Mode::bucket: return e == 1 ? 1.25 : 1.6;
+        case Mode::analog: return e == 1 ? 1.45 : 2.0;
+        case Mode::digital: return e == 1 ? 1.65 : 1.8;
+        default: return 1.0;
+    }
+}
+
+int rhythmRepeatsOf (float v) noexcept { return std::clamp ((int) std::lround (clamp01 (v) * 15.0f), 0, 15) + 1; }
+double rhythmDecayDb (float v) noexcept { return 40.0 * (double) clamp01 (v); }
+int rhythmBeatsOf (float v) noexcept { return std::clamp ((int) std::lround (clamp01 (v) * 7.0f), 0, 7) + 1; }
+
+double rhythmSpacingMs (const EffectParams& p, double bpm) noexcept
+{
+    const auto kind = syncKind (p[rhythmSync]);
+    if (kind == 0)
+        return std::max (1.0, timeMs (p[rhythmTime]));
+    return std::max (1.0, noteBeats (noteIndex (p[rhythmNote]), kind) * 60000.0 / tempoFor (p, bpm));
+}
+
+double rhythmLengthMs (const EffectParams& p, double bpm) noexcept
+{
+    return std::min (19000.0, (double) rhythmBeatsOf (p[rhythmLength]) * 60000.0 / tempoFor (p, bpm));
+}
+
+// the pattern without allocating (the audio thread): up to 15 heard taps, returns their count
+int rhythmPattern (const EffectParams& p, double bpm, std::array<RhythmTap, 16>& taps, double& slot0) noexcept
+{
+    const auto spacing = rhythmSpacingMs (p, bpm), length = rhythmLengthMs (p, bpm);
+    const auto slots = std::clamp (std::min (rhythmRepeatsOf (p[rhythmRepeats]), (int) std::floor (length / spacing + 1e-6) + 1), 1, 16);
+    const auto decay = rhythmDecayDb (p[rhythmDecay]);
+    std::array<double, 16> g {};
+    double power = 0.0;
+    for (int k = 0; k < slots; ++k)
+    {
+        g[(std::size_t) k] = slots > 1 ? std::pow (10.0, -decay * (double) k / (double) (slots - 1) / 20.0) : 1.0;
+        power += g[(std::size_t) k] * g[(std::size_t) k];
+    }
+    const auto norm = 1.0 / std::sqrt (power);
+    slot0 = g[0] * norm;
+    for (int k = 1; k < slots; ++k)
+        taps[(std::size_t) (k - 1)] = { spacing * (double) k, g[(std::size_t) k] * norm * (double) clamp01 (p[rhythmTap1 + k - 1]) };
+    return slots - 1;
+}
+
+std::vector<RhythmTap> rhythmTaps (const EffectParams& p, double bpm, double* slot0)
+{
+    std::array<RhythmTap, 16> taps {};
+    double first = 0.0;
+    const auto n = rhythmPattern (p, bpm, taps, first);
+    if (slot0 != nullptr)
+        *slot0 = first;
+    return { taps.begin(), taps.begin() + n };
+}
 double tempoFor (const EffectParams& p, double projectBpm) noexcept
 {
     if (p[tempoSource] >= 0.5f)
@@ -502,6 +575,7 @@ public:
         steep.reset();
         lfoPhase = 0.0;
         envelope = 0.0f;
+        duckGr = 0.0;
         hyb.dirty = true;
     }
 
@@ -539,7 +613,8 @@ private:
     {
 
         const auto md = modeOf (p[mode]);
-        const auto st = styleOf (p[style]);
+        const bool rhythmOn = p[rhythm] >= 0.5f; // round 137: Rhythm mode overrides the style
+        const auto st = rhythmOn ? Style::single : styleOf (p[style]);
         float dryGain = 1.0f, wetGain = 0.0f;
         equalPowerMix (p[mix], dryGain, wetGain);
 
@@ -553,6 +628,14 @@ private:
         const auto spreadMs = 20.0 * bipolar (p[spread]);
         tL = std::max (0.0, tL + spreadMs * 0.25);
         tR = std::max (0.0, tR - spreadMs * 0.25);
+        std::array<RhythmTap, 16> rTaps {};
+        double rSlot0 = 0.0;
+        int rCount = 0;
+        if (rhythmOn) // the loop is the pattern length; the taps are read inside it
+        {
+            tL = tR = rhythmLengthMs (p, bpm);
+            rCount = rhythmPattern (p, bpm, rTaps, rSlot0);
+        }
 
         const auto g = feedbackGain (p[feedback]);
         const bool pairsOn = p[pairs] >= 0.5f;
@@ -573,7 +656,7 @@ private:
         const auto cents = 100.0 * bipolar (p[pitchDetune]);
 
         // character: the write-path filter / shaper and the modulation source
-        configure (md, tL, ageV);
+        configure (md, tL, ageV, eraOf (p[era]));
         for (auto& c : ch)
         {
             c.lowCut.set (lowCutHz (p[lowCut]), sr);
@@ -589,7 +672,8 @@ private:
         const auto quadEl = std::pow (2.0, -0.4 * bipolar (p[spacing]));
         const auto quadEr = std::pow (2.0, 0.4 * bipolar (p[spacing]));
         const auto envAttack = (float) (1.0 - std::exp (-1.0 / (0.01 * sr)));
-        const auto envRelease = (float) (1.0 - std::exp (-1.0 / (0.25 * sr)));
+        const auto duckThresholdDb = -51.0 * std::pow ((double) std::max (1e-6f, duck), 1.28);
+        const auto duckReleaseStep = 85.0 / sr;
         static constexpr double diffMs[4] = { 4.3, 6.7, 9.1, 12.7 };
 
         // round 135w: quad taps / swell, groove / feel / accent, prime numbers, cross feedback, balance, freeze, start side
@@ -603,7 +687,7 @@ private:
         const int first = (st == Style::pingPong && p[startSide] >= 0.5f) ? 1 : 0, second = 1 - first;
         // the plain read path (no shifter / pitch / reverse / phaser on the echoes) can read the echoes from their own
         // taps: Feel moves the heard taps, Groove / Accent use a loop of two echo times (odd and even repeats apart)
-        const bool plainRead = (int) md < (int) Mode::phaser && st != Style::quad;
+        const bool plainRead = (int) md < (int) Mode::phaser && st != Style::quad && ! rhythmOn;
         const auto longest = std::max (tL, tR) * 0.001 * sr * (1.0 + std::abs (feelV) + std::abs (grooveV)) + 0.02 * sr;
         const bool twoTap = plainRead && st != Style::pingPong && (std::abs (grooveV) > 1e-6 || std::abs (accentV) > 1e-6)
                             && 2.0 * longest < ch[0].line.maxDelay();
@@ -657,7 +741,16 @@ private:
             {
                 auto& s = ch[(std::size_t) c];
                 float y = 0.0f;
-                if (st == Style::quad)
+                if (rhythmOn)
+                {
+                    // slot 0 comes back through the loop (the input of the last pass), the taps scale with the glide
+                    const auto scale = target[c] > 1.0 ? d[c] / target[c] : 1.0;
+                    fbSig[c] = s.line.at (std::min (maxRead, d[c]));
+                    y = (float) (rSlot0 * loopG) * fbSig[c];
+                    for (int k = 0; k < rCount; ++k)
+                        y += (float) rTaps[(std::size_t) k].level * s.line.at (std::clamp (rTaps[(std::size_t) k].ms * 0.001 * sr * scale, 2.0, maxRead));
+                }
+                else if (st == Style::quad)
                 {
                     const auto e = c == 0 ? quadEl : quadEr;
                     float last = 0.0f, heard = 0.0f;
@@ -729,7 +822,7 @@ private:
                     }
                     default: break;
                 }
-                if (st != Style::quad && ! twoTap && ! feelTap) // the quad style feeds back its last tap as read
+                if (st != Style::quad && ! twoTap && ! feelTap && ! rhythmOn) // the quad style feeds back its last tap as read
                     fbSig[c] = y;
                 echo[c] = y;
             }
@@ -775,14 +868,22 @@ private:
                 s.line.push (softLimit (u));
             }
 
-            // ducking (not measured: a plain envelope-driven gain on the echoes)
+            // ducking, round 137 [EXEC] measured on the ValhallaDelay demo (REA_rodada137 §5): a gain reduction on the
+            // echoes keyed by the input's level: GR = input rms − T, T = −51 dB × ducking^1.28 (a 6 dB soft knee),
+            // fast attack (10 ms), released at ≈ 85 dB / s
             auto duckGain = 1.0f;
             if (duck > 0.0f)
             {
-                const auto e = std::abs (mono);
-                envelope += (e - envelope) * (e > envelope ? envAttack : envRelease);
-                duckGain = 1.0f / (1.0f + 8.0f * duck * envelope);
+                const auto e = mono * mono;
+                envelope += (e - envelope) * envAttack;
+                const auto keyDb = 10.0 * std::log10 (std::max (1e-12, (double) envelope));
+                const auto x = keyDb - duckThresholdDb;
+                const auto target = x <= -3.0 ? 0.0 : x >= 3.0 ? x : (x + 3.0) * (x + 3.0) / 12.0;
+                duckGr = target > duckGr ? duckGr + (target - duckGr) * (double) envAttack : std::max (target, duckGr - duckReleaseStep);
+                duckGain = (float) std::pow (10.0, -duckGr / 20.0);
             }
+            else
+                duckGr = 0.0;
 
             // balance of the echoes, width (M / S of the echoes) and the equal-power mix
             echo[0] *= 1.0f - std::max (0.0f, balanceV);
@@ -826,9 +927,10 @@ private:
         return y;
     }
 
-    void configure (Mode m, double timeMsL, float ageV) noexcept
+    void configure (Mode m, double timeMsL, float ageV, int eraIndex = 0) noexcept
     {
         modAmountMs = 6.1;
+        const auto bw = eraBandwidth (m, eraIndex); // round 137: Era (1 = Past)
         switch (m)
         {
             case Mode::tape:
@@ -837,7 +939,7 @@ private:
             {
                 // tape: the head bump / low-end loss (low shelf −5 dB), and a two-pole roll-off that falls with the
                 // delay time (tape speed): ≈ 9 kHz at 100 ms, 5 kHz at 300 ms, 2.7 kHz at 1 s
-                const auto fc = m == Mode::tape ? std::clamp (9000.0 * std::pow (std::max (1.0, timeMsL) / 100.0, -0.5), 1500.0, 10000.0) : 9000.0;
+                const auto fc = std::min (0.45 * sr, bw * (m == Mode::tape ? std::clamp (9000.0 * std::pow (std::max (1.0, timeMsL) / 100.0, -0.5), 1500.0, 10000.0) : 9000.0));
                 for (auto& c : ch)
                 {
                     c.shelf.set (350.0, sr);
@@ -859,12 +961,12 @@ private:
                 modulation = m == Mode::hifi ? ModSource::random : ModSource::none;
                 break;
             case Mode::bucket:
-                steep.set (1650.0, sr);
+                steep.set (1650.0 * bw, sr);
                 shaper.set (0.6f, 0.05f);
                 modulation = ModSource::sine;
                 break;
             case Mode::analog:
-                steep.set (3450.0, sr);
+                steep.set (3450.0 * bw, sr);
                 shaper.set (1.525f, 0.0f);
                 modulation = ModSource::sine;
                 break;
@@ -872,7 +974,7 @@ private:
             case Mode::pitch:
             case Mode::reverse:
             case Mode::detune:
-                steep.set (8000.0, sr);
+                steep.set (std::min (0.45 * sr, 8000.0 * bw), sr);
                 shaper.set (0.375f, 0.0f);
                 modulation = m == Mode::digital ? ModSource::sine : ModSource::none;
                 break;
@@ -1040,6 +1142,7 @@ private:
     double wowAmountMs = 1.15, flutterAmountMs = 0.2;
     double lfoPhase = 0.0;
     float envelope = 0.0f;
+    double duckGr = 0.0; // round 137: the ducking's gain reduction (dB)
 };
 } // namespace
 } // namespace echoform
@@ -1327,6 +1430,8 @@ private:
 // =====================================================================================================================
 namespace lattice
 {
+int inputPanOf (float v) noexcept { return std::clamp ((int) std::lround (clamp01 (v) * 8.0f), 0, 8); }
+
 int tapCount (float v) noexcept
 {
     static constexpr int counts[10] = { 1, 1, 2, 3, 3, 3, 4, 8, 8, 16 };
@@ -1452,6 +1557,7 @@ public:
         const auto noiseLevel = (float) std::pow (10.0, (-120.0 + 90.0 * clamp01 (p[noise])) / 20.0);
         const auto smoothS = (1.0 + 999.0 * (double) clamp01 (p[smoothing])) * 0.001;
         const auto isDark = on (p[colour]);
+        const auto panMode = inputPanOf (p[inputPan]);
         static constexpr double diffRatios[4] = { 0.131, 0.217, 0.293, 0.359 };
         for (auto& c : ch)
         {
@@ -1475,6 +1581,10 @@ public:
             vibPhase -= std::floor (vibPhase);
             float wet[2];
             const float in[2] = { l[i], r[i] };
+            // round 137: Input pan (the reference's InputPan, measured [EXEC]): what enters the taps
+            const auto monoIn = 0.5f * (in[0] + in[1]);
+            const float src[2] = { panMode == 2 ? in[1] : panMode == 3 || panMode == 4 ? monoIn : panMode == 5 ? 0.0f : in[0],
+                                   panMode == 2 ? in[0] : panMode == 3 || panMode == 5 ? monoIn : panMode == 4 ? 0.0f : in[1] };
             for (int c = 0; c < 2; ++c)
             {
                 auto& s = ch[(std::size_t) c];
@@ -1500,7 +1610,7 @@ public:
             for (int c = 0; c < 2; ++c)
             {
                 auto& s = ch[(std::size_t) c];
-                auto x = in[c];
+                auto x = src[c];
                 if (useDrive && ! post)
                     x = driveFn (x) + noiseLevel * s.noise.next();
                 if (useDiff && diffG > 0.0f)
@@ -1558,7 +1668,14 @@ const EffectInfo& echoformInfo()
                                      { "Tempo source", 0.0f }, { "BPM", 1.0f / 3.0f }, { "Start side", 0.0f }, { "Filter link", 0.0f },
                                      { "Tap A", 1.0f }, { "Tap B", 1.0f }, { "Tap C", 1.0f }, { "Tap D", 1.0f }, { "Swell", 0.0f },
                                      { "Groove", 0.5f }, { "Feel", 0.5f }, { "Accent", 0.5f }, { "Prime numbers", 0.0f },
-                                     { "Cross feedback", 0.0f }, { "Balance", 0.5f }, { "Freeze", 0.0f } } };
+                                     { "Cross feedback", 0.0f }, { "Balance", 0.5f }, { "Freeze", 0.0f },
+                                     // round 137: Rhythm mode (appended; off = the old sound); 1/8 note, 8 repeats, 2 beats
+                                     { "Rhythm", 0.0f }, { "Rhythm sync", 0.5f }, { "Rhythm note", 0.35f }, { "Rhythm time", 0.3f },
+                                     { "Repeats", 7.0f / 15.0f }, { "Decay", 0.0f }, { "Length", 1.0f / 7.0f },
+                                     { "Era", 0.0f },
+                                     { "Tap 1", 1.0f }, { "Tap 2", 1.0f }, { "Tap 3", 1.0f }, { "Tap 4", 1.0f }, { "Tap 5", 1.0f },
+                                     { "Tap 6", 1.0f }, { "Tap 7", 1.0f }, { "Tap 8", 1.0f }, { "Tap 9", 1.0f }, { "Tap 10", 1.0f },
+                                     { "Tap 11", 1.0f }, { "Tap 12", 1.0f }, { "Tap 13", 1.0f }, { "Tap 14", 1.0f }, { "Tap 15", 1.0f } } };
     return info;
 }
 
@@ -1588,7 +1705,8 @@ const EffectInfo& latticeInfo()
                                      { "Vibrato depth", 0.0f }, { "Over-mod", 0.0f }, { "Drive in", 0.375f }, { "Drive out", 0.75f },
                                      { "Noise", 0.3333333f }, { "Rotate", 0.5f }, { "Smoothing", 0.0990991f }, { "Colour", 0.0f },
                                      { "Sync", 0.0f }, { "Taps", 1.5f / 24.0f } /* round 129: two taps (one a side), the reference default */, { "Diffusion on", 0.0f }, { "Drive on", 0.0f },
-                                     { "Drive post", 1.0f }, { "Half speed", 0.0f } } };
+                                     { "Drive post", 1.0f }, { "Half speed", 0.0f },
+                                     { "Input pan", 0.125f } /* round 137: index 1 = stereo, the reference default */ } };
     return info;
 }
 
@@ -1652,6 +1770,21 @@ std::string paramText (EffectKind kind, int param, float v)
             case groove: case feel: return fmt ("%+.1f%%", 25.0 * bipolar (v));
             case accent: case balance: return fmt ("%+.0f%%", 100.0 * bipolar (v));
             case crossFeedback: return pct (v * 100.0);
+            case rhythm: return v >= 0.5f ? "on" : "off";
+            case rhythmSync:
+            {
+                static const char* const kinds[4] = { "ms", "note", "dotted", "triplet" };
+                return kinds[syncKind (v)];
+            }
+            case rhythmNote: return noteNames[noteIndex (v)];
+            case rhythmTime: return msText (timeMs (v));
+            case rhythmRepeats: return fmt ("%d", rhythmRepeatsOf (v));
+            case rhythmDecay: return fmt ("%.1f dB", rhythmDecayDb (v));
+            case rhythmTap1: case rhythmTap1 + 1: case rhythmTap1 + 2: case rhythmTap1 + 3: case rhythmTap1 + 4: case rhythmTap1 + 5:
+            case rhythmTap1 + 6: case rhythmTap1 + 7: case rhythmTap1 + 8: case rhythmTap1 + 9: case rhythmTap1 + 10: case rhythmTap1 + 11:
+            case rhythmTap1 + 12: case rhythmTap1 + 13: case rhythmTapLast: return pct (v * 100.0);
+            case era: return eraOf (v) == 0 ? "past" : eraOf (v) == 1 ? "present" : "future";
+            case rhythmLength: return rhythmBeatsOf (v) == 1 ? std::string ("1 beat") : fmt ("%d beats", rhythmBeatsOf (v));
             default: return fmt ("%.2f", v);
         }
     }
@@ -1724,6 +1857,11 @@ std::string paramText (EffectKind kind, int param, float v)
             case diffOn: case driveOn: return on (v) ? "on" : "off";
             case drivePost: return on (v) ? "post" : "pre";
             case halfSpeed: return on (v) ? "1/2x" : "1x";
+            case inputPan:
+            {
+                static const char* const names[9] = { "stereo", "stereo", "swapped", "mono", "mono left", "mono right", "stereo", "stereo", "stereo" };
+                return names[inputPanOf (v)];
+            }
             default: return fmt ("%.2f", v);
         }
     }

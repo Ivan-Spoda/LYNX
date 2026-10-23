@@ -19,6 +19,7 @@
 // All parameters are 0..1 in the model (EffectParams). Every effect reports zero latency; the delay lines are
 // allocated in prepare() (off the audio thread), process() never allocates.
 
+#include <array>
 #include <memory>
 #include <string>
 #include <utility>
@@ -72,6 +73,19 @@ enum Param
     crossFeedback, // 0 … 100 %: each side's feedback taken from the other side (EchoBoy's Dual "FB Mix")
     balance,     // ±100 %: the echoes' left / right level
     freeze,      // the loop holds what it has (no input, unity feedback, no colouring) (PrimalTap's Freeze)
+    // ---- round 137 (docs/PARITY.md: EchoBoy "Echo Mode: Rhythm"), appended; off by default (the old sound)
+    rhythm,        // Rhythm echo mode: a pattern of evenly spaced taps that the feedback replays (overrides the style)
+    rhythmSync,    // the tap spacing in ms (0) or as a note / dotted / triplet value (the Sync L law)
+    rhythmNote,    // that note (the Note L law, default 1/8)
+    rhythmTime,    // that time in ms (the Time L law)
+    rhythmRepeats, // 1 … 16 slots in the pattern (the first slot is the input itself: repeats − 1 taps are heard)
+    rhythmDecay,   // 0 … 40 dB from the first slot to the last
+    rhythmLength,  // the pattern length, 1 … 8 beats (measured default: 2 beats); taps past it are dropped
+    era,           // round 137: ValhallaDelay's Era: Past (0, the old sound) / Present (0.5) / Future (1): the loop's
+                   // bandwidth per mode, measured black-box on the demo (REA_rodada137 §3)
+    rhythmTap1,    // round 137: the level of each heard rhythm tap (1 … 15), 0 … 100 % (EchoBoy's rhythm editor bars);
+                   // 100 % by default, applied after the pattern's normalisation
+    rhythmTapLast = rhythmTap1 + 14,
     paramCount
 };
 enum class Style { single, ratio, quad, dual, pingPong }; // the two-time styles last (the panel shows the right time for both)
@@ -105,6 +119,20 @@ int nearestPrime (int samples) noexcept;
 // round 135w: an edit of `param` with Filter link on: the low and high cut move together (the same frequency ratio);
 // returns the edits to apply (just the one when the link is off or the parameter is not a cut)
 std::vector<std::pair<int, float>> linkedEdit (const EffectParams& p, int param, float value);
+// round 137: Rhythm mode (EchoBoy's, measured black-box [EXEC], REA_rodada137 §2)
+struct RhythmTap { double ms; double level; };
+int rhythmRepeatsOf (float v) noexcept;  // 1 … 16
+double rhythmDecayDb (float v) noexcept; // 0 … 40
+int rhythmBeatsOf (float v) noexcept;    // 1 … 8
+double rhythmSpacingMs (const EffectParams& p, double bpm) noexcept;
+double rhythmLengthMs (const EffectParams& p, double bpm) noexcept;
+// the heard taps of one pass (slot 0 = the input is not heard; it comes back through the feedback after the length)
+// and the level of slot 0 in `slot0`; levels are equal-power normalised over the slots that fit in the length
+std::vector<RhythmTap> rhythmTaps (const EffectParams& p, double bpm, double* slot0 = nullptr);
+int rhythmPattern (const EffectParams& p, double bpm, std::array<RhythmTap, 16>& taps, double& slot0) noexcept; // no allocation
+int eraOf (float v) noexcept;           // 0 past, 1 present, 2 future (round 137)
+// the factor on the character's low-pass cut-off for the mode and era (1 for Past)
+double eraBandwidth (Mode m, int era) noexcept;
 int hybridOf (float v) noexcept;         // 0 off, 1 clean, 2 analog (round 124)
 float hybridValue (int h) noexcept;
 Mode modeOf (float v) noexcept;
@@ -147,8 +175,13 @@ enum Param
 {
     mix, depth, width, delay, feedback, spread, slope, skew, random, tapGain, diffusion, diffSize, diffModRate,
     diffModDepth, lowCut, highCut, xover, detuneRate, detuneDepth, vibratoRate, vibratoDepth, overMod, driveIn,
-    driveOut, noise, rotate, smoothing, colour, sync, taps, diffOn, driveOn, drivePost, halfSpeed, paramCount
+    driveOut, noise, rotate, smoothing, colour, sync, taps, diffOn, driveOn, drivePost, halfSpeed,
+    inputPan, // round 137 (appended): what enters the taps, 9 steps (index round (8 v)), measured on the reference
+              // [EXEC]: 0 / 1 stereo (default 1), 2 swapped, 3 mono to both, 4 mono to the left, 5 mono to the right,
+              // 6–8 stereo (no difference measured with an impulse)
+    paramCount
 };
+int inputPanOf (float v) noexcept;  // 0 … 8
 int tapCount (float v) noexcept;     // 1, 1, 2, 3, 3, 3, 4, 8, 8, 16 (index floor(24 v))
 double delayMs (float v) noexcept;   // 0 .. 1000 ms
 double tapMs (const EffectParams& p, int tap, int taps, bool right) noexcept; // tap position (without modulation)

@@ -3617,3 +3617,15 @@ countries: br
 "Voice Shift" = "Voice Shift"
 "Voicing" = "Timbre"
 "Holds the plate's tail for ever (the decay at its top): play into it to layer, switch off to let it fade" = "Segura a cauda da placa para sempre (o decaimento no máximo): toque por cima para sobrepor, desligue para deixar sumir"
+
+# --- Round 137: Echoform Rhythm mode and Era
+"Rhythm echo: a pattern of evenly spaced taps that the feedback repeats every Length" = "Eco rítmico: um padrão de taps igualmente espaçados que o feedback repete a cada Duração"
+"Slots in the rhythm pattern (the first one is the input itself)" = "Posições no padrão rítmico (a primeira é a própria entrada)"
+"How much quieter the last tap of the pattern is than the first" = "Quanto o último tap do padrão é mais baixo que o primeiro"
+"Length of the rhythm pattern in beats; the feedback replays it" = "Duração do padrão rítmico em tempos; o feedback o repete"
+"Repeats" = "Repetições"
+"Past|Present|Future" = "Passado|Presente|Futuro"
+"Input pan" = "Pan de entrada"
+"Stereo|Swapped|Mono|Mono left|Mono right" = "Estéreo|Invertido|Mono|Mono esquerda|Mono direita"
+"Trigger" = "Gatilho"
+"Off|Host sync|MIDI" = "Desl.|Sinc. do host|MIDI"

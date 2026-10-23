@@ -2060,7 +2060,23 @@ public:
                     tR = tL * (0.01 + 0.99 * (double) params[ratio]);
                 const auto gain = juce::jlimit (0.0, 1.0, feedbackGain (params[feedback]));
                 window = juce::jmax (50.0, 4.5 * juce::jmax (tL, tR));
-                if (st == Style::pingPong)
+                if (params[rhythm] >= 0.5f) // round 137: the Rhythm pattern, three passes of it (left and right alike)
+                {
+                    double slot0 = 0.0;
+                    const auto taps = rhythmTaps (params, bpm, &slot0);
+                    const auto length = rhythmLengthMs (params, bpm);
+                    window = 3.0 * length * 1.02;
+                    auto level = 1.0;
+                    for (int pass = 0; pass < 3; ++pass, level *= gain)
+                        for (int c = 0; c < 2; ++c)
+                        {
+                            if (pass > 0)
+                                ticks.push_back ({ length * pass, slot0 * level, c == 1 });
+                            for (const auto& t : taps)
+                                ticks.push_back ({ length * pass + t.ms, t.level * level, c == 1 });
+                        }
+                }
+                else if (st == Style::pingPong)
                 {
                     auto t = tL, level = 1.0;
                     for (int k = 0; k < 24 && t <= window; ++k)

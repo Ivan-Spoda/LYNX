@@ -1237,7 +1237,7 @@ Sources: REA_rodada100.md §5/§7b; product page with mode descriptions (valhall
 | reverb mode | **4: Mono / Small Stereo / Medium Stereo / Big Stereo**, default mono (mono-in for Mono) | round 135: Mono (mono in), Small / Medium / Big stereo (two separate sides) first, LYNX's Wide / Dense / Bright after them; menu with ◀ ▶ | ✅ | [EXEC] the trial with a left-only impulse: below 0.25 the input is summed and the tail leaves both sides, from 0.25 up the left input stays left; steps at 0.25 / 0.5 / 0.75; translated 1:1. The default stays Wide (older projects unchanged). |
 | pitch mode | **Single (up or down by Shift) / Dual / SingleReverse / DualReverse / Bypass**, default single | round 135: caption "Pitch mode", Single / Dual / Single, bright / Dual, bright / No shift | ⚠️ | The reverse-grain modes are still approximated by a +4 dB shelf (engine). |
 | color mode | Bright / Dark (Dark = steep loss above ~10 kHz) | Bright / Dark (5 kHz loop band limit) | ✅/⚠️ | Dark is darker than described. |
-| Programs | 8 host programs (Program param, `currentProgram`) | none | ❌ | |
+| Programs | 8 host programs (Program param, `currentProgram`) | LYNX's own factory presets in the preset bar | — | round 137: deliberately left out — the programs are the vendor's presets (the third-party rule: never copy their presets); Halo's own factory presets play that role |
 | Description line | none visible in 1.2.2's UI (the page says tooltips) | hint bar | ✅ | |
 | Resizable | not in 1.2.2 (fixed small UI) | resizable | ➕ | |
 | Gestures | not documented | full set | ➕ | |
@@ -1314,7 +1314,7 @@ Sources: [VintageVerb](https://valhalladsp.com/shop/reverb/valhalla-vintage-verb
 | Style | Single / Dual / Ratio / PingPong / Quad knob under Mix, default Single | Style knob with 5 steps, same place; order Single / Ratio / Quad / Dual / Ping-pong; the substitute reorders | ✅ | The knob order is different, so turning it gives a different sequence than the original |
 | Style changes which controls are shown | Spread / Ratio / Spacing / Delay R swap in place | Same swaps (`when` items) | ✅ | |
 | Delay time | 0–20 000 ms, piecewise law, default 300 ms, big knob | Same law and default | ✅ | |
-| Delay label L / R in Dual and PingPong | Captions read "DELAY L" and "DELAY R" | Captions read "Delay" and "Delay R" | ⚠️ | Left caption doesn't change |
+| Delay label L / R in Dual and PingPong | Captions read "DELAY L" and "DELAY R" | Captions read "Delay L" and "Delay R" in Dual / Ping-pong | ✅ | round 129 (row re-checked in round 137) |
 | Sync combo under the time knob | Msec / Note / Dotted / Triplet; "DELAY Sync" becomes L and R in Dual / PingPong | Same 4 choices, same place, R menu only in Dual / Ping-pong | ✅ | |
 | Note value | 1/64 … 8/1 (10 values); the knob turns into a note knob | Same 10 values; note knob replaces the time knob | ✅ | |
 | Spread (Single) | ±20 ms, 0 ms | Same, ±¼ applied per side as measured | ✅ | |
@@ -1330,23 +1330,23 @@ Sources: [VintageVerb](https://valhalladsp.com/shop/reverb/valhalla-vintage-verb
 | Diff Size | 0–100 %, 100 % | Same | ✅ | |
 | Mod: Wow / Flutter (tape modes) | 0–100 %, 50 / 50 | Same, shown in Tape only | ✅ | Original also shows them in DuckTape and ChromeTape; LYNX maps both to Tape |
 | Mod: Rate / Depth (HiFi / BBD / Digital) | 0.01–10 Hz, 0.50 Hz; 0–100 %, 50 % | Same values, shown for Lo-Fi … Phaser | ✅ | |
-| Section title changes to FREQ (Ghost) / PITCH (Pitch) | The section header is renamed | Header always reads "Mod" | ⚠️ | UI only |
+| Section title changes to FREQ (Ghost) / PITCH (Pitch) | The section header is renamed | Mod / Freq / Pitch by mode | ✅ | round 129 (row re-checked in round 137) |
 | Freq Shift / Detune (Ghost) | ±1000 Hz (\|x\|^5), 0 Hz; ±10 Hz, 0.10 Hz | Same laws and defaults (Shifter mode) | ✅ | |
 | Pitch Shift / Detune (Pitch / RevPitch) | ±24 st, 0; ±100 c, 0 | Same (Pitch, Reverse) | ✅ | |
 | EQ High / Low | 200–20 000 Hz, 20 kHz; 10–2000 Hz, 10 Hz; in the feedback path | Same, High above Low | ✅ | |
-| Ducking | 0–100 % one-knob ducking (feedback + output); comes with the duck modes | Ducking knob in an "Output" section, active in every mode, simple envelope curve | ⚠️ | Placement and behaviour not confirmed against the original; curve not measured |
+| Ducking | 0–100 % one-knob ducking (feedback + output); comes with the duck modes | Ducking knob in an "Output" section, active in every mode; round 137: the original's curve | ✅ | round 137 [EXEC] measured on the demo (1 kHz tone at −29 / −15 / −9 dBFS rms, ducking 25–100 %): a gain reduction on the echoes keyed by the input = input rms − T, T = −51 dB × ducking^1.28, released at ≈ 85 dB/s; LYNX uses that law (REA_rodada137 §5) |
 | Mode list | 17 modes: Tape, HiFi, BBD, Digital, Ghost, Pitch, RevPitch, BBDuck, Clarity, DuckTape, PitchDuck, LoFi, Quartz, PhaserDDL, RichPitch, ChromeTape, Analog | 12 characters | ⚠️ | BBDuck → bucket (loses brightness that follows the delay time), Clarity / Quartz → Clean (loses Clarity's limiter and Era waveforms), DuckTape / ChromeTape → Tape, PitchDuck → Pitch; built-in ducking lost |
 | Mode selector with ◀ ▶ | Bottom left, "MODE: Tape ◀▶" | Bottom left menu with ◀ ▶ | ✅ | |
-| Era | Past / Present / Future, ◀ ▶, bottom middle; changes filters, saturation, diffusion and Clarity's waveforms | — | ❌ | Needs a new parameter and per-mode voicing |
+| Era | Past / Present / Future, ◀ ▶, bottom middle; changes filters, saturation, diffusion and Clarity's waveforms | round 137: Past / Present / Future tabs, bottom right; default Past (the old sound) | ✅ | [EXEC] the demo's default is Past (value 1/3; Present from 2/3, Future at 1); the first repeat's top end opens with the era (Tape 8 kHz −10.1 / −7.1 / −6.5 dB, Digital 12 kHz −45 / −6.6 / −6.3, LoFi 8 kHz −10 / −5.3 / −1.8, BBD 4 kHz −27 / −17 / −8; HiFi and Clarity unchanged): LYNX scales each character's loop low-pass by the fitted factor; the era's saturation / diffusion differences are not modelled |
 | Colour theme follows the mode | The whole panel recolours per mode family (green tape, blue digital, grey Ghost, navy Pitch) | Fixed theme | ⚠️ | Design cue only; a LYNX accent per mode family would do, without copying the original's colours |
 | Preset browser | "PRESET: Default ◀▶" bottom right, large factory library | Header box shows "(no preset)" | ✅ | Applies to all LYNX engines; round 129's preset bar (LYNX factory presets for Echoform) |
-| Description line | Bottom strip describes the current Style / Mode, and the hovered control | Hint only in the main window's hint bar | ❌ | UI only |
+| Description line | Bottom strip describes the current Style / Mode, and the hovered control | bottom strip (hovered control, else the mode) | ✅ | round 135 (row re-checked in round 137) |
 | Text entry / reset gestures | Not confirmed in our refs | Right-click value entry, double-click / Alt-click default, Ctrl fine drag, wheel | ✅ | |
 | Resizable window | Resize corner; uiWidth / uiHeight saved in the state | Resizable, fixed aspect ratio | ✅ | uiWidth / uiHeight not translated (harmless) |
 | Output level | — | Level ±18 dB | ➕ | |
 | Ping-pong "Pairs" toggle | — | Pairs / alternate | ➕ | |
 | Echo-train display | — | Echoes on a time axis | ➕ | |
-| Saved-state translation | — | Translates everything except Era, TapA–D, RepeatSwell; 17 modes → 12 characters; duck variants lose built-in ducking | ⚠️ | `PluginSubstitutes.cpp [valhalla-delay]` |
+| Saved-state translation | — | Translates everything (round 137: + Era, TapA–D, RepeatSwell); 17 modes → 12 characters; duck variants lose built-in ducking | ⚠️ | `PluginSubstitutes.cpp [valhalla-delay]` |
 
 **Scores:** configuration 6/10, design 6/10.
 
@@ -1432,14 +1432,14 @@ Sources: [VintageVerb](https://valhalladsp.com/shop/reverb/valhalla-vintage-verb
 | EQ page | Mode Bright / Dark, Low Cut 10 Hz, High Cut 20 kHz, SpatialEQ 300 Hz | Same | ✅ | |
 | DRIVE page | On/Off, InGain 9 dB, OutGain −6 dB, NoiseGain −90 dB, Pre/Post (POST) | Same | ✅ | |
 | WARP page: Speed, fbMix, Smoothing | 1X / ½X, 50 %, 100 ms | Same | ✅ | |
-| WARP page: InputPan | 0–8 steps, shows "Stereo" | — | ❌ | Not in the engine; substitute drops it |
+| WARP page: InputPan | 0–8 steps, shows "Stereo" | round 137: Input pan menu on the WARP page (Stereo / Swapped / Mono / Mono left / Mono right) | ✅ | [EXEC] left- and right-only impulses through the demo: index 0–1 stereo (default 1), 2 swapped, 3 (L + R) / 2 to both, 4 to the left only, 5 to the right only, 6–8 like stereo; translated one to one |
 | 16-tap alternating polarity / type ≥ 10 | Measured | Not modelled | ⚠️ | |
 | Preset browser | "PRESET: Default ◀▶" next to the page area | header preset bar + the original's preset name | ✅ | rounds 129 / 135 |
 | Description / tooltip line | Bottom strip shows hover help (e.g. the OverMod warning) | bottom strip: every control described ("Over-mod — pushes the modulation past its normal range (can sound unstable)") | ✅ | round 135 |
 | Tap display | — | Tap graph under the pages | ➕ | |
 | Resizable | Fixed size | Resizable | ➕ | |
 | Gestures / text entry | Not confirmed | Full LYNX set | ✅ | |
-| Saved-state translation | — | Everything except DelaySync and InputPan | ⚠️ | `PluginSubstitutes.cpp [valhalla-ubermod]` |
+| Saved-state translation | — | Everything except DelaySync (round 137: InputPan translated) | ⚠️ | `PluginSubstitutes.cpp [valhalla-ubermod]` |
 
 **Scores:** configuration 6/10, design 7/10. **After round 135**: configuration 7/10, design 9/10 (left: per-mode LFO designs, InputPan, Sync translation).
 
@@ -1503,7 +1503,7 @@ Sources: docs/specs/echoboy.md (Pro Tools-era guide pp. 22–54, store page); `[
 | Echo Mode: Single | per-channel echo | Delay model Mono/Stereo | Style "Single" (+ Spread) | ✅ (Echoform) | |
 | Echo Mode: Dual | two independent times, FB mix / balance | Offset only | Style "Dual" (Time L/R, sync L/R) | ⚠️ | no FB cross-mix or FB balance |
 | Echo Mode: Ping-Pong | mono in, L then R | Ping pong | Style "Ping-pong" (+ Pairs) | ✅ | |
-| Echo Mode: Rhythm (≤16 taps, 1–8 beats, grid ½…1/64, Shape) | Rhythm editor | — | — (Ratio/Quad are not a pattern) | ❌ | biggest structural gap |
+| Echo Mode: Rhythm (≤16 taps, 1–8 beats, grid ½…1/64, Shape) | Rhythm editor | — | round 137: RHYTHM switch (third row): evenly spaced taps (ms / note / dotted / triplet), Repeats 1–16, Decay 0–40 dB, Length 1–8 beats; the echo train shows the pattern | ⚠️ (Echoform) | [EXEC] measured on the trial (impulses at 60 / 120 BPM; its host parameters RhythmMode / Note / Time / Repeats / Decay): Repeats = slots incl. the input, so repeats − 1 taps are heard, each 1 / √slots (equal power, with the decay spread from the first slot to the last); the pattern spans 2 beats (taps past it are dropped) and the feedback replays it every 2 beats — LYNX's Length defaults to 2 beats. Left: the Pattern presets and the Custom (drawn) taps of the rhythm editor (not host parameters, not measured) |
 | Echo Style menu (~30 voicings) | main panel menu | — | Mode menu: 12 (Tape, Lo-Fi, Hi-Fi tape, Bucket brigade, Analog, Digital, Clean, Phaser, Shifter, Pitch, Reverse, Detune) | ⚠️ | covers families: tape/BBD/digital/lo-fi; no radio/telephone, chorus/vibrato, "Diffused/Verbed" variants |
 | Echo Time ms | ms, pitch-bends when moved | Time + Keep pitch | Time L/R 0–20 s, default 300 ms | ✅ | |
 | Note / Dotted / Triplet | Note/Dot/Trip buttons | Tempo sync | Sync menu ms/Note/Dotted/Triplet, 1/64…8/1 | ✅ | |
@@ -1612,7 +1612,7 @@ TD-PSOLA from core/VocalPitch.h), for this role: 696 slots in 399 of her project
 | DRIVE | 0.0…10.0 | Drive 0–10 (tube stage on the shifted voice, ≈ 1.75 dB / step, make-down above 6) | ✅ | curve fitted roughly on the trial's level / harmonics (round 136 may refine) |
 | MIX | 0–100 %, default 100, linear | Mix (linear, dry delayed by the latency) | ✅ | measured linear on the trial |
 | Latency | 2417 samples at 48 kHz (reported) | two periods of 70 Hz (≈ 1376 at 48 kHz), reported | ⚠️ | different (both compensated by PDC) |
-| MIDI → pitch | host MIDI | — | ❌ | |
+| MIDI → pitch | host MIDI | round 137: MIDI channel stepper under the modes: the highest note held on that Channel Rack channel replaces Pitch (relative to C4) in Transpose / Quantize and is the note Robot sings | ✅ | [MANUAL] the original's MIDI mode; the trial's MIDI response was not measured (our measurement host sends no notes) |
 | One-screen panel | Pitch / Formant · Mode · Drive / Mix | the same three sections | ✅ | |
 | Presets | Soundtoys strip | LYNX preset bar with 7 factory presets | ✅ | |
 | Substitute entry | — | `[soundtoys-littlealterboy]` (VST2 `StLa`, names) | ✅ | round 135 |

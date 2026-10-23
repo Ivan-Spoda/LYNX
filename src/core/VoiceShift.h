@@ -12,7 +12,8 @@
 //   Drive     0 … 10: a tube stage on the shifted voice           Mix      dry / wet (linear, measured)
 //
 // Latency: two periods of the lowest detected pitch (70 Hz), reported to PDC; the dry signal is delayed to match.
-// Meters (controlOutput): 0 = sung note / 127 (0 = unvoiced), 1 = the note sent out / 127.
+// Meters (controlOutput): 0 = sung note / 127 (0 = unvoiced), 1 = the note sent out / 127, 2 = the held MIDI note / 127
+// (0 = none; round 137).
 
 #include <memory>
 #include <string>
@@ -24,7 +25,13 @@ class Effect;
 
 namespace voiceshift
 {
-enum Param : int { pitch, formant, link, mode, drive, mix, count };
+enum Param : int
+{
+    pitch, formant, link, mode, drive, mix,
+    midi, // round 137 (appended, Off by default): the Channel Rack channel whose held notes set the pitch (the
+          // original's MIDI control): Transpose / Quantize shift by (highest held note − C4), Robot sings that note
+    count
+};
 enum class Mode { transpose, quantize, robot };
 
 double pitchSemitones (float v) noexcept;   // −12 … +12
@@ -37,6 +44,8 @@ constexpr double minHz = 70.0, maxHz = 1000.0;
 int latencyFor (double sampleRate) noexcept;
 // the drive stage's static curve (no state): input → output at a drive amount 0 … 10
 float driveCurve (float x, double amount) noexcept;
+int midiChannelIndex (float v) noexcept;    // −1 = off, else 0 … 127 (LYNX Tune's law)
+float midiChannelValue (int channel) noexcept;
 
 const EffectInfo& info();
 std::string paramText (int param, float v);

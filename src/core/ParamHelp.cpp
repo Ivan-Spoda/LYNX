@@ -224,6 +224,10 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::echoform, "style" }, TR_NOOP ("Echo layout: single, ratio, four taps, dual or ping-pong") },
         { { K::echoform, "ratio" }, TR_NOOP ("Time of the second echo as a share of the first") },
         { { K::echoform, "output" }, TR_NOOP ("Level of the echoes") },
+        { { K::echoform, "rhythm" }, TR_NOOP ("Rhythm echo: a pattern of evenly spaced taps that the feedback repeats every Length") },
+        { { K::echoform, "repeats" }, TR_NOOP ("Slots in the rhythm pattern (the first one is the input itself)") },
+        { { K::echoform, "decay" }, TR_NOOP ("How much quieter the last tap of the pattern is than the first") },
+        { { K::echoform, "length" }, TR_NOOP ("Length of the rhythm pattern in beats; the feedback replays it") },
         // Ridge Strip
         { { K::ridgeStrip, "input" }, TR_NOOP ("Level into the channel strip") },
         { { K::ridgeStrip, "hpf" }, TR_NOOP ("High-pass filter: removes rumble below this frequency") },

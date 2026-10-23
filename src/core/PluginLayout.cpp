@@ -2199,6 +2199,9 @@ Layout voiceShiftLayout()
     v.push_back (value (192, 176, 72, 24, "Formant", boxed));
     v.push_back (section (310, 4, 130, 222, TR_NOOP ("Mode")));
     v.push_back (radio (322, 50, 110, 120, "Mode", TR_NOOP ("Transpose|Quantize|Robot")));
+    // round 137: MIDI control (the notes held on a Channel Rack channel set the pitch / the robot's note)
+    v.push_back (label (322, 172, 110, 16, TR_NOOP ("MIDI")));
+    v.push_back (stepper (318, 190, 118, 22, "MIDI", TR_NOOP ("MIDI channel"), 129));
     v.push_back (section (446, 4, 190, 222, nullptr, boxed));
     v.push_back (dial (494, 100, 60, "Drive", TR_NOOP ("Drive"), big));
     v.push_back (dial (588, 100, 60, "Mix", TR_NOOP ("Mix"), big));
@@ -2489,7 +2492,7 @@ Layout echoformLayout()
 {
     Layout l;
     l.width = 950;  // round 135w: + the TWEAK section and the output meter (was 780)
-    l.height = 330; // round 135w: + a second row of switches (was 300)
+    l.height = 352; // round 135w: + a second row of switches (was 300); round 137: + the Rhythm row (was 330)
     auto& v = l.items;
     const auto top = 4.0f, h = 232.0f, k1 = 66.0f, k2 = 160.0f, d = 34.0f;
     // mix + style
@@ -2511,7 +2514,9 @@ Layout echoformLayout()
     const std::vector<float> syncValues { 0.25f, 0.5f, 0.75f, 1.0f };
     v.push_back (menuOf (100, 150, 76, 20, "Sync L", TR_NOOP ("Sync"), TR_NOOP ("ms|Note|Dotted|Triplet"), syncValues));
     v.push_back (when (menuOf (190, 150, 76, 20, "Sync R", TR_NOOP ("Sync"), TR_NOOP ("ms|Note|Dotted|Triplet"), syncValues), "Style", 0.6f, 1.0f));
-    v.push_back (display (96, 180, 172, 50, "echotrain"));
+    v.push_back (when (display (96, 180, 172, 50, "echotrain"), "Rhythm", 0.0f, 0.49f));
+    // round 137: in Rhythm mode the picture is the pattern itself: one bar per heard tap, drag to set its level
+    v.push_back (when (display (96, 180, 172, 50, "rhythmbars"), "Rhythm", 0.5f, 1.0f));
     // feedback + width
     v.push_back (section (280, top, 80, h, TR_NOOP ("Feedback")));
     v.push_back (dial (320, k1, d, "Feedback", TR_NOOP ("Feedback")));
@@ -2585,6 +2590,20 @@ Layout echoformLayout()
     v.push_back (when (stepper (346, 290, 96, 20, "BPM", TR_NOOP ("BPM"), 270), "Tempo source", 0.5f, 1.0f));
     v.push_back (toggle (452, 290, 110, 20, "Filter link", TR_NOOP ("Link EQ")));
     v.push_back (toggle (570, 290, 100, 20, "Freeze", TR_NOOP ("Freeze")));
+    // ---- round 137: EchoBoy's Rhythm echo mode (a pattern of evenly spaced taps the feedback replays every Length)
+    v.push_back (toggle (8, 320, 74, 20, "Rhythm", TR_NOOP ("Rhythm")));
+    v.push_back (when (menuOf (88, 320, 76, 20, "Rhythm sync", TR_NOOP ("Spacing"), TR_NOOP ("ms|Note|Dotted|Triplet"), syncValues), "Rhythm", 0.5f, 1.0f));
+    v.push_back (when (when (stepper (170, 320, 90, 20, "Rhythm note", TR_NOOP ("Note"), 9), "Rhythm sync", 0.5f, 1.0f), "Rhythm", 0.5f, 1.0f));
+    v.push_back (when (when (slider (Item::hslider, 170, 322, 90, 16, "Rhythm time", nullptr, noCaption), "Rhythm sync", 0.0f, 0.49f), "Rhythm", 0.5f, 1.0f));
+    v.push_back (when (label (268, 320, 54, 20, TR_NOOP ("Repeats")), "Rhythm", 0.5f, 1.0f));
+    v.push_back (when (stepper (324, 320, 70, 20, "Repeats", TR_NOOP ("Repeats"), 15), "Rhythm", 0.5f, 1.0f));
+    v.push_back (when (label (402, 320, 44, 20, TR_NOOP ("Decay")), "Rhythm", 0.5f, 1.0f));
+    v.push_back (when (slider (Item::hslider, 448, 322, 100, 16, "Decay", nullptr, noCaption), "Rhythm", 0.5f, 1.0f));
+    v.push_back (when (value (552, 320, 56, 20, "Decay"), "Rhythm", 0.5f, 1.0f));
+    v.push_back (when (label (614, 320, 50, 20, TR_NOOP ("Length")), "Rhythm", 0.5f, 1.0f));
+    v.push_back (when (stepper (666, 320, 96, 20, "Length", TR_NOOP ("Length"), 7), "Rhythm", 0.5f, 1.0f));
+    // round 137: ValhallaDelay's Era (the loop's bandwidth per mode), bottom right
+    v.push_back (tabs (770, 320, 176, 20, "Era", TR_NOOP ("Past|Present|Future"), { 0.0f, 0.5f, 1.0f }));
     return l;
 }
 
@@ -2702,6 +2721,18 @@ Layout latticeLayout()
     }
     row (5, { { "Rotate", TR_NOOP ("Feedback mix") }, { "Smoothing", TR_NOOP ("Smoothing") } },
          { tabs (322, 104, 56, 40, "Half speed", TR_NOOP ("1x|1/2x")) });
+    {
+        // round 137: the WARP page's input pan (what enters the taps), measured on the reference
+        auto caption = label (552, 82, 104, 16, TR_NOOP ("Input pan"));
+        caption.page = 5;
+        v.push_back (caption);
+        std::vector<float> panValues;
+        for (int k = 1; k <= 5; ++k)
+            panValues.push_back ((float) k / 8.0f);
+        auto pan = menuOf (552, 102, 104, 22, "Input pan", TR_NOOP ("Input pan"), TR_NOOP ("Stereo|Swapped|Mono|Mono left|Mono right"), panValues);
+        pan.page = 5;
+        v.push_back (pan);
+    }
     v.push_back (display (312, 230, 354, 62, "lattice"));
     return l;
 }
