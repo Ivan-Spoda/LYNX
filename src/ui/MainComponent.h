@@ -245,6 +245,12 @@ private:
     IconButton waitInputButton { "waitInput", Icon::waitInput };
     void refreshRecordOptionButtons();
     void showRecordMenu();
+    // right-click on the metronome: on/off, its volume, count-in (FL keeps the metronome's options there)
+    void showMetronomeMenu();
+    // the metronome volume knob in a callout under the metronome button
+    void showMetronomeVolume();
+    // View > Audio editor: the selected channel's sample when it is a Sampler with one, else an empty editor
+    void openAudioEditorForSelection();
     void toggleRecording();       // the record button: asks what to record first (unless told not to)
     void armSelectedInsertForAudio(); // "Audio, into the Playlist": arms the selected insert (asks for its input)
     void setControlHints(); // the hint bar text of every toolbar control (markup, see ui/HintBar.h)
@@ -301,7 +307,8 @@ private:
     RackTitleTools rackTitleTools;
     FilterBox rackFilterBox;
     IconButton rackGraphButton { "rackGraph", Icon::graph };
-    static constexpr int rackTitleToolsWidth = 96 + 4 + 26 + 4 + 24;
+    IconButton rackPianoRollButton { "rackPianoRoll", Icon::pianoRoll };
+    static constexpr int rackTitleToolsWidth = 96 + 4 + 26 + 4 + 24 + 4 + 24;
     // one icon per workspace panel (F5..F9): click toggles, right-click shows it maximized
     std::array<IconButton, workspace::panelCount> panelButtons { IconButton { "playlistPanel", Icon::playlist },
                                                                  IconButton { "rackPanel", Icon::channelRack },

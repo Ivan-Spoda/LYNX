@@ -106,6 +106,10 @@ public:
 
     // Preview of an audio file (browser). An invalid/empty file stops the preview.
     void previewFile (const juce::File& file);
+    // The Browser's preview volume (0..1.25, 1 = default; core/ValueMath.h previewGain). Applies to the preview
+    // playing now too. UI thread.
+    void setPreviewVolume (double volume) noexcept;
+    double getPreviewVolume() const noexcept { return previewVolume; }
     // Plays a sound made in memory through the same preview output (the start-up sound). UI thread.
     void previewSample (std::shared_ptr<const SampleData> sample, bool loop = false, float gain = 0.8f);
     // The frame of the previewed sample being played, -1 when the preview is silent.
@@ -376,6 +380,7 @@ private:
     std::uint64_t loggedOver = 0, loggedLate = 0;
     double lastLogMs = 0.0;
     class PreviewPlayer* preview = nullptr; // graph node (owned by the graph)
+    double previewVolume = 1.0;
     void publishSong();
     void adoptPrepared (PreparedFlp& prepared); // the plugins of a prepared import found / substituted (message thread)
 
