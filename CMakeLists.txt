@@ -126,6 +126,7 @@ add_library(lynx_core STATIC
     src/core/VoiceTools.cpp
     src/core/MidiControls.cpp
     src/core/FormulaController.cpp
+    src/core/VoiceShift.cpp
     src/core/FabFilterStates.cpp
     src/core/FlResampler.cpp
     src/core/FlKeys.cpp

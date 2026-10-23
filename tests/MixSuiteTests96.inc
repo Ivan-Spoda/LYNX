@@ -430,11 +430,12 @@ TEST (mixsuite_panels_place_every_parameter)
     using namespace lynx;
     // LYNX's own panels (not FL arrangements): every parameter has exactly one control, controls stay inside the body
     // and never overlap, and the dynamics effects show their live gain-reduction meter
-    CHECK (plugui::ownLayoutKinds().size() == 21); // the mixing suite, the reverbs of round 100, the delay / modulation suite of round 101, the dynamics of round 108, the voice tools of round 119
+    CHECK (plugui::ownLayoutKinds().size() == 23); // the mixing suite, the reverbs of round 100, the delay / modulation suite of round 101, the dynamics of round 108, the voice tools of round 119, Voice Shift and Auto-pan (round 135)
     for (const auto kind : plugui::ownLayoutKinds())
     {
-        if (kind == EffectKind::echoform || kind == EffectKind::spiralEcho || kind == EffectKind::orbit || kind == EffectKind::latticeMod)
-            continue; // round 101's panels swap knobs in place by style / mode: checked by their own test
+        if (kind == EffectKind::echoform || kind == EffectKind::spiralEcho || kind == EffectKind::orbit || kind == EffectKind::latticeMod
+            || kind == EffectKind::autoPan)
+            continue; // round 101's panels (and round 135's Auto-pan) swap knobs in place by style / mode / source: checked by their own test
         const auto& l = plugui::layoutFor (kind);
         CHECK (! plugui::hasFlLayout (kind));
         const auto count = (int) effectInfo (kind).params.size();

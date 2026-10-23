@@ -17,6 +17,7 @@
 #include "core/MixSuite.h"
 #include "core/VocalPitch.h"
 #include "core/VoiceTools.h"
+#include "core/VoiceShift.h"
 #include "core/EchoSuite.h"
 #include "core/DynamicsSuite.h"
 
@@ -534,10 +535,14 @@ translate = fresh-air
 product = Decapitator
 vendor = Soundtoys
 lynx = Ember Saturator
+# [DATA] VST2 unique ID from real projects
+vst2 = StDc
 names = Decapitator
 # its state is encoded: a light drive (+1.4 dB, tube; round 113, was +5.4 dB) with auto gain, so the slot colours
-# without jumping in level
+# without jumping in level. Round 135: the states of her projects were read in the official trial (black-box) and are
+# translated (voicing, drive, punish, tone, the reference's filter ranges, thump / steep, mix, output trim)
 preset = Drive=0.04
+translate = soundtoys-decapitator
 
 [fabfilter-saturn]
 product = FabFilter Saturn
@@ -558,9 +563,24 @@ lynx = Auto-pan
 vst2 = StPn
 names = PanMan
 # its state is encoded (round 127: high-entropy payload, not a readable value list; no Soundtoys trial installed), so
-# a moderate sweep: Auto-pan's depth is 2·Depth − 1, so Depth=0.75 swings the balance ±50 % once per beat. Round 113's
+# (until round 135) a moderate sweep: Auto-pan's depth is 2·Depth − 1, so Depth=0.75 swings the balance ±50 % once per beat. Round 113's
 # "Depth=0.5" meant 50 % but mapped to depth 0, an exact pass-through that silently dropped the effect (round 127)
-preset = Depth=0.75
+preset = Depth=0.918; Source=0.5; Rate=0.8505; Smoothing=1; Analog=1
+# round 135: the rhythmic-panner sources (free LFO, rhythm steps); without a known state her usual setting (a 3.56 Hz
+# back-and-forth LFO, 150° wide, soft, analog stage); her states read in the official trial (black-box) are translated
+translate = soundtoys-panman
+
+[soundtoys-littlealterboy]
+product = Little AlterBoy
+vendor = Soundtoys
+lynx = Voice Shift
+# [DATA] VST2 unique ID from real projects
+vst2 = StLa
+names = Little AlterBoy; LittleAlterBoy; AlterBoy
+# round 135: LYNX's voice shifter. Its state is encoded; her states were read in the official trial (black-box, the
+# host API only) and are translated; any other state gets her usual setting (Quantize, formant +1.2 st, drive 4.6)
+preset = Pitch=0.5; Formant=0.55; Mode=0.5; Drive=0.46; Mix=1
+translate = soundtoys-littlealterboy
 
 # ---------------------------------------------------------------- vocal pitch correction -> LYNX Tune (round 95)
 [antares-auto-tune]
@@ -660,7 +680,7 @@ std::string matchKey (const std::string& name)
 std::optional<EffectKind> effectKindNamed (const std::string& name)
 {
     const auto wanted = lowerAscii (trim (name));
-    for (int k = 0; k <= (int) EffectKind::formulaController; ++k) // the last EffectKind: extend when one is appended
+    for (int k = 0; k <= (int) lastEffectKind; ++k) // the last EffectKind: extend when one is appended
     {
         const auto kind = (EffectKind) k;
         if (kind == EffectKind::plugin || kind == EffectKind::parallel)
@@ -1562,8 +1582,74 @@ int translateWavesS1Imager (const std::vector<std::uint8_t>& state, EffectSlot& 
     return 4;
 }
 
+// --- Soundtoys (round 135): her states, read black-box in the official trials -------------------------------------
+// A Soundtoys state is text ("WIDGET = …; PRESET =<encoded>;"); the payload is NOT decoded. Each state found in her
+// projects was loaded into the official trial through the host API and every parameter read back
+// (docs/analise/REA_rodada135s.md §1); the table maps the payload's FNV-1a hash to those settings in LYNX's units.
+struct KnownState
+{
+    std::uint64_t hash;
+    std::vector<std::pair<int, float>> values;
+};
+namespace vs = voiceshift;
+namespace em = mixsuite::ember;
+namespace ap = autopan;
+#include "core/SoundtoysStates.inc"
+
+std::optional<std::uint64_t> soundtoysPayloadHash (const std::vector<std::uint8_t>& state)
+{
+    static constexpr char key[] = "PRESET =";
+    const auto* b = state.data();
+    const auto n = state.size();
+    for (std::size_t i = 0; i + sizeof (key) - 1 <= n; ++i)
+        if (std::memcmp (b + i, key, sizeof (key) - 1) == 0)
+        {
+            auto start = i + sizeof (key) - 1, end = start;
+            while (end < n && b[end] != ';') ++end;
+            if (end >= n) return std::nullopt;
+            while (start < end && std::isspace (b[start])) ++start;
+            while (end > start && std::isspace (b[end - 1])) --end;
+            std::uint64_t h = 0xcbf29ce484222325ull;
+            for (auto k = start; k < end; ++k) { h ^= b[k]; h *= 0x100000001b3ull; }
+            return h;
+        }
+    return std::nullopt;
+}
+
+template <std::size_t N>
+int translateKnown (const KnownState (&table)[N], EffectKind kind, const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    if (slot.kind != kind) return 0;
+    const auto h = soundtoysPayloadHash (state);
+    if (! h) return 0;
+    for (const auto& k : table)
+        if (k.hash == *h)
+        {
+            for (const auto& [p, v] : k.values)
+                if (p >= 0 && p < (int) slot.params.size()) slot.params[(std::size_t) p] = v;
+            return (int) k.values.size();
+        }
+    return 0;
+}
+
+int translateAlterBoy (const std::vector<std::uint8_t>& s, EffectSlot& slot) { return translateKnown (alterBoyStates, EffectKind::voiceShift, s, slot); }
+int translateDecapitator (const std::vector<std::uint8_t>& s, EffectSlot& slot) { return translateKnown (decapitatorStates, EffectKind::ember, s, slot); }
+int translatePanMan (const std::vector<std::uint8_t>& s, EffectSlot& slot) { return translateKnown (panManStates, EffectKind::autoPan, s, slot); }
+} // namespace
+
+int knownSoundtoysStates() noexcept { return (int) (std::size (alterBoyStates) + std::size (decapitatorStates) + std::size (panManStates)); }
+std::optional<std::uint64_t> soundtoysStateHash (const std::vector<std::uint8_t>& state) { return soundtoysPayloadHash (state); }
+
+namespace
+{
 RawTranslator rawTranslatorNamed (std::string_view name)
 {
+    if (name == "soundtoys-littlealterboy")
+        return translateAlterBoy;
+    if (name == "soundtoys-decapitator")
+        return translateDecapitator;
+    if (name == "soundtoys-panman")
+        return translatePanMan;
     if (name == "waves-s1-imager")
         return translateWavesS1Imager;
     if (name == "waves-h-delay")

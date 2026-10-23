@@ -1854,6 +1854,16 @@ Layout emberLayout()
             v.push_back (item);
         }
     }
+    // round 135: the Decapitator role's voicing row, switches and the wide filter ranges
+    l.height = 760;
+    v.push_back (section (4, 640, 512, 116, TR_NOOP ("Voicing")));
+    v.push_back (tabs (12, 664, 496, 20, "Voice", TR_NOOP ("Style menu|Tape pre|Console|Grit|Triode|Pentode"), { 0.0f, 0.2f, 0.4f, 0.6f, 0.8f, 1.0f }));
+    v.push_back (toggle (12, 696, 80, 20, "Punish", TR_NOOP ("Punish")));
+    v.push_back (toggle (96, 696, 76, 20, "Thump", TR_NOOP ("Thump")));
+    v.push_back (toggle (176, 696, 76, 20, "Steep", TR_NOOP ("Steep")));
+    v.push_back (toggle (12, 726, 110, 20, "Wide cuts", TR_NOOP ("Wide cuts")));
+    v.push_back (dial (340, 712, 22, "Low cut (wide)", TR_NOOP ("Low cut")));
+    v.push_back (dial (440, 712, 22, "High cut (wide)", TR_NOOP ("High cut")));
     return l;
 }
 
@@ -2132,6 +2142,69 @@ Layout geminiDoubler()
     return l;
 }
 
+Layout autoPanLayout()
+{
+    // round 135: the rhythmic panners' panel (the role: PanMan, screenshot of the official trial): OFFSET, WIDTH and
+    // SMOOTHING over the pan-position strip (L … C … R) on the left; the source, its rate or rhythm steps and the
+    // direction (one way or back and forth) in the middle; input / output and the analog stage on the right. FL's
+    // own LFO (the Love Philter pan LFO the effect was made for) stays the first source with its period, phase and
+    // tension.
+    Layout l;
+    l.width = 760;
+    l.height = 250;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 330, 242, TR_NOOP ("Pan")));
+    v.push_back (dial (60, 76, 44, "Pan", TR_NOOP ("Offset"), bipolar));
+    v.push_back (dial (166, 76, 44, "Depth", TR_NOOP ("Width"), bipolar));
+    v.push_back (when (dial (272, 76, 44, "Smoothing", TR_NOOP ("Smoothing")), "Source", 0.25f, 1.0f));
+    v.push_back (when (dial (272, 76, 44, "Tension", TR_NOOP ("Tension"), bipolar), "Source", 0.0f, 0.25f));
+    v.push_back (display (20, 160, 298, 26, "panpos"));
+    v.push_back (label (20, 190, 30, 16, TR_NOOP ("L"), alignLeft));
+    v.push_back (label (154, 190, 30, 16, TR_NOOP ("C")));
+    v.push_back (label (288, 190, 30, 16, TR_NOOP ("R")));
+    v.push_back (when (toggle (20, 216, 120, 20, "FL pan law", TR_NOOP ("FL pan law")), "Source", 0.0f, 0.25f));
+    v.push_back (toggle (190, 216, 128, 20, "Control only", TR_NOOP ("Control only")));
+    v.push_back (section (340, 4, 250, 242, TR_NOOP ("Rate")));
+    v.push_back (tabs (350, 28, 230, 22, "Source", TR_NOOP ("FL LFO|LFO|Rhythm steps")));
+    v.push_back (when (dial (465, 104, 52, "Rate", TR_NOOP ("Rate"), big), "Source", 0.25f, 0.75f));
+    v.push_back (when (dial (410, 104, 40, "Period", TR_NOOP ("Period")), "Source", 0.0f, 0.25f));
+    v.push_back (when (dial (520, 104, 40, "Phase", TR_NOOP ("Phase")), "Source", 0.0f, 0.25f));
+    v.push_back (when (stepper (366, 84, 90, 22, "Steps", TR_NOOP ("Steps"), 6), "Source", 0.75f, 1.0f));
+    v.push_back (when (tabs (466, 84, 110, 22, "Step note", TR_NOOP ("1/1|1/2|1/4|1/8|1/16|1/32")), "Source", 0.75f, 1.0f));
+    v.push_back (when (tabs (380, 190, 170, 26, "Direction", TR_NOOP ("<|<  >|>"), { 1.0f, 0.0f, 0.5f }), "Source", 0.25f, 1.0f));
+    v.push_back (section (596, 4, 160, 242, TR_NOOP ("Level")));
+    v.push_back (dial (636, 62, 32, "Input", TR_NOOP ("Input"), bipolar));
+    v.push_back (dial (716, 62, 32, "Output", TR_NOOP ("Output"), bipolar));
+    v.push_back (display (616, 116, 120, 92, "iometer"));
+    v.push_back (tabs (610, 216, 132, 22, "Analog", TR_NOOP ("Digital|Analog")));
+    return l;
+}
+
+Layout voiceShiftLayout()
+{
+    // round 135: the voice manipulators' one-screen panel (the role: a small Soundtoys voice shifter, screenshot of the
+    // official trial): PITCH and FORMANT side by side with LINK between them and a read-out under each, the three
+    // MODE buttons in the middle, DRIVE and MIX on the right
+    Layout l;
+    l.width = 640;
+    l.height = 230;
+    auto& v = l.items;
+    v.push_back (section (4, 4, 300, 222, TR_NOOP ("Pitch / formant")));
+    v.push_back (knob (80, 100, 78, "Pitch", TR_NOOP ("Pitch"), 0, (std::uint16_t) (big | bipolar | noCaption)));
+    v.push_back (label (40, 28, 80, 16, TR_NOOP ("Pitch")));
+    v.push_back (value (44, 176, 72, 24, "Pitch", boxed));
+    v.push_back (toggle (124, 84, 56, 22, "Link", TR_NOOP ("Link")));
+    v.push_back (knob (228, 100, 78, "Formant", TR_NOOP ("Formant"), 0, (std::uint16_t) (big | bipolar | noCaption)));
+    v.push_back (label (188, 28, 80, 16, TR_NOOP ("Formant")));
+    v.push_back (value (192, 176, 72, 24, "Formant", boxed));
+    v.push_back (section (310, 4, 130, 222, TR_NOOP ("Mode")));
+    v.push_back (radio (322, 50, 110, 120, "Mode", TR_NOOP ("Transpose|Quantize|Robot")));
+    v.push_back (section (446, 4, 190, 222, nullptr, boxed));
+    v.push_back (dial (494, 100, 60, "Drive", TR_NOOP ("Drive"), big));
+    v.push_back (dial (588, 100, 60, "Mix", TR_NOOP ("Mix"), big));
+    return l;
+}
+
 // --- LYNX's reverbs (REA round 100): own panels, the same conventions as the mixing suite. The algorithm / type
 // menu sits top-left with the Mix, the time controls (pre-delay, decay, size) in the middle, colour and
 // modulation to the right. -------------------------------------------------------------------------------------
@@ -2245,7 +2318,7 @@ Layout foilPlateLayout()
     // Mix / Predelay · big Decay · Size / Width · EQ (2 × 2) · Mod; the plate type below
     Layout l;
     l.width = 720;
-    l.height = 300;
+    l.height = 316;
     auto& v = l.items;
     v.push_back (section (8, 8, 92, 244, nullptr, boxed));
     v.push_back (dial (54, 50, 40, "Mix", TR_NOOP ("Mix")));
@@ -2263,6 +2336,9 @@ Layout foilPlateLayout()
     v.push_back (section (608, 8, 104, 244, TR_NOOP ("Mod")));
     v.push_back (dial (660, 64, 36, "Mod rate", TR_NOOP ("Rate")));
     v.push_back (dial (660, 168, 36, "Mod depth", TR_NOOP ("Depth")));
+    // round 135 (the Little Plate role): the decay's ∞ and a low cut
+    v.push_back (toggle (330, 266, 90, 22, "Infinite", TR_NOOP ("Infinite")));
+    v.push_back (dial (470, 274, 22, "Low cut", TR_NOOP ("Low cut")));
     v.push_back (label (8, 264, 52, 24, TR_NOOP ("Mode"), alignLeft));
     v.push_back (choiceMenu (60, 264, 180, 24, "Type", TR_NOOP ("Type"), TR_NOOP ("Silver|Pewter|Nickel|Bronze|Bismuth|Tin|Zinc|Platinum|Tungsten|Iron|Gold|Lead")));
     return l;
@@ -2684,7 +2760,8 @@ const std::vector<EffectKind>& ownLayoutKinds()
                                                  EffectKind::foilPlate, EffectKind::nebula, EffectKind::halo, EffectKind::horizon,
                                                  EffectKind::echoform, EffectKind::spiralEcho, EffectKind::orbit, EffectKind::latticeMod,
                                                  EffectKind::crestCompressor, EffectKind::prismMultiband, EffectKind::sentryGate,
-                                                 EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::compressor };
+                                                 EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::compressor,
+                                                 EffectKind::voiceShift, EffectKind::autoPan };
     return kinds;
 }
 
@@ -2763,6 +2840,8 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::sentryGate: l = sentryGate(); break;
         case EffectKind::quellDenoiser: l = quellDenoiser(); break;
         case EffectKind::geminiDoubler: l = geminiDoubler(); break;
+        case EffectKind::voiceShift: l = voiceShiftLayout(); break;
+        case EffectKind::autoPan: l = autoPanLayout(); break;
         default: l = generated (kind); break;
     }
     return cache.emplace (kind, std::move (l)).first->second;

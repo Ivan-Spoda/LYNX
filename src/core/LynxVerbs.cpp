@@ -984,9 +984,11 @@ protected:
         s.shape = 2;
         s.lineScale = t.scale * (0.5 + 0.5 * size);
         const auto rt = foilDecaySec (p[2]);
-        s.rt60 = rt;
+        // round 135 (the Little Plate role): Infinite holds the plate (the decay knob's ∞), damped as at 30 s
+        const auto infinite = p[12] >= 0.5f;
+        s.rt60 = infinite ? 1000.0 : rt;
         // plates lose highs faster the longer they ring: 1/RT(8 kHz) = 1/RT + damp (measured, §3)
-        s.highMult = 1.0 / (1.0 + t.damp * rt);
+        s.highMult = 1.0 / (1.0 + t.damp * (infinite ? 30.0 : rt));
         s.highXover = 5000.0;
         s.lowMult = t.lowRt;
         s.lowXover = 250.0;
@@ -1006,6 +1008,9 @@ protected:
         s.earlySec = 0.015;
         s.earlyDiffusion = 0.8;
         s.gain = t.gain;
+        // round 135: a low cut on the plate's output, 20 Hz … 1 kHz (0 = off; 12 dB/oct)
+        s.outLowCut = foil::lowCutHz (p[13]);
+        s.outLowOrder = 2;
     }
 };
 
@@ -1374,6 +1379,7 @@ double epoch::decaySec (float v) noexcept { return epochDecay (v); }
 const char* atrium::typeName (int i) noexcept { return atriumTypes[std::clamp (i, 0, atrium::typeCount - 1)].name; }
 double atrium::decaySec (float v) noexcept { return atriumDecaySec (v); }
 float atrium::decayValue (double s) noexcept { return (float) skewInverse (s, 0.1, 100.0, 5.717); }
+double foil::lowCutHz (float v) noexcept { return v <= 0.0f ? 0.0 : 20.0 * std::pow (50.0, (double) std::min (v, 1.0f)); }
 const char* foil::typeName (int i) noexcept { return foilTypes[std::clamp (i, 0, foil::typeCount - 1)].name; }
 double foil::decaySec (float v) noexcept { return foilDecaySec (v); }
 const char* nebula::modeName (int i) noexcept { return nebulaModes[std::clamp (i, 0, nebula::modeCount - 1)].name; }
@@ -1406,7 +1412,8 @@ const EffectInfo& info (EffectKind kind)
     static const EffectInfo foilInfo { "Foil Plate",
         params ({ { "Mix", 1.0f }, { "Predelay", 0.0f }, { "Decay", 0.5f }, { "Size", 0.5f }, { "Width", 0.5f },
                   { "Mod rate", 0.365345f }, { "Mod depth", 0.0f }, { "Low EQ freq", 0.343434f }, { "Low EQ gain", 0.5f },
-                  { "High EQ freq", 0.494949f }, { "High EQ gain", 0.5f }, { "Type", 0.0f } }) }; // EQ at 700 Hz / 10 kHz (round 129)
+                  { "High EQ freq", 0.494949f }, { "High EQ gain", 0.5f }, { "Type", 0.0f }, // EQ at 700 Hz / 10 kHz (round 129)
+                  { "Infinite", 0.0f }, { "Low cut", 0.0f } }) }; // round 135 (the Little Plate role)
     static const EffectInfo nebulaInfo { "Nebula",
         params ({ { "Mix", 0.5f }, { "Sync", 0.0f }, { "Note", 0.333333f }, { "Delay", 0.5f }, { "Warp", 0.0f },
                   { "Feedback", 0.5f }, { "Density", 0.0f }, { "Width", 1.0f }, { "Low cut", 0.0f }, { "High cut", 1.0f },
@@ -1483,6 +1490,8 @@ std::string paramText (EffectKind kind, int param, float v, double bpm)
                 case 9: return hz (200.0 + 19800.0 * v);
                 case 8: case 10: return fmt ("%+.1f dB", -12.0 + 24.0 * v);
                 case 11: return foil::typeName (choice (v, foil::typeCount));
+                case 12: return v >= 0.5f ? "on" : "off";
+                case 13: return v <= 0.0f ? "off" : hz (foil::lowCutHz (v));
                 default: return pct (v);
             }
         case EffectKind::nebula:

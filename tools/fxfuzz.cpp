@@ -335,7 +335,7 @@ int main (int argc, char** argv)
         }
 
     if (kinds)
-        for (int k = 0; k <= (int) lynx::EffectKind::geminiDoubler; ++k)
+        for (int k = 0; k <= (int) lynx::lastEffectKind; ++k)
         {
             const auto kind = (lynx::EffectKind) k;
             if (kind == lynx::EffectKind::plugin || (only >= 0 && k != only))

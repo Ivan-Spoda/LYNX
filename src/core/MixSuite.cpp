@@ -1302,6 +1302,20 @@ double toneTilt (float v) noexcept { return lin (v, -1.0, 1.0); }
 double lowCutHz (float v) noexcept { return v <= 0.0f ? 0.0 : logMap (v, 20.0, 500.0); }
 double highCutHz (float v) noexcept { return v >= 1.0f ? 0.0 : logMap (v, 2000.0, 20000.0); }
 int oversampling (float v) noexcept { return v < 0.25f ? 2 : (v < 0.75f ? 4 : 8); }
+int voiceIndex (float v) noexcept { return std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * voices), 0, voices); }
+const char* voiceName (int k) noexcept
+{
+    static const char* const names[voices + 1] { "Off", "Tape pre", "Console", "Grit", "Triode", "Pentode" };
+    return names[std::clamp (k, 0, voices)];
+}
+Style voiceStyle (int k) noexcept
+{
+    static const Style st[voices + 1] { Style::tube, Style::tube, Style::console, Style::transistor, Style::tube, Style::tape };
+    return st[std::clamp (k, 0, voices)];
+}
+double lowCutWideHz (float v) noexcept { return v <= 0.0f ? 0.0 : logMap (v, 20.0, 1000.0); }
+double highCutWideHz (float v) noexcept { return v >= 1.0f ? 0.0 : logMap (v, 1000.0, 20000.0); }
+double driveSteps (float v) noexcept { return driveDb (v) / 3.6; }
 int bandCount (float v) noexcept { return std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * 3.0f), 0, 3) + 1; }
 double crossoverHz (float v) noexcept { return logMap (v, 30.0, 18000.0); }
 float crossoverValue (double hz) noexcept { return (float) std::clamp (std::log (hz / 30.0) / std::log (600.0), 0.0, 1.0); }
@@ -1340,6 +1354,14 @@ float shape (Style s, float x) noexcept
             const auto a = std::abs (x);
             const auto a2 = a * a;
             return x / std::sqrt (std::sqrt (1.0f + a2 * a2)); // harder knee: x / (1 + x⁴)^¼
+        }
+        case Style::console:
+        {
+            // round 135: a softer, mostly symmetric knee with a little even content (x / (1 + |x|^2.5)^0.4 + a small bias)
+            constexpr float bias = 0.12f;
+            auto f = [] (float u) { const auto a = std::abs (u); return u / std::pow (1.0f + std::pow (a, 2.5f), 0.4f); };
+            const auto fb = f (bias);
+            return f (x + bias) - fb;
         }
         case Style::fuzz:
         default:
@@ -1445,6 +1467,7 @@ public:
         for (auto& d : bandDc)
             d.set (sr, 8.0);
         splitBands = 0; // redesign the crossovers at the new rate
+        lastVoice = -1;
         reset();
     }
 
@@ -1459,6 +1482,10 @@ public:
         tiltLo.reset();
         tiltHi.reset();
         highcut.reset();
+        highcut2.reset();
+        highcut1.reset();
+        voicePre.reset();
+        voicePost.reset();
         dc.reset();
         for (auto& b : bandOs)
             for (auto& o : b)
@@ -1499,14 +1526,13 @@ private:
         const auto factor = oversampling (p[quality]);
         for (auto& o : os)
             o.setFactor (factor);
-        const auto s = styleOf (p[style]);
-        const auto drv = (float) dbToGain (driveDb (p[drive]));
-        const bool tape = s == Style::tape;
-        const auto lc = lowCutHz (p[lowCut]), hc = highCutHz (p[highCut]);
-        if (lc > 0.0)
-            lowcut.filter (sr, 1, lc, 0.70710678);
-        if (hc > 0.0)
-            highcut.filter (sr, 0, std::min (hc, sr * 0.45), 0.70710678);
+        // round 135: a voicing replaces the Style menu's curve and adds its own EQ; PUNISH adds 20 dB before the drive
+        const auto vk = voiceIndex (p[voice]);
+        const auto s = vk > 0 ? voiceStyle (vk) : styleOf (p[style]);
+        const auto drv = (float) dbToGain (driveDb (p[drive]) + (on (p[punish]) ? punishDb : 0.0));
+        const bool tape = s == Style::tape && vk == 0;
+        const auto [lc, hc] = configureCuts (p);
+        configureVoice (vk);
         // tape: pre-emphasis before the drive and the inverse after it, so the highs saturate first (DAFX 4.3)
         emphasis.shelf (sr, 3000.0, 6.0, true, 0.7);
         deemphasis.shelf (sr, 3000.0, -6.0, true, 0.7);
@@ -1530,6 +1556,11 @@ private:
             {
                 a = lowcut.process (a, 0);
                 b = lowcut.process (b, 1);
+            }
+            if (vk > 0)
+            {
+                a = voicePre.process (a, 0);
+                b = voicePre.process (b, 1);
             }
             if (tape)
             {
@@ -1569,12 +1600,17 @@ private:
                 b = deemphasis.process (b, 1);
             }
             if (post) ex.post (a, b, l[i], r[i]);
+            if (vk > 0)
+            {
+                a = voicePost.process (a, 0);
+                b = voicePost.process (b, 1);
+            }
             a = tiltHi.process (tiltLo.process (a, 0), 0);
             b = tiltHi.process (tiltLo.process (b, 1), 1);
             if (hc > 0.0)
             {
-                a = highcut.process (a, 0);
-                b = highcut.process (b, 1);
+                a = applyHighCut (a, 0);
+                b = applyHighCut (b, 1);
             }
             float da = l[i], db = r[i];
             dry.process (da, db);
@@ -1616,17 +1652,14 @@ private:
             splitSlope = slope;
             splitBands = nb;
         }
-        const auto lc = lowCutHz (p[lowCut]), hc = highCutHz (p[highCut]);
-        if (lc > 0.0)
-            lowcut.filter (sr, 1, lc, 0.70710678);
-        if (hc > 0.0)
-            highcut.filter (sr, 0, std::min (hc, sr * 0.45), 0.70710678);
+        const auto [lc, hc] = configureCuts (p);
         const auto tilt = toneTilt (p[tone]);
         tiltLo.shelf (sr, 1000.0, -6.0 * tilt, false, 0.5);
         tiltHi.shelf (sr, 1000.0, 6.0 * tilt, true, 0.5);
         const auto mx = std::clamp (p[mix], 0.0f, 1.0f);
         const auto out = (float) dbToGain (lin (p[output], -18.0, 18.0));
         const bool autoOn = on (p[autoGain]);
+        const auto punishGain = (float) (on (p[punish]) ? dbToGain (punishDb) : 1.0); // round 135
 
         std::array<Style, maxBands> st {};
         std::array<float, maxBands> drv {}, bmix {}, lvl {}, comp {};
@@ -1635,7 +1668,7 @@ private:
         for (int b = 0; b < nb; ++b)
         {
             st[(std::size_t) b] = styleOf (p[(std::size_t) bandParam (b, 0)]);
-            drv[(std::size_t) b] = (float) dbToGain (driveDb (p[(std::size_t) bandParam (b, 1)]));
+            drv[(std::size_t) b] = (float) dbToGain (driveDb (p[(std::size_t) bandParam (b, 1)])) * punishGain;
             bmix[(std::size_t) b] = std::clamp (p[(std::size_t) bandParam (b, 2)], 0.0f, 1.0f);
             lvl[(std::size_t) b] = (float) dbToGain (bandLevelDb (p[(std::size_t) bandParam (b, 3)]));
             comp[(std::size_t) b] = autoOn ? autoMakeup (st[(std::size_t) b], drv[(std::size_t) b]) : 1.0f;
@@ -1739,8 +1772,8 @@ private:
             auto b = tiltHi.process (tiltLo.process (wr[(std::size_t) i], 1), 1);
             if (hc > 0.0)
             {
-                a = highcut.process (a, 0);
-                b = highcut.process (b, 1);
+                a = applyHighCut (a, 0);
+                b = applyHighCut (b, 1);
             }
             float da = l[i], db = r[i];
             dry.process (da, db);
@@ -1751,6 +1784,56 @@ private:
     }
 
     float& band (int b, int c, int i) noexcept { return bandBuf[(std::size_t) b][(std::size_t) c][(std::size_t) i]; }
+
+    // round 135: the low / high cut of either range. Old range: 12 dB/oct both; THUMP gives the low cut a resonance,
+    // STEEP makes the high cut 30 dB/oct (5th-order Butterworth), the wide range's gentle high cut is 6 dB/oct
+    // [EXEC trial: gentle ≈ 6 dB/oct, steep ≈ 30 dB/oct, low cut 12 dB/oct, Thump +3.5 dB at the cutoff]
+    std::pair<double, double> configureCuts (const EffectParams& p) noexcept
+    {
+        const bool wide = on (p[wideCuts]);
+        const auto lc = wide ? lowCutWideHz (p[lowCutWide]) : lowCutHz (p[lowCut]);
+        const auto hc = wide ? highCutWideHz (p[highCutWide]) : highCutHz (p[highCut]);
+        if (lc > 0.0)
+            lowcut.filter (sr, 1, lc, on (p[thump]) ? thumpQ : 0.70710678);
+        hcMode = on (p[steep]) ? 2 : (wide ? 1 : 0);
+        if (hc > 0.0)
+        {
+            const auto f = std::min (hc, sr * 0.45);
+            if (hcMode == 2)
+            {
+                highcut.filter (sr, 0, f, 1.0 / (2.0 * std::cos (3.14159265358979323846 / 5.0)));        // Q 0.618
+                highcut2.filter (sr, 0, f, 1.0 / (2.0 * std::cos (2.0 * 3.14159265358979323846 / 5.0))); // Q 1.618
+            }
+            else if (hcMode == 0)
+                highcut.filter (sr, 0, f, 0.70710678);
+            const auto k = std::tan (3.14159265358979323846 * f / sr); // first-order section (bilinear)
+            highcut1.set (k, k, 0.0, 1.0 + k, k - 1.0, 0.0);
+        }
+        return { lc, hc };
+    }
+
+    float applyHighCut (float x, int c) noexcept
+    {
+        if (hcMode == 1) return highcut1.process (x, c);
+        x = highcut.process (x, c);
+        if (hcMode == 2) x = highcut1.process (highcut2.process (x, c), c);
+        return x;
+    }
+
+    // a voicing's EQ before and after its curve (small, broad shelves: the five references differ mostly there)
+    void configureVoice (int k) noexcept
+    {
+        if (k <= 0 || k == lastVoice) return;
+        lastVoice = k;
+        switch (k)
+        {
+            case 1: voicePre.shelf (sr, 8000.0, 1.0, true, 0.7); voicePost.shelf (sr, 60.0, 0.0, false, 0.7); break;  // tape pre: open top
+            case 2: voicePre.shelf (sr, 7000.0, 2.5, true, 0.7); voicePost.shelf (sr, 50.0, 1.0, false, 0.7); break;  // console: airy, firm bass
+            case 3: voicePre.shelf (sr, 6000.0, -2.5, true, 0.7); voicePost.shelf (sr, 80.0, 0.0, false, 0.7); break; // grit: darker top
+            case 4: voicePre.shelf (sr, 60.0, -3.0, false, 0.7); voicePost.shelf (sr, 10000.0, 0.5, true, 0.7); break; // triode: thinner bass
+            default: voicePre.peaking (sr, 100.0, 0.8, 2.5); voicePost.shelf (sr, 1000.0, 0.0, true, 0.7); break;     // pentode: bass bump
+        }
+    }
 
     static constexpr int maxBlock = 2048;
     // level compensation: the RMS gain of the curve on a −12 dBFS sine at this drive, inverted
@@ -1776,6 +1859,8 @@ private:
     std::array<Oversampler, 2> os;
     Delay2<256> dry;
     Biquad lowcut, emphasis, deemphasis, tiltLo, tiltHi, highcut;
+    Biquad highcut2, highcut1, voicePre, voicePost; // round 135
+    int hcMode = 0, lastVoice = -1;
     OnePoleHp dc;
     std::array<float, maxBlock> wl {}, wr {};
     float makeup = 1.0f, lastDrive = -1.0f;
@@ -1865,7 +1950,10 @@ const EffectInfo& emberInfo()
                                      { "B3 on", 1.0f }, { "B3 state", 0.0f }, { "B3 bass", 0.5f }, { "B3 mid", 0.5f }, { "B3 treble", 0.5f }, { "B3 presence", 0.5f },
                                      { "B3 feedback", 0.0f }, { "B3 fb freq.", 0.6990f }, { "B3 dynamics", 0.5f },
                                      { "B4 on", 1.0f }, { "B4 state", 0.0f }, { "B4 bass", 0.5f }, { "B4 mid", 0.5f }, { "B4 treble", 0.5f }, { "B4 presence", 0.5f },
-                                     { "B4 feedback", 0.0f }, { "B4 fb freq.", 0.6990f }, { "B4 dynamics", 0.5f } } };
+                                     { "B4 feedback", 0.0f }, { "B4 fb freq.", 0.6990f }, { "B4 dynamics", 0.5f },
+                                     // round 135 (the Decapitator role)
+                                     { "Punish", 0.0f }, { "Thump", 0.0f }, { "Steep", 0.0f }, { "Voice", 0.0f }, { "Wide cuts", 0.0f },
+                                     { "Low cut (wide)", 0.0f }, { "High cut (wide)", 1.0f } } };
     return info;
 }
 
@@ -2047,7 +2135,12 @@ std::string paramText (EffectKind kind, int param, float v)
         using namespace ember;
         switch (param)
         {
-            case drive: return fmt ("%+.1f dB", driveDb (v));
+            case drive: return fmt ("%+.1f dB", driveDb (v)) + fmt (" (%.1f)", driveSteps (v)); // round 135: + the 0 … 10 scale
+            case punish: case thump: case wideCuts: return onOff (v);
+            case steep: return on (v) ? "30 dB/oct" : "gentle";
+            case voice: return voiceName (voiceIndex (v));
+            case lowCutWide: return v <= 0.0f ? "off" : hzText (lowCutWideHz (v));
+            case highCutWide: return v >= 1.0f ? "off" : hzText (highCutWideHz (v));
             case style:
             {
                 static const char* names[] = { "tube", "tape", "transistor", "fuzz" };

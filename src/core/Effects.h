@@ -109,6 +109,24 @@ public:
     virtual int latencySamples() const noexcept { return 0; }
 };
 
+// Auto-pan's rhythmic-panner sources (round 135, the PanMan role; appended after FL's Love Philter LFO parameters 0–6,
+// which stay the default source): the source, a free rate in Hz, the direction, smoothing, rhythm steps on a note
+// grid, input / output gains and an analog input stage.
+namespace autopan
+{
+enum Param : int { source = 7, rate, direction, smoothing, stepsParam, stepNote, inputGain, outputGain, analogStage, count };
+enum class Source { fl, lfo, steps };
+enum class Direction { both, right, left }; // back and forth, left → right, right → left
+Source sourceOf (float v) noexcept;
+Direction directionOf (float v) noexcept;
+double rateHz (float v) noexcept;   // 0.01 … 10 Hz (0.01 · 1000^v, the reference's law)
+float rateValue (double hz) noexcept;
+int stepCount (float v) noexcept;   // 2 … 8
+double stepBeats (float v) noexcept; // 1/1 … 1/32 note, in beats (4 … 0.125)
+double inputDb (float v) noexcept;  // ±24 dB (input and output)
+std::string paramText (int param, float v);
+} // namespace autopan
+
 std::unique_ptr<Effect> makeEffect (EffectKind kind);
 // The effect of a slot: like makeEffect (kind), but also builds the effects that need more than the kind
 // (`parallel` containers, the Vocodex from its raw state).

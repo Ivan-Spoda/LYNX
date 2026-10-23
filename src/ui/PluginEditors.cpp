@@ -100,7 +100,7 @@ public:
         for (const auto& item : l.items) // live meters and graphs (mixing suite, LYNX Tune's pitch, round 108's dynamics): 30 Hz
             if (item.type == Item::display && item.display != nullptr
                 && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0
-                    || std::strcmp (item.display, "pitchgraph") == 0
+                    || std::strcmp (item.display, "pitchgraph") == 0 || std::strcmp (item.display, "panpos") == 0
                     || std::strcmp (item.display, "pitchtrace") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)))
             {
                 startTimerHz (30);
@@ -1816,6 +1816,27 @@ public:
                 g.drawText (caps (tr (item.label)) + "  " + juce::String (amount * 30.0f, 1) + " dB", bar.reduced (3.0f * s, 0.0f),
                             juce::Justification::centredLeft, false);
             }
+            return;
+        }
+        else if (id == "panpos") // round 135: where the panner has the sound now (the rhythmic panners' L … C … R strip)
+        {
+            const auto at = juce::jlimit (0.0f, 1.0f, liveMeter (1));
+            constexpr int segments = 29;
+            const auto area = r.reduced (2.0f * s);
+            g.setColour (colour::bg0);
+            g.fillRoundedRectangle (area, 3.0f * s);
+            const auto w = area.getWidth() / (float) segments;
+            for (int k = 0; k < segments; ++k)
+            {
+                const auto centre = ((float) k + 0.5f) / (float) segments;
+                const auto d = std::abs (centre - at) * (float) segments;
+                const auto glow = juce::jlimit (0.0f, 1.0f, 1.0f - d / 2.5f);
+                const auto cell = juce::Rectangle<float> (area.getX() + w * (float) k, area.getY(), w, area.getHeight()).reduced (1.0f * s, 3.0f * s);
+                g.setColour (accent.withAlpha (0.10f + 0.90f * glow * glow));
+                g.fillRoundedRectangle (cell, 1.5f * s);
+            }
+            g.setColour (colour::textSecondary.withAlpha (0.5f));
+            g.drawVerticalLine ((int) area.getCentreX(), area.getY(), area.getBottom());
             return;
         }
         else if (id == "iometer") // round 129: input and output peak meters with peak holds and read-outs (−48 … 0 dBFS)

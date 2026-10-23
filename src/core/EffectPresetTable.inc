@@ -180,6 +180,21 @@ Warm tape              | Style = tape; Drive = 9 dB
 Tube vocal             | Style = tube; Drive = 6 dB; Mix = 60 %
 Gritty transistor      | Style = transistor; Drive = 18 dB
 Fuzz, parallel         | Style = fuzz; Drive = 24 dB; Mix = 30 %
+folder Voicings
+Vocal colour           | Voice = Tape pre; Drive = 7 dB; Tone = 15 %; Wide cuts = on; High cut (wide) = 8 kHz; Mix = 88 %; Auto gain = off
+Console warmth         | Voice = Console; Drive = 10 dB; Wide cuts = on
+Punished drums         | Voice = Grit; Drive = 12 dB; Punish = on; Mix = 50 %
+Thick triode bass      | Voice = Triode; Drive = 14 dB; Wide cuts = on; Low cut (wide) = 60 Hz; Thump = on
+Pentode edge           | Voice = Pentode; Drive = 16 dB; Wide cuts = on; High cut (wide) = 6 kHz; Steep = 30 dB/oct
+
+[Voice Shift]
+Hard tune              | Mode = Quantize; Formant = +1.2 st; Drive = 4.6
+Octave down            | Pitch = -12.0 st; Formant = -12.0 st; Drive = 5.5
+Deeper voice           | Formant = -3.0 st
+Brighter voice         | Formant = +2.5 st
+Chipmunk               | Pitch = +7.0 st; Link = On
+Robot                  | Mode = Robot; Drive = 3.0
+Harmony a fifth up     | Pitch = +7.0 st; Mix = 50 %
 
 [Aether]
 Vocal air              | Air = 4.5 dB; Harmonics = 25 %

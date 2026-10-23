@@ -1161,7 +1161,8 @@ static bool hasLiveMeters (EffectKind kind) noexcept
     // round 129: the voice tools (Quell's reduction meter was never published) and the basic compressor's meters
     return mixsuite::isSuiteKind (kind) || dyn::isDynKind (kind) || kind == EffectKind::lynxTune || kind == EffectKind::facetEq
            || kind == EffectKind::apexLimiter || voicetools::isVoiceKind (kind) || kind == EffectKind::compressor
-           || kind == EffectKind::echoform; // round 135w: Echoform's output meter
+           || kind == EffectKind::echoform // round 135w: Echoform's output meter
+           || kind == EffectKind::autoPan || kind == EffectKind::voiceShift; // round 135: the pan position, the shifter's notes
 }
 
 void RackRenderer::setSidechain (const RackState& state, const EffectSlot& slot, Effect& effect, int track) noexcept

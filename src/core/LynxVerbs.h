@@ -136,10 +136,11 @@ float decayValue (double sec) noexcept;
 }
 namespace foil
 {
-constexpr int paramCount = 12;
+constexpr int paramCount = 14; // round 135: + Infinite, Low cut
 constexpr int typeCount = 12;
 const char* typeName (int index) noexcept;
 double decaySec (float v) noexcept;
+double lowCutHz (float v) noexcept; // 0 = off, else 20 Hz … 1 kHz
 }
 namespace nebula
 {

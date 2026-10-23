@@ -121,6 +121,7 @@ APP_SOURCES+=(src/core/DynamicsSuite.cpp src/core/FabFilterStates.cpp src/ui/Dyn
 APP_SOURCES+=(src/core/VoiceTools.cpp)
 # MIDI CC automation of hosted plugins, Formula Controller (round 133, issue #3)
 APP_SOURCES+=(src/core/MidiControls.cpp src/core/FormulaController.cpp src/ui/ControllerEditors.cpp)
+APP_SOURCES+=(src/core/VoiceShift.cpp)
 # FL's DirectWave (REA round 72)
 APP_SOURCES+=(src/core/DirectWave.cpp)
 # Ogg Vorbis decoding as FL does (REA round 77)
