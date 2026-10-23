@@ -1,4 +1,5 @@
 #include "core/RackRenderer.h"
+#include "core/MidiControls.h"
 #include "core/LoadTrace.h"
 #include "core/DynamicsSuite.h"
 #include "core/MixSuite.h"
@@ -275,6 +276,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
         std::stable_sort (p.notes.begin(), p.notes.end(), [] (const Note& a, const Note& b) { return a.start < b.start; });
     state->schedule = makeScheduleIndex (state->song);
     state->sampleRate = sampleRate;
+    state->buildMidiRoutes();
     state->buildAutomationTables();
     {
         const loadtrace::Scope timing ("pdc");
@@ -448,6 +450,29 @@ void RackState::buildPdc (const RackState* previous)
     }
 }
 
+void RackState::buildMidiRoutes()
+{
+    const auto count = song.channels.size();
+    midiTargets.assign (count, {});
+    midiSources.assign (count, {});
+    midiOutChannel.assign (count, -1);
+    hasMidiRoutes = false;
+    for (std::size_t c = 0; c < count; ++c)
+    {
+        if (song.channels[c].instrument != InstrumentKind::midiOut)
+            continue;
+        const auto settings = midictl::parseMidiOut (song.channels[c].pluginState);
+        midiOutChannel[c] = settings.channel;
+        for (std::size_t t = 0; t < count; ++t)
+            if (t != c && song.channels[t].instrument == InstrumentKind::plugin && song.channels[t].plugin.midiInPort == settings.port)
+            {
+                midiTargets[c].push_back ((int) t);
+                midiSources[t].push_back ((int) c);
+                hasMidiRoutes = true;
+            }
+    }
+}
+
 void RackState::buildAutomationTables()
 {
     const auto& automations = song.automations;
@@ -507,7 +532,8 @@ void RackState::buildAutomationTables()
             case AutomationTargetKind::channelParam:
                 // VST plugins and the exact engines that take FL's parameter automation (FL Slayer: REA_rodada79)
                 if (channelOk && (song.channels[(std::size_t) t.index].instrument == InstrumentKind::plugin
-                                  || song.channels[(std::size_t) t.index].instrument == InstrumentKind::slayer))
+                                  || song.channels[(std::size_t) t.index].instrument == InstrumentKind::slayer
+                                  || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::midiOut && midictl::isMidiParam (t.param))))
                     pluginParams.push_back ({ a, t.index, 0, 0, t.param });
                 else
                     used = false;
@@ -939,6 +965,11 @@ void RackRenderer::applyPluginParams (const RackState& state, int firstSlot) noe
         {
             if (b.channel < (int) state.instruments.size())
                 state.instruments[(std::size_t) b.channel]->setParameter (b.param, v);
+            // a MIDI Out's controls reach the plugins on its port
+            if ((std::size_t) b.channel < state.midiTargets.size())
+                for (const auto t : state.midiTargets[(std::size_t) b.channel])
+                    if (t < (int) state.instruments.size())
+                        state.instruments[(std::size_t) t]->setParameter (b.param, v);
         }
         else if (b.track < (int) state.effects.size() && b.slot < (int) state.effects[(std::size_t) b.track].size())
             state.effects[(std::size_t) b.track][(std::size_t) b.slot]->setParameter (b.param, v);
@@ -977,8 +1008,13 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
     // idle channel, no notes in this chunk and no PDC: nothing to do (neither clear nor sum into the mixer)
     const auto hasDelay = (std::size_t) i < state.channelDelays.size() && state.channelDelays[(std::size_t) i] != nullptr;
     const auto hasArp = (std::size_t) i < state.arpeggiators.size() && state.arpeggiators[(std::size_t) i] != nullptr;
+    const auto* sources = state.hasMidiRoutes && (std::size_t) i < state.midiSources.size() && ! state.midiSources[(std::size_t) i].empty()
+                              ? &state.midiSources[(std::size_t) i] : nullptr;
+    const auto routed = [sources] (int channel) {
+        return sources != nullptr && std::find (sources->begin(), sources->end(), channel) != sources->end();
+    };
     if (! hasDelay && ! hasArp && instrument.idle()
-        && std::none_of (events.begin(), events.end(), [i] (const NoteEvent& e) { return e.channel == i; }))
+        && std::none_of (events.begin(), events.end(), [&] (const NoteEvent& e) { return e.channel == i || routed (e.channel); }))
     {
         channelSilent[(std::size_t) i] = 1;
         return;
@@ -1013,7 +1049,25 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         const auto& e = list[index];
 
         if (e.channel != i)
+        {
+            // a note of a MIDI Out channel on this plugin's MIDI input port, with that MIDI Out's MIDI channel
+            if (sources == nullptr || ! routed (e.channel) || (e.type != NoteEvent::Type::on && e.type != NoteEvent::Type::off))
+                continue;
+            if (e.sampleOffset > position)
+            {
+                instrument.render (l + position, r + position, e.sampleOffset - position, gl, gr);
+                position = e.sampleOffset;
+            }
+            const auto midiChannel = state.midiOutChannel[(std::size_t) e.channel];
+            if (e.type == NoteEvent::Type::on)
+            {
+                if (! c.muted && ! state.song.channels[(std::size_t) e.channel].muted)
+                    instrument.noteOnMidi (e.key, e.velocity, midiChannel);
+            }
+            else
+                instrument.noteOffMidi (e.key, midiChannel);
             continue;
+        }
 
         if (e.sampleOffset > position)
         {

@@ -2,6 +2,8 @@
 
 #include "ui/AutomationUi.h"
 #include "core/NoteTools.h"
+#include "core/FlSynths.h"
+#include "core/MidiControls.h"
 #include "ui/ToolWindow.h"
 #include "core/Slicer.h"
 #include "ui/ChannelSettings.h"
@@ -65,6 +67,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::slayer: return "FL Slayer";
         case InstrumentKind::fruitydance: return "Fruity Dance";
         case InstrumentKind::directwave: return "DirectWave";
+        case InstrumentKind::midiOut: return "MIDI Out";
     }
     return "?";
 }
@@ -81,7 +84,8 @@ juce::String instrumentLabel (InstrumentKind k)
         case InstrumentKind::synth: return tr ("Synth");
         case InstrumentKind::sampler: return tr ("Sampler");
         case InstrumentKind::audioClip: return tr ("Audio clip");
-        case InstrumentKind::controller: return tr ("Controller");
+        case InstrumentKind::controller: return tr ("Envelope Controller");
+        case InstrumentKind::midiOut: return tr ("MIDI Out");
         default: return instrumentName (k);
     }
 }
@@ -2021,6 +2025,30 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
             add (c);
         });
 
+    menu.addSeparator();
+    // built-in controllers (round 133, issue #3): no sound of their own
+    menu.addItem (tr ("Envelope Controller"), [this, add] {
+        ChannelDef c;
+        c.name = tr ("Envelope Controller").toStdString();
+        c.instrument = InstrumentKind::controller;
+        c.controllerState = writeEnvelopeController (defaultEnvelopeController());
+        const auto added = add (c);
+        openChannelSettings (engine, added);
+    });
+    menu.addItem (tr ("MIDI Out"), [this, add] {
+        ChannelDef c;
+        c.name = "MIDI Out";
+        c.instrument = InstrumentKind::midiOut;
+        midictl::MidiOutSettings settings;
+        // FL gives each new MIDI Out the next MIDI channel, skipping the drum channel 10
+        int count = 0;
+        for (const auto& ch : engine.getSong().channels)
+            count += ch.instrument == InstrumentKind::midiOut;
+        settings.channel = count % 15 >= 9 ? count % 15 + 1 : count % 15;
+        midictl::writeMidiOut (c.pluginState, settings);
+        const auto added = add (c);
+        openChannelSettings (engine, added);
+    });
     menu.addSeparator();
 
     if (insertAt < 0)

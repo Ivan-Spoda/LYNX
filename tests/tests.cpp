@@ -34,6 +34,7 @@
 #include "core/FruityMultiband.h"
 #include "core/Denormals.h"
 #include "core/FlpImport.h"
+#include "core/MidiControls.h"
 #include "core/FlEffects.h"
 #include "core/ProjectContents.h"
 #include "core/FlPatcher.h"
@@ -1089,13 +1090,15 @@ TEST (flp_midi_out_notes_reach_wrapper_on_same_port)
     p.patterns.push_back (pattern);
 
     const auto song = lynx::importFlp (p);
-    CHECK (song.channels.size() == 2 && song.channels[0].muted);
-    CHECK (song.channels[1].plugin.foreign.midiInPort == 3);
+    // round 133: the MIDI Out channel stays a live route (its notes are sent at play time, with its MIDI channel)
+    CHECK (song.channels.size() == 2 && song.channels[0].instrument == lynx::InstrumentKind::midiOut && ! song.channels[0].muted);
+    CHECK (song.channels[1].plugin.foreign.midiInPort == 3 && song.channels[1].plugin.midiInPort == 3);
+    CHECK (lynx::midictl::parseMidiOut (song.channels[0].pluginState).port == 3);
     int toWrapper = 0;
     for (const auto& pat : song.patterns)
         for (const auto& n : pat.notes)
             toWrapper += n.channel == 1 && n.key == 64;
-    CHECK (toWrapper == 1);
+    CHECK (toWrapper == 0);
 }
 
 TEST (flp_effect_automation_follows_slots_and_params)
@@ -15769,3 +15772,4 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Match124xTests.inc"
 #include "Vmatch127Tests.inc"
 #include "ParityTests129.inc"
+#include "Feat133Tests.inc"
