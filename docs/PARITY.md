@@ -1259,7 +1259,7 @@ Sources: REA_rodada100.md §6/§7b; product page and mode descriptions (valhalla
 | MIX / WIDTH | 0–100 % 50 % / width 100 % | same | ✅ | |
 | Mix lock | boxed MIX label (lock) | click the MIX caption: boxed while locked | ✅ | round 135 |
 | ECHO Delay (big) | 0–2000 ms piecewise, 30.0 ms | same | ✅ | |
-| Echo sync | "Msec ⇕" combo under Delay (ms / note / dotted / triplet) | tabs + note menu (1/64…1/2, 6 values) | ⚠️ | Note list not confirmed against the original. |
+| Echo sync | "Msec ⇕" combo under Delay (ms / note / dotted / triplet) | tabs + note menu (1/64…1/2, 6 values) | ✅ | round 137 [EXEC] the demo's EchoNote texts: 1/64, 1/32, 1/16, 1/8, 1/4, 1/2 in sixths of the range — the same list and steps as LYNX's menu / translator |
 | Feedback / Level | 0–100 %, 0 % / 0 % | same | ✅ | |
 | Drive | 0–24 dB, 3.0 dB | same | ✅ | |
 | Spread | 0–100 %, 0 % | same | ✅ | |
@@ -1424,7 +1424,7 @@ Sources: [VintageVerb](https://valhalladsp.com/shop/reverb/valhalla-vintage-verb
 |---|---|---|---|---|
 | Faders Mix / Depth / Width / Delay / Feedback, values under them | 50 % / 50 % / 100 % (0–200) / 10 ms (0–1000) / 0 % | Same faders, values and defaults | ✅ | |
 | **MODE** menu (under the faders) | Named algorithms: 2TapChorus (default), 4TapEnsemble, SuperSix, 6TapRandom, DualEnsemble, 8Tap, 16Phase, 16Tap, 32Tap; each has its own LFO design (antiphase triangle, 3-phase, randomised triangle, 16-phase) | round 135: a "Mode" menu with the nine algorithms under LYNX's own names (2-tap chorus … 32-tap) on the reference's type index, default 2-tap chorus (round 129), ◀ ▶ | ⚠️ | The three 6-tap modes and the two 16-tap modes still play alike (one random-detune plus one vibrato LFO for every mode — vox136 / engine) |
-| Sync | Free plus 17 note values, next to the mode | 18-entry list (Free, 1/64 … 1/1), next to Taps | ⚠️ | List order is a guess; the substitute doesn't translate `DelaySync` |
+| Sync | Free plus 17 note values, next to the mode | 18-entry list (Free, 1/64 … 1/1), next to Taps | ⚠️ | List order is a guess; the substitute doesn't translate `DelaySync`. Round 137 [EXEC]: the demo's value has more states than its 18 index texts (impulses at 120 BPM, sampled at k / 24: free, 1/16, 1/8, 1/4, 1/2, 1/1, then dotted and triplet groups, long values capped at 2750 ms) — the full map is still to read |
 | Page tabs | MOD / TAPS / DIFF / EQ / DRIVE / WARP, top right | Same 6 tabs, same order | ✅ | |
 | MOD page | SlowRate 0.50 Hz, SlowDepth 50 %, VibRate 6.00 Hz, VibDepth 0 %, OverMod 1.0× | Same 5 knobs and defaults | ✅ | |
 | TAPS page | Spread 50 %, Slope 0, Skew 0, Random 0, TapGain 0 dB | Same | ✅ | Smoothing of tap-time changes (Warp Smoothing) should be checked |
