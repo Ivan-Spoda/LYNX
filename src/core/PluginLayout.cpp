@@ -2590,6 +2590,7 @@ Layout echoformLayout()
     v.push_back (when (stepper (346, 290, 96, 20, "BPM", TR_NOOP ("BPM"), 270), "Tempo source", 0.5f, 1.0f));
     v.push_back (toggle (452, 290, 110, 20, "Filter link", TR_NOOP ("Link EQ")));
     v.push_back (toggle (570, 290, 100, 20, "Freeze", TR_NOOP ("Freeze")));
+    v.push_back (toggle (676, 290, 90, 20, "LoFi", TR_NOOP ("LoFi"))); // round 137: H-Delay's LoFi switch
     // ---- round 137: EchoBoy's Rhythm echo mode (a pattern of evenly spaced taps the feedback replays every Length)
     v.push_back (toggle (8, 320, 74, 20, "Rhythm", TR_NOOP ("Rhythm")));
     v.push_back (when (menuOf (88, 320, 76, 20, "Rhythm sync", TR_NOOP ("Spacing"), TR_NOOP ("ms|Note|Dotted|Triplet"), syncValues), "Rhythm", 0.5f, 1.0f));

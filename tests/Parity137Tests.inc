@@ -268,3 +268,24 @@ TEST (crest_trigger_host_sync_and_midi_round137)
     run (p, true, held.data(), 3, y);
     CHECK (levelDb (y, 24000, 30000) < -8.0);
 }
+
+TEST (echoform_lofi_switch_round137)
+{
+    using namespace lynx;
+    namespace e = echosuite::echoform;
+    auto p = p135w::cleanEcho (300.0, 0.0f);
+    CHECK (p[e::lofi] == 0.0f);
+    std::vector<float> l, r;
+    p135w::echoImpulse (p, l, r, 1);
+    auto hfEnergy = [] (const std::vector<float>& x) {
+        double hi = 0.0;
+        for (int i = 14001; i < 16000; ++i)
+            hi += (double) (x[(std::size_t) i] - x[(std::size_t) i - 1]) * (x[(std::size_t) i] - x[(std::size_t) i - 1]);
+        return hi;
+    };
+    const auto open = hfEnergy (l);
+    p[e::lofi] = 1.0f;
+    p135w::echoImpulse (p, l, r, 1);
+    CHECK (hfEnergy (l) < open * 0.5);
+    CHECK (formatEffectParam (EffectKind::echoform, e::lofi, 1.0f, 120.0) == "on");
+}

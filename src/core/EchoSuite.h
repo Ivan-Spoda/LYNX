@@ -86,6 +86,8 @@ enum Param
     rhythmTap1,    // round 137: the level of each heard rhythm tap (1 … 15), 0 … 100 % (EchoBoy's rhythm editor bars);
                    // 100 % by default, applied after the pattern's normalisation
     rhythmTapLast = rhythmTap1 + 14,
+    lofi,          // round 137: H-Delay's LoFi switch, independent of the mode: a steep low-pass (8th order, 5.8 kHz)
+                   // inside the loop (measured on the trial, docs/specs/h-delay.md §4.2); off by default
     paramCount
 };
 enum class Style { single, ratio, quad, dual, pingPong }; // the two-time styles last (the panel shows the right time for both)

@@ -3629,3 +3629,4 @@ countries: br
 "Stereo|Swapped|Mono|Mono left|Mono right" = "Estéreo|Invertido|Mono|Mono esquerda|Mono direita"
 "Trigger" = "Gatilho"
 "Off|Host sync|MIDI" = "Desl.|Sinc. do host|MIDI"
+"LoFi" = "LoFi"

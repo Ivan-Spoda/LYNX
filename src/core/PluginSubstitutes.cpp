@@ -1475,6 +1475,8 @@ int translateWavesHDelay (const std::vector<std::uint8_t>& state, EffectSlot& sl
     p[e::ducking] = 0.0f;
     p[e::width] = 1.0f;
     p[e::spread] = 0.5f;
+    // round 137: LoFi (RealWorld 21, on = 1) → Echoform's own LoFi switch (the same in-loop low-pass, spec §4.2)
+    p[e::lofi] = wavesValue (rw, 21).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
     const auto hp = wavesValue (rw, 17).value_or (19.0), lp = wavesValue (rw, 15).value_or (20100.0);
     p[e::lowCut] = hp > 19.5 ? linNorm (hp, 10.0, 2000.0) : 0.0f;
     // Echoform's high cut acts like a one-pole at about half its label below 80 % (REA_rodada101 §3.3)

@@ -834,9 +834,9 @@ Trial on this PC: yes (Doubler2 / Doubler4).
 
 | Original feature | Original (range / default / where) | LYNX now | Status | Note |
 |---|---|---|---|---|
-| Pan / gain graph (half circle, voices + D marker) | top-left; angle = pan, radius = gain; **"Gain, Pan, Delay and Detune can be controlled using the graphs"** (drag) | `geminipan`, same place, D + 1 + 2 markers | ⚠️ | display only — not draggable |
-| Delay / detune graph | top-centre; x 0…100 ms (labels 0 20 40 60 80 100), y +100…−100 c with "100 / 0 / 100" labels; draggable | `geminimap`, x labels 0…100, no y labels, not draggable | ⚠️ | add the cents labels; drag |
-| EQ graph | top-right; L and H markers on the curve, x labels 62 / 250 / 1K / 4K, 0 dB tick; drag markers, **double-click a marker = filter on/off** | `geminieq` curve only, no markers, no axis labels | ⚠️ | |
+| Pan / gain graph (half circle, voices + D marker) | top-left; angle = pan, radius = gain; **"Gain, Pan, Delay and Detune can be controlled using the graphs"** (drag) | `geminipan`, same place, D + 1 + 2 (+ 3 + 4) markers; round 137: drag a marker = its pan (angle) and gain (radius) | ✅ | round 137 |
+| Delay / detune graph | top-centre; x 0…100 ms (labels 0 20 40 60 80 100), y +100…−100 c with "100 / 0 / 100" labels; draggable | `geminimap`, x labels 0…100; round 137: +100 / 0 / −100 cent labels, drag a voice = its delay and detune | ✅ | round 137 |
+| EQ graph | top-right; L and H markers on the curve, x labels 62 / 250 / 1K / 4K, 0 dB tick; drag markers, **double-click a marker = filter on/off** | `geminieq`; round 137: L and H markers on the curve (drag = frequency / gain, double-click = on / off), labels 62 / 250 / 1K / 4K and the 0 dB tick | ✅ | round 137 |
 | Direct on/off | row 2, left; On | toggle "Direct", On | ✅ | |
 | Direct gain | 0…−48 dB (manual default −12; trial default 0) | 0…−48 dB, default 0 dB | ✅ | |
 | Direct pan / stereo rotation | ±45°, centre | ±45°, rotation law measured | ✅ | |
@@ -904,7 +904,7 @@ delay display → an echo-train picture (not the note/BPM read-out).
 | Sync HOST | button under the display; default | menu entry "Note" (follows project tempo) | ⚠️ | named differently |
 | Sync BPM (own tempo) + BPM value | button + BPM number in the display | — | ✅ | translator folds BPM into ms; round 135w: "Project / Own BPM" + BPM (30–300) on the second row; H-Delay's own-BPM states keep their note and tempo (was folded into ms) |
 | Sync MS | button | menu entry "ms" | ✅ | |
-| Central display | note value (e.g. "1/8 D") and tempo "120 BPM" (or ms); click-drag / type to edit | value text under the knob + echo-train picture (echoes on a time axis) | ⚠️ | no note/tempo read-out block; echotrain ➕ |
+| Central display | note value (e.g. "1/8 D") and tempo "120 BPM" (or ms); click-drag / type to edit | value text under the knob + echo-train picture (echoes on a time axis); round 137: the picture's top right reads the note and its tempo ("1/8 D  120.0 BPM") or the ms | ✅ | echotrain ➕; edited with the knob / sync menu, not by dragging the read-out |
 | Tap pad | big pad far left; last two taps; Host: snaps to a note, BPM: sets BPM, MS: sets ms | — | ✅ | round 129: TAP pad (sets the left time) |
 | Ping Pong | button above the display; Off; start-side value | STYLE = "Ping-pong" (5th of 5) + "Pairs" toggle (alternate / H-Delay pairs) | ⚠️ | no button; start side ❌ |
 | Ping-pong start side (L→R / R→L) | value box | — | ✅ | translator ignores RealWorld 45; round 135w: "Start left / Start right" (ping-pong); translated from RealWorld 45 (0 left, 1 right [EXEC] round 119 probe) |
@@ -915,7 +915,7 @@ delay display → an echo-train picture (not the note/BPM read-out).
 | Output | knob −18…+18 dB, default 0 | "Level" −18…+18 dB, default 0 (round 119) | ✅ | |
 | Output meter | vertical, 0 … −48 dB, beside Dry/Wet | — | ✅ | round 135w: OUT meter (0 … −48 dB) at the right edge |
 | Peak / clip LED | red lamp above the meter | — | ✅ | round 135w: clip lamp above the meter + highest-peak read-out; click to reset |
-| LoFi | switch under Tap; Off; steep LP (≈ 5.8 kHz, 8th order+) inside the loop | MODE "Lo-Fi" (a menu entry that also sets the whole character) | ⚠️ | not an independent switch; law differs |
+| LoFi | switch under Tap; Off; steep LP (≈ 5.8 kHz, 8th order+) inside the loop | MODE "Lo-Fi" (a menu entry that also sets the whole character); round 137: LOFI switch (second row), independent of the mode | ✅ | round 137: the in-loop 8th-order low-pass at 5.8 kHz of docs/specs/h-delay.md §4.2 (−22 dB at 8 kHz); the steeper stop band above 8 kHz is not modelled; translated (RealWorld 21) |
 | Analog | knob Off / 1 / 2 / 3 / 4, default 2 | MODE menu (Analog, Bucket brigade, Tape …) + Drive / Age | ⚠️ | no 0–4 positions, no hiss / loop compression of Mod2 |
 | Mod Depth | 0–100, default 0; bottom-left MODULATION group | "Depth" in MOD section, only in non-tape modes; default 50 % | ⚠️ | default Tape mode shows Wow/Flutter instead |
 | Mod Rate | 0.1 … 6000 Hz (BPM sync in concept), default 0.1 | 0.01 … 10 Hz, default ≈ 0.5 Hz | ⚠️ | range / default |

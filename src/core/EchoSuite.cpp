@@ -573,6 +573,7 @@ public:
             c.noise.s = seed += 0x9e3779b9u;
         }
         steep.reset();
+        lofiLp.reset();
         lfoPhase = 0.0;
         envelope = 0.0f;
         duckGr = 0.0;
@@ -672,6 +673,9 @@ private:
         const auto quadEl = std::pow (2.0, -0.4 * bipolar (p[spacing]));
         const auto quadEr = std::pow (2.0, 0.4 * bipolar (p[spacing]));
         const auto envAttack = (float) (1.0 - std::exp (-1.0 / (0.01 * sr)));
+        const bool lofiOn = p[lofi] >= 0.5f;
+        if (lofiOn)
+            lofiLp.set (5800.0, sr);
         const auto duckThresholdDb = -51.0 * std::pow ((double) std::max (1e-6f, duck), 1.28);
         const auto duckReleaseStep = 85.0 / sr;
         static constexpr double diffMs[4] = { 4.3, 6.7, 9.1, 12.7 };
@@ -865,6 +869,8 @@ private:
                         u = s.diff[k].process (u, diffMs[k] * diffScale * 0.001 * sr * (c == 1 ? 1.07 : 1.0), 0.65f * diffAmount);
                 u = character (s, c, u, md, ageV, driveGain);
                 u = s.highCut.lp (s.lowCut.hp (u));
+                if (lofiOn)
+                    u = lofiLp.process (u, c);
                 s.line.push (softLimit (u));
             }
 
@@ -1136,6 +1142,7 @@ private:
     double sr = 48000.0;
     std::array<Channel, 2> ch;
     Butter8 steep;
+    Butter8 lofiLp; // round 137: the LoFi switch
     Shaper shaper;
     ModSource modulation = ModSource::tape;
     double modAmountMs = 6.1;
@@ -1675,7 +1682,8 @@ const EffectInfo& echoformInfo()
                                      { "Era", 0.0f },
                                      { "Tap 1", 1.0f }, { "Tap 2", 1.0f }, { "Tap 3", 1.0f }, { "Tap 4", 1.0f }, { "Tap 5", 1.0f },
                                      { "Tap 6", 1.0f }, { "Tap 7", 1.0f }, { "Tap 8", 1.0f }, { "Tap 9", 1.0f }, { "Tap 10", 1.0f },
-                                     { "Tap 11", 1.0f }, { "Tap 12", 1.0f }, { "Tap 13", 1.0f }, { "Tap 14", 1.0f }, { "Tap 15", 1.0f } } };
+                                     { "Tap 11", 1.0f }, { "Tap 12", 1.0f }, { "Tap 13", 1.0f }, { "Tap 14", 1.0f }, { "Tap 15", 1.0f },
+                                     { "LoFi", 0.0f } } };
     return info;
 }
 
@@ -1783,6 +1791,7 @@ std::string paramText (EffectKind kind, int param, float v)
             case rhythmTap1: case rhythmTap1 + 1: case rhythmTap1 + 2: case rhythmTap1 + 3: case rhythmTap1 + 4: case rhythmTap1 + 5:
             case rhythmTap1 + 6: case rhythmTap1 + 7: case rhythmTap1 + 8: case rhythmTap1 + 9: case rhythmTap1 + 10: case rhythmTap1 + 11:
             case rhythmTap1 + 12: case rhythmTap1 + 13: case rhythmTapLast: return pct (v * 100.0);
+            case lofi: return v >= 0.5f ? "on" : "off";
             case era: return eraOf (v) == 0 ? "past" : eraOf (v) == 1 ? "present" : "future";
             case rhythmLength: return rhythmBeatsOf (v) == 1 ? std::string ("1 beat") : fmt ("%d beats", rhythmBeatsOf (v));
             default: return fmt ("%.2f", v);
