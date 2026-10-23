@@ -148,7 +148,8 @@ public:
     bool hasHelpLine() const
     {
         return layout != nullptr && layout != &plugui::soundgoodizerLayout()
-               && std::find (plugui::ownLayoutKinds().begin(), plugui::ownLayoutKinds().end(), kind) != plugui::ownLayoutKinds().end();
+               && (std::find (plugui::ownLayoutKinds().begin(), plugui::ownLayoutKinds().end(), kind) != plugui::ownLayoutKinds().end()
+                   || kind == EffectKind::lynxTune); // round 135: LYNX Tune's panel too
     }
     float footerHeight() const { return hasHelpLine() ? 20.0f : 0.0f; }
 
@@ -169,9 +170,32 @@ public:
                        + (what.isNotEmpty() ? juce::String::fromUTF8 (" \xe2\x80\x94 ") + what : juce::String());
             }
         }
+        // round 135: nothing under the mouse -> what the current mode is (the reference's summary of the algorithm)
+        if (text.isEmpty())
+            if (const auto* fx = current())
+                text = pluginheader::modeLine (kind, fx->params, engine.getSong().bpm);
         g.setColour (colour::textSecondary);
         g.setFont (font (type::small));
-        g.drawText (text, area.reduced (10.0f, 0.0f), juce::Justification::centredLeft, true);
+        g.drawFittedText (text, area.reduced (10.0f, 0.0f).toNearestInt(), juce::Justification::centredLeft, 1, 0.85f);
+    }
+
+    // round 135: the MIX caption of a LYNX engine toggles the mix lock (the reference reverbs: click the MIX label)
+    bool isMixItem (const LayoutItem& item) const
+    {
+        const auto p = paramOf (item);
+        return (item.type == Item::knob || (item.type == Item::vslider && ! hasStyle (item, plugui::captionLeft))) && p >= 0 && hasHelpLine()
+               && item.label != nullptr && ! hasStyle (item, plugui::noCaption) && juce::String (effectInfo (kind).params[(std::size_t) p].name) == "Mix";
+    }
+    juce::Rectangle<float> captionArea (const LayoutItem& item) const
+    {
+        const auto r = rectOf (item);
+        const auto s = scale();
+        if (item.type == Item::vslider)
+            return r.withTop (r.getBottom() - 13.0f * s);
+        if (hasStyle (item, plugui::captionAbove))
+            return r.withHeight (14.0f * s);
+        const auto circle = knobCircle (item);
+        return r.withTop (circle.getBottom()).withHeight (13.0f * s);
     }
 
     juce::Rectangle<float> rectOf (const LayoutItem& item) const
@@ -456,7 +480,16 @@ public:
         using namespace theme;
         if (item.label == nullptr || *item.label == 0)
             return;
-        g.setColour (hasStyle (item, plugui::dim) ? colour::textDisabled : skin::captionColour());
+        const auto locked = isMixItem (item) && pluginheader::isMixLocked (kind);
+        if (locked) // round 135: the locked MIX caption is boxed in the accent colour
+        {
+            const auto w = juce::jmin (r.getWidth(), juce::GlyphArrangement::getStringWidth (font (juce::jmax (8.0f, 9.5f * scale()), true), caps (tr (item.label))) + 10.0f);
+            g.setColour (accent.withAlpha (0.25f));
+            g.fillRoundedRectangle (r.withSizeKeepingCentre (w, r.getHeight()), 3.0f);
+            g.setColour (accent);
+            g.drawRoundedRectangle (r.withSizeKeepingCentre (w, r.getHeight()), 3.0f, 1.0f);
+        }
+        g.setColour (locked ? theme::colour::textPrimary : hasStyle (item, plugui::dim) ? colour::textDisabled : skin::captionColour());
         g.setFont (font (juce::jmax (8.0f, 9.5f * scale()), true));
         g.drawFittedText (caps (tr (item.label)), r.toNearestInt(), j, 1, 0.7f);
     }
@@ -2434,6 +2467,13 @@ public:
         const auto& item = activeLayout().items[(std::size_t) index];
         const auto r = rectOf (item);
 
+        if (! e.mods.isPopupMenu() && isMixItem (item) && captionArea (item).contains (e.position))
+        {
+            pluginheader::toggleMixLock (kind);
+            repaint();
+            return;
+        }
+
         if (hasStyle (item, plugui::pageTabs))
         {
             const auto n = juce::jmax (1, (int) plugui::optionLabels (item).size());
@@ -2854,6 +2894,8 @@ public:
             return { tr ("Drag a handle (frequency and gain); mouse wheel = Q; right-click = type; double-click = 0 dB"), {}, false, true };
         if (hasStyle (item, plugui::pageTabs))
             return { tr ("Page: switch the controls shown"), {}, false, false };
+        if (isMixItem (item) && captionArea (item).contains (p))
+            return { tr ("MIX label: click to keep the Mix while presets change (mix lock)"), pluginheader::isMixLocked (kind) ? tr ("locked") : tr ("unlocked"), false, false };
         const auto spec = specFor (item);
         return ui::valueHint (spec, valueOf (paramOf (item)));
     }

@@ -10,6 +10,7 @@
 
 #include "core/Effects.h"
 #include "core/FabFilterStates.h"
+#include "core/FlEffects.h"
 #include "core/FlPluginDb.h"
 #include "core/FlWrapper.h"
 #include "core/LynxTune.h"
@@ -140,7 +141,8 @@ map = xml:parameter5 -> Low cut
 map = xml:parameter6 -> High cut
 map = xml:parameter7 -> Mod rate
 map = xml:parameter8 -> Mod depth
-map = xml:parameter9 -> Reverb mode | steps 0:0 0.525:0.5 0.775:1
+# round 135: its four reverb modes (Mono / three stereo sizes, steps at 0.25 / 0.5 / 0.75 [EXEC]) -> Halo's same four
+map = xml:parameter9 -> Reverb mode | steps 0:0.125 0.25:0.25 0.5:0.375 0.75:0.625
 map = xml:parameter10 -> Shift mode | steps 0:0 0.25:0.25 0.45:0.5 0.65:0.75 0.85:1
 map = xml:parameter11 -> Color | steps 0:0 0.525:1
 
@@ -2137,9 +2139,32 @@ EffectSlot makeSubstituteSlot (const SubstituteEntry& entry, const PluginIdentit
         if (const auto translate = fabfilter::translatorNamed (entry.translator))
             if (const auto state = fabfilter::parseState (original->state))
                 count += translate (*state, slot);
+    // round 135: the header shows the original's preset name (LYNX engines only: an FL effect's preset box lists FL's
+    // own presets)
+    if (original != nullptr && ! original->state.empty() && flPluginsForEffect (slot.kind).empty())
+        slot.presetName = originalPresetName (original->state);
     if (translated != nullptr)
         *translated = count;
     return slot;
+}
+
+std::string originalPresetName (const std::vector<std::uint8_t>& state)
+{
+    if (const auto chunk = findBytes (state, "<PresetChunkXMLTree"); chunk != std::string::npos)
+    {
+        const auto a = findBytes (state, "<Preset Name=\"", chunk);
+        if (a == std::string::npos)
+            return {};
+        const auto start = a + 14;
+        const auto b = findBytes (state, "\"", start);
+        if (b == std::string::npos || b - start > 200)
+            return {};
+        return xmlUnescape (trim (std::string (state.begin() + (std::ptrdiff_t) start, state.begin() + (std::ptrdiff_t) b)));
+    }
+    for (const auto& [name, value] : juceXmlStateAttributes (state))
+        if (name == "presetName")
+            return trim (value);
+    return {};
 }
 
 bool substituteEffectSlot (EffectSlot& slot, const PluginIdentity& identity)

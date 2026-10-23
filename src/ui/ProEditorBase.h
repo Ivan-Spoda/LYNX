@@ -51,7 +51,7 @@ public:
             window[(std::size_t) i] = 0.5f - 0.5f * std::cos (2.0f * juce::MathConstants<float>::pi * (float) i / (float) fftSize);
         engine.addChangeListener (this);
         setWantsKeyboardFocus (true);
-        setSize (width, height);
+        setSize (width, height + (int) helpH); // round 135: + the description line under the bottom bar
         claimTap();
         startTimerHz (30);
     }
@@ -294,10 +294,13 @@ protected:
     }
 
     // --- geometry ------------------------------------------------------------------------------------
-    static constexpr float headerH = 30.0f, barH = 28.0f;
+    static constexpr float headerH = 30.0f, barH = 28.0f, helpH = 18.0f;
     juce::Rectangle<float> headerArea() const { return { 0.0f, 0.0f, (float) getWidth(), headerH }; }
-    juce::Rectangle<float> barArea() const { return { 0.0f, (float) getHeight() - barH, (float) getWidth(), barH }; }
-    juce::Rectangle<float> bodyArea() const { return { 0.0f, headerH, (float) getWidth(), (float) getHeight() - headerH - barH }; }
+    juce::Rectangle<float> barArea() const { return { 0.0f, (float) getHeight() - barH - helpH, (float) getWidth(), barH }; }
+    juce::Rectangle<float> bodyArea() const { return { 0.0f, headerH, (float) getWidth(), (float) getHeight() - headerH - barH - helpH }; }
+    // round 135: the description line at the very bottom (the reference reverbs' strip): what the control under the
+    // mouse does, or the current mode when nothing is under it
+    juce::Rectangle<float> helpArea() const { return { 0.0f, (float) getHeight() - helpH, (float) getWidth(), helpH }; }
 
     std::vector<Ctl> controls() const
     {
@@ -530,6 +533,42 @@ protected:
         for (int i = 0; i < (int) all.size(); ++i)
             paintControl (g, all[(std::size_t) i], i);
         paintOverlay (g, *fx);
+        paintHelpLine (g, *fx);
+    }
+
+    juce::String helpText (const EffectSlot& fx)
+    {
+        if (mouse.x < 0.0f)
+            return pluginheader::modeLine (kind, fx.params, engine.getSong().bpm);
+        if (const auto part = bar.partAt (mouse); part != pluginheader::Part::none)
+            return bar.hintFor (part);
+        Ctl c;
+        if (controlAt (mouse, c))
+        {
+            const auto& info = effectInfo (kind);
+            if (c.param >= 0 && c.param < (int) info.params.size())
+            {
+                const auto what = pluginheader::describe (kind, info.params[(std::size_t) c.param].name);
+                const auto name = c.caption.isNotEmpty() ? c.caption : tr (info.params[(std::size_t) c.param].name);
+                if (what.isNotEmpty())
+                    return name + juce::String::fromUTF8 (" \xe2\x80\x94 ") + what;
+            }
+            return c.hint.isNotEmpty() ? c.hint : c.caption;
+        }
+        if (const auto h = bodyHint (mouse); h.text.isNotEmpty())
+            return h.text;
+        return pluginheader::modeLine (kind, fx.params, engine.getSong().bpm);
+    }
+
+    void paintHelpLine (juce::Graphics& g, const EffectSlot& fx)
+    {
+        using namespace theme;
+        const auto area = helpArea();
+        g.setColour (colour::bg0.withAlpha (0.6f));
+        g.fillRect (area);
+        g.setColour (colour::textSecondary);
+        g.setFont (font (type::small));
+        g.drawFittedText (helpText (fx), area.reduced (10.0f, 0.0f).toNearestInt(), juce::Justification::centredLeft, 1, 0.85f);
     }
 
     void paintHeader (juce::Graphics& g, const EffectSlot& fx)

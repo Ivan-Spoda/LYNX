@@ -2255,10 +2255,14 @@ Layout haloLayout()
                                TR_NOOP ("Low cut"), TR_NOOP ("High cut"), TR_NOOP ("Mod rate"), TR_NOOP ("Mod depth") };
     for (int i = 0; i < 9; ++i)
         v.push_back (dial (46.0f + 73.0f * (float) i, 56, 44, knobs[i], captions[i], i == 1 ? bipolar : 0));
-    v.push_back (label (8, 160, 92, 24, TR_NOOP ("Reverb mode"), alignLeft));
-    v.push_back (choiceMenu (100, 160, 100, 24, "Reverb mode", TR_NOOP ("Reverb mode"), TR_NOOP ("Wide|Dense|Bright")));
-    v.push_back (label (232, 160, 92, 24, TR_NOOP ("Shift mode"), alignLeft));
-    v.push_back (choiceMenu (324, 160, 150, 24, "Shift mode", TR_NOOP ("Shift mode"), TR_NOOP ("Up|Up + down|Up, bright|Up + down, bright|No shift")));
+    v.push_back (label (8, 160, 86, 24, TR_NOOP ("Reverb mode"), alignLeft));
+    // round 135: the reference's four modes (mono in, three stereo sizes) first, LYNX's own three after them; ◀ ▶
+    auto mode = choiceMenu (94, 160, 136, 24, "Reverb mode", TR_NOOP ("Reverb mode"),
+                            TR_NOOP ("Mono|Small stereo|Medium stereo|Big stereo|Wide|Dense|Bright"));
+    mode.values = { 0.125f, 0.25f, 0.375f, 0.625f, 0.0f, 0.5f, 1.0f }; // verbs::haloModeIndex (Wide / Dense / Bright keep 0 / ½ / 1)
+    v.push_back (mode);
+    v.push_back (label (240, 160, 82, 24, TR_NOOP ("Pitch mode"), alignLeft));
+    v.push_back (choiceMenu (322, 160, 160, 24, "Shift mode", TR_NOOP ("Pitch mode"), TR_NOOP ("Single|Dual|Single, bright|Dual, bright|No shift")));
     v.push_back (label (500, 160, 60, 24, TR_NOOP ("Color"), alignLeft));
     v.push_back (choiceMenu (560, 160, 112, 24, "Color", TR_NOOP ("Color"), TR_NOOP ("Bright|Dark")));
     return l;
@@ -2281,17 +2285,24 @@ Layout horizonLayout()
     v.push_back (choiceMenu (112, 220, 120, 22, "Echo note", TR_NOOP ("Note"), "1/64|1/32|1/16|1/8|1/4|1/2"));
     v.push_back (dial (290, 64, 34, "Echo feedback", TR_NOOP ("Feedback")));
     v.push_back (dial (370, 64, 34, "Echo level", TR_NOOP ("Level")));
-    v.push_back (dial (290, 168, 34, "Echo drive", TR_NOOP ("Drive")));
+    // round 135: only the controls the echo / reverb mode uses are shown, in the same place (the reference: Drive in
+    // Clean / Tape / Digital / Analog / Lo-fi, Detune in the pitch modes; Attack instead of Early / late in Space and
+    // Freeze) [EXEC: the trial's editor in every mode]
+    constexpr float pitchLo = 3.5f / 11.0f, pitchHi = 10.5f / 11.0f; // echo modes 4 … 10 (choice (v, 12))
+    v.push_back (when (dial (290, 168, 34, "Echo drive", TR_NOOP ("Drive")), "Echo mode", 0.0f, pitchLo));
+    v.push_back (when (dial (290, 168, 34, "Echo drive", TR_NOOP ("Drive")), "Echo mode", pitchHi, 1.0f));
+    v.push_back (when (dial (290, 168, 34, "Echo detune", TR_NOOP ("Detune"), bipolar), "Echo mode", pitchLo, pitchHi));
     v.push_back (dial (370, 168, 34, "Echo spread", TR_NOOP ("Spread")));
-    v.push_back (dial (330, 116, 22, "Echo detune", TR_NOOP ("Detune"), bipolar));
     v.push_back (section (428, 8, 320, 244, TR_NOOP ("Reverb")));
     v.push_back (dial (496, 84, 76, "Decay", TR_NOOP ("Decay"), big));
     v.push_back (tabs (436, 206, 120, 34, "Routing", TR_NOOP ("Echo > Rev|Rev > Echo")));
     v.push_back (dial (614, 64, 34, "Size", TR_NOOP ("Size")));
     v.push_back (dial (694, 64, 34, "Reverb level", TR_NOOP ("Level")));
-    v.push_back (dial (614, 168, 34, "Early/late", TR_NOOP ("Early / late"), bipolar));
+    constexpr float attackLo = 4.5f / 7.0f, attackHi = 6.5f / 7.0f; // reverb modes 5 … 6 (choice (v, 8))
+    v.push_back (when (dial (614, 168, 34, "Early/late", TR_NOOP ("Early / late"), bipolar), "Reverb mode", 0.0f, attackLo));
+    v.push_back (when (dial (614, 168, 34, "Early/late", TR_NOOP ("Early / late"), bipolar), "Reverb mode", attackHi, 1.0f));
+    v.push_back (when (dial (614, 168, 34, "Attack", TR_NOOP ("Attack")), "Reverb mode", attackLo, attackHi));
     v.push_back (dial (694, 168, 34, "Density", TR_NOOP ("Density")));
-    v.push_back (dial (654, 116, 22, "Attack", TR_NOOP ("Attack")));
     v.push_back (section (752, 8, 104, 244, TR_NOOP ("Mod")));
     v.push_back (dial (804, 64, 36, "Mod rate", TR_NOOP ("Rate")));
     v.push_back (dial (804, 168, 36, "Mod depth", TR_NOOP ("Depth")));
@@ -2483,14 +2494,17 @@ Layout latticeLayout()
         v.push_back (slider (Item::vslider, 16.0f + 58.0f * (float) k, 14, 40, 196, faders[k], captions[k]));
         v.push_back (value (10.0f + 58.0f * (float) k, 238, 52, 16, faders[k], 0));
     }
-    v.push_back (label (12, 268, 38, 18, TR_NOOP ("Taps")));
-    v.push_back (menuOf (52, 266, 100, 22, "Taps", TR_NOOP ("Taps"), TR_NOOP ("1|2|3|4|8|16"),
-                         { 1.5f / 24.0f, 2.5f / 24.0f, 3.5f / 24.0f, 6.5f / 24.0f, 7.5f / 24.0f, 9.5f / 24.0f }));
+    // round 135: the reference's MODE menu — its nine algorithms by their tap layout (LYNX's own names, the reference's
+    // type index: lattice::tapCount); the engine plays the three 6-tap ones and the two 16-tap ones alike for now
+    v.push_back (label (8, 268, 40, 18, TR_NOOP ("Mode")));
+    v.push_back (menuOf (46, 266, 128, 22, "Taps", TR_NOOP ("Mode"),
+                         TR_NOOP ("2-tap chorus|4-tap ensemble|6-tap chorus|6-tap random|Dual ensemble|8-tap|16-tap phase|16-tap|32-tap"),
+                         { 1.5f / 24.0f, 2.5f / 24.0f, 3.5f / 24.0f, 4.5f / 24.0f, 5.5f / 24.0f, 6.5f / 24.0f, 7.5f / 24.0f, 8.5f / 24.0f, 9.5f / 24.0f }));
     std::vector<float> syncValues;
     for (int k = 0; k <= 17; ++k)
         syncValues.push_back ((float) k / 17.0f);
-    v.push_back (label (158, 268, 40, 18, TR_NOOP ("Sync")));
-    v.push_back (menuOf (200, 266, 96, 22, "Sync", TR_NOOP ("Sync"),
+    v.push_back (label (178, 268, 36, 18, TR_NOOP ("Sync")));
+    v.push_back (menuOf (214, 266, 88, 22, "Sync", TR_NOOP ("Sync"),
                          "Free|1/64|1/32T|1/64.|1/32|1/16T|1/32.|1/16|1/8T|1/16.|1/8|1/4T|1/8.|1/4|1/2T|1/4.|1/2|1/1", syncValues));
     // the pages: modulation, taps, diffusion, EQ, drive, warp
     l.pages = { TR_NOOP ("Mod"), TR_NOOP ("Taps"), TR_NOOP ("Diff"), TR_NOOP ("EQ"), TR_NOOP ("Drive"), TR_NOOP ("Warp") };

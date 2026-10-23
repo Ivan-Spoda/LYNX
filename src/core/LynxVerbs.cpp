@@ -1097,9 +1097,26 @@ struct HaloMode
 {
     const char* name;
     double scale, rtScale, bright;
+    float value;   // the Reverb mode value that selects it (nearest wins)
+    int stereo;    // 0 = LYNX's own wide tank, 1 = mono in (the reference's Mono), 2 = two separate sides (its stereo modes)
+    double width;  // side gain of the output
 };
-const HaloMode haloModes[3] = { { "Wide", 1.2, 1.0, 0.0 }, { "Dense", 0.9, 1.05, 0.0 }, { "Bright", 1.0, 0.75, 1.0 } };
-const char* const haloShiftModes[5] = { "Up", "Up + down", "Up, bright", "Up + down, bright", "No shift" };
+// round 135: the reference's four modes [EXEC: its trial, a left-only impulse — below 0.25 the input is summed and the
+// tail comes out of both sides, from 0.25 up the left input stays on the left; 0.25 / 0.5 / 0.75 are the steps] beside
+// LYNX's own Wide / Dense / Bright, which keep their values 0 / ½ / 1 (older projects sound the same)
+const HaloMode haloModes[7] = { { "Wide", 1.2, 1.0, 0.0, 0.0f, 0, 1.0 },          { "Mono", 1.0, 1.0, 0.0, 0.125f, 1, 1.0 },
+                                { "Small stereo", 0.75, 0.85, 0.0, 0.25f, 2, 1.0 }, { "Medium stereo", 1.0, 1.0, 0.0, 0.375f, 2, 1.0 },
+                                { "Dense", 0.9, 1.05, 0.0, 0.5f, 0, 1.0 },          { "Big stereo", 1.3, 1.15, 0.0, 0.625f, 2, 1.0 },
+                                { "Bright", 1.0, 0.75, 1.0, 1.0f, 0, 1.0 } };
+int haloModeIndex (float v)
+{
+    int best = 0;
+    for (int i = 1; i < 7; ++i)
+        if (std::abs (v - haloModes[i].value) < std::abs (v - haloModes[best].value))
+            best = i;
+    return best;
+}
+const char* const haloShiftModes[5] = { "Single", "Dual", "Single, bright", "Dual, bright", "No shift" };
 const char* const haloColours[2] = { "Bright", "Dark" };
 
 double haloShiftSemis (float v) { return -12.0 + 24.0 * v; }
@@ -1113,7 +1130,7 @@ protected:
     void configure (const EffectParams& p, double, Settings& s, float& mix) const noexcept override
     {
         mix = p[0];
-        const auto& m = haloModes[choice (p[9], 3)];
+        const auto& m = haloModes[haloModeIndex (p[9])];
         const auto shiftMode = choice (p[10], 5);
         const auto dark = choice (p[11], 2) == 1;
         const auto size = (double) p[4];
@@ -1143,6 +1160,17 @@ protected:
         s.modRateHz = 0.05 + 4.95 * p[7];
         s.modDepthMs = 1.2 * p[8] / std::sqrt (std::max (0.3, s.modRateHz));
         s.gain = dark ? 0.75 : 0.95;
+        if (m.stereo == 2)
+            s.crossFeed = 0.0; // the two sides stay apart
+    }
+
+    // the reference's Mono mode sums the input (mono in, a stereo tail)
+    void preStage (float* l, float* r, int n, const EffectParams& p, double) noexcept override
+    {
+        if (haloModes[haloModeIndex (p[9])].stereo != 1)
+            return;
+        for (int i = 0; i < n; ++i)
+            l[i] = r[i] = 0.5f * (l[i] + r[i]);
     }
 };
 
@@ -1475,7 +1503,7 @@ std::string paramText (EffectKind kind, int param, float v, double bpm)
                 case 5: return 250.0 * v < 5.0 ? std::string ("off") : hz (250.0 * v);
                 case 6: return hz (100.0 + 14900.0 * v);
                 case 7: return fmt ("%.2f Hz", 0.05 + 4.95 * v);
-                case 9: return haloModes[choice (v, 3)].name;
+                case 9: return haloModes[haloModeIndex (v)].name;
                 case 10: return haloShiftModes[choice (v, 5)];
                 case 11: return haloColours[choice (v, 2)];
                 default: return pct (v);

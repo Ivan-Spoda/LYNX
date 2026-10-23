@@ -173,6 +173,9 @@ std::string substituteOriginalName (const EffectSlot& slot);
 std::vector<std::pair<std::string, std::string>> juceXmlStateAttributes (const std::vector<std::uint8_t>& state);
 // The <PluginName> of a Waves preset chunk ("" when not a Waves state).
 std::string wavesPluginName (const std::vector<std::uint8_t>& state);
+// The name of the preset the original plugin was saved with (round 135): a Valhalla state's `presetName` attribute,
+// a Waves chunk's <Preset Name="...">; "" when none is stored.
+std::string originalPresetName (const std::vector<std::uint8_t>& state);
 // The "RealWorld" parameter values of the active setup of a Waves preset chunk ("*" = unused -> NaN).
 std::vector<double> wavesRealWorldParams (const std::vector<std::uint8_t>& state);
 
