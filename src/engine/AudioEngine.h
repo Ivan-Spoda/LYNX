@@ -184,6 +184,10 @@ public:
     // MIDI inputs: every device is enabled and plays the selected channels unless the MIDI settings say otherwise
     // (Settings › MIDI: device off, one MIDI channel only, a fixed Channel Rack channel; velocity curve; pickup).
     juce::StringArray getActiveMidiInputs() const;
+    // Counts the messages received from the enabled MIDI inputs (the toolbar's MIDI activity light).
+    std::uint32_t getMidiActivity() const noexcept { return midiActivity.load (std::memory_order_relaxed); }
+    // Closes and opens again every enabled MIDI input (the MIDI light's click; Settings › MIDI › Refresh).
+    void reconnectMidiInputs();
     const prefs::MidiPrefs& getMidiPrefs() const noexcept { return midiPrefs; }
     // Applies them (and saves them in %APPDATA%\LYNX\midi-settings.txt when `save`).
     void setMidiPrefs (const prefs::MidiPrefs& prefs, bool save = true);
@@ -414,6 +418,9 @@ private:
     std::array<std::atomic<float>, scopeSize> scope {}; // ring buffer of the output (written by audio)
     std::atomic<int> scopeWrite { 0 };
     juce::MidiDeviceListConnection midiDevicesChanged;
+    std::vector<std::string> lastMidiInputIds;       // the MIDI inputs available at the last check (UI thread)
+    int midiCheckTicks = 0;
+    std::atomic<std::uint32_t> midiActivity { 0 };
     prefs::MidiPrefs midiPrefs;                      // UI thread
     juce::SpinLock midiPrefsLock;                    // guards midiPrefsShared (UI writes, MIDI thread reads)
     prefs::MidiPrefs midiPrefsShared;

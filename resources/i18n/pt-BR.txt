@@ -3039,3 +3039,6 @@ countries: br
 "Classic|Vintage" = "Clássico|Vintage"
 "No third-party plugins found yet ({0}). Press Find new plugins, or add folders with Plugin folders..." = "Nenhum plugin de terceiros encontrado ainda ({0}). Clique em Buscar plugins novos, ou adicione pastas em Pastas de plugins..."
 "LYNX's own instruments and effects are not listed here: they are always available from the Channel Rack's + button, a mixer insert slot or the Quick-add palette (F8)." = "Os instrumentos e efeitos próprios do LYNX não aparecem aqui: estão sempre disponíveis no botão + do Channel Rack, num slot de insert do mixer ou na paleta de inserção rápida (F8)."
+"MIDI input: blinks when a connected device sends MIDI. Click to reconnect the MIDI inputs." = "Entrada MIDI: pisca quando um dispositivo conectado envia MIDI. Clique para reconectar as entradas MIDI."
+"No MIDI input is open." = "Nenhuma entrada MIDI está aberta."
+"Open: {0}" = "Abertas: {0}"

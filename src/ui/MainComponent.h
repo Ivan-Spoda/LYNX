@@ -54,6 +54,7 @@ public:
     // Piano Roll and Mixer floating too).
     void selectTabForSnapshot (int tab);
     void showDesktopForSnapshot (bool extraPanels);
+    void openQuickAddForTest() { showQuickAdd(); } // --windowtest
     void waitForBrowserForSnapshot() { browser.waitForListing (5000); }
     juce::StringArray getMenuNamesForSnapshot() { return getMenuBarNames(); }
     juce::PopupMenu getMenuForSnapshot (int index) { return getMenuForIndex (index, {}); }
@@ -208,6 +209,7 @@ private:
     void exportAudio();
     void refreshToolbar();
     void updateTitle();
+    bool shouldReclaimKeyboardFocus(); // the main window is active but nothing in it has the keyboard focus
     void autosave();
     // project safety (REA round 118, FL's backup folder / save new version / project data files interpreted)
     void saveNewVersion();
@@ -320,6 +322,9 @@ private:
     toolbar::MasterKnob masterVolume { engine, toolbar::MasterKnob::Kind::volume };
     toolbar::MasterKnob masterPitch { engine, toolbar::MasterKnob::Kind::pitch };
     toolbar::PerformanceMeter perfMeter;
+    toolbar::MidiActivityLight midiLight;
+    juce::StringArray midiLightInputs; // the open MIDI inputs (refreshed once a second)
+    int midiInputTicks = 0;
     toolbar::OutputMonitor output { engine };
     int meterTicks = 0;
 
