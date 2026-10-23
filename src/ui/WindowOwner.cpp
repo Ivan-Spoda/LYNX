@@ -4,6 +4,8 @@
 #include "ui/Theme.h"
 
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <ctime>
 
 #if JUCE_WINDOWS
@@ -76,7 +78,9 @@ void applyWindowChrome (juce::Component& window)
    #endif
 }
 
-void keepAboveMainWindow (juce::Component& window)
+namespace
+{
+void applyOwnership (juce::Component& window)
 {
     applyWindowChrome (window);
 
@@ -89,8 +93,98 @@ void keepAboveMainWindow (juce::Component& window)
         return;
     // "owned" window: Windows keeps it above its owner and minimizes it along with it
     SetWindowLongPtrW ((HWND) window.getWindowHandle(), GWLP_HWNDPARENT, (LONG_PTR) owner->getWindowHandle());
-   #else
-    juce::ignoreUnused (window);
    #endif
+}
+
+// JUCE recreates a window's native peer when its style changes (setResizable, setUsingNativeTitleBar...
+// after it is on screen). The new native window has no owner, so it fell behind the main window
+// (issue #4: the Audio editor opened behind LYNX). This re-applies the ownership to every new peer.
+class OwnershipKeeper final : public juce::ComponentListener
+{
+public:
+    explicit OwnershipKeeper (juce::Component& w) : window (&w) { w.addComponentListener (this); }
+    ~OwnershipKeeper() override
+    {
+        if (window != nullptr)
+            window->removeComponentListener (this);
+    }
+
+    void componentParentHierarchyChanged (juce::Component& c) override
+    {
+        if (c.getPeer() != nullptr) // (also called while the old peer is still there: harmless)
+            applyOwnership (c);
+    }
+
+    void componentBeingDeleted (juce::Component& c) override;
+
+    juce::Component* window;
+};
+
+std::map<juce::Component*, std::unique_ptr<OwnershipKeeper>>& keepers()
+{
+    static std::map<juce::Component*, std::unique_ptr<OwnershipKeeper>> all;
+    return all;
+}
+
+void OwnershipKeeper::componentBeingDeleted (juce::Component& c)
+{
+    c.removeComponentListener (this);
+    window = nullptr;
+    keepers().erase (&c); // deletes this
+}
+} // namespace
+
+bool isOwnedByMainWindow (juce::Component& window)
+{
+   #if JUCE_WINDOWS
+    auto* owner = mainWindow().getComponent();
+    return owner != nullptr && window.getWindowHandle() != nullptr && owner->getWindowHandle() != nullptr
+           && GetWindow ((HWND) window.getWindowHandle(), GW_OWNER) == (HWND) owner->getWindowHandle();
+   #else
+    return keepers().count (&window) > 0;
+   #endif
+}
+
+bool isAboveMainWindow (juce::Component& window)
+{
+   #if JUCE_WINDOWS
+    auto* owner = mainWindow().getComponent();
+    if (owner == nullptr || window.getWindowHandle() == nullptr || owner->getWindowHandle() == nullptr)
+        return false;
+    for (auto h = GetWindow ((HWND) window.getWindowHandle(), GW_HWNDNEXT); h != nullptr; h = GetWindow (h, GW_HWNDNEXT))
+        if (h == (HWND) owner->getWindowHandle())
+            return true;
+    return false;
+   #else
+    return isOwnedByMainWindow (window);
+   #endif
+}
+
+void forceForegroundForTest (juce::Component& window)
+{
+   #if JUCE_WINDOWS
+    // a process started in the background may not take the foreground: join the input of the foreground window's
+    // thread for a moment (what UI automation tools do)
+    auto* hwnd = (HWND) window.getWindowHandle();
+    auto* foreground = GetForegroundWindow();
+    if (hwnd == nullptr || foreground == hwnd)
+        return;
+    const auto theirs = GetWindowThreadProcessId (foreground, nullptr), ours = GetCurrentThreadId();
+    AttachThreadInput (theirs, ours, TRUE);
+    SetForegroundWindow (hwnd);
+    SetFocus (hwnd);
+    AttachThreadInput (theirs, ours, FALSE);
+   #else
+    window.toFront (true);
+   #endif
+}
+
+void keepAboveMainWindow (juce::Component& window)
+{
+    auto& all = keepers();
+    auto& keeper = all[&window];
+    if (keeper == nullptr)
+        keeper = std::make_unique<OwnershipKeeper> (window);
+    applyOwnership (window);
 }
 } // namespace lynx

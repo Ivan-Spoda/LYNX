@@ -1622,7 +1622,7 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
     // hosted plugins read the transport from here (PluginHost's play head)
     {
         auto& timeline = hostTimeline();
-        timeline.tick.store (startTick, std::memory_order_relaxed);
+        timeline.tick.store (hostPositionTick (song, startTick, state.schedule.songLength), std::memory_order_relaxed);
         timeline.bpm.store (bpm, std::memory_order_relaxed);
         timeline.sampleRate.store (sampleRate, std::memory_order_relaxed);
         timeline.beatsPerBar.store (std::max (1, song.beatsPerBar), std::memory_order_relaxed);

@@ -200,6 +200,29 @@ float mapVelocity (float velocity, VelocityCurve curve) noexcept
     return v;
 }
 
+MidiInputPlan planMidiInputs (const MidiPrefs& prefs, const std::vector<MidiPort>& available,
+                              const std::vector<std::string>& previous, const std::vector<std::string>& openIds)
+{
+    auto contains = [] (const std::vector<std::string>& list, const std::string& id) {
+        return std::find (list.begin(), list.end(), id) != list.end();
+    };
+
+    MidiInputPlan plan;
+    for (const auto& port : available)
+    {
+        const auto wanted = prefs.input (port.name).enabled;
+        const auto isOpen = contains (openIds, port.id);
+
+        if (wanted && ! isOpen)
+            plan.open.push_back (port.id);
+        else if (wanted && ! contains (previous, port.id))
+            plan.reopen.push_back (port.id);
+        else if (! wanted && isOpen)
+            plan.close.push_back (port.id);
+    }
+    return plan;
+}
+
 MidiInputPrefs MidiPrefs::input (const std::string& name) const
 {
     for (const auto& i : inputs)
