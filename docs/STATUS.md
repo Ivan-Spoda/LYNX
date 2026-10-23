@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-22 (release 0.1.12 alpha). Everything below is verified by the core tests (more than a million checks), the
+Last updated: 2026-10-23 (release 0.1.13 alpha). Everything below is verified by the core tests (more than a million checks), the
 app's self-test (`LYNX.exe --selftest`), off-screen UI snapshots (`--snapshot`) and a regression run that
 exports the 30 demo projects shipped with FL Studio 2026.
 
