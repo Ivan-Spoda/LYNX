@@ -124,6 +124,8 @@ add_library(lynx_core STATIC
     src/core/ApexLimiter.cpp
     src/core/DynamicsSuite.cpp
     src/core/VoiceTools.cpp
+    src/core/MidiControls.cpp
+    src/core/FormulaController.cpp
     src/core/FabFilterStates.cpp
     src/core/FlResampler.cpp
     src/core/FlKeys.cpp
@@ -273,6 +275,7 @@ if(LYNX_BUILD_APP)
         src/ui/DynamicsDisplays.cpp
         src/ui/ExportDialog.cpp
         src/ui/AutomationUi.cpp
+        src/ui/ControllerEditors.cpp
         src/ui/ChannelSettings.cpp
         src/ui/BrowserComponent.cpp
         src/ui/Theme.cpp
@@ -303,6 +306,7 @@ if(LYNX_BUILD_APP)
         src/ui/EventEditor.cpp
         src/ui/AudioEditor.cpp
         src/ui/ToolWindow.cpp
+        src/ui/TempoTapper.cpp
         src/ui/HistoryPanel.cpp
         src/ui/MissingFilesDialog.cpp
         src/ui/SettingsDialog.cpp

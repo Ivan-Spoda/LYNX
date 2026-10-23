@@ -15,6 +15,7 @@ struct Transport
 {
     std::atomic<bool> playing { false };
     std::atomic<bool> metronome { false };
+    std::atomic<float> metronomeVolume { 1.0f }; // the metronome's volume (0..1.25, 1 = the default click level)
     std::atomic<bool> recording { false };
     std::atomic<double> bpm { 130.0 };
     std::atomic<int> beatsPerBar { 4 };
@@ -37,6 +38,7 @@ struct Transport
     // Playlist loop region (song mode only). end <= start = disabled.
     std::atomic<bool> songMode { false };
     std::atomic<double> loopStart { 0.0 }, loopEnd { 0.0 };
+    std::atomic<double> songEnd { 0.0 }; // Song::songLength(): without a loop region Song mode loops there
 
     double ticksPerSample() const noexcept
     {

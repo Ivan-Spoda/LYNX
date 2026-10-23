@@ -64,6 +64,9 @@ int patternSteps (const Song& song, const Pattern& pattern) noexcept;
 // Rack then draws a miniature of the notes instead of the steps (as FL does once a channel has piano-roll
 // notes) and a click opens the Piano Roll. LYNX's own rule (FL's exact test is not confirmed).
 bool showsNotePreview (const Pattern& pattern, int channel) noexcept;
+// The Channel Rack's piano-roll view (FL's "step sequencer / piano roll overview" switch): every channel row shows
+// its notes as a miniature, step patterns included; otherwise only the rows with piano-roll notes do.
+bool showsNotePreview (const Pattern& pattern, int channel, bool pianoRollView) noexcept;
 
 // The key range of the channel's notes in the pattern (lowest, highest); {60, 60} without notes.
 std::pair<int, int> channelKeyRange (const Pattern& pattern, int channel) noexcept;

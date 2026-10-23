@@ -111,6 +111,26 @@ struct MidiPrefs
     bool operator== (const MidiPrefs&) const = default;
 };
 
+// What to do with the MIDI input devices at a periodic check (issue #4: a controller that was not ready when LYNX
+// started, or that came back after a reconnection, stayed silent until it was turned off and on in Settings).
+struct MidiPort
+{
+    std::string id;   // the system's identifier
+    std::string name; // the name MidiPrefs uses
+};
+
+struct MidiInputPlan
+{
+    std::vector<std::string> open;   // wanted and not open (it appeared, or opening failed before): open it
+    std::vector<std::string> reopen; // open, but it disappeared since the last check and came back: close and open again
+    std::vector<std::string> close;  // open but turned off in the settings
+    bool operator== (const MidiInputPlan&) const = default;
+};
+
+// `available` = the devices now; `previous` = the identifiers available at the last check; `openIds` = the ones open.
+MidiInputPlan planMidiInputs (const MidiPrefs& prefs, const std::vector<MidiPort>& available,
+                              const std::vector<std::string>& previous, const std::vector<std::string>& openIds);
+
 // Takeover ("pickup") of a parameter by a hardware controller: the controller changes the parameter only once its
 // value reaches the parameter's (moving past it in either direction, or landing within `tolerance`), so a knob that
 // sits elsewhere doesn't make the parameter jump. `previous` is the controller's last value (< 0 = none yet).

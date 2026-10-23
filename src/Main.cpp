@@ -29,6 +29,10 @@
 #include "ui/AutomationUi.h"
 #include "ui/PluginSkin.h"
 #include "ui/ChannelSettings.h"
+#include "ui/ControllerEditors.h"
+#include "core/FormulaController.h"
+#include "core/MidiControls.h"
+#include "core/FlSynths.h"
 #include "ui/Dialogs.h"
 #include "core/RackOps.h"
 #include "ui/ExportDialog.h"
@@ -45,6 +49,7 @@
 #include "ui/NoteToolDialogs.h"
 #include "ui/EventEditor.h"
 #include "ui/AudioEditor.h"
+#include "ui/TempoTapper.h"
 #include "core/EventEdit.h"
 #include "core/FacetEq.h"
 #include "ui/FacetEqEditor.h"
@@ -57,6 +62,7 @@
 #include "ui/Theme.h"
 #include "ui/WaveformView.h"
 #include "ui/WindowOwner.h"
+#include "ui/ToolWindow.h"
 #include "platform/CrashGuard.h"
 
 #include <chrono>
@@ -496,6 +502,15 @@ public:
             return;
         }
 
+        if (args.contains ("--windowtest"))
+        {
+            // LYNX.exe --windowtest report.txt: opens the Quick-add palette, the Audio editor and a plugin-like window
+            // over the main window and checks that each one stays in front, owned by the main window, with the
+            // keyboard focus (issue #4). The windows appear on screen for a few seconds.
+            runWindowTest (args[args.indexOf ("--windowtest") + 1].unquoted());
+            return;
+        }
+
         if (args.contains ("--pluginstyle")) // round 126: force one style for this run (glow, neon, hardware, vivid; auto = per plugin)
         {
             const auto i = args.indexOf ("--pluginstyle");
@@ -534,6 +549,15 @@ public:
             // --drags: also mouse drags over the editors (their menus may flash on screen: not for the selftest)
             const auto ok = runEffectFuzz (rounds, args[i + 1].unquoted(), args.contains ("--drags"));
             setApplicationReturnValue (ok ? 0 : 1);
+            quit();
+            return;
+        }
+
+        if (args.contains ("--controllershot"))
+        {
+            // LYNX.exe --controllershot prefix: the built-in controllers' editors (round 133) as PNGs
+            const auto i = args.indexOf ("--controllershot");
+            runControllerShot (args[i + 1].unquoted());
             quit();
             return;
         }
@@ -1061,7 +1085,7 @@ private:
             juce::Random random (111);
             const auto value = [&] { const auto r = random.nextInt (6); return r == 0 ? 0.0f : r == 1 ? 1.0f : random.nextFloat(); };
 
-            for (int k = 0; k <= (int) lynx::EffectKind::geminiDoubler; ++k)
+            for (int k = 0; k <= (int) lynx::EffectKind::formulaController; ++k)
             {
                 const auto kind = (lynx::EffectKind) k;
                 if (! lynx::NativeEffectWindows::canOpen (kind))
@@ -1232,6 +1256,137 @@ private:
         test->window->setVisible (true);
         test->step ("step=shown");
         test->startTimer (4000);
+    }
+
+    void runWindowTest (const juce::String& reportPath)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+
+        struct WindowTest final : juce::Timer
+        {
+            juce::String reportPath, report;
+            bool ok = true;
+            int stepIndex = 0;
+            std::unique_ptr<lynx::AudioEngine> engine;
+            lynx::MainComponent* ui = nullptr;
+            std::unique_ptr<juce::DocumentWindow> main, pluginLike;
+            juce::TextEditor* pluginField = nullptr;
+            std::function<void()> done;
+
+            void line (const juce::String& text)
+            {
+                report << text << "\n";
+                juce::File (reportPath).replaceWithText (report);
+            }
+
+            void check (const juce::String& what, bool passed)
+            {
+                line ((passed ? "ok   " : "FAIL ") + what);
+                ok = ok && passed;
+            }
+
+            bool isAbove (juce::Component* w) { return w != nullptr && lynx::isAboveMainWindow (*w); }
+
+            bool focusIn (juce::Component* w)
+            {
+                auto* f = juce::Component::getCurrentlyFocusedComponent();
+                return w != nullptr && f != nullptr && (f == w || w->isParentOf (f));
+            }
+
+            void timerCallback() override
+            {
+                switch (stepIndex++)
+                {
+                    case 0:
+                        line ("foreground=" + juce::String (juce::Process::isForegroundProcess() ? 1 : 0));
+                        ui->openQuickAddForTest();
+                        break;
+                    case 1:
+                    {
+                        auto* w = lynx::findToolWindow ("quickadd");
+                        check ("quick-add palette open", w != nullptr);
+                        check ("quick-add palette active", w != nullptr && w->isActiveWindow());
+                        check ("quick-add palette owned by the main window", w != nullptr && lynx::isOwnedByMainWindow (*w));
+                        check ("quick-add palette above the main window", isAbove (w));
+                        auto* f = juce::Component::getCurrentlyFocusedComponent();
+                        check ("quick-add search box has the keyboard focus", focusIn (w) && dynamic_cast<juce::TextEditor*> (f) != nullptr && f->hasKeyboardFocus (false) && w->isActiveWindow());
+                        lynx::closeAllToolWindows();
+                        lynx::openAudioEditor (*engine);
+                        break;
+                    }
+                    case 2:
+                    {
+                        auto* w = lynx::findToolWindow ("audioeditor");
+                        check ("audio editor open", w != nullptr);
+                        check ("audio editor active", w != nullptr && w->isActiveWindow());
+                        check ("audio editor owned by the main window", w != nullptr && lynx::isOwnedByMainWindow (*w));
+                        check ("audio editor above the main window", isAbove (w));
+                        lynx::forceForegroundForTest (*main); // the user clicks the main window
+                        break;
+                    }
+                    case 3:
+                    {
+                        auto* w = lynx::findToolWindow ("audioeditor");
+                        check ("audio editor stays above the main window after clicking it", isAbove (w));
+                        lynx::closeAllToolWindows();
+                        // a plugin editor's window: its own controls keep the keyboard focus
+                        pluginLike = std::make_unique<juce::DocumentWindow> ("Plugin", juce::Colours::black, juce::DocumentWindow::closeButton);
+                        pluginLike->setUsingNativeTitleBar (true);
+                        auto* field = new juce::TextEditor();
+                        field->setSize (300, 120);
+                        pluginLike->setContentOwned (field, true);
+                        pluginLike->centreWithSize (300, 120);
+                        pluginLike->setVisible (true);
+                        lynx::keepAboveMainWindow (*pluginLike);
+                        pluginLike->toFront (true);
+                        field->grabKeyboardFocus();
+                        pluginField = field;
+                        break;
+                    }
+                    case 4:
+                        check ("plugin window active", pluginLike->isActiveWindow());
+                        check ("plugin window keeps the keyboard focus", pluginField->hasKeyboardFocus (false) && pluginLike->isActiveWindow());
+                        check ("plugin window above the main window", isAbove (pluginLike.get()));
+                        pluginLike = nullptr;
+                        lynx::forceForegroundForTest (*main);
+                        juce::Component::unfocusAllComponents();
+                        break;
+                    case 5:
+                        check ("main window takes the keyboard focus back when it is active", ui->hasKeyboardFocus (true));
+                        line (ok ? "result=OK" : "result=FAILED");
+                        stopTimer();
+                        done();
+                        break;
+                    default:
+                        break;
+                }
+            }
+        };
+
+        auto* test = new WindowTest();
+        test->reportPath = reportPath;
+        test->engine = std::make_unique<lynx::AudioEngine> (false);
+        test->main = std::make_unique<juce::DocumentWindow> ("LYNX window test", lynx::theme::window, juce::DocumentWindow::allButtons);
+        test->main->setUsingNativeTitleBar (true);
+        test->ui = new lynx::MainComponent (*test->engine, false);
+        test->main->setContentOwned (test->ui, true);
+        test->main->setResizable (true, true);
+        test->main->centreWithSize (1280, 760);
+        test->main->setVisible (true);
+        lynx::setMainWindowForOwnership (test->main.get());
+        lynx::forceForegroundForTest (*test->main);
+        test->main->toFront (true);
+        test->done = [this, test] {
+            setApplicationReturnValue (test->ok ? 0 : 1);
+            juce::MessageManager::callAsync ([this, test] {
+                lynx::closeAllToolWindows();
+                lynx::setMainWindowForOwnership (nullptr);
+                test->main = nullptr;
+                delete test;
+                quit();
+            });
+        };
+        test->startTimer (1500);
     }
 
     // LYNX.exe --plugintest plugin.vst3 report.txt ["name"]: loads the plugin (or the one named in a shell), plays notes if it is an
@@ -2465,6 +2620,51 @@ private:
         quit();
     }
 
+    void runControllerShot (const juce::String& prefix)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        lynx::AudioEngine offline (false);
+        lynx::Song song;
+        song.mixer = lynx::Song::defaultMixer (2);
+        song.mixer[1].name = "Insert 1";
+        auto fx = lynx::makeEffectSlot (lynx::EffectKind::formulaController);
+        lynx::formula::State formula;
+        formula.formula = "a*Sin(SongTime*Pi*b*4)+c";
+        fx.state = lynx::formula::writeState (formula);
+        fx.params[0] = 0.5f;
+        fx.params[1] = 0.25f;
+        fx.params[2] = 0.5f;
+        song.mixer[1].effects.push_back (fx);
+        lynx::ChannelDef env;
+        env.name = "Envelope Controller";
+        env.instrument = lynx::InstrumentKind::controller;
+        env.controllerState = lynx::writeEnvelopeController (lynx::defaultEnvelopeController());
+        song.channels.push_back (env);
+        lynx::ChannelDef out;
+        out.name = "MIDI Out";
+        out.instrument = lynx::InstrumentKind::midiOut;
+        lynx::midictl::MidiOutSettings settings;
+        settings.port = 1;
+        lynx::midictl::writeMidiOut (out.pluginState, settings);
+        song.channels.push_back (out);
+        song.patterns.emplace_back();
+        offline.setSong (std::move (song));
+        offline.dispatchPendingMessages();
+        auto shoot = [&] (std::unique_ptr<juce::Component> c, const juce::String& name) {
+            if (c == nullptr)
+                return;
+            savePng (c->createComponentSnapshot (c->getLocalBounds()), prefix + name);
+        };
+        shoot (lynx::makeChannelSettingsPanel (offline, 0), "-envelope-controller.png");
+        shoot (lynx::makeChannelSettingsPanel (offline, 1), "-midi-out.png");
+        lynx::FormulaControllerWindows::open (offline, 1, 0);
+        for (int k = 0; k < juce::TopLevelWindow::getNumTopLevelWindows(); ++k)
+            if (auto* w = dynamic_cast<juce::DocumentWindow*> (juce::TopLevelWindow::getTopLevelWindow (k)))
+                if (w->getName().startsWith ("Formula") && w->getContentComponent() != nullptr)
+                    savePng (w->getContentComponent()->createComponentSnapshot (w->getContentComponent()->getLocalBounds()), prefix + "-formula-controller.png");
+        lynx::FormulaControllerWindows::closeAll();
+    }
+
     void runSnapshot (const juce::String& prefix, const juce::String& projectPath)
     {
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
@@ -2885,6 +3085,16 @@ private:
                 saveWindow (std::move (wave), "-audioeditor.png");
                 saveWindow (lynx::makeAudioEditorForSnapshot (offline, d, true), "-audioeditor-spectrum.png");
             }
+
+            // the tempo tapper after five steady taps (round 132)
+            saveWindow (lynx::makeTempoTapperForSnapshot (offline, 5, 128.0), "-tempotapper.png");
+
+            // the Channel Rack's piano-roll view (round 132)
+            ui.selectTabForSnapshot (0);
+            ui.getRackForSnapshot().setPianoRollView (true);
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-rack-pianoroll-view.png");
+            ui.getRackForSnapshot().setPianoRollView (false);
 
             // the Channel Rack with the step graph lane (velocity), and the Euclidean fill window
             ui.selectTabForSnapshot (0);

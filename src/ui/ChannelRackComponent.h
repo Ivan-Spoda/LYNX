@@ -75,6 +75,10 @@ public:
 
     // Workflow P2: step graph lanes, fills, rotation and organisation
     void toggleGraphLanes();
+    // Piano-roll view: every row shows its notes as a miniature (a click opens them in the Piano Roll) instead of
+    // the step buttons; FL's "step sequencer / piano roll overview" switch in the rack's title bar.
+    void setPianoRollView (bool on);
+    bool isPianoRollView() const noexcept { return pianoRollView; }
     bool areGraphLanesShown() const noexcept { return graphLanes; }
     void setGraphLevelForSnapshot (int level) { graphLevel = level; graphLanes = true; updateSize(); repaint(); }
     void rotateSelected (int steps);
@@ -151,6 +155,7 @@ private:
     void applyLane (const juce::MouseEvent& e);
     float laneValueAt (int y) const;
     bool graphLanes = false;
+    bool pianoRollView = false;
     int graphLevel = 0; // notetools::Level
     int laneDownStep = -1;
     float laneDownValue = 0.0f;

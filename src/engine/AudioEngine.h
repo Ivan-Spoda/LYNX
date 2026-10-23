@@ -106,6 +106,10 @@ public:
 
     // Preview of an audio file (browser). An invalid/empty file stops the preview.
     void previewFile (const juce::File& file);
+    // The Browser's preview volume (0..1.25, 1 = default; core/ValueMath.h previewGain). Applies to the preview
+    // playing now too. UI thread.
+    void setPreviewVolume (double volume) noexcept;
+    double getPreviewVolume() const noexcept { return previewVolume; }
     // Plays a sound made in memory through the same preview output (the start-up sound). UI thread.
     void previewSample (std::shared_ptr<const SampleData> sample, bool loop = false, float gain = 0.8f);
     // The frame of the previewed sample being played, -1 when the preview is silent.
@@ -184,6 +188,10 @@ public:
     // MIDI inputs: every device is enabled and plays the selected channels unless the MIDI settings say otherwise
     // (Settings › MIDI: device off, one MIDI channel only, a fixed Channel Rack channel; velocity curve; pickup).
     juce::StringArray getActiveMidiInputs() const;
+    // Counts the messages received from the enabled MIDI inputs (the toolbar's MIDI activity light).
+    std::uint32_t getMidiActivity() const noexcept { return midiActivity.load (std::memory_order_relaxed); }
+    // Closes and opens again every enabled MIDI input (the MIDI light's click; Settings › MIDI › Refresh).
+    void reconnectMidiInputs();
     const prefs::MidiPrefs& getMidiPrefs() const noexcept { return midiPrefs; }
     // Applies them (and saves them in %APPDATA%\LYNX\midi-settings.txt when `save`).
     void setMidiPrefs (const prefs::MidiPrefs& prefs, bool save = true);
@@ -372,6 +380,7 @@ private:
     std::uint64_t loggedOver = 0, loggedLate = 0;
     double lastLogMs = 0.0;
     class PreviewPlayer* preview = nullptr; // graph node (owned by the graph)
+    double previewVolume = 1.0;
     void publishSong();
     void adoptPrepared (PreparedFlp& prepared); // the plugins of a prepared import found / substituted (message thread)
 
@@ -414,6 +423,9 @@ private:
     std::array<std::atomic<float>, scopeSize> scope {}; // ring buffer of the output (written by audio)
     std::atomic<int> scopeWrite { 0 };
     juce::MidiDeviceListConnection midiDevicesChanged;
+    std::vector<std::string> lastMidiInputIds;       // the MIDI inputs available at the last check (UI thread)
+    int midiCheckTicks = 0;
+    std::atomic<std::uint32_t> midiActivity { 0 };
     prefs::MidiPrefs midiPrefs;                      // UI thread
     juce::SpinLock midiPrefsLock;                    // guards midiPrefsShared (UI writes, MIDI thread reads)
     prefs::MidiPrefs midiPrefsShared;

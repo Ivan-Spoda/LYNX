@@ -60,6 +60,14 @@ std::optional<double> ValueSpec::parse (const juce::String& typed) const
     return controls::snapToInterval (v, minimum, interval);
 }
 
+juce::String utilityVolumeText (double volume)
+{
+    const auto v = controls::clampUtilityVolume (volume);
+    const auto gain = controls::utilityGain (v);
+    const auto db = gain > 0.0f ? juce::String (20.0 * std::log10 ((double) gain), 1) + " dB" : juce::String ("-inf dB");
+    return juce::String (juce::roundToInt (v * 100.0)) + "% (" + (gain > 1.0f ? "+" : "") + db + ")";
+}
+
 ValueSpec percentSpec (const juce::String& name, double defaultValue)
 {
     ValueSpec s;

@@ -1,4 +1,6 @@
 #include "engine/AudioEngine.h"
+
+#include "core/ValueMath.h"
 #include "platform/Paths.h"
 #include "engine/FlStudio.h"
 
@@ -13,6 +15,7 @@
 #include "core/Instruments.h"
 #include "core/Dither.h"
 #include "core/SoftClip.h"
+#include "core/Scheduler.h"
 #include "engine/ChannelRackProcessor.h"
 #include "engine/DllAsioDevice.h"
 #include "engine/Metronome.h"
@@ -213,6 +216,7 @@ void AudioEngine::buildInitialGraph()
     auto metronome = graph.addNode (std::make_unique<Metronome> (transport));
     auto previewOwned = std::make_unique<PreviewPlayer>();
     preview = previewOwned.get();
+    preview->setVolume (controls::previewGain (previewVolume));
     auto previewNode = graph.addNode (std::move (previewOwned));
 
     for (int channel = 0; channel < 2; ++channel)
@@ -421,7 +425,7 @@ void AudioEngine::copyScope (float* destination, int count) const noexcept
 void AudioEngine::previewFile (const juce::File& file)
 {
     if (preview != nullptr)
-        preview->play (file.existsAsFile() ? samples.load (file.getFullPathName()) : nullptr);
+        preview->playBrowser (file.existsAsFile() ? samples.load (file.getFullPathName()) : nullptr);
 }
 
 void AudioEngine::setInputScale (int scale, int root) noexcept
@@ -440,6 +444,13 @@ void AudioEngine::previewSample (std::shared_ptr<const SampleData> sample, bool 
 {
     if (preview != nullptr)
         preview->play (std::move (sample), loop, gain);
+}
+
+void AudioEngine::setPreviewVolume (double volume) noexcept
+{
+    previewVolume = controls::clampUtilityVolume (volume);
+    if (preview != nullptr)
+        preview->setVolume (controls::previewGain (previewVolume));
 }
 
 double AudioEngine::getPreviewPosition() const noexcept
@@ -633,6 +644,8 @@ void AudioEngine::finishAudioTake()
     const auto ticksPerSample = song.bpm * ppq / (60.0 * takeSampleRate);
     auto start = (std::int64_t) std::llround (startTick - takeLatency * ticksPerSample);
     std::int64_t offset = 0;
+    if (song.mode == PlayMode::song && ! song.hasLoop() && start >= song.songLength()) // (the position loops over the song)
+        start %= std::max<std::int64_t> (1, song.songLength());
 
     if (start < 0)
     {
@@ -800,7 +813,12 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
         velocityCurve = midiPrefsShared.velocity;
     }
 
-    if (! device.enabled || (device.midiChannel != 0 && m.getChannel() != device.midiChannel))
+    if (! device.enabled)
+        return;
+
+    midiActivity.fetch_add (1, std::memory_order_relaxed); // the toolbar's MIDI input light
+
+    if (device.midiChannel != 0 && m.getChannel() != device.midiChannel)
         return;
 
     if (m.isController())
@@ -862,12 +880,37 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
 void AudioEngine::enableAllMidiInputs()
 {
     // (a device turned off in the MIDI settings is closed, so other programs can use it)
+    std::vector<prefs::MidiPort> available;
+    std::vector<std::string> open;
     for (const auto& device : juce::MidiInput::getAvailableDevices())
     {
-        const auto on = midiPrefs.input (device.name.toStdString()).enabled;
-        if (deviceManager.isMidiInputDeviceEnabled (device.identifier) != on)
-            deviceManager.setMidiInputDeviceEnabled (device.identifier, on);
+        available.push_back ({ device.identifier.toStdString(), device.name.toStdString() });
+        if (deviceManager.isMidiInputDeviceEnabled (device.identifier))
+            open.push_back (device.identifier.toStdString());
     }
+
+    const auto plan = prefs::planMidiInputs (midiPrefs, available, lastMidiInputIds, open);
+    for (const auto& id : plan.close)
+        deviceManager.setMidiInputDeviceEnabled (juce::String (id), false);
+    for (const auto& id : plan.reopen) // it went away and came back: the old handle may be dead
+        deviceManager.setMidiInputDeviceEnabled (juce::String (id), false);
+    for (const auto* list : { &plan.reopen, &plan.open })
+        for (const auto& id : *list)
+            deviceManager.setMidiInputDeviceEnabled (juce::String (id), true);
+
+    lastMidiInputIds.clear();
+    for (const auto& port : available)
+        lastMidiInputIds.push_back (port.id);
+}
+
+void AudioEngine::reconnectMidiInputs()
+{
+    if (prefetcher == nullptr) // (only with an audio device: the real app)
+        return;
+    for (const auto& device : juce::MidiInput::getAvailableDevices())
+        if (deviceManager.isMidiInputDeviceEnabled (device.identifier))
+            deviceManager.setMidiInputDeviceEnabled (device.identifier, false);
+    enableAllMidiInputs();
 }
 
 void AudioEngine::setMidiPrefs (const prefs::MidiPrefs& p, bool save)
@@ -993,7 +1036,9 @@ void AudioEngine::updateRecording()
     // the whole take is a single undo step: overdub or replace, quantised to the record grid; in song mode a
     // clip of the pattern is placed where recording started if none plays there
     const auto options = recordOptions;
-    const auto placeClipAt = (std::int64_t) takeStartPosition;
+    auto placeClipAt = (std::int64_t) takeStartPosition;
+    if (song.mode == PlayMode::song && ! song.hasLoop()) // (the position loops over the song)
+        placeClipAt %= std::max<std::int64_t> (1, song.songLength());
     editSong ([&] (Song& s) {
         commitTake (s.patterns[(std::size_t) s.currentPattern], notes, options.mode, options.quantise, takeClearedChannels);
 
@@ -1053,7 +1098,9 @@ void AudioEngine::editSong (const std::function<void (Song&)>& edit, bool undoab
     if (undoable)
         modified = true;
 
+    const auto lengthsBefore = patternLengths (song);
     edit (song);
+    followPatternLengths (lengthsBefore, song);
     publishSong();
 }
 
@@ -1543,6 +1590,7 @@ void AudioEngine::publishSong()
     transport.songMode.store (song.mode == PlayMode::song);
     transport.loopStart.store ((double) song.loopStart);
     transport.loopEnd.store ((double) song.loopEnd);
+    transport.songEnd.store ((double) song.songLength());
 
     const loadtrace::Scope buildTiming ("rack_build");
     RackState::Factories factories;
@@ -1640,8 +1688,20 @@ void AudioEngine::applyControllers()
     for (const auto& [target, v] : pluginChanges)
     {
         if (target.kind == AutomationTargetKind::channelParam)
+        {
             if (auto* p = dynamic_cast<PluginInstrument*> (getChannelInstrument (target.index).get()))
                 p->setParameterFromUi (target.param, v);
+            // a MIDI Out's controls: the plugins on its port (REA_rodada133 §4)
+            if (target.index >= 0 && target.index < (int) song.channels.size()
+                && song.channels[(std::size_t) target.index].instrument == InstrumentKind::midiOut)
+            {
+                const auto port = midictl::parseMidiOut (song.channels[(std::size_t) target.index].pluginState).port;
+                for (int c = 0; c < (int) song.channels.size(); ++c)
+                    if (song.channels[(std::size_t) c].instrument == InstrumentKind::plugin && song.channels[(std::size_t) c].plugin.midiInPort == port)
+                        if (auto* p = dynamic_cast<PluginInstrument*> (getChannelInstrument (c).get()))
+                            p->setParameterFromUi (target.param, v);
+            }
+        }
 
         if (target.kind == AutomationTargetKind::effectParam)
             if (auto* p = dynamic_cast<PluginEffect*> (getEffect (target.index, target.slot).get()))
@@ -1651,6 +1711,13 @@ void AudioEngine::applyControllers()
 
 void AudioEngine::timerCallback()
 {
+    // MIDI inputs: open the enabled devices that appeared (or were not ready) and reopen the ones that came back
+    if (prefetcher != nullptr && ++midiCheckTicks >= 60) // every 2 s
+    {
+        midiCheckTicks = 0;
+        enableAllMidiInputs();
+    }
+
     updateRealtimeStats();
     applyControllers();
     updateRecording();
@@ -1905,9 +1972,11 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
         auto n = numSamples - done;
         const auto playing = transport.playing.load (std::memory_order_relaxed);
         const auto tps = transport.ticksPerSample();
-        const auto loopStart = transport.loopStart.load (std::memory_order_relaxed);
-        const auto loopEnd = transport.loopEnd.load (std::memory_order_relaxed);
-        const auto looping = playing && transport.songMode.load (std::memory_order_relaxed) && loopEnd > loopStart && tps > 0.0;
+        // Song mode: the loop region, or else the whole song (back to the start at its end, like FL)
+        const auto loop = playbackLoop (transport.songMode.load (std::memory_order_relaxed), transport.loopStart.load (std::memory_order_relaxed),
+                                        transport.loopEnd.load (std::memory_order_relaxed), transport.songEnd.load (std::memory_order_relaxed));
+        const auto loopStart = loop.start, loopEnd = loop.end;
+        const auto looping = playing && loop.active() && tps > 0.0;
 
         if (looping)
         {

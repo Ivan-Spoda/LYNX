@@ -2,6 +2,8 @@
 
 #include "ui/AutomationUi.h"
 #include "core/NoteTools.h"
+#include "core/FlSynths.h"
+#include "core/MidiControls.h"
 #include "ui/ToolWindow.h"
 #include "core/Slicer.h"
 #include "ui/ChannelSettings.h"
@@ -65,6 +67,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::slayer: return "FL Slayer";
         case InstrumentKind::fruitydance: return "Fruity Dance";
         case InstrumentKind::directwave: return "DirectWave";
+        case InstrumentKind::midiOut: return "MIDI Out";
     }
     return "?";
 }
@@ -81,7 +84,8 @@ juce::String instrumentLabel (InstrumentKind k)
         case InstrumentKind::synth: return tr ("Synth");
         case InstrumentKind::sampler: return tr ("Sampler");
         case InstrumentKind::audioClip: return tr ("Audio clip");
-        case InstrumentKind::controller: return tr ("Controller");
+        case InstrumentKind::controller: return tr ("Envelope Controller");
+        case InstrumentKind::midiOut: return tr ("MIDI Out");
         default: return instrumentName (k);
     }
 }
@@ -434,7 +438,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
             continue;
         }
 
-        if (showsNotePreview (pattern, row)) // piano-roll notes: a miniature instead of the step buttons
+        if (showsNotePreview (pattern, row, pianoRollView)) // piano-roll notes: a miniature instead of the step buttons
         {
             paintNotePreview (g, row, pattern, channel.colour);
             continue;
@@ -1117,6 +1121,17 @@ void ChannelRackComponent::applyLane (const juce::MouseEvent& e)
     setLaneValue (step, value);
 }
 
+void ChannelRackComponent::setPianoRollView (bool on)
+{
+    if (pianoRollView == on)
+        return;
+    pianoRollView = on;
+    repaint();
+
+    if (onFilterChanged) // the title's switches follow
+        onFilterChanged();
+}
+
 void ChannelRackComponent::toggleGraphLanes()
 {
     graphLanes = ! graphLanes;
@@ -1503,7 +1518,7 @@ void ChannelRackComponent::mouseDown (const juce::MouseEvent& e)
             const auto step = (e.x - gridLeft()) / stepWidth;
             const auto& pattern = song.patterns[(std::size_t) song.currentPattern];
 
-            if (showsNotePreview (pattern, row)) // the miniature opens the Piano Roll (steps would break the melody)
+            if (showsNotePreview (pattern, row, pianoRollView)) // the miniature opens the Piano Roll (steps would break the melody)
             {
                 if (! e.mods.isPopupMenu())
                 {
@@ -1707,7 +1722,7 @@ ui::Hint ChannelRackComponent::hintAt (juce::Point<int> p)
             h.text = name + " - " + tr ("Select: [LMB] one  [Ctrl]+[LMB] or [RMB] add/remove  [Shift]+[LMB] range  [LMB] drag range  [RMB] drag adds  [2xLMB] all  [Alt]+[Up]/[Down] moves the selection");
             break;
         case Area::grid:
-            if (! song.patterns.empty() && showsNotePreview (song.patterns[(std::size_t) song.currentPattern], row))
+            if (! song.patterns.empty() && showsNotePreview (song.patterns[(std::size_t) song.currentPattern], row, pianoRollView))
                 h.text = name + " - " + tr ("Piano Roll notes: [LMB] opens them in the Piano Roll");
             else
                 h.text = name + " - " + tr ("Steps: [LMB] drag draws (starting on a lit step erases)  [RMB] drag erases");
@@ -1739,7 +1754,7 @@ void ChannelRackComponent::applyPaint (const juce::MouseEvent& e)
 
     if (row < 0 || row >= (int) song.channels.size() || step < 0 || step >= numSteps() || e.x < stickyX + gridLeft()
         || song.channels[(std::size_t) row].instrument == InstrumentKind::audioClip
-        || showsNotePreview (song.patterns[(std::size_t) song.currentPattern], row)) // drag-paint skips note rows
+        || showsNotePreview (song.patterns[(std::size_t) song.currentPattern], row, pianoRollView)) // drag-paint skips note rows
         return;
 
     if (row == lastPaintedRow && step == lastPaintedStep)
@@ -2021,6 +2036,30 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
             add (c);
         });
 
+    menu.addSeparator();
+    // built-in controllers (round 133, issue #3): no sound of their own
+    menu.addItem (tr ("Envelope Controller"), [this, add] {
+        ChannelDef c;
+        c.name = tr ("Envelope Controller").toStdString();
+        c.instrument = InstrumentKind::controller;
+        c.controllerState = writeEnvelopeController (defaultEnvelopeController());
+        const auto added = add (c);
+        openChannelSettings (engine, added);
+    });
+    menu.addItem (tr ("MIDI Out"), [this, add] {
+        ChannelDef c;
+        c.name = "MIDI Out";
+        c.instrument = InstrumentKind::midiOut;
+        midictl::MidiOutSettings settings;
+        // FL gives each new MIDI Out the next MIDI channel, skipping the drum channel 10
+        int count = 0;
+        for (const auto& ch : engine.getSong().channels)
+            count += ch.instrument == InstrumentKind::midiOut;
+        settings.channel = count % 15 >= 9 ? count % 15 + 1 : count % 15;
+        midictl::writeMidiOut (c.pluginState, settings);
+        const auto added = add (c);
+        openChannelSettings (engine, added);
+    });
     menu.addSeparator();
 
     if (insertAt < 0)

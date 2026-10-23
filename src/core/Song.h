@@ -72,7 +72,9 @@ enum class InstrumentKind : std::uint8_t
     drumaxx,    // FL's Drumaxx engine (REA_rodada67 §6–§9): the plugin's raw saved state ("SSLF" stream) in ChannelDef::pluginState
     slayer,     // FL Slayer (REA_rodada68 §2–6): raw saved state in pluginState, the user's Slayer_Engine.dll in samplePath
     fruitydance, // Fruity Dance (REA_rodada68 §8): a visual plugin (dancing character) that keeps its state and makes no sound
-    directwave  // DirectWave (REA_rodada72): raw saved state in pluginState, one zone per zone of the played program, sample formats in modelParams
+    directwave, // DirectWave (REA_rodada72): raw saved state in pluginState, one zone per zone of the played program, sample formats in modelParams
+    midiOut     // FL's MIDI Out (REA_rodada16 §1, REA_rodada133 §4): no sound; its notes and MIDI controls go to the plugins whose
+                // MIDI input port is its port (PluginRef::midiInPort). FL's state (channel @4, port @24) in pluginState
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
@@ -102,10 +104,14 @@ struct PluginRef
     // FL wrapper processing options (REA_rodada118 Part B), saved with the project:
     bool fixedBuffers = false;    // "Use fixed size buffers": constant block length (the device buffer), + that latency
     bool separateProcess = false; // "Make bridged": this plugin runs in its own process even with the global option off
+    // The wrapper's "MIDI input port" (0…255; −1 = none): the notes / controls of the MIDI Out channels on that port
+    // reach this plugin (FL: Plugin wrapper settings › MIDI › Input port)
+    int midiInPort = -1;
 
     bool operator== (const PluginRef& o) const
     {
-        return id == o.id && state == o.state && foreign == o.foreign && fixedBuffers == o.fixedBuffers && separateProcess == o.separateProcess;
+        return id == o.id && state == o.state && foreign == o.foreign && fixedBuffers == o.fixedBuffers && separateProcess == o.separateProcess
+               && midiInPort == o.midiInPort;
     }
 };
 
@@ -163,6 +169,8 @@ struct SamplerSettings
     float cutoff = 20000.0f;   // channel filter (Hz); low-pass at 20 kHz with no resonance = off
     float resonance = 0.0f;    // 0..1
     int filterType = 0;        // 0 low-pass, 1 band-pass, 2 high-pass, 3 band-stop
+    float gainDb = 0.0f;       // the Sampler's Gain knob (dB, -24..+24): a level boost/cut of the sample before the
+                               // channel volume (FL's Sampler has none: its closest is the "Normalize" precomputed effect)
     ModEnvelope filterEnv;     // shifts the cutoff (octaves)
     ModEnvelope pitchEnv;      // shifts the pitch (semitones)
     std::array<ChannelLfo, lfoTargets> lfo {}; // per LfoTarget
@@ -395,7 +403,8 @@ enum class EffectKind : std::uint8_t
     prismMultiband,  // LYNX's Prism Multiband (REA_rodada108, core/DynamicsSuite.h): 4-band dynamics
     sentryGate,      // LYNX's Sentry Gate (REA_rodada108, core/DynamicsSuite.h): gate / expander
     quellDenoiser,   // LYNX's Quell Denoiser (REA_rodada119, core/VoiceTools.h): one-knob multiband noise suppressor
-    geminiDoubler    // LYNX's Gemini Doubler (REA_rodada119, core/VoiceTools.h): two pitch-shifted delay voices
+    geminiDoubler,   // LYNX's Gemini Doubler (REA_rodada119, core/VoiceTools.h): two pitch-shifted delay voices
+    formulaController // FL's Formula Controller (REA_rodada133, core/FormulaController.h): no sound; output = formula of a, b, c
 };
 
 constexpr int maxEffectParams = 96; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches); Facet EQ 88 (round 128)
@@ -797,7 +806,7 @@ struct Song
     // First insert that no channel uses (or the last one, if all are taken).
     int nextFreeInsert() const;
 
-    // End of the last clip, rounded up to a bar (minimum 1 bar).
+    // End of the last clip, rounded up to a bar (minimum 1 bar; with no clip, the current pattern's length).
     std::int64_t songLength() const noexcept;
 
     // Removes a pattern and fixes the clips and the current index.
@@ -848,6 +857,13 @@ struct Song
 // maxEffectSlots slots run): {slot index, destination insert}. The renderer, the PDC plan and the routing order
 // all enumerate them this way.
 std::vector<std::pair<int, int>> fruitySendsOf (const Song& song, int track);
+
+// Pattern clips follow their pattern's length, like FL's: after an edit, the clips of a pattern whose length
+// changed get the new length when they had the old one and start at the pattern's start (an auto-sized clip;
+// a clip resized or cut by hand keeps its length). `before` = patternLengths (song) before the edit.
+// (Issue #4: a pattern set to 2 bars still looped 1 bar in Song mode.)
+std::vector<std::int64_t> patternLengths (const Song& song);
+void followPatternLengths (const std::vector<std::int64_t>& before, Song& song);
 
 // Copy of the song ready for export: always in song mode (the current pattern becomes a clip
 // if `wholeSong` is false or the Playlist is empty), with `tailTicks` of silence at the end
