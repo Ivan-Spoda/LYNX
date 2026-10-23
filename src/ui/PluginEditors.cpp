@@ -98,7 +98,7 @@ public:
         const auto& l = activeLayout();
         for (const auto& item : l.items) // live meters and graphs (mixing suite, LYNX Tune's pitch, round 108's dynamics): 30 Hz
             if (item.type == Item::display && item.display != nullptr
-                && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0
+                && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0
                     || std::strcmp (item.display, "pitchgraph") == 0
                     || std::strcmp (item.display, "pitchtrace") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)))
             {
@@ -274,6 +274,12 @@ public:
         }
         if (current() == nullptr || param < 0 || param >= maxEffectParams)
             return;
+        if (kind == EffectKind::echoform) // round 135w: Filter link moves the low and high cut together
+            if (const auto edits = echosuite::echoform::linkedEdit (current()->params, param, value); edits.size() > 1)
+            {
+                setParams (edits);
+                return;
+            }
         if (usesBar())
             bar.willEdit();
         engine.editSong ([t = track, s = slot, param, v = juce::jlimit (0.0f, 1.0f, value)] (Song& song) {
@@ -1464,6 +1470,11 @@ public:
             dot (param01 ("Direct pan"), param01 ("Direct gain"), param01 ("Direct") >= 0.5f, colour::textPrimary, "D");
             dot (param01 ("V1 pan"), param01 ("V1 gain"), param01 ("V1 on") >= 0.5f, curveColour, "1");
             dot (param01 ("V2 pan"), param01 ("V2 gain"), param01 ("V2 on") >= 0.5f, curveColour.withRotatedHue (0.12f), "2");
+            // round 135w: voices 3 and 4 (shown when on)
+            if (param01 ("V3 on") >= 0.5f)
+                dot (param01 ("V3 pan"), param01 ("V3 gain"), true, curveColour.withRotatedHue (0.24f), "3");
+            if (param01 ("V4 on") >= 0.5f)
+                dot (param01 ("V4 pan"), param01 ("V4 gain"), true, curveColour.withRotatedHue (0.36f), "4");
         }
         else if (id == "geminimap") // Gemini Doubler: each voice's delay (across, 0 … 100 ms) against its detune (up, ±100 c)
         {
@@ -1475,12 +1486,14 @@ public:
             for (int k = 0; k <= 5; ++k)
                 g.drawText (juce::String (k * 20), juce::Rectangle<float> (inner.getX() + inner.getWidth() * (float) k / 5.0f - 12.0f * s, inner.getBottom() - 11.0f * s, 24.0f * s, 10.0f * s),
                             juce::Justification::centred, false);
-            for (int k = 0; k < 2; ++k)
+            for (int k = 0; k < 4; ++k) // round 135w: four voices (3 and 4 only when on)
             {
-                const juce::String pre = k == 0 ? "V1 " : "V2 ";
+                const juce::String pre = "V" + juce::String (k + 1) + " ";
+                if (k >= 2 && param01 ((pre + "on").toRawUTF8()) < 0.5f)
+                    continue;
                 const auto x = inner.getX() + inner.getWidth() * param01 ((pre + "delay").toRawUTF8());
                 const auto y = inner.getBottom() - inner.getHeight() * param01 ((pre + "detune").toRawUTF8());
-                const auto col = k == 0 ? curveColour : curveColour.withRotatedHue (0.12f);
+                const auto col = curveColour.withRotatedHue (0.12f * (float) k);
                 g.setColour ((param01 ((pre + "on").toRawUTF8()) >= 0.5f ? col : colour::textDisabled));
                 // the LFO's reach on the pitch as a bar through the dot
                 const auto depth = std::abs (param01 ((pre + "depth").toRawUTF8()) - 0.5f) * 2.0f * inner.getHeight();
@@ -1741,8 +1754,10 @@ public:
         {
             // the originals' level meters (SSL E-Channel's IN / OUT meter, RComp's input and output, Doubler's output)
             const auto fracOf = [] (float linear) { return juce::jlimit (0.0f, 1.0f, (20.0f * std::log10 (juce::jmax (1e-6f, linear)) + 48.0f) / 48.0f); };
-            ioMeters[0].update (fracOf (liveMeter (2)), 0.02f);
-            ioMeters[1].update (fracOf (liveMeter (3)), 0.02f);
+            const auto base = item.steps > 0 ? item.steps : 2; // round 135w: the engine's meter outputs (LYNX Tune: 3 / 4)
+            ioMeters[0].update (fracOf (liveMeter (base)), 0.02f);
+            ioMeters[1].update (fracOf (liveMeter (base + 1)), 0.02f);
+            ioClip = ioClip || liveMeter (base + 1) >= 0.999f; // round 135w: the clip lamp (Doubler's), click to reset
             const auto labelH = 13.0f * s, readH = 13.0f * s;
             auto area = r.reduced (2.0f * s);
             const auto top = area.removeFromTop (labelH), bottom = area.removeFromBottom (readH);
@@ -1766,6 +1781,12 @@ public:
                 const auto column = juce::Rectangle<float> (bar.getX() - 4.0f * s, 0.0f, bar.getWidth() + 8.0f * s, 0.0f);
                 g.setColour (colour::textSecondary);
                 g.setFont (font (juce::jmax (7.0f, 8.5f * s), true));
+                if (k == 1 && ioClip) // round 135w: the output clipped since the last click
+                {
+                    g.setColour (juce::Colour (0xffe5383b));
+                    g.fillRoundedRectangle (column.withY (top.getY()).withHeight (labelH).reduced (4.0f * s, 1.0f * s), radius::sm);
+                    g.setColour (colour::textPrimary);
+                }
                 g.drawText (caps (tr (names[k])), column.withY (top.getY()).withHeight (labelH), juce::Justification::centred, false);
                 const auto peakDb = ioMeters[(std::size_t) k].peak * 48.0f - 48.0f;
                 g.setColour (peakDb > -0.1f ? juce::Colour (0xffe5383b) : colour::textPrimary);
@@ -1773,6 +1794,48 @@ public:
                 g.drawText (ioMeters[(std::size_t) k].peak > 0.001f ? juce::String (peakDb, 1) : juce::String ("-inf"),
                             column.withY (bottom.getY()).withHeight (readH), juce::Justification::centred, false);
             }
+            return;
+        }
+        else if (id == "limitpill") // round 135w: the output limiter's activity pill (RComp's), lit while it limits
+        {
+            const auto active = liveMeter (4) > 0.001f;
+            g.setColour (active ? juce::Colour (0xffe5383b) : colour::bg3);
+            g.fillRoundedRectangle (r.reduced (1.0f * s), r.getHeight() * 0.5f);
+            return;
+        }
+        else if (id == "outmeter") // round 135w: an output peak meter with a clip lamp and the highest peak (click: reset)
+        {
+            // H-Delay's output meter (0 … −48 dB) and peak lamp, DeEsser's output meter (−30 … 0, `steps` = 30)
+            const auto range = (float) (item.steps > 0 ? item.steps : 48);
+            const auto peakNow = liveMeter (3);
+            const auto fracOf = [range] (float linear) { return juce::jlimit (0.0f, 1.0f, (20.0f * std::log10 (juce::jmax (1e-6f, linear)) + range) / range); };
+            outMeter.update (fracOf (peakNow), 0.02f);
+            outMax = juce::jmax (outMax, peakNow);
+            outClip = outClip || peakNow >= 0.999f;
+            const auto lampH = 10.0f * s, readH = 13.0f * s;
+            auto area = r.reduced (2.0f * s);
+            const auto lamp = area.removeFromTop (lampH).withSizeKeepingCentre (juce::jmin (area.getWidth(), 16.0f * s), lampH - 2.0f * s);
+            area.removeFromTop (2.0f * s);
+            const auto bottom = area.removeFromBottom (readH);
+            g.setColour (outClip ? juce::Colour (0xffe5383b) : colour::bg3);
+            g.fillRoundedRectangle (lamp, radius::sm);
+            const auto scaleW = juce::jmin (16.0f * s, area.getWidth() * 0.45f);
+            auto bar = area.withTrimmedLeft (scaleW).reduced (2.0f * s, 0.0f);
+            g.setFont (font (juce::jmax (6.5f, 7.5f * s)));
+            const int stepDb = range > 36.0f ? 12 : 6;
+            for (int db = 0; db >= -(int) range; db -= stepDb)
+            {
+                const auto y = bar.getY() + bar.getHeight() * (float) -db / range;
+                g.setColour (colour::gridBeat);
+                g.drawHorizontalLine ((int) y, bar.getX(), bar.getRight());
+                g.setColour (colour::textSecondary);
+                g.drawText (juce::String (db), juce::Rectangle<float> (area.getX(), y - 5.0f * s, scaleW - 1.0f * s, 10.0f * s), juce::Justification::centredRight, false);
+            }
+            skin::meter (g, bar, outMeter.level, outMeter.peak, true);
+            const auto maxDb = 20.0f * std::log10 (juce::jmax (1e-6f, outMax));
+            g.setColour (maxDb > -0.1f ? juce::Colour (0xffe5383b) : colour::textPrimary);
+            g.setFont (font (juce::jmax (7.0f, 8.5f * s)));
+            g.drawText (outMax > 1e-5f ? juce::String (maxDb, 1) : juce::String ("-inf"), bottom, juce::Justification::centred, false);
             return;
         }
         else if (id == "taptempo") // round 129: a tap pad (H-Delay's TAP): tap twice or more to set the delay time
@@ -2472,6 +2535,20 @@ public:
             repaint();
             return;
         }
+        if (item.type == Item::display && juce::String (item.display) == "iometer") // round 135w: reset the peaks and the clip lamp
+        {
+            ioMeters = {};
+            ioClip = false;
+            repaint();
+            return;
+        }
+        if (item.type == Item::display && juce::String (item.display) == "outmeter") // round 135w: reset the peak and the clip lamp
+        {
+            outMax = 0.0f;
+            outClip = false;
+            repaint();
+            return;
+        }
         if (item.type == Item::display && juce::String (item.display) == "taptempo") // round 129: the tap pad
         {
             const auto now = juce::Time::getMillisecondCounter();
@@ -2845,7 +2922,11 @@ public:
         if (item.type == Item::display && juce::String (item.display) == "taptempo")
             return { tr ("Tap tempo: click in time (two taps or more) to set the delay"), tapBpm > 0.0 ? juce::String (tapBpm, 1) + " BPM" : juce::String(), false, false };
         if (item.type == Item::display && juce::String (item.display) == "iometer")
-            return { tr ("Input and output level (peak, dBFS); the numbers hold the highest peak"), {}, false, false };
+            return { tr ("Input and output level (peak, dBFS); the numbers hold the highest peak; OUT turns red when the output clips; click to reset"), {}, false, false };
+        if (item.type == Item::display && juce::String (item.display) == "limitpill")
+            return { tr ("Output limiter: lit while it keeps the output under 0 dBFS"), {}, false, false };
+        if (item.type == Item::display && juce::String (item.display) == "outmeter")
+            return { tr ("Output level (peak, dBFS): the lamp lights when the output clips, the number holds the highest peak; click to reset"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "vusel")
             return { tr ("VU display: what the meter shows (input level, gain reduction, output level)"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "xy")
@@ -3043,7 +3124,7 @@ private:
                     pitchHistory.erase (pitchHistory.begin(), pitchHistory.begin() + (std::ptrdiff_t) (pitchHistory.size() - pitchHistoryLength));
                 repaint (rectOf (item).getSmallestIntegerContainer());
             }
-            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)) && visible (item))
+            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)) && visible (item))
             {
                 history = history || std::strcmp (item.display, "grhistory") == 0;
                 repaint (rectOf (item).getSmallestIntegerContainer());
@@ -3094,6 +3175,10 @@ private:
     int crossoverDrag = -1;    // the crossover parameter being dragged on a band display
     float vuNeedle = 0.0f;     // the VU display's needle (dB below 0 VU, with inertia)
     std::array<skin::Ballistics, 2> ioMeters {};
+    bool ioClip = false;         // the "iometer" display's clip lamp (round 135w)
+    skin::Ballistics outMeter;   // the "outmeter" display (round 135w): level, highest peak since the last click, clip lamp
+    float outMax = 0.0f;
+    bool outClip = false;
     juce::uint32 lastTap = 0;          // the tap pad (round 129)
     std::vector<double> tapIntervals;
     double tapBpm = 0.0; // the "iometer" display: input and output (round 129)

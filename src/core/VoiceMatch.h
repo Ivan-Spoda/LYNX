@@ -143,6 +143,10 @@ struct Settings
 {
     double thresholdDb = -15.0, ratio = 3.0, attackMs = 0.5, releaseMs = 160.0, gainDb = 0.0;
     double mix = 1.0, trimDb = 0.0; // parallel mix (the dry path is delayed with the wet one) and the trim after it
+    // round 135w (the reference's switches; the fit above is ARC + Electro + Warm, her state): Manual = one release
+    // time (no program-dependent slow path), Opto = the slow path's release curve inverted (slower near 0 dB of
+    // reduction), Smooth = without Warm's extra reduction (ratio as shown) [model: laws not measured yet]
+    bool manual = false, opto = false, smooth = false;
 };
 constexpr int lookahead = 64; // samples at 48 kHz (the original's measured delay, scaled with the rate)
 

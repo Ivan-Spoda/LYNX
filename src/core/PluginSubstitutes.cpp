@@ -1141,6 +1141,16 @@ int translateWavesTune (const std::vector<std::uint8_t>& state, EffectSlot& slot
         slot.params[lynxtune::humanize] = 0.0f;
         n += 2;
     }
+    // round 135w: Speed is shown as saved; it only acts (Link off) where the trial showed an effect (below ~5 ms)
+    if (const auto speed = wavesValue (rw, 20); speed && *speed > 0.0)
+    {
+        slot.params[lynxtune::speed] = lynxtune::speedValue (*speed);
+        slot.params[lynxtune::speedLink] = *speed < 5.0 ? 0.0f : 1.0f;
+        ++n;
+    }
+    // RealWorld 22 = 100 in every state of her corpus, Correction % by its default [model]
+    if (const auto amount = wavesValue (rw, 22); amount && *amount >= 1.0 && *amount <= 100.0)
+        slot.params[lynxtune::correction] = (float) (*amount / 100.0);
     return n;
 }
 
@@ -1202,6 +1212,12 @@ int translateWavesRComp (const std::vector<std::uint8_t>& state, EffectSlot& slo
     slot.params[6] = (float) std::clamp (wavesValue (rw, 26).value_or (100.0) / 100.0, 0.0, 1.0); // mix %
     slot.params[7] = linNorm (wavesValue (rw, 27).value_or (0.0), -18.0, 18.0);                  // trim dB
     slot.params[8] = 1.0f;                                                                         // vintage voicing
+    // round 135w: ARC / Manual (17), Electro / Opto (22), Warm / Smooth (16) [EXEC round 113 list]; the output limiter
+    // the reference always has
+    slot.params[9] = wavesValue (rw, 17).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
+    slot.params[10] = wavesValue (rw, 22).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
+    slot.params[11] = wavesValue (rw, 16).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
+    slot.params[12] = 1.0f;
     return 6;
 }
 
@@ -1364,17 +1380,27 @@ int translateWavesHDelay (const std::vector<std::uint8_t>& state, EffectSlot& sl
     if (slot.kind != EffectKind::echoform || ! sync || ! fb)
         return 0;
     auto& p = slot.params;
-    const bool pingPong = wavesValue (rw, 10).value_or (1.0) >= 0.5;
+    // round 135w: [EXEC] round 119's probe: 1 = PingPong, 2 = Stereo (2 used to read as ping-pong)
+    const auto ppValue = wavesValue (rw, 10).value_or (1.0);
+    const bool pingPong = ppValue >= 0.5 && ppValue < 1.5;
     const bool analog = wavesValue (rw, 23).value_or (2.0) >= 0.5;
     p[e::style] = e::styleValue (pingPong ? e::Style::pingPong : e::Style::single);
     p[e::pairs] = pingPong ? 1.0f : 0.0f;
     // round 129: phase L / R (RealWorld 8 / 9, round 119 §2 [EXEC]; 1 = inverted)
     p[e::phaseL] = wavesValue (rw, 8).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
     p[e::phaseR] = wavesValue (rw, 9).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
+    // round 135w: the ping-pong's start side (RealWorld 45: 0 left, 1 right — round 119 probe [EXEC])
+    p[e::startSide] = wavesValue (rw, 45).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
     const auto note = (int) std::lround (wavesValue (rw, 4).value_or (13.0));
-    if (*sync >= 0.5 && *sync < 1.5 && note >= 0 && note <= 19)
+    const auto ownTempo = wavesValue (rw, 2);
+    // round 135w: H-Delay's own BPM (sync 0) keeps its note and tempo (was folded into milliseconds)
+    const bool ownBpmSync = *sync < 0.5 && ownTempo && *ownTempo >= 30.0 && *ownTempo <= 300.0;
+    p[e::tempoSource] = ownBpmSync ? 1.0f : 0.0f;
+    if (ownBpmSync)
+        p[e::ownBpm] = e::bpmValue (*ownTempo);
+    if ((ownBpmSync || (*sync >= 0.5 && *sync < 1.5)) && note >= 0 && note <= 19)
     {
-        // host tempo: the note follows the project's tempo
+        // host tempo (or its own): the note follows that tempo
         const auto index = note >= 18 ? note - 12 : note / 3;  // 1/64 … 1/2, 1 bar, 2 bars
         const auto kind = note >= 18 ? 1 : (note % 3 == 0 ? 3 : (note % 3 == 1 ? 1 : 2)); // triplet, straight, dotted
         for (const auto side : { e::syncL, e::syncR })
@@ -1469,20 +1495,24 @@ int translateWavesDoubler (const std::vector<std::uint8_t>& state, EffectSlot& s
     p[g::highOn] = flag (14, 0.0);
     p[g::feedbackCut] = g::freqValue (at (15, 16.0));
     p[g::range] = flag (18, 0.0);
-    for (int v = 0; v < g::voices; ++v)
+    // round 135w: a four-voice doubler's voices 3 and 4 (blocks 46 / 56, the same layout as 26 / 36 [model]: a two-voice
+    // state carries those blocks too, so they are read only when the state names the four-voice plug-in; their source
+    // indices are not probed yet: own side)
+    const bool four = wavesPluginName (state).find ("Doubler4") != std::string::npos;
+    for (int v = 0; v < (four ? 4 : 2); ++v)
     {
         const auto b = (std::size_t) (26 + 10 * v);
         const auto param = [&] (g::VoiceParam q) -> float& { return p[(std::size_t) g::voiceParam (v, q)]; };
         param (g::vOn) = flag (b, 1.0);
         param (g::vGain) = linNorm (at (b + 1, 0.0), -48.0, 0.0);
-        param (g::vPan) = linNorm (at (b + 2, v == 0 ? -45.0 : 45.0), -45.0, 45.0);
+        param (g::vPan) = linNorm (at (b + 2, v % 2 == 0 ? -45.0 : 45.0), -45.0, 45.0);
         param (g::vOctave) = flag (b + 3, 0.0);
         param (g::vDetune) = linNorm (at (b + 4, 0.0), -100.0, 100.0);
         param (g::vDelay) = linNorm (at (b + 5, 10.0), 0.0, 100.0);
         param (g::vFeedback) = linNorm (at (b + 6, 0.0), 0.0, 100.0);
         param (g::vDepth) = linNorm (at (b + 7, 0.0), -200.0, 200.0);
         param (g::vRate) = logNorm (std::clamp (at (b + 8, 1.0), 0.1, 400.0), 0.1, 400.0);
-        param (g::vSource) = ((float) std::clamp ((int) std::lround (at (16 + (std::size_t) v, 0.0)), 0, 2) + 0.5f) / 3.0f;
+        param (g::vSource) = v >= 2 ? 1.0f / 6.0f : ((float) std::clamp ((int) std::lround (at (16 + (std::size_t) v, 0.0)), 0, 2) + 0.5f) / 3.0f;
     }
     return 33;
 }

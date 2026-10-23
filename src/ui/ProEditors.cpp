@@ -426,7 +426,8 @@ public:
     }
 
 private:
-    enum { idThreshold = 1, idFreq, idMeterThreshold, idDisplay, idExternal };
+    enum { idThreshold = 1, idFreq, idMeterThreshold, idDisplay, idExternal, idOutMeter };
+    float outPeakDb = -100.0f; // round 135w: the output meter's highest peak since the last click (DeEsser's read-out)
     static constexpr float waveH = 194.0f; // the waveform display (DISPLAY hides it and the window shrinks)
     bool displayShown() const { return v (P ("Display")) >= 0.5f; }
     // which handle of the frequency slider is being dragged: 0 = high-pass (Frequency), 1 = low-pass
@@ -447,7 +448,9 @@ private:
         return displayShown() ? bodyArea().withTrimmedRight (112.0f).withHeight (190.0f).reduced (0.0f, 4.0f)
                               : bodyArea().withTrimmedRight (112.0f).withHeight (0.0f).translated (0.0f, -4.0f);
     }
-    juce::Rectangle<float> meters() const { return { (float) getWidth() - 70.0f, headerH + 18.0f, 26.0f, bodyArea().getHeight() - 26.0f }; }
+    // round 135w: the input meter moved left to make room for the output meter (In | GR | Out)
+    juce::Rectangle<float> meters() const { return { (float) getWidth() - 100.0f, headerH + 18.0f, 26.0f, bodyArea().getHeight() - 26.0f }; }
+    juce::Rectangle<float> outMeter() const { return meters().translated (56.0f, 0.0f).withWidth (16.0f).withTrimmedTop (12.0f).withTrimmedBottom (16.0f); }
     juce::Rectangle<float> freqTrack() const { return { 34.0f, wave().getBottom() + 182.0f, 250.0f, 24.0f }; }
 
     double thresholdDb() const { return mixsuite::hush::thresholdDb (v (pThr())); }
@@ -515,6 +518,8 @@ private:
         out.push_back (la);
         // the meter's threshold arrow
         out.push_back (custom ({ meters().getX() - 12.0f, meterY ((float) thresholdDb()) - 7.0f, 12.0f, 14.0f }, idMeterThreshold, pThr(), tr ("Threshold: drag up or down")));
+        // round 135w: the output meter (−30 … 0 dBFS, the reference's), its peak read-out and clip lamp: click to reset
+        out.push_back (custom (outMeter().expanded (4.0f, 28.0f), idOutMeter, -1, tr ("Output level (peak, dBFS): the lamp lights when the output clips, the number holds the highest peak; click to reset")));
         const auto b = barArea();
         const auto cy = b.getCentreY();
         out.push_back (barMenu ({ 10.0f, cy - 11.0f, 180.0f, 22.0f }, P ("Band detector"), tr ("Detection"), "High-pass|Band", { 0.0f, 1.0f }));
@@ -560,6 +565,12 @@ private:
 
     void customDown (const Ctl& c, const juce::MouseEvent& e) override
     {
+        if (c.id == idOutMeter)
+        {
+            outPeakDb = -100.0f;
+            repaint();
+            return;
+        }
         if (c.id == idExternal)
         {
             const auto* fx = current();
@@ -589,6 +600,8 @@ private:
 
     void customDrag (const Ctl& c, const juce::MouseEvent& e) override
     {
+        if (c.id == idOutMeter)
+            return;
         if (c.id == idFreq)
         {
             const auto tr_ = freqTrack();
@@ -746,6 +759,18 @@ private:
             g.drawText (juce::String ((int) db), juce::Rectangle<float> (m.getX() - 34.0f, meterY (db) - 6.0f, 20.0f, 12.0f), juce::Justification::centredRight, false);
         caption (g, { m.getX() - 6.0f, m.getY() - 16.0f, 38.0f, 14.0f }, tr ("In"));
         caption (g, { grR.getX() - 10.0f, m.getY() - 16.0f, 34.0f, 14.0f }, "GR");
+        // round 135w: the output meter, −30 … 0 dBFS, a clip lamp above it and the highest peak under it
+        const auto o = outMeter();
+        outPeakDb = juce::jmax (outPeakDb, newest.out);
+        drawMeter (g, o, newest.out, -30.0f, colour::meterLow.withAlpha (0.85f));
+        const auto lamp = juce::Rectangle<float> (o.getX(), o.getY() - 10.0f, o.getWidth(), 6.0f);
+        g.setColour (outPeakDb > -0.1f ? juce::Colour (0xffe5383b) : colour::bg1);
+        g.fillRoundedRectangle (lamp, 2.0f);
+        caption (g, { o.getX() - 10.0f, m.getY() - 16.0f, 36.0f, 14.0f }, tr ("Out"));
+        g.setFont (font (type::caption));
+        g.setColour (outPeakDb > -0.1f ? juce::Colour (0xffe5383b) : colour::textSecondary);
+        g.drawText (outPeakDb > -99.0f ? juce::String (outPeakDb, 1) : juce::String ("-inf"), juce::Rectangle<float> (o.getX() - 10.0f, o.getBottom() + 2.0f, o.getWidth() + 20.0f, 12.0f),
+                    juce::Justification::centred, false);
     }
 };
 

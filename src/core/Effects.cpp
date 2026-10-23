@@ -186,7 +186,26 @@ public:
     float controlOutput (int k) const noexcept override
     {
         return k == 0 ? meterGr.load (std::memory_order_relaxed) : k == 2 ? meterIn.load (std::memory_order_relaxed)
-             : k == 3 ? meterOut.load (std::memory_order_relaxed) : 0.0f;
+             : k == 3 ? meterOut.load (std::memory_order_relaxed) : k == 4 ? meterLimit.load (std::memory_order_relaxed) : 0.0f;
+    }
+
+    // round 135w: the reference's built-in 0 dBFS output limiter — the gain drops at once to keep every sample at or
+    // under 0 dBFS and recovers over 50 ms; meter 4 = its reduction this block (0..1 over 0..12 dB), the activity pill
+    void outputLimit (float* l, float* r, int n) noexcept
+    {
+        const auto rel = (float) (1.0 - std::exp (-1.0 / (0.05 * sampleRate)));
+        float most = 1.0f;
+        for (int i = 0; i < n; ++i)
+        {
+            const auto peak = std::max (std::abs (l[i]), std::abs (r[i]));
+            limitGain += rel * (1.0f - limitGain);
+            if (peak * limitGain > 1.0f)
+                limitGain = 1.0f / peak;
+            l[i] *= limitGain;
+            r[i] *= limitGain;
+            most = std::min (most, limitGain);
+        }
+        meterLimit.store (std::clamp (-20.0f * std::log10 (std::max (most, 1e-6f)) / 12.0f, 0.0f, 1.0f), std::memory_order_relaxed);
     }
 
     void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
@@ -205,7 +224,14 @@ public:
             v.gainDb = compMakeupDb (params[4]);
             v.mix = std::clamp ((double) params[6], 0.0, 1.0);
             v.trimDb = -18.0 + 36.0 * std::clamp ((double) params[7], 0.0, 1.0);
+            v.manual = params[9] >= 0.5f;
+            v.opto = params[10] >= 0.5f;
+            v.smooth = params[11] >= 0.5f;
             vintage.process (l, r, n, v);
+            if (params[12] >= 0.5f)
+                outputLimit (l, r, n);
+            else
+                meterLimit.store (0.0f, std::memory_order_relaxed);
             for (int i = 0; i < n; ++i)
                 peakOut = std::max (peakOut, std::max (std::abs (l[i]), std::abs (r[i])));
             useSidechain = false;
@@ -268,8 +294,13 @@ public:
             l[i] = (l[i] * gain * wetMix + l[i] * (1.0f - wetMix)) * trim;
             r[i] = (r[i] * gain * wetMix + r[i] * (1.0f - wetMix)) * trim;
             maxGr = std::max (maxGr, envelopeDb);
-            peakOut = std::max (peakOut, std::max (std::abs (l[i]), std::abs (r[i])));
         }
+        if (params[12] >= 0.5f)
+            outputLimit (l, r, n);
+        else
+            meterLimit.store (0.0f, std::memory_order_relaxed);
+        for (int i = 0; i < n; ++i)
+            peakOut = std::max (peakOut, std::max (std::abs (l[i]), std::abs (r[i])));
         meterGr.store (std::clamp (maxGr / 30.0f, 0.0f, 1.0f), std::memory_order_relaxed);
         meterIn.store (std::min (peakIn, 1.0f), std::memory_order_relaxed);
         meterOut.store (std::min (peakOut, 1.0f), std::memory_order_relaxed);
@@ -283,7 +314,8 @@ public:
     }
 
 private:
-    std::atomic<float> meterGr { 0.0f }, meterIn { 0.0f }, meterOut { 0.0f };
+    std::atomic<float> meterGr { 0.0f }, meterIn { 0.0f }, meterOut { 0.0f }, meterLimit { 0.0f };
+    float limitGain = 1.0f;
     std::atomic<int> latency { 0 };
     vmatch::progcomp::Compressor vintage;
     double sampleRate = 44100.0;
@@ -2218,7 +2250,10 @@ const EffectInfo& effectInfo (EffectKind kind)
 {
     static const EffectInfo eq { "EQ", { { "Low", 0.5f }, { "Mid", 0.5f }, { "Mid freq.", 0.5f }, { "High", 0.5f }, { "Output", 0.5f } } };
     static const EffectInfo comp { "Compressor", { { "Threshold", 0.7f }, { "Ratio", 3.0f / 19.0f }, { "Attack", 0.67f }, { "Release", 0.54f }, { "Makeup", 0.0f }, { "Auto gain", 0.0f },
-                                                  { "Mix", 1.0f }, { "Trim", 0.5f }, { "Voicing", 0.0f } } }; // round 129: the RComp role's MIX and TRIM
+                                                  { "Mix", 1.0f }, { "Trim", 0.5f }, { "Voicing", 0.0f },
+                                                  // round 135w: the RComp role's switches (the vintage voicing's ARC / Electro / Warm
+                                                  // by default, as fitted) and its 0 dBFS output limiter (off: older projects unchanged)
+                                                  { "Release mode", 0.0f }, { "Release curve", 0.0f }, { "Character", 0.0f }, { "Limiter", 0.0f } } };
     static const EffectInfo delay { "Delay", { { "Time", 0.3f }, { "Feedback", 0.42f }, { "Mix", 0.3f }, { "Ping-pong", 0.0f }, { "Damping", 0.3f } } };
     static const EffectInfo reverb { "Reverb", { { "Room", 0.6f }, { "Damping", 0.5f }, { "Width", 1.0f }, { "Mix", 0.25f }, { "Dry", 1.0f },
                                                  { "Low cut", 0.0f }, { "High cut", 1.0f }, { "Predelay", 0.0f } } };
@@ -2634,6 +2669,10 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 case 6: std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f); break;
                 case 7: std::snprintf (text, sizeof (text), "%+.1f dB", -18.0f + 36.0f * v); break;
                 case 8: return v >= 0.5f ? "vintage program" : "classic";
+                case 9: return v >= 0.5f ? "manual" : "ARC";
+                case 10: return v >= 0.5f ? "opto" : "electro";
+                case 11: return v >= 0.5f ? "smooth" : "warm";
+                case 12: return v >= 0.5f ? "on" : "off";
                 default: std::snprintf (text, sizeof (text), "+%.1f dB", compMakeupDb (v)); break;
             }
             return text;

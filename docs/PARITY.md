@@ -365,6 +365,18 @@ range buttons — see its table). Our host still shows their demo banner.
 Scores "after" = with round 129's changes (below). The biggest single gap was the frame every original has around its
 controls — undo / redo, A / B, presets — which none of LYNX's engines had; it is now in every LYNX engine editor.
 
+**Round 135w (Waves roles + Echoform; `docs/analise/REA_rodada135w.md`)** — config / design after round 135w:
+
+| LYNX engine | Original | Config 129 → 135w | Design 129 → 135w | What changed |
+|---|---|---|---|---|
+| Compressor (stand-in) | Renaissance Compressor | 5 → 8 | 5 → 7 | ARC / Manual, Electro / Opto, Warm / Smooth, output limiter + pill, all translated |
+| Hush De-esser | DeEsser | 8 → 9 | 5 → 6 | output meter with clip lamp / peak hold, the reference's five frequencies as LYNX presets |
+| Gemini Doubler | Doubler2 / Doubler4 | 8 / 5 → 9 / 8 | 7 → 7 | voices 3–4 (page), modulation RESET, clip lamp |
+| Echoform | H-Delay | 7 → 9 | 5 → 7 | own BPM sync, ping-pong start side, filter link, output meter + clip lamp |
+| LYNX Tune | Waves Tune Real-Time | 5 → 8 | 5 → 6 | "Real-time" page: Speed + Link, tolerance cents / time, vibrato on / depth, correction %, IN / OUT meters |
+| Echoform | ValhallaDelay | 7 → 8 | 7 → 7 | Quad taps A–D, Repeat / Swell |
+| Echoform | EchoBoy / PrimalTap | 5 → 7 | 5 → 6 | Groove / Feel (measured on the trial), Accent, Prime numbers, X-feed, Balance, Freeze, own BPM |
+
 ## Round 129: what changed
 
 - **Every LYNX engine editor** (the generic panels and the display-first editors) has the originals' header: undo / redo
@@ -423,24 +435,24 @@ Trial on this PC: yes (the new parity129 capture is missing; the w119 capture wa
 
 | Original feature | Original (range / default / where) | LYNX now | Status | Note |
 |---|---|---|---|---|
-| Header: Undo / Redo | WaveSystem bar, top left | song-level Ctrl+Z only | ❌ | |
-| Header: Setup A/B + A→B copy | bar ("A→B", "Setup A") | none | ❌ | |
-| Header: preset name + Load menu | bar ("A: Start Me Up"), factory presets by CLA | presets box lists FL presets only, "(no preset)" | ❌ | no factory or user presets for Glow |
-| Header: Save | bar | none | ❌ | |
+| Header: Undo / Redo | WaveSystem bar, top left | song-level Ctrl+Z only | ✅ | round 129's preset bar (per-plugin undo / redo) |
+| Header: Setup A/B + A→B copy | bar ("A→B", "Setup A") | none | ✅ | round 129's preset bar: A / B and copy, saved with the project |
+| Header: preset name + Load menu | bar ("A: Start Me Up"), factory presets by CLA | presets box lists FL presets only, "(no preset)" | ✅ | no factory or user presets for Glow; round 129: LYNX factory presets for Glow + user presets |
+| Header: Save | bar | none | ✅ | round 129: Save preset… (.lynxpreset) |
 | Header: ≡ menu (help, resize) | bar, right | options menu (Presets, Reset, Bypass); window resizable | ⚠️ | |
 | Bypass | VST param | slot LED / options menu | ✅ | |
 | GAIN knob | 0–100 scale, default **40** (≈ +8 dB below threshold), left of the VU; nonlinear law (20 → −18.5 dB, 40 → +8, 80 → +31.8) | "Gain" 0…+30 dB linear, default **+0.0 dB**, big knob on the left | ⚠️ | right place; different unit (dB, not 0–100), different range (no attenuation below unity), different default (CLA 40 ≈ +8 dB vs 0 dB) |
 | PEAK REDUCTION knob | 0–100, default **46**, right of the VU, nonlinear | "Peak reduction" 0–100 (side chain −20…+40 dB linear), default **0** = off, big knob on the right | ⚠️ | right place and right scale; the default does no levelling, and the taper differs (the translator uses 0.40 + 0.021·(knob − 40)) |
 | COMPRESS / LIMIT switch | toggle, left side under the logo; default Compress | "Compress | Limit" tabs under the VU | ✅ | different place (centre, not left) but easy to find; Limit γ = 9 (~10:1) vs about 100:1 on the hardware |
 | VU meter | analog VU in the centre; −20…+3 scale, red above 0 | analog VU in the centre, same −20…+3 scale | ✅ | good match |
-| VU DISPLAY selector | rotary knob INPUT / **GR** (default) / OUTPUT, top right | hidden: clicking the meter switches GR ↔ Output; no Input | ⚠️ | no visible selector, and Input is missing; add a 3-position switch beside the VU |
+| VU DISPLAY selector | rotary knob INPUT / **GR** (default) / OUTPUT, top right | hidden: clicking the meter switches GR ↔ Output; no Input | ✅ | no visible selector, and Input is missing; add a 3-position switch beside the VU; round 129: INPUT / GR / OUTPUT selector beside the VU |
 | VU readout text | none (needle only) | "Gain reduction −x.x dB" or "Output x VU" inside the face | ➕ | |
 | VU calibration | 0 VU = −18 dBFS (spec, unverified) | output mode 0 VU = −18 dBFS | ✅ | |
 | HI FREQ (side-chain HF emphasis) | knob 0–100, default **50** (≈ +5–6 dB detector sensitivity at 6 kHz), with a "FLAT" mark; bottom strip | "Emphasis" 0–100 % (+0…+10 dB shelf at 2.5 kHz in the detector), default **0 %**, small knob under the switch | ⚠️ | the function exists; different default (CLA's default is not flat), name and law; not translated (fixed to 0) |
 | ANALOG | 3 buttons 50Hz / 60Hz / OFF, bottom left; default 60 Hz per a 3rd-party summary, Off in her state | none | ❌ | needs DSP (hum + noise); low priority, Off is the common choice |
 | MIX | knob 0–100 %, default 100, bottom strip | "Mix" 0–100 %, default 100 %, small knob | ✅ | |
-| TRIM | knob −18…+18 dB, default 0, bottom right (after the mix) | none (Gain is pre-mix and 0…+30 only) | ❌ | new parameter (output trim ±18 dB) |
-| AUTO MAKEUP | toggle under the VU-display knob, right; default Off | none | ❌ | new parameter: makeup tied to peak reduction |
+| TRIM | knob −18…+18 dB, default 0, bottom right (after the mix) | none (Gain is pre-mix and 0…+30 only) | ✅ | new parameter (output trim ±18 dB); round 129: Trim ±18 dB after the mix |
+| AUTO MAKEUP | toggle under the VU-display knob, right; default Off | none | ✅ | new parameter: makeup tied to peak reduction; round 129: Auto makeup toggle |
 | Mono / stereo components | separate Mono and Stereo plugins | stereo-linked engine | ⚠️ | no mono variant needed in a DAW slot |
 | Attack / release | fixed (opto cell, program dependent: about 66 ms near the knee to 4 ms deep; two-stage release 60 ms then 0.5–15 s) | fixed: fast cell 10 ms / 50 ms + slow cell 400 ms / 0.4–5 s with memory | ⚠️ | no control in either (correct), but the behaviour differs (spec §6: slow 400 ms attack and a fixed 10 ms) |
 | Static curve | γ ≈ 4.54 (≈ 4.2:1 local, 5.5:1 asymptotic) | γ = 2 (≈ 3:1) | ⚠️ | engine (spec §7) |
@@ -488,7 +500,7 @@ Trial on this PC: yes (older capture used).
 
 | Original feature | Original (range / default / where) | LYNX now | Status | Note |
 |---|---|---|---|---|
-| Header: Undo/Redo, A/B, A→B, preset Load/Save, name | WaveSystem bar | generic header, "(no preset)" | ❌ | |
+| Header: Undo/Redo, A/B, A→B, preset Load/Save, name | WaveSystem bar | generic header, "(no preset)" | ✅ | round 129's preset bar |
 | Overall layout | left = Filters + EQ (HF top → LF bottom); right = Dynamics (Compress, Expand, GR LEDs), EQ TO / DYN TO routing, Analog, Gain block with meters + Out fader | left = Filters, HF, HMF, LMF, LF, EQ curve; right = Compressor, Expander/gate, Dynamics (GR bars, routing), Gain | ✅ | same reading order and columns |
 | HPF | 16–350 Hz, 18 dB/oct, fully left = Out (default Out) | "High-pass" 16–350 Hz 3rd order, 0 = off | ✅ | |
 | LPF | 3–22 kHz, 12 dB/oct, fully left = Out | "Low-pass" 22 k→3 kHz 12 dB/oct, 0 = off | ✅ | |
@@ -501,7 +513,7 @@ Trial on this PC: yes (older capture used).
 | EQ TO: BYP | button, EQ section bypass ("hardware-flat") | "EQ in" toggle | ✅ | |
 | EQ TO: DYN S.C. (filters **and EQ** into the side chain) | button | "To sidechain" = filters only, **and it removes them from the audio** | ⚠️ | different semantics; the EQ cannot be sent to the side chain (de-essing use) |
 | DYN TO: BYP | button | "Dyn in" toggle | ✅ | |
-| DYN TO: CH OUT (dynamics post-EQ) | button, default **pre-EQ** | "EQ>Dyn \| Dyn>EQ" tabs, default **EQ>Dyn** | ⚠️ | the default order is the opposite of SSL's (the translator sets Dyn>EQ) |
+| DYN TO: CH OUT (dynamics post-EQ) | button, default **pre-EQ** | "EQ>Dyn \| Dyn>EQ" tabs, default **EQ>Dyn** | ✅ | the default order is the opposite of SSL's (the translator sets Dyn>EQ); round 129: Dyn>EQ is the default, as on the reference |
 | Comp RATIO | 1…∞, default 1 (off) | 1 + 19v² … ∞, default 1 (off) | ✅ | |
 | Comp THRESHOLD | +10…−20 dBu (= −8…−38 dBFS), default 0 dBu (−18 dBFS); clockwise = lower | −40…0 dBFS, default 0 dBFS; clockwise = higher | ⚠️ | different unit and reference, opposite direction, default 18 dB higher |
 | Comp RELEASE | 0.1–4 s, default 0.4 | 0.1–4 s, default 0.29 | ✅ | |
@@ -520,7 +532,7 @@ Trial on this PC: yes (older capture used).
 | INPUT trim | ±18 dB, knob in the Gain block | "Input" ±20 dB | ✅ | |
 | Phase Ø | button + LED | "Phase" toggle | ✅ | |
 | OUTPUT fader | fader −24…+12 dB beside the meter | "Output" knob ±20 dB | ⚠️ | knob, not a fader; different range |
-| Level meter | stereo bar meter −50…0 dBFS with an INPUT / OUTPUT selector and a numeric peak readout ("−7.2") | none | ❌ | UI (the engine already exports in/out peaks via meters.set) |
+| Level meter | stereo bar meter −50…0 dBFS with an INPUT / OUTPUT selector and a numeric peak readout ("−7.2") | none | ✅ | UI (the engine already exports in/out peaks via meters.set); round 129: the GAIN block's input / output meter with peak read-outs |
 | EQ response display | — | "Equalizer" curve | ➕ | |
 | Latency | 1 sample | 0 | ✅ | irrelevant |
 | Vocalstrip 2 (SSL Native) role | de-esser, de-ploser, 3-band EQ, compander with knee/makeup/drive, process order | Ridge at neutral defaults, no translation | ❌ | spec: translate the compander, better to LYNX Compressor/Crest |
@@ -578,28 +590,28 @@ What the trial shows (rcomp.png):
 | Original feature | Original (range / default / where) | LYNX Compressor now | Status | Note |
 |---|---|---|---|---|
 | Header: Skins menu | Light / Dark / Legacy | — | ➕/n.a. | not needed |
-| Header: Undo/Redo, A/B, A→B, Load/Save, preset name | WaveSystem bar ("A: Default Preset") | generic header, "(no preset)" | ❌ | |
+| Header: Undo/Redo, A/B, A→B, Load/Save, preset name | WaveSystem bar ("A: Default Preset") | generic header, "(no preset)" | ✅ | round 129's preset bar |
 | Threshold | −60…0 dBFS, default **0**, vertical slider integrated in the input meter | knob −60…0 dB, default **−18** | ⚠️ | range ✅; default and form differ |
 | Ratio | 0.50…50 (below 1 = expansion), default **1.0**, value box inside the GR meter | knob 1…20, default **4:1** | ⚠️ | no expansion, no 20–50:1 |
 | Gain (output) | −30…+30 dB, default 0, vertical fader on the output meter | "Makeup" 0…+24 dB | ⚠️ | no negative gain |
 | Attack | 0.5…500 ms, default 16 ms, horizontal slider | 0.1…100 ms, default 10.2 ms | ⚠️ | |
 | Release | 5…5000 ms, default 160 ms, horizontal slider | 10…1000 ms, default 120 ms | ⚠️ | |
-| ARC / Manual | toggle, bottom | none (the translator fakes ARC with a fixed 300 ms) | ❌ | engine |
-| Electro / Opto | toggle (GR-dependent release around 3 dB) | none | ❌ | engine |
-| Warm / Smooth | toggle | none | ❌ | engine |
-| Mix | 0–100 %, default 100, knob | none (only the DAW slot dry/wet) | ⚠️ | |
-| Trim | −18…+18 dB, post-limiter, knob | none | ❌ | |
-| Built-in 0 dBFS output limiter + activity indicator | always on; pill under Gain | none | ❌ | |
-| Knee | soft, starts ≈ 6 dB below the threshold (fixed) | hard knee | ❌ | engine |
-| Input meter (stereo) + peak readouts | left | none | ❌ | |
-| Gain-change meter (bipolar, +6…−12) + readout | centre, the main display | none (no live output) | ❌ | |
-| Output meter (stereo) + peak readouts | right | none | ❌ | |
-| Latency / look-ahead | 64 samples @ 48 kHz | 0 | ⚠️ | |
+| ARC / Manual | toggle, bottom | none (the translator fakes ARC with a fixed 300 ms) | ✅ | engine; round 135w: ARC / Manual switch (vintage voicing; ARC = the fitted program-dependent release, Manual = one release time [model]); translated (RW 17) |
+| Electro / Opto | toggle (GR-dependent release around 3 dB) | none | ✅ | engine; round 135w: Electro / Opto switch (Opto inverts the slow release curve [model]); translated (RW 22) |
+| Warm / Smooth | toggle | none | ✅ | engine; round 135w: Warm / Smooth switch (Smooth = ratio as shown, without Warm's extra reduction [model]); translated (RW 16) |
+| Mix | 0–100 %, default 100, knob | none (only the DAW slot dry/wet) | ✅ | round 129: Mix knob |
+| Trim | −18…+18 dB, post-limiter, knob | none | ✅ | round 129: Trim ±18 dB |
+| Built-in 0 dBFS output limiter + activity indicator | always on; pill under Gain | none | ✅ | round 135w: Limiter switch (on for translated RComp states) + the activity pill under it |
+| Knee | soft, starts ≈ 6 dB below the threshold (fixed) | hard knee | ✅ | engine; round 123: the vintage voicing (substitutes start there) has the fitted soft knee; Classic stays hard |
+| Input meter (stereo) + peak readouts | left | none | ✅ | round 129: input / output meters with peak read-outs |
+| Gain-change meter (bipolar, +6…−12) + readout | centre, the main display | none (no live output) | ⚠️ | round 129: the reduction meter with its read-out (0…−30, not bipolar) |
+| Output meter (stereo) + peak readouts | right | none | ✅ | round 129 |
+| Latency / look-ahead | 64 samples @ 48 kHz | 0 | ✅ | round 123: the vintage voicing has the measured 64-sample delay |
 | Auto gain (power-matched) | — | "Auto gain" toggle | ➕ | |
 | External side chain | — | yes (DAW side-chain routing) | ➕ | |
 | Gestures | drag, value windows accept typed values | generic contract | ✅ | |
-| Saved-state translation | — | threshold (−5 dB), ratio, attack, release (ARC → 300 ms), gain; Warm/Smooth, Electro/Opto, mix, trim not translated | ⚠️ | round 113 §3c; 0.53 dB RMS on the stairs |
-| CLA-76 (same stand-in) | Input/Output −∞…0, Attack/Release 1–7, Ratio 4/8/12/20/All, Meter In/GR/Out, Analog, Bluey/Blacky, Mix | Compressor at a fixed preset, no translation | ❌ | |
+| Saved-state translation | — | threshold (−5 dB), ratio, attack, release (ARC → 300 ms), gain; Warm/Smooth, Electro/Opto, mix, trim not translated | ✅ | round 113 §3c; 0.53 dB RMS on the stairs; round 123 / 135w: threshold, ratio, attack, release, gain, mix, trim, ARC, Electro / Opto, Warm / Smooth, limiter |
+| CLA-76 (same stand-in) | Input/Output −∞…0, Attack/Release 1–7, Ratio 4/8/12/20/All, Meter In/GR/Out, Analog, Bluey/Blacky, Mix | Compressor at a fixed preset, no translation | ✅ | round 127: CLA-76 → Crest Compressor (Bus style) fitted on her state, RealWorld list translated (input / output, attack / release 1–7, ratio buttons, mix) |
 
 **Scores:** configuration 2/10, design 1/10. A plain row of 6 knobs with no meters cannot be read as RComp.
 
@@ -669,8 +681,8 @@ Trial on this PC: yes (no screenshot this round).
 
 | Original feature | Original (range / default / where) | LYNX Hush now | Status | Note |
 |---|---|---|---|---|
-| Header: Undo/Redo, A/B, A→B, Load/Save, resize | WaveSystem bar | ProEditor header: title, slot, gesture hint only | ❌ | |
-| Factory presets | Default (5506 Hz HP Split), Male Ess 4500, Male Shh 3385, Female Ess 6779, Female Shh 5077 (all BandPass + Split) | none | ❌ | 4–5 generic-named presets (frequency + detector) would cover it |
+| Header: Undo/Redo, A/B, A→B, Load/Save, resize | WaveSystem bar | ProEditor header: title, slot, gesture hint only | ✅ | round 129's preset bar in the ProEditor header; round 128: resizable |
+| Factory presets | Default (5506 Hz HP Split), Male Ess 4500, Male Shh 3385, Female Ess 6779, Female Shh 5077 (all BandPass + Split) | none | ✅ | 4–5 generic-named presets (frequency + detector) would cover it; round 135w: "Classic split (band detector)" folder: Classic default 5.5 kHz, Male S 4.5, Male SH 3.4, Female S 6.8, Female SH 5.1 kHz (LYNX names; classic voicing, band detector, split) |
 | Thresh | slider −80…0 dB, default **0**, aligned with the Energy Detector meter | "Threshold" big knob −60…0 dB, default **−30 dB**; also a draggable line on the waveform and an arrow on the meter | ⚠️ | 3 ways to set it ➕; range is 20 dB shorter; default differs |
 | Freq | value window 2000–16000 Hz (log), default **5506 Hz** | horizontal slider 2–16 kHz with end labels, same log law; default **6.02 kHz** | ✅ | same law; set the default to 5506 (v = 0.487) |
 | SideChain HighPass / BandPass | button, default HighPass | "Detection: High-pass \| Band" tabs (+ bottom-bar menu), default High-pass | ✅ | Hush BP Q 1.4; Waves "very sharp", Q unknown |
@@ -678,7 +690,7 @@ Trial on this PC: yes (no screenshot this round).
 | Monitor Output / SideChain (+ yellow light) | button | "Audition" toggle under the frequency slider (plays the detection band) | ✅ | same function, different name |
 | Energy Detector meter (side-chain energy, dB below 0 dBFS, blue) aligned with the threshold | main meter | "IN" meter = **input** peak, with a threshold arrow | ⚠️ | threshold is compared with an unfiltered level; switch IN to side-chain energy (as Waves) or add it |
 | Attn meter (red, instantaneous GR) + **infinite peak hold, click to reset** | meter | "GR" bar (0–30 dB scale, shared with the IN scale) | ⚠️ | no peak hold / reset |
-| Output meter −30…0 dBFS + peak readout (click to reset) | meter | none (bottom bar shows the Output **setting**) | ❌ | UI |
+| Output meter −30…0 dBFS + peak readout (click to reset) | meter | none (bottom bar shows the Output **setting**) | ✅ | UI; round 135w: OUT meter −30…0 beside IN / GR, clip lamp and highest-peak read-out, click to reset |
 | Frequency-response display | **none in the classic DeEsser** (the manual lists no graph; Renaissance DeEsser has one) | small detector-band graph only in the generic `hushDeEsser()` layout; the display-first editor shows the scrolling waveform with the reduction in red | ➕ | nothing to add for parity |
 | Range | none (the floor is the split's leakage) | "Range" 0–24 dB, default 12 | ➕ | translator fixes it at 12 dB |
 | Release | none (hidden, unknown) | 10–250 ms, default 61 ms | ➕ | |
@@ -745,8 +757,8 @@ third-party control reference josephnilo.com/blog/waves-ns1-explained. Trial on 
 | Adaptive noise-floor behaviour | "analyzes and adapts in real time"; steady noise drifts by a few dB over seconds | fixed 6-band expander (fitted), no adaptation | ⚠️ | engine, not UI (spec §4.3–4.4; 63 Hz octave +5…7 dB after SSL HPF) |
 | Latency | not published; not measured (the first plugin our host loads from the shell is mis-instantiated, so its reported latency is not trusted) | 0 | ? | measure on the trial if it matters |
 | Undo / Redo | toolbar | song-level Ctrl+Z only | ⚠️ | |
-| Presets (load/save, factory) | toolbar | "(no preset)", no save | ❌ | |
-| A/B, Setup A/B, copy A→B | toolbar | — | ❌ | |
+| Presets (load/save, factory) | toolbar | "(no preset)", no save | ✅ | round 129's preset bar: 4 LYNX factory presets + user presets |
+| A/B, Setup A/B, copy A→B | toolbar | — | ✅ | round 129's preset bar |
 | ◀ ▶ preset step | toolbar | ◀ ▶ | ✅ | empty list |
 | Help / options menu | toolbar ≡ | options menu (reset, bypass) | ✅ | |
 | MIDI learn | right-click | right-click MIDI link | ✅ | |
@@ -784,7 +796,7 @@ Trial on this PC: yes (Doubler2 / Doubler4).
 | Align (direct) | NO/YES button; default Off | toggle, default **On** | ⚠️ | default differs |
 | FB high-pass | 16…12000 Hz, default 16; numeric box with a HP icon | "FB low cut" knob 16 Hz…21.4 kHz, default 16 | ⚠️ | range top 12 kHz in the original |
 | Range | 80 Hz / 20 Hz, manual default 20 Hz (trial screenshot shows 80HZ) | tabs 80 Hz / 20 Hz, default 80 | ✅ | |
-| Modulation RESET | button, automatable, restarts every LFO in sync | — | ❌ | needs a trigger param + engine reset |
+| Modulation RESET | button, automatable, restarts every LFO in sync | — | ✅ | needs a trigger param + engine reset; round 135w: RESET button (momentary): every voice's LFO restarts in sync |
 | Low shelf on / gain / freq | L marker button + gain knob + freq box; gain +12…−24 dB, below −24 "the floor drops to make a cut filter"; default On | L toggle, gain −30…+12, freq 16 Hz–21 kHz, default **off** | ⚠️ | no cut mode below −24; default off vs On |
 | High shelf on / gain / freq | H marker + gain + freq box | H toggle, gain, freq, default off | ⚠️ | same remarks |
 | EQ acts on voices only | yes | yes | ✅ | |
@@ -801,11 +813,11 @@ Trial on this PC: yes (Doubler2 / Doubler4).
 | Per-voice column order | Voice · Gain · Pan · Delay · Fdbk · Oct · Detune · Depth · Rate | 1 · Gain · Pan · Delay · Feedback · Oct · Detune · Depth · Rate · Source | ✅ | same order |
 | Source per voice (In 1 / In 2) | bottom-left drop-downs "In 1 L▾", "In 2 R▾" (L / L+R / L−R) | tabs at the end of each voice row | ⚠️ | different place, same options |
 | Master output gain | right column, vertical fader 0 … −∞ (scale 0 / 24) | vertical fader −24…0 dB, no scale | ⚠️ | no −∞, no scale marks |
-| Output meters | stereo bar meters beside the fader, scale 0…−24, peak counters under them (click to reset) | — | ❌ | |
-| Clip light | red, click to reset | — | ❌ | |
-| Doubler4: voices 3 and 4 | 4 rows, each with its source | 2 voices only | ❌ | engine + params + translation (spec §7 item 6) |
+| Output meters | stereo bar meters beside the fader, scale 0…−24, peak counters under them (click to reset) | — | ✅ | round 129: output meters with peak read-outs beside the fader |
+| Clip light | red, click to reset | — | ✅ | round 135w: the meter's OUT label turns red when the output clipped; click the meter to reset |
+| Doubler4: voices 3 and 4 | 4 rows, each with its source | 2 voices only | ✅ | engine + params + translation (spec §7 item 6); round 135w: voices 3 / 4 (page "Voices 3-4" of the voice rows; off by default), drawn on the graphs; a Doubler4 state's blocks 46 / 56 are translated [model: same layout as voices 1 / 2; sources 3 / 4 not probed] |
 | Components Mono / Mono→Stereo / Stereo | 3 | 1 stereo | ⚠️ | M→S = stereo on a mono-fed track; fine |
-| Undo / Redo, presets, A/B, Setup A/B, Save | toolbar | see header note | ❌ | |
+| Undo / Redo, presets, A/B, Setup A/B, Save | toolbar | see header note | ✅ | round 129's preset bar |
 | MIDI learn, gestures | right-click; Alt-click etc. | yes | ✅ | |
 | Window | fixed 800×580 | resizable 800×460 | ✅ | |
 
@@ -843,26 +855,26 @@ delay display → an echo-train picture (not the note/BPM read-out).
 | Delay knob | big, left; 1–3500 ms or note 1/64T … 2 Bar; default 1/8 dotted (Host) | big "Delay" knob in DELAY section; 0–20000 ms (piecewise law) or note 1/64…8/1; default 300 ms | ⚠️ | same role; default ms not a note |
 | Note values on one knob | one knob steps triplet / straight / dotted for each length (1/64T … 2 Bar) | note knob (10 lengths) + separate kind menu (Note / Dotted / Triplet) | ⚠️ | two controls for one; reachable |
 | Sync HOST | button under the display; default | menu entry "Note" (follows project tempo) | ⚠️ | named differently |
-| Sync BPM (own tempo) + BPM value | button + BPM number in the display | — | ❌ | translator folds BPM into ms |
+| Sync BPM (own tempo) + BPM value | button + BPM number in the display | — | ✅ | translator folds BPM into ms; round 135w: "Project / Own BPM" + BPM (30–300) on the second row; H-Delay's own-BPM states keep their note and tempo (was folded into ms) |
 | Sync MS | button | menu entry "ms" | ✅ | |
 | Central display | note value (e.g. "1/8 D") and tempo "120 BPM" (or ms); click-drag / type to edit | value text under the knob + echo-train picture (echoes on a time axis) | ⚠️ | no note/tempo read-out block; echotrain ➕ |
-| Tap pad | big pad far left; last two taps; Host: snaps to a note, BPM: sets BPM, MS: sets ms | — | ❌ | |
+| Tap pad | big pad far left; last two taps; Host: snaps to a note, BPM: sets BPM, MS: sets ms | — | ✅ | round 129: TAP pad (sets the left time) |
 | Ping Pong | button above the display; Off; start-side value | STYLE = "Ping-pong" (5th of 5) + "Pairs" toggle (alternate / H-Delay pairs) | ⚠️ | no button; start side ❌ |
-| Ping-pong start side (L→R / R→L) | value box | — | ❌ | translator ignores RealWorld 45 |
+| Ping-pong start side (L→R / R→L) | value box | — | ✅ | translator ignores RealWorld 45; round 135w: "Start left / Start right" (ping-pong); translated from RealWorld 45 (0 left, 1 right [EXEC] round 119 probe) |
 | Dual (independent L/R times) | button; drag L or R in display | STYLE = "Dual" + Delay R / Sync R | ✅ | |
-| Phase L / Phase R (ØL ØR) | two buttons beside Ping Pong / Dual; Off | — | ❌ | new params |
+| Phase L / Phase R (ØL ØR) | two buttons beside Ping Pong / Dual; Off | — | ✅ | new params; round 129 |
 | Feedback | big knob right of display, 0–200 %, default 60 | small knob, 0–200 %, default 70 | ⚠️ | size / place / default |
 | Dry/Wet | top-right knob 0–100, default 100, equal power | "Mix" top-left, 0–100 %, default 50 %, equal power | ⚠️ | place + default |
 | Output | knob −18…+18 dB, default 0 | "Level" −18…+18 dB, default 0 (round 119) | ✅ | |
-| Output meter | vertical, 0 … −48 dB, beside Dry/Wet | — | ❌ | |
-| Peak / clip LED | red lamp above the meter | — | ❌ | |
+| Output meter | vertical, 0 … −48 dB, beside Dry/Wet | — | ✅ | round 135w: OUT meter (0 … −48 dB) at the right edge |
+| Peak / clip LED | red lamp above the meter | — | ✅ | round 135w: clip lamp above the meter + highest-peak read-out; click to reset |
 | LoFi | switch under Tap; Off; steep LP (≈ 5.8 kHz, 8th order+) inside the loop | MODE "Lo-Fi" (a menu entry that also sets the whole character) | ⚠️ | not an independent switch; law differs |
 | Analog | knob Off / 1 / 2 / 3 / 4, default 2 | MODE menu (Analog, Bucket brigade, Tape …) + Drive / Age | ⚠️ | no 0–4 positions, no hiss / loop compression of Mod2 |
 | Mod Depth | 0–100, default 0; bottom-left MODULATION group | "Depth" in MOD section, only in non-tape modes; default 50 % | ⚠️ | default Tape mode shows Wow/Flutter instead |
 | Mod Rate | 0.1 … 6000 Hz (BPM sync in concept), default 0.1 | 0.01 … 10 Hz, default ≈ 0.5 Hz | ⚠️ | range / default |
 | HiPass | Off, 20 Hz–20 kHz, default Off; bottom FILTERS group (left) | "Low" (EQ section, lower knob) 10 Hz–2 kHz linear | ⚠️ | no Off label, range to 2 kHz, linear taper |
 | LoPass | 20 Hz–20 kHz, Off, default Off (right) | "High" (upper knob) 200 Hz–20 kHz | ⚠️ | range, order reversed |
-| Filter LINK | button between HP and LP; moves both | — | ❌ | |
+| Filter LINK | button between HP and LP; moves both | — | ✅ | round 135w: "Link EQ": moving the low or the high cut moves the other by the same ratio |
 | Components Mono / Stereo / M>S | 3 | one stereo engine + Width | ⚠️ | Width ➕ |
 | Delay changes glide (tape-like) | yes | depends on mode | ⚠️ | |
 | Loop limiter (fb > 100 % stays bounded; −3 dB loud passes) | engine | Drive/Age shaper in some modes; no loop limiter in Clean | ⚠️ | engine (spec §7 item 1) |
@@ -873,7 +885,7 @@ delay display → an echo-train picture (not the note/BPM read-out).
 | 12 modes (Tape, Shifter, Pitch, Reverse, …) | — | MODE menu | ➕ | |
 | MIDI learn (all but meter) | right-click | right-click MIDI link | ✅ | |
 | Gestures (Alt-click reset, Ctrl fine, wheel, type) | yes | yes | ✅ | |
-| Undo / Redo, presets, A/B, Setup A/B, Save | toolbar | see header note | ❌ | |
+| Undo / Redo, presets, A/B, Setup A/B, Save | toolbar | see header note | ✅ | round 129's preset bar |
 | Window | fixed ~750×290 | resizable 780×300 | ✅ | |
 
 **Scores** — configuration: 5/10, design: 4/10 (the controls exist for ~60 % of H-Delay, but in ValhallaDelay's
@@ -914,15 +926,15 @@ positions against wtune.png once it exists.
 
 | Original feature | Original (range / default / where) | LYNX now | Status | Note |
 |---|---|---|---|---|
-| Speed | 0.1–800 ms, default 15; piecewise taper (½ travel = 50 ms); in-note drift / vibrato tightness | — (one "RETUNE SPEED" knob only) | ❌ | measured effect small (only < 5 ms), but a WTRT user looks for two time knobs |
+| Speed | 0.1–800 ms, default 15; piecewise taper (½ travel = 50 ms); in-note drift / vibrato tightness | — (one "RETUNE SPEED" knob only) | ✅ | measured effect small (only < 5 ms), but a WTRT user looks for two time knobs; round 135w: SPEED (0.1–800 ms, the trial's taper, default 15) on the "Real-time" page; it acts with Link off (flattens part of the in-note deviation below ~5 ms, as measured in round 120); translated (RW 20) |
 | Note Transition | 0.1–800 ms (0.1 ms steps), default 120 | "RETUNE SPEED" 0–400 ms (quadratic), default 20 ms; translator maps NT → retune (τ = NT, matched ±10 %) | ⚠️ | name, range (800), default; behaviour matched |
-| Link (Speed ↔ NT) | Off | — | ❌ | follows from Speed |
-| Tolerance Cents | Off–40 c (added to the 50 c switch threshold) | — | ❌ | LYNX has fixed hysteresis |
-| Tolerance Time | Off–300 ms | — | ❌ | |
-| Vibrato On/Off | On | — | ❌ | (Flex-Tune / Humanize are Auto-Tune concepts, not equivalents) |
-| Vibrato Depth | 0–200 %, default 100 | — | ❌ | |
+| Link (Speed ↔ NT) | Off | — | ✅ | follows from Speed; round 135w: "Link" (on = the retune speed handles the deviations — the old behaviour; translated states keep it on unless Speed < 5 ms) |
+| Tolerance Cents | Off–40 c (added to the 50 c switch threshold) | — | ✅ | LYNX has fixed hysteresis; round 135w: TOL. CENTS Off–40 c (added to the half-way point) [model] |
+| Tolerance Time | Off–300 ms | — | ✅ | round 135w: TOL. TIME Off–300 ms (a new note must last that long) [model] |
+| Vibrato On/Off | On | — | ✅ | (Flex-Tune / Humanize are Auto-Tune concepts, not equivalents); round 135w: "Vibrato" switch (off = flattened) |
+| Vibrato Depth | 0–200 %, default 100 | — | ✅ | round 135w: VIB. DEPTH 0–200 % (multiplies Natural vibrato) |
 | Correction On/Off | On | slot bypass / header LED | ⚠️ | no in-panel switch |
-| Correction % | 1–100 %, default 100 | MIX 0–100 % (dry/wet) | ⚠️ | not the same: Mix blends dry + shifted (phasey); Correction scales the pitch shift |
+| Correction % | 1–100 %, default 100 | MIX 0–100 % (dry/wet) | ✅ | not the same: Mix blends dry + shifted (phasey); Correction scales the pitch shift; round 135w: CORRECTION 0–100 % scales the shift (not a dry mix); RW 22 translated [model] |
 | Formant | Corrected / Non-Corrected, default Corrected | "FORMANT" toggle, On | ✅ | |
 | Formant shift | — | ±7 st | ➕ | |
 | Reference pitch | ±100 c (415.3–466.16 Hz), 440 | "A4" knob 430–450 Hz | ⚠️ | range ±40 c only |
@@ -936,7 +948,7 @@ positions against wtune.png once it exists.
 | Keyboard view / navigation buttons | yes | — | ❌ | one octave only |
 | Central display | target note name + correction amount in cents | `pitchring`: note name, ±100 c ring, sung offset + octave | ✅ | |
 | Scrolling pitch graph | not in WTRT (guide lists none) | `pitchtrace` (input vs corrected, 8 s) | ➕ | Auto-Tune-style; useful |
-| Input / output meters | −28 … 0 dBFS | — | ❌ | |
+| Input / output meters | −28 … 0 dBFS | — | ✅ | round 135w: IN / OUT meters on the "Real-time" page |
 | MIDI Target Pitch | MIDI note forces the target (Speed/NT timing) | "MIDI channel" (held pitch classes become the targets) | ⚠️ | pitch class only, no octave |
 | MIDI Reference Tone + level | tone generator ±18 dB | — | ❌ | |
 | Latency | reports 0; real 0–4 ms dynamic | ~25 ms reported + PDC; "Low latency" toggle | ⚠️ | ➕ toggle; different by design |
@@ -944,7 +956,7 @@ positions against wtune.png once it exists.
 | Tracking | — | knob | ➕ | |
 | Humanize / Flex-Tune | — | knobs | ➕ | Auto-Tune Pro role |
 | Mono / Stereo components (detect on (L+R)/2) | 2 | one stereo slot | ✅ | |
-| Undo / Redo, presets (factory/user/favourites, search), A/B, Setup A/B, Save | toolbar | see header note | ❌ | |
+| Undo / Redo, presets (factory/user/favourites, search), A/B, Setup A/B, Save | toolbar | see header note | ✅ | round 129's preset bar (no search / favourites) |
 | MIDI learn, gestures | right-click; Alt-click etc. | yes | ✅ | |
 | Window | fixed | resizable 800×548 | ✅ | |
 
@@ -1251,7 +1263,7 @@ Sources: [VintageVerb](https://valhalladsp.com/shop/reverb/valhalla-vintage-verb
 | Original feature | Original (range / default / where) | LYNX now | Status | Note |
 |---|---|---|---|---|
 | Mix | 0–100 %, 50 %, equal-power law; top of the left box | Mix 0–100 %, 50 %, equal-power, same place | ✅ | |
-| Mix lock | Click the "MIX" label to lock Mix while browsing presets | — | ❌ | Only useful once presets exist |
+| Mix lock | Click the "MIX" label to lock Mix while browsing presets | — | ✅ | Only useful once presets exist; round 129: "Keep the Mix when loading presets" in the preset menu |
 | Style | Single / Dual / Ratio / PingPong / Quad knob under Mix, default Single | Style knob with 5 steps, same place; order Single / Ratio / Quad / Dual / Ping-pong; the substitute reorders | ✅ | The knob order is different, so turning it gives a different sequence than the original |
 | Style changes which controls are shown | Spread / Ratio / Spacing / Delay R swap in place | Same swaps (`when` items) | ✅ | |
 | Delay time | 0–20 000 ms, piecewise law, default 300 ms, big knob | Same law and default | ✅ | |
@@ -1261,8 +1273,8 @@ Sources: [VintageVerb](https://valhalladsp.com/shop/reverb/valhalla-vintage-verb
 | Spread (Single) | ±20 ms, 0 ms | Same, ±¼ applied per side as measured | ✅ | |
 | Ratio (Ratio) | 1–100 %, 61.8 % | Same | ✅ | |
 | Spacing (Quad) | ±100 %, 0 % | Same | ✅ | |
-| REPEAT / SWELL button (Quad) | Feedback from TapD (Repeat) or from all active taps (Swell) | — (always takes feedback from the last tap) | ❌ | Needs an engine change |
-| TapA / B / C / D on/off (Quad) | 4 buttons under the time knob, greyed out in the other styles | — (all 4 taps always on) | ❌ | Needs an engine change |
+| REPEAT / SWELL button (Quad) | Feedback from TapD (Repeat) or from all active taps (Swell) | — (always takes feedback from the last tap) | ✅ | Needs an engine change; round 135w: Repeat / Swell (Quad): feedback from the last tap or the mean of the taps heard [model] |
+| TapA / B / C / D on/off (Quad) | 4 buttons under the time knob, greyed out in the other styles | — (all 4 taps always on) | ✅ | Needs an engine change; round 135w: Taps A B C D (Quad, second row) |
 | Feedback | 0–200 %, 70 % | Same | ✅ | |
 | Width | ±100 %, 100 % | Same | ✅ | |
 | Color: Drive | 0–24 dB, 0 dB | Same | ✅ | |
@@ -1280,7 +1292,7 @@ Sources: [VintageVerb](https://valhalladsp.com/shop/reverb/valhalla-vintage-verb
 | Mode selector with ◀ ▶ | Bottom left, "MODE: Tape ◀▶" | Bottom left menu with ◀ ▶ | ✅ | |
 | Era | Past / Present / Future, ◀ ▶, bottom middle; changes filters, saturation, diffusion and Clarity's waveforms | — | ❌ | Needs a new parameter and per-mode voicing |
 | Colour theme follows the mode | The whole panel recolours per mode family (green tape, blue digital, grey Ghost, navy Pitch) | Fixed theme | ⚠️ | Design cue only; a LYNX accent per mode family would do, without copying the original's colours |
-| Preset browser | "PRESET: Default ◀▶" bottom right, large factory library | Header box shows "(no preset)" | ❌ | Applies to all LYNX engines |
+| Preset browser | "PRESET: Default ◀▶" bottom right, large factory library | Header box shows "(no preset)" | ✅ | Applies to all LYNX engines; round 129's preset bar (LYNX factory presets for Echoform) |
 | Description line | Bottom strip describes the current Style / Mode, and the hovered control | Hint only in the main window's hint bar | ❌ | UI only |
 | Text entry / reset gestures | Not confirmed in our refs | Right-click value entry, double-click / Alt-click default, Ctrl fine drag, wheel | ✅ | |
 | Resizable window | Resize corner; uiWidth / uiHeight saved in the state | Resizable, fixed aspect ratio | ✅ | uiWidth / uiHeight not translated (harmless) |
@@ -1465,20 +1477,20 @@ Sources: docs/specs/echoboy.md (Pro Tools-era guide pp. 22–54, store page); `[
 | Echo Style menu (~30 voicings) | main panel menu | — | Mode menu: 12 (Tape, Lo-Fi, Hi-Fi tape, Bucket brigade, Analog, Digital, Clean, Phaser, Shifter, Pitch, Reverse, Detune) | ⚠️ | covers families: tape/BBD/digital/lo-fi; no radio/telephone, chorus/vibrato, "Diffused/Verbed" variants |
 | Echo Time ms | ms, pitch-bends when moved | Time + Keep pitch | Time L/R 0–20 s, default 300 ms | ✅ | |
 | Note / Dotted / Triplet | Note/Dot/Trip buttons | Tempo sync | Sync menu ms/Note/Dotted/Triplet, 1/64…8/1 | ✅ | |
-| Tempo source | host, tap, MIDI, 30–300 BPM | host | host only | ⚠️ | no tap tempo, no free BPM |
+| Tempo source | host, tap, MIDI, 30–300 BPM | host | host only | ✅ | no tap tempo, no free BPM; round 129 tap pad + round 135w own BPM (30–300) |
 | Mix | Dry…Wet, 12 o'clock = 50/50 | Wet/Dry faders | Mix 0–100 % (default 50) | ✅ | |
 | Feedback | Min…Max, can run away | Level | 0–200 %, default 70 % | ✅ | |
 | Saturation | Less…More, style-dependent, centre default | Feedback distortion Sat/Limit | Drive 0–24 dB (Colour) | ⚠️ | not style-dependent; default 0, not centre |
 | HighCut | style-dependent darkening | FB cutoff/res, LP/HP/BP | High cut 200 Hz–20 kHz + Low cut 10 Hz–2 kHz | ✅ | |
-| Prime Numbers | detunes repeat times | — | — | ❌ | trivial: snap times to primes in samples |
-| Groove (shuffle…swing) | alternate repeats | — | — | ❌ | |
-| Feel (rushin'…draggin') | global pre-delay ± | Offset (partial) | Spread ±20 ms (partial) | ⚠️ | |
+| Prime Numbers | detunes repeat times | — | — | ✅ | trivial: snap times to primes in samples; round 135w (Echoform): "Primes" — the delay times snap to a prime number of samples |
+| Groove (shuffle…swing) | alternate repeats | — | — | ✅ | round 135w (Echoform): Groove ±25 % = odd repeats late / early by that share of the echo time ([EXEC] EchoBoy trial: +0.25 → +113…125 ms at 500 ms) |
+| Feel (rushin'…draggin') | global pre-delay ± | Offset (partial) | Spread ±20 ms (partial) | ✅ | round 135w (Echoform): Feel ±25 % moves the whole train by that share of the echo time ([EXEC]: +0.125 → +56…62 ms at 500 ms) |
 | Input level (echo path only) | −24…+24 dB | Input Wet | — | ⚠️ | |
 | Output level (echo only) | −24…+24 dB | Wet | Level ±18 dB | ✅ | |
-| Tweak: Accent | bipolar | — | — | ❌ | |
+| Tweak: Accent | bipolar | — | — | ✅ | round 135w (Echoform): Accent ±100 % (odd vs even repeats) [MANUAL: not a host parameter on the trial, law not measured] |
 | Tweak: Width | min…max, past 3 o'clock out-of-phase | Stereo | Width ±100 % | ✅ | |
 | Tweak: L/R Offset | 0–25 ms, default 8 | Offset | Spread ±20 ms | ✅ | |
-| Tweak Dual: FB Mix / Balance / FB Balance | knobs | — | — | ❌ | |
+| Tweak Dual: FB Mix / Balance / FB Balance | knobs | — | — | ⚠️ | round 135w (Echoform): X-feed (each side's feedback from the other) and Balance; no FB Balance |
 | Style Edit: 3-band EQ gain + per-repeat Decay, Mid Res | ±18 dB etc. | FB filter only | Low/High cut only | ❌ | the "EQ in the loop vs first repeat" idea is missing |
 | Style Edit: saturation type (Clean, Tape, Warm, Pump, Dirt, Limit×4) | menu | Limit/Sat + knee/symmetry | via Mode only | ⚠️ | |
 | Style Edit: Diffusion + Size, Loop/Post | knobs + switch | Diffusion level/spread | Diffusion amount/size | ⚠️ | no Loop/Post choice |
@@ -1486,10 +1498,10 @@ Sources: docs/specs/echoboy.md (Pro Tools-era guide pp. 22–54, store page); `[
 | Ducking | — (not in EchoBoy) | — | Ducking | ➕ | |
 | Pitch / shifter / reverse modes | — | — | yes | ➕ | |
 | Echo display | Tweak "visualiser" of delay tails | — | "echotrain" display of repeats | ✅ (Echoform) | |
-| Freeze (PrimalTap) | holds the loop; ≤2048 ms at 8× | — | — | ❌ | |
+| Freeze (PrimalTap) | holds the loop; ≤2048 ms at 8× | — | — | ✅ | round 135w (Echoform): Freeze holds the loop (no input, unity feedback, no colour) |
 | Multiply 2×/4×/8× (PrimalTap; halves the rate per step, max 2.5 s) | knob | Smp rate / Bits (lo-fi) | Lo-Fi mode | ⚠️ | no time-for-bandwidth trade |
 | VCO Rate/Depth per tap, phase flip (PrimalTap) | knobs | Mod rate | Rate/Depth (one LFO) | ⚠️ | |
-| Preset menu / user presets / A/B | Soundtoys strip | FL factory list only; no user save, no A/B | "(no preset)" | ❌ | |
+| Preset menu / user presets / A/B | Soundtoys strip | FL factory list only; no user save, no A/B | "(no preset)" | ✅ | round 129's preset bar (Echoform) |
 | Gestures, value entry, automation | standard | generic editor: full set | full set | ✅ | |
 | Translation of the saved state | encoded | none, FL defaults (ms delay, FB, etc. unrelated) | none | ❌ | state unreadable; default only |
 

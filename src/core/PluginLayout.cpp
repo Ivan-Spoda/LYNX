@@ -1026,7 +1026,7 @@ Layout lynxTune()
     Layout l;
     l.width = 800;
     l.height = 610;
-    l.pages = { TR_NOOP ("Pitch graph"), TR_NOOP ("Advanced") };
+    l.pages = { TR_NOOP ("Pitch graph"), TR_NOOP ("Advanced"), TR_NOOP ("Real-time") }; // round 135w: + Real-time
     auto& v = l.items;
     auto menu = [&v] (float x, float y, float w, const char* param, const char* caption, const char* options, int steps = 0) {
         LayoutItem m;
@@ -1067,7 +1067,7 @@ Layout lynxTune()
     v.push_back (knob (700, 200, 104, "Humanize", TR_NOOP ("HUMANIZE"), 284, big | showValue));
     // --- pitch graph / advanced (pages)
     v.push_back (section (0, 336, 800, 142, nullptr, boxed));
-    v.push_back (pageTabs (8, 340, 220, 20, TR_NOOP ("Pitch graph|Advanced")));
+    v.push_back (pageTabs (8, 340, 330, 20, TR_NOOP ("Pitch graph|Advanced|Real-time")));
     v.push_back (onPage (display (6, 366, 788, 106, "pitchtrace"), 0));
     auto adv = [&v] (LayoutItem i) { v.push_back (onPage (std::move (i), 1)); };
     adv (label (14, 368, 300, 16, TR_NOOP ("Create vibrato"), alignLeft));
@@ -1088,6 +1088,25 @@ Layout lynxTune()
     adv (label (470, 368, 300, 16, TR_NOOP ("Pitch tracking"), alignLeft));
     adv (toggle (470, 400, 150, 20, "Ignore vibrato", TR_NOOP ("Ignore vibrato")));
     adv (label (470, 430, 320, 14, TR_NOOP ("Notes are picked from the pitch with its vibrato smoothed"), alignLeft | dim));
+    // round 135w: the real-time corrector's controls (the Waves Tune Real-Time role): Speed with its link to the
+    // retune (Note Transition), the tolerances, vibrato on / amount, correction %, input / output meters
+    auto rt = [&v] (LayoutItem i) { v.push_back (onPage (std::move (i), 2)); };
+    rt (knob (50, 412, 34, "Speed", TR_NOOP ("SPEED"), 444, showValue));
+    rt (toggle (14, 450, 74, 18, "Speed link", TR_NOOP ("Link")));
+    rt (knob (140, 412, 34, "Tolerance cents", TR_NOOP ("TOL. CENTS"), 444, showValue));
+    rt (knob (224, 412, 34, "Tolerance time", TR_NOOP ("TOL. TIME"), 444, showValue));
+    rt (toggle (284, 372, 110, 18, "Keep vibrato", TR_NOOP ("Vibrato")));
+    rt (knob (330, 422, 30, "Vibrato amount", TR_NOOP ("VIB. DEPTH"), 452, showValue));
+    rt (knob (430, 412, 34, "Correction", TR_NOOP ("CORRECTION"), 444, showValue));
+    rt (label (494, 376, 214, 14, TR_NOOP ("Speed: in-note drift and vibrato"), alignLeft | dim));
+    rt (label (494, 394, 214, 14, TR_NOOP ("Link: the retune speed does it"), alignLeft | dim));
+    rt (label (494, 412, 214, 14, TR_NOOP ("Tolerance: how far / how long a note"), alignLeft | dim));
+    rt (label (494, 430, 214, 14, TR_NOOP ("may stray before the target changes"), alignLeft | dim));
+    {
+        auto io = display (712, 366, 80, 106, "iometer");
+        io.steps = 3; // LYNX Tune's input / output peaks are its meter outputs 3 and 4
+        rt (io);
+    }
     // --- the keyboard: BYPASS / REMOVE modes, LATCH, four octaves (a key edits its note name in every octave)
     v.push_back (section (0, 482, 800, 128, TR_NOOP ("TARGET NOTES")));
     v.push_back (display (8, 502, 784, 102, "tunekeys"));
@@ -1629,6 +1648,13 @@ Layout compressorLayout()
     v.push_back (toggle (314, 30, 94, 20, "Auto gain", TR_NOOP ("Auto gain")));
     // round 123: the voicing — LYNX's classic compressor, or the measured program-dependent one (substitutes start there)
     v.push_back (tabs (314, 60, 94, 40, "Voicing", TR_NOOP ("Classic|Vintage")));
+    // round 135w: the reference's ARC / Manual, Electro / Opto and Warm / Smooth switches (the vintage voicing's), and
+    // its output limiter with the activity pill
+    v.push_back (when (tabs (314, 108, 94, 20, "Release mode", TR_NOOP ("ARC|Manual")), "Voicing", 0.5f, 1.0f));
+    v.push_back (when (tabs (314, 132, 94, 20, "Release curve", TR_NOOP ("Electro|Opto")), "Voicing", 0.5f, 1.0f));
+    v.push_back (when (tabs (314, 156, 94, 20, "Character", TR_NOOP ("Warm|Smooth")), "Voicing", 0.5f, 1.0f));
+    v.push_back (toggle (314, 182, 94, 20, "Limiter", TR_NOOP ("Limiter")));
+    v.push_back (display (330, 206, 62, 12, "limitpill"));
     v.push_back (dial (60, 252, 34, "Attack", TR_NOOP ("Attack")));
     v.push_back (dial (140, 252, 34, "Release", TR_NOOP ("Release")));
     v.push_back (dial (217, 252, 34, "Ratio", TR_NOOP ("Ratio")));
@@ -2049,15 +2075,21 @@ Layout geminiDoubler()
     v.push_back (toggle (632, 208, 40, 22, "High shelf", TR_NOOP ("H")));
     v.push_back (dial (700, 206, 30, "High gain", TR_NOOP ("Gain"), bipolar));
     v.push_back (dial (754, 206, 30, "High freq", TR_NOOP ("Freq")));
-    // one row per voice
+    // one row per voice; round 135w: voices 3 and 4 (the four-voice doubler's) on a second page of the same rows
     v.push_back (section (4, 264, 680, 192, TR_NOOP ("Voices")));
-    static const char* const names[2][10] {
+    l.pages = { TR_NOOP ("Voices 1-2"), TR_NOOP ("Voices 3-4") };
+    v.push_back (pageTabs (500, 266, 180, 20, TR_NOOP ("Voices 1-2|Voices 3-4")));
+    static const char* const names[4][10] {
         { "V1 on", "V1 gain", "V1 pan", "V1 delay", "V1 feedback", "V1 octave", "V1 detune", "V1 depth", "V1 rate", "V1 source" },
-        { "V2 on", "V2 gain", "V2 pan", "V2 delay", "V2 feedback", "V2 octave", "V2 detune", "V2 depth", "V2 rate", "V2 source" } };
-    for (int k = 0; k < 2; ++k)
+        { "V2 on", "V2 gain", "V2 pan", "V2 delay", "V2 feedback", "V2 octave", "V2 detune", "V2 depth", "V2 rate", "V2 source" },
+        { "V3 on", "V3 gain", "V3 pan", "V3 delay", "V3 feedback", "V3 octave", "V3 detune", "V3 depth", "V3 rate", "V3 source" },
+        { "V4 on", "V4 gain", "V4 pan", "V4 delay", "V4 feedback", "V4 octave", "V4 detune", "V4 depth", "V4 rate", "V4 source" } };
+    static const char* const numbers[4] { TR_NOOP ("1"), TR_NOOP ("2"), TR_NOOP ("3"), TR_NOOP ("4") };
+    for (int k = 0; k < 4; ++k)
     {
-        const auto cy = 316.0f + 76.0f * (float) k;
-        v.push_back (toggle (14, cy - 11, 40, 22, names[k][0], k == 0 ? TR_NOOP ("1") : TR_NOOP ("2")));
+        const auto cy = 316.0f + 76.0f * (float) (k % 2);
+        const auto rowStart = v.size();
+        v.push_back (toggle (14, cy - 11, 40, 22, names[k][0], numbers[k]));
         v.push_back (dial (90, cy, 30, names[k][1], TR_NOOP ("Gain")));
         v.push_back (dial (148, cy, 30, names[k][2], TR_NOOP ("Pan"), bipolar));
         v.push_back (dial (206, cy, 30, names[k][3], TR_NOOP ("Delay")));
@@ -2066,8 +2098,12 @@ Layout geminiDoubler()
         v.push_back (dial (384, cy, 30, names[k][6], TR_NOOP ("Detune"), bipolar));
         v.push_back (dial (442, cy, 30, names[k][7], TR_NOOP ("Depth"), bipolar));
         v.push_back (dial (500, cy, 30, names[k][8], TR_NOOP ("Rate")));
-        v.push_back (tabs (540, cy - 11, 136, 22, names[k][9], k == 0 ? TR_NOOP ("L|L+R|L-R") : TR_NOOP ("R|R+L|R-L"), { 1.0f / 6.0f, 0.5f, 5.0f / 6.0f }));
+        v.push_back (tabs (540, cy - 11, 136, 22, names[k][9], k % 2 == 0 ? TR_NOOP ("L|L+R|L-R") : TR_NOOP ("R|R+L|R-L"), { 1.0f / 6.0f, 0.5f, 5.0f / 6.0f }));
+        for (auto i = rowStart; i < v.size(); ++i)
+            v[i].page = k / 2;
     }
+    // round 135w: the modulation RESET (every voice's LFO restarts in sync; momentary)
+    v.push_back (toggle (420, 266, 70, 20, "Mod reset", TR_NOOP ("Reset"), momentary));
     v.push_back (section (690, 264, 106, 192, TR_NOOP ("Output")));
     v.push_back (slider (Item::vslider, 698, 290, 30, 150, "Output", nullptr));
     v.push_back (display (730, 276, 62, 172, "iometer")); // round 129: the reference's output meters
@@ -2343,8 +2379,8 @@ LayoutItem menuOf (float x, float y, float w, float h, const char* param, const 
 Layout echoformLayout()
 {
     Layout l;
-    l.width = 780;
-    l.height = 300;
+    l.width = 950;  // round 135w: + the TWEAK section and the output meter (was 780)
+    l.height = 330; // round 135w: + a second row of switches (was 300)
     auto& v = l.items;
     const auto top = 4.0f, h = 232.0f, k1 = 66.0f, k2 = 160.0f, d = 34.0f;
     // mix + style
@@ -2414,6 +2450,32 @@ Layout echoformLayout()
     v.push_back (label (8, 254, 52, 20, TR_NOOP ("Mode")));
     v.push_back (menuOf (64, 252, 200, 24, "Mode", TR_NOOP ("Mode"),
                          TR_NOOP ("Tape|Lo-Fi|Hi-Fi tape|Bucket brigade|Analog|Digital|Clean|Phaser|Shifter|Pitch|Reverse|Detune"), stepCentres (12)));
+    // ---- round 135w (docs/PARITY.md: H-Delay, ValhallaDelay, EchoBoy / PrimalTap)
+    // TWEAK: EchoBoy's groove / feel / accent, its dual-mode cross feedback, the echoes' balance
+    v.push_back (section (780, top, 124, h, TR_NOOP ("Tweak")));
+    v.push_back (dial (812, 52, 26, "Groove", TR_NOOP ("Groove"), bipolar));
+    v.push_back (dial (812, 124, 26, "Feel", TR_NOOP ("Feel"), bipolar));
+    v.push_back (dial (812, 196, 26, "Accent", TR_NOOP ("Accent"), bipolar));
+    v.push_back (dial (872, 52, 26, "Cross feedback", TR_NOOP ("X-feed")));
+    v.push_back (dial (872, 124, 26, "Balance", TR_NOOP ("Balance"), bipolar));
+    v.push_back (toggle (848, 186, 52, 20, "Prime numbers", TR_NOOP ("Primes")));
+    // the echoes' output level with a clip lamp (H-Delay's meter)
+    v.push_back (section (908, top, 38, h, TR_NOOP ("Out")));
+    v.push_back (display (910, 24, 34, 208, "outmeter"));
+    // quad: Repeat / Swell where the right sync menu sits in the two-time styles, the four taps on the second row
+    v.push_back (when (tabs (190, 150, 76, 20, "Swell", TR_NOOP ("Repeat|Swell")), "Style", 0.4f, 0.6f));
+    v.push_back (when (label (8, 290, 40, 20, TR_NOOP ("Taps")), "Style", 0.4f, 0.6f));
+    v.push_back (when (toggle (48, 290, 34, 20, "Tap A", TR_NOOP ("A")), "Style", 0.4f, 0.6f));
+    v.push_back (when (toggle (86, 290, 34, 20, "Tap B", TR_NOOP ("B")), "Style", 0.4f, 0.6f));
+    v.push_back (when (toggle (124, 290, 34, 20, "Tap C", TR_NOOP ("C")), "Style", 0.4f, 0.6f));
+    v.push_back (when (toggle (162, 290, 34, 20, "Tap D", TR_NOOP ("D")), "Style", 0.4f, 0.6f));
+    // ping-pong: which side the first echo comes from
+    v.push_back (when (tabs (8, 290, 190, 20, "Start side", TR_NOOP ("Start left|Start right")), "Style", 0.8f, 1.0f));
+    // the tempo the note values follow: the project's or the echo's own BPM (H-Delay's BPM sync)
+    v.push_back (tabs (210, 290, 130, 20, "Tempo source", TR_NOOP ("Project|Own BPM")));
+    v.push_back (when (stepper (346, 290, 96, 20, "BPM", TR_NOOP ("BPM"), 270), "Tempo source", 0.5f, 1.0f));
+    v.push_back (toggle (452, 290, 110, 20, "Filter link", TR_NOOP ("Link EQ")));
+    v.push_back (toggle (570, 290, 100, 20, "Freeze", TR_NOOP ("Freeze")));
     return l;
 }
 
