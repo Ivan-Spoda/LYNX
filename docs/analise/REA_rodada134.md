@@ -162,4 +162,14 @@ the record menu (r131 works on recording), the browser's details box.
 
 ## Where I stopped
 
-(see below)
+- Done (landing 1): Part B items B1–B7 and Part A rows 1, 3, 4, 5, 6, 7 (code + tests `tests/Rea134Tests.inc`).
+- Build note: `scripts/build-windows-zig.sh` recompiles every app source each run, but Zig's own cache can hand back
+  an object compiled before a header changed when the header is edited while a build runs; a stale `Song.h`
+  (EffectSlot copy constructor from the old layout) crashed `.flp` imports. Clearing `ZIG_GLOBAL_CACHE_DIR` fixed it.
+- Next candidates: FL's per-format Export entries and "Last exported format(s)"; "Disable maximum polyphony" for
+  exports; the record menu's Quantize section and recording markers; the Browser's details box (date, path) for the
+  selected result; FL's "Use maximum buffer size from host" (report the device buffer to a fixed-buffer plugin);
+  "Allow smart disable" per plugin (bit `0x20000000`) with smart disable for hosted plugins; "Delete recorded files to
+  recycle bin" as a choice (LYNX always uses the recycle bin); the consumer of the render window's HQ bit in FLEngine.
+- Not confirmed: what exactly FL forces with "HQ for all plugins" inside its own plugins; `0x400` / `0x10000000` and
+  the other record-`0x02` flags.

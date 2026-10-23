@@ -83,7 +83,11 @@ search::FileSystem diskFileSystem()
         for (const auto& c : children)
         {
             if (c.isDirectory())
-                listing.subfolders.push_back (c.getFileName().toStdString());
+            {
+                // junctions and links (Windows' "My Music" inside Documents points back to itself) are not followed
+                if (! c.isSymbolicLink())
+                    listing.subfolders.push_back (c.getFileName().toStdString());
+            }
             else if (isListed (c))
                 listing.files.push_back (c.getFileName().toStdString());
         }
@@ -100,8 +104,16 @@ bool refreshIndex (const juce::Array<juce::File>& roots, const std::function<boo
     shared.loadOnce();
     const auto fs = diskFileSystem();
     int listed = 0;
-    for (const auto& root : roots)
-        listed += shared.index.refresh (root.getFullPathName().toStdString(), fs, shouldStop);
+    try
+    {
+        for (const auto& root : roots)
+            listed += shared.index.refresh (root.getFullPathName().toStdString(), fs, shouldStop);
+    }
+    catch (const std::exception& e) // never takes the app down: the search falls back to what is indexed
+    {
+        DBG ("browser index: " << e.what());
+        std::fprintf (stderr, "browser index: %s\n", e.what());
+    }
     if (listed > 0)
         shared.save();
     return listed > 0;

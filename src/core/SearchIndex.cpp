@@ -50,6 +50,8 @@ int Index::refresh (const std::string& root, const FileSystem& fs, const std::fu
 
         const auto folder = pending.back();
         pending.pop_back();
+        if (folder.size() > 1024) // a runaway path (a link loop the file system did not report): not followed
+            continue;
         const auto time = fs.folderTime (folder);
 
         if (time < 0)

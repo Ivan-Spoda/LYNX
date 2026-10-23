@@ -518,7 +518,7 @@ private:
         const auto seconds = exportMusicSeconds (song, options);
         // FL's line: "Length: 144 bars  Total time: 3'57''  Disk space: 38.76 MB" (REA round 134)
         const auto bars = lengthInBars (seconds, song.bpm, song.beatsPerBar);
-        auto info = tr ("Length: {0} bars", { juce::String (bars, bars < 10.0 && std::abs (bars - std::round (bars)) > 0.01 ? 1 : 0) }) + "  ·  "
+        auto info = tr ("Length: {0} bars", { juce::String ((int) std::ceil (bars - 0.01)) }) + "  ·  " // whole bars, as FL
                     + tr ("Total time: {0}", { juce::String (formatDuration (seconds)) });
         if (options.tail == TailMode::leave)
             info << " " << tr ("(+ tail up to {0} s)", { juce::String ((int) options.maxTailSeconds) });
