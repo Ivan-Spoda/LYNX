@@ -72,6 +72,20 @@ void schedulePatternLoop (const Pattern& pattern,
                           EventBuffer& out,
                           float swing = 0.0f,
                           const std::vector<ChannelDef>* channels = nullptr) noexcept;
+// The range the transport loops over: in Song mode the Playlist's loop region, or else the whole song (FL plays the
+// song in a loop: at its end the position goes back to the start, issue #4). Pattern mode: none (end <= start); the
+// pattern loop is the position modulo the pattern length.
+struct PlaybackLoop
+{
+    double start = 0.0, end = 0.0;
+    bool active() const noexcept { return end > start; }
+};
+PlaybackLoop playbackLoop (bool songMode, double loopStart, double loopEnd, double songLength) noexcept;
+
+// The position hosted plugins see (their play head): within the pattern in Pattern mode, within the song in Song
+// mode, so plugins synced to the host follow the loop like in FL instead of counting on forever.
+double hostPositionTick (const Song& song, double tick, std::int64_t songLength) noexcept; // songLength = song.songLength()
+
 // Index built once per snapshot so scheduleSong doesn't scan every note on every block:
 // song length and the longest note of each pattern. Requires notes sorted by start.
 struct ScheduleIndex

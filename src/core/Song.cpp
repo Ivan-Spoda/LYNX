@@ -61,7 +61,39 @@ std::int64_t Song::songLength() const noexcept
     for (const auto& c : playlist)
         end = std::max (end, c.end());
 
+    // an empty Playlist (e.g. recording the first take in Song mode) loops the current pattern's length, not one bar
+    if (playlist.empty() && currentPattern >= 0 && currentPattern < (int) patterns.size())
+        end = patterns[(std::size_t) currentPattern].effectiveLength (beatsPerBar);
+
     return std::max<std::int64_t> (bar, (end + bar - 1) / bar * bar);
+}
+
+void followPatternLengths (const std::vector<std::int64_t>& before, Song& song)
+{
+    if (before.size() != song.patterns.size())
+        return; // patterns added, removed or moved: their clips are handled by that edit
+
+    for (std::size_t i = 0; i < before.size(); ++i)
+    {
+        const auto now = song.patterns[i].effectiveLength (song.beatsPerBar);
+        if (now == before[i] || before[i] <= 0)
+            continue;
+
+        song.forEachClipList ([&] (std::vector<Clip>& clips) {
+            for (auto& c : clips)
+                if (c.kind == ClipKind::pattern && c.pattern == (int) i && c.offset == 0 && c.length == before[i])
+                    c.length = now;
+        });
+    }
+}
+
+std::vector<std::int64_t> patternLengths (const Song& song)
+{
+    std::vector<std::int64_t> lengths;
+    lengths.reserve (song.patterns.size());
+    for (const auto& p : song.patterns)
+        lengths.push_back (p.effectiveLength (song.beatsPerBar));
+    return lengths;
 }
 
 void Song::removePattern (int index)
