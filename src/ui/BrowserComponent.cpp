@@ -3,6 +3,7 @@
 #include "core/FlpImport.h"
 #include "core/ProjectContents.h"
 #include "core/SearchQuery.h"
+#include "core/ValueMath.h"
 #include "engine/PluginHost.h"
 #include "engine/Text.h"
 #include "ui/I18n.h"
@@ -1543,6 +1544,23 @@ BrowserComponent::BrowserComponent (AudioEngine& e)
                                 "OR, -word (not), \"exact phrase\", * and ? wildcards  [Esc] clear"));
     addAndMakeVisible (searchBox);
 
+    // the sample preview volume (FL's Browser has one too): a small knob at the end of the search row
+    previewVolume.setRange (0.0, controls::maxUtilityVolume, 0.01);
+    previewVolume.setDoubleClickReturnValue (true, 1.0);
+    previewVolume.textFromValueFunction = [] (double v) { return ui::utilityVolumeText (v); };
+    previewVolume.valueFromTextFunction = [] (const juce::String& t) { return t.retainCharacters ("0123456789.").getDoubleValue() / 100.0; };
+    previewVolume.setValue (engine.getPreviewVolume(), juce::dontSendNotification);
+    previewVolume.setMouseClickGrabsKeyboardFocus (false);
+    previewVolume.setWantsKeyboardFocus (false);
+    previewVolume.onValueChange = [this] {
+        engine.setPreviewVolume (previewVolume.getValue());
+        refreshPreviewVolume();
+        if (onPreviewVolumeChanged != nullptr)
+            onPreviewVolumeChanged();
+    };
+    addAndMakeVisible (previewVolume);
+    refreshPreviewVolume();
+
     tree = std::make_unique<FileTree> (*this, false);
     results = std::make_unique<FileTree> (*this, true);
 
@@ -1737,7 +1755,12 @@ void BrowserComponent::resized()
     auto area = getLocalBounds().reduced (4);
     tabs->setBounds (area.removeFromTop (26));
     area.removeFromTop (4);
-    searchBox.setBounds (area.removeFromTop (24));
+    {
+        auto row = area.removeFromTop (24);
+        previewVolume.setBounds (row.removeFromRight (24));
+        row.removeFromRight (4);
+        searchBox.setBounds (row);
+    }
     area.removeFromTop (4);
     strip->setBounds (getLocalBounds().removeFromBottom (juce::jmin (64, getHeight() / 4)));
     area.setBottom (strip->getY() - 2);
@@ -1749,6 +1772,14 @@ void BrowserComponent::resized()
         list->setSize (area.getWidth() - 10, list->getHeight());
         list->updateSize();
     }
+}
+
+void BrowserComponent::refreshPreviewVolume()
+{
+    previewVolume.setValue (engine.getPreviewVolume(), juce::dontSendNotification);
+    const auto text = tr ("Sample preview volume: {0}", { ui::utilityVolumeText (engine.getPreviewVolume()) });
+    previewVolume.setTooltip (text);
+    ui::setHint (previewVolume, text + "  " + tr ("[LMB] drag  [Wheel] step  [2xLMB] 100%  [RMB] type a value"), true);
 }
 
 void BrowserComponent::paint (juce::Graphics& g)

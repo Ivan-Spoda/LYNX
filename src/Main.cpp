@@ -49,6 +49,7 @@
 #include "ui/NoteToolDialogs.h"
 #include "ui/EventEditor.h"
 #include "ui/AudioEditor.h"
+#include "ui/TempoTapper.h"
 #include "core/EventEdit.h"
 #include "core/FacetEq.h"
 #include "ui/FacetEqEditor.h"
@@ -2943,6 +2944,16 @@ private:
                 saveWindow (std::move (wave), "-audioeditor.png");
                 saveWindow (lynx::makeAudioEditorForSnapshot (offline, d, true), "-audioeditor-spectrum.png");
             }
+
+            // the tempo tapper after five steady taps (round 132)
+            saveWindow (lynx::makeTempoTapperForSnapshot (offline, 5, 128.0), "-tempotapper.png");
+
+            // the Channel Rack's piano-roll view (round 132)
+            ui.selectTabForSnapshot (0);
+            ui.getRackForSnapshot().setPianoRollView (true);
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-rack-pianoroll-view.png");
+            ui.getRackForSnapshot().setPianoRollView (false);
 
             // the Channel Rack with the step graph lane (velocity), and the Euclidean fill window
             ui.selectTabForSnapshot (0);

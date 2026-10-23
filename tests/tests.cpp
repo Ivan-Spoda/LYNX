@@ -15773,3 +15773,4 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Vmatch127Tests.inc"
 #include "ParityTests129.inc"
 #include "Feat133Tests.inc"
+#include "Feat132Tests.inc"

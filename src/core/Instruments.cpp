@@ -1498,6 +1498,7 @@ public:
         cutoff.store (std::clamp (s.cutoff, 20.0f, 20000.0f));
         resonance.store (std::clamp (s.resonance, 0.0f, 1.0f));
         filterType.store (std::clamp (s.filterType, 0, 3));
+        outGain.store (samplerGain (s.gainDb));
         bpm.store (std::max (1.0, songBpm)); // before the mailbox: the synced LFO reads it when updating
         {
             Modulation m { { s.filterEnv, s.pitchEnv }, s.lfo };
@@ -1838,6 +1839,13 @@ public:
                     renderFl (v, left, right, n, chanVol, chanPan);
         }
 
+        // the Gain knob scales the other voices with the channel's gains (FL voices apply it in renderFl)
+        {
+            const auto g = outGain.load (std::memory_order_relaxed);
+            gl *= g;
+            gr *= g;
+        }
+
         // channel filter (TPT SVF, same as the synth); off when open, without resonance and without modulation
         const auto fc = cutoff.load(), res = resonance.load();
         const auto type = filterType.load();
@@ -2152,7 +2160,7 @@ public:
                     readFrame (v, l, r, lastFrame, looping, sl, sr);
                     v.holdL = sl, v.holdR = sr;
                 }
-                auto gain = v.fade * v.zoneGain;
+                auto gain = v.fade * v.zoneGain * outGain.load (std::memory_order_relaxed);
                 if (v.fadeIn > 0.0f || v.fadeOut > 0.0f)
                 {
                     if (v.fadeIn > 0.0f && v.clipElapsed < v.fadeIn)
@@ -2296,6 +2304,7 @@ private:
     std::atomic<float> regionStart { 0.0f }, regionEnd { 1.0f };
     std::atomic<float> cutoff { 20000.0f }, resonance { 0.0f };
     std::atomic<bool> porta { false };
+    std::atomic<float> outGain { 1.0f }; // SamplerSettings::gainDb as a factor
     std::atomic<float> portaBeats { 0.125f };
     std::vector<LoadedZone> zones; // multi-sample (fixed after creation)
     double songTicks = 0.0;         // song position in the block (global LFO)
@@ -2517,6 +2526,13 @@ public:
     bool idle() const noexcept override { return true; }
 };
 } // namespace
+
+float samplerGain (float db) noexcept
+{
+    if (! std::isfinite (db) || db == 0.0f)
+        return 1.0f;
+    return (float) std::pow (10.0, (double) std::clamp (db, -24.0f, 24.0f) / 20.0);
+}
 
 std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr<const SampleData> sample)
 {
