@@ -3067,3 +3067,4 @@ countries: br
 "High cut (wide)" = "Corte de agudos (amplo)"
 "Step note" = "Nota do passo"
 "Voice Shift" = "Voice Shift"
+"Voicing" = "Timbre"

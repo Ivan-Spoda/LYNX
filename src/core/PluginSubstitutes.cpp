@@ -561,9 +561,9 @@ lynx = Auto-pan
 vst2 = StPn
 names = PanMan
 # its state is encoded (round 127: high-entropy payload, not a readable value list; no Soundtoys trial installed), so
-# a moderate sweep: Auto-pan's depth is 2·Depth − 1, so Depth=0.75 swings the balance ±50 % once per beat. Round 113's
+# (until round 135) a moderate sweep: Auto-pan's depth is 2·Depth − 1, so Depth=0.75 swings the balance ±50 % once per beat. Round 113's
 # "Depth=0.5" meant 50 % but mapped to depth 0, an exact pass-through that silently dropped the effect (round 127)
-preset = Depth=0.75; Source=0.5; Rate=0.8505; Smoothing=1; Analog=1
+preset = Depth=0.918; Source=0.5; Rate=0.8505; Smoothing=1; Analog=1
 # round 135: the rhythmic-panner sources (free LFO, rhythm steps); without a known state her usual setting (a 3.56 Hz
 # back-and-forth LFO, 150° wide, soft, analog stage); her states read in the official trial (black-box) are translated
 translate = soundtoys-panman
