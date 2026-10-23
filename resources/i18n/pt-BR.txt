@@ -3039,3 +3039,9 @@ countries: br
 "Classic|Vintage" = "Clássico|Vintage"
 "No third-party plugins found yet ({0}). Press Find new plugins, or add folders with Plugin folders..." = "Nenhum plugin de terceiros encontrado ainda ({0}). Clique em Buscar plugins novos, ou adicione pastas em Pastas de plugins..."
 "LYNX's own instruments and effects are not listed here: they are always available from the Channel Rack's + button, a mixer insert slot or the Quick-add palette (F8)." = "Os instrumentos e efeitos próprios do LYNX não aparecem aqui: estão sempre disponíveis no botão + do Channel Rack, num slot de insert do mixer ou na paleta de inserção rápida (F8)."
+
+# round 136: Ember's Classic voicing
+"A|E|N|T|P" = "A|E|N|T|P"
+"Punish" = "Punir"
+"Steep" = "Íngreme"
+"Thump" = "Peso"

@@ -208,6 +208,10 @@ enum Param
     band2On, band2State, band2Bass, band2Mid, band2Treble, band2Presence, band2Feedback, band2FeedbackFreq, band2Dynamics,
     band3On, band3State, band3Bass, band3Mid, band3Treble, band3Presence, band3Feedback, band3FeedbackFreq, band3Dynamics,
     band4On, band4State, band4Bass, band4Mid, band4Treble, band4Presence, band4Feedback, band4FeedbackFreq, band4Dynamics,
+    // round 136 (appended): the Classic voicing (core/EmberClassic.h), measured on the reference five-style saturator
+    // its substitute role plays; its own controls with the original's laws. Voicing 0 = Ember's own engine (unchanged)
+    voicing, classicStyle, classicDrive, classicPunish, classicLowCut, classicThump, classicTone, classicHighCut,
+    classicSteep, classicMix, classicOutput,
     count
 };
 constexpr int maxBands = 4;

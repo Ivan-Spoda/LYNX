@@ -532,10 +532,14 @@ translate = fresh-air
 product = Decapitator
 vendor = Soundtoys
 lynx = Ember Saturator
+# [DATA] VST2 unique ID from real projects
+vst2 = StDc
 names = Decapitator
-# its state is encoded: a light drive (+1.4 dB, tube; round 113, was +5.4 dB) with auto gain, so the slot colours
-# without jumping in level
-preset = Drive=0.04
+# round 136: Ember's Classic voicing, measured black-box on the official trial (REA_rodada136 §1). Its state is
+# encoded (not decoded here); her 63 saved states are known by the hash of the encoded preset and translated to the
+# settings the trial reports for them; any other state: style A, drive 2, output -3.2 dB (her usual light drive)
+preset = Voicing=1; Classic style=0; Classic drive=0.2; Classic tone=0.5; Classic high cut=1; Classic mix=1; Classic output=0.866667
+translate = soundtoys-decapitator
 
 [fabfilter-saturn]
 product = FabFilter Saturn
@@ -555,10 +559,12 @@ lynx = Auto-pan
 # [DATA] VST2 unique ID from real projects
 vst2 = StPn
 names = PanMan
-# its state is encoded (round 127: high-entropy payload, not a readable value list; no Soundtoys trial installed), so
-# a moderate sweep: Auto-pan's depth is 2·Depth − 1, so Depth=0.75 swings the balance ±50 % once per beat. Round 113's
-# "Depth=0.5" meant 50 % but mapped to depth 0, an exact pass-through that silently dropped the effect (round 127)
-preset = Depth=0.75
+# round 136: Auto-pan's Rhythm voicing (core/RhythmPan.h), measured black-box on the official trial (REA_rodada136
+# §2). Its state is encoded (not decoded here); her 50 saved states are known by the hash of the encoded preset and
+# translated to the pattern, rate / beats, width, smoothing, start phase and analog stage measured for them; any other
+# state: her most used one (a 3.56 Hz left / right triangle over 151 degrees, analog)
+preset = Voicing=1; Rate=0.8505; Sync=0; Width=0.7171; Offset=0.5; Smoothing=0.9925; Pattern=0; Amount=0.9981; Start phase=0.9917; Analog=0.5; Output=0.5
+translate = soundtoys-panman
 
 # ---------------------------------------------------------------- vocal pitch correction -> LYNX Tune (round 95)
 [antares-auto-tune]
@@ -1530,8 +1536,69 @@ int translateWavesS1Imager (const std::vector<std::uint8_t>& state, EffectSlot& 
     return 4;
 }
 
+// ---- Soundtoys (round 136): the encoded preset is not decoded; her saved states are recognised by its hash
+#include "core/SoundtoysStates.inc"
+
+std::uint64_t presetHash (const std::vector<std::uint8_t>& state)
+{
+    const auto at = findBytes (state, "PRESET =");
+    if (at == std::string::npos)
+        return 0;
+    std::size_t end = at + 8;
+    while (end < state.size() && state[end] != '\r')
+        ++end;
+    if (end > at + 8 && state[end - 1] == ';')
+        --end;
+    std::uint64_t h = 0xcbf29ce484222325ull; // FNV-1a 64
+    for (auto i = at + 8; i < end; ++i)
+        h = (h ^ state[i]) * 0x100000001b3ull;
+    return h;
+}
+
+int translateSoundtoysDecapitator (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    namespace e = mixsuite::ember;
+    if (slot.kind != EffectKind::ember)
+        return 0;
+    const auto h = presetHash (state);
+    for (const auto& st : decapitatorStates)
+    {
+        if (st.hash != h)
+            continue;
+        static constexpr int order[10] { e::classicStyle, e::classicDrive, e::classicPunish, e::classicLowCut, e::classicThump,
+                                         e::classicTone, e::classicHighCut, e::classicSteep, e::classicMix, e::classicOutput };
+        slot.params[(std::size_t) e::voicing] = 1.0f;
+        for (int i = 0; i < 10; ++i)
+            slot.params[(std::size_t) order[i]] = st.v[i];
+        slot.mix = 1.0f;
+        return 10;
+    }
+    return 0;
+}
+
+int translateSoundtoysPanMan (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    if (slot.kind != EffectKind::autoPan || slot.params.size() < 19)
+        return 0;
+    const auto h = presetHash (state);
+    for (const auto& st : panManStates)
+    {
+        if (st.hash != h)
+            continue;
+        for (int i = 0; i < 12; ++i)
+            slot.params[(std::size_t) (7 + i)] = st.v[i];
+        slot.mix = 1.0f;
+        return 12;
+    }
+    return 0;
+}
+
 RawTranslator rawTranslatorNamed (std::string_view name)
 {
+    if (name == "soundtoys-decapitator")
+        return translateSoundtoysDecapitator;
+    if (name == "soundtoys-panman")
+        return translateSoundtoysPanMan;
     if (name == "waves-s1-imager")
         return translateWavesS1Imager;
     if (name == "waves-h-delay")
@@ -2440,4 +2507,6 @@ bool base64Decode (const std::string& text, std::vector<std::uint8_t>& out)
     }
     return padding <= 2;
 }
+std::uint64_t soundtoysPresetHash (const std::vector<std::uint8_t>& state) { return presetHash (state); }
+
 } // namespace lynx

@@ -471,6 +471,10 @@ TEST (mixsuite_panels_place_every_parameter)
                 const auto& j = *controls[b];
                 if (i.page >= 0 && j.page >= 0 && i.page != j.page) // different pages never show together
                     continue;
+                // round 136: controls shown for disjoint ranges of the same parameter never show together
+                if (i.whenParam != nullptr && j.whenParam != nullptr && std::strcmp (i.whenParam, j.whenParam) == 0
+                    && (i.whenMax <= j.whenMin || j.whenMax <= i.whenMin))
+                    continue;
                 const auto overlap = i.x + 0.5f < j.x + j.w && j.x + 0.5f < i.x + i.w && i.y + 0.5f < j.y + j.h && j.y + 0.5f < i.y + i.h;
                 if (overlap)
                 {

@@ -29,6 +29,7 @@
 #include "core/DrumSynthLive.h"
 #include "core/Effects.h"
 #include "core/MixSuite.h"
+#include "core/EmberClassic.h"
 #include "core/Effector.h"
 #include "core/FruityDelayBank.h"
 #include "core/FruityMultiband.h"
@@ -15769,3 +15770,4 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Match124xTests.inc"
 #include "Vmatch127Tests.inc"
 #include "ParityTests129.inc"
+#include "VoiceMatch136Tests.inc"

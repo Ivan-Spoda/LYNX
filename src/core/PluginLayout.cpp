@@ -1721,6 +1721,31 @@ Layout aetherLayout()
     return l;
 }
 
+// round 136: Ember's Classic voicing (core/EmberClassic.h) — with Voicing on, Ember's own controls hide and the
+// Classic ones (the reference's laws and texts) show; added around emberLayout() so that layout stays as it is
+Layout withEmberClassic (Layout l)
+{
+    for (auto& it : l.items)
+        if (it.whenParam == nullptr)
+            it = when (it, "Voicing", 0.0f, 0.5f);
+    auto add = [&l] (LayoutItem it) { l.items.push_back (when (it, "Voicing", 0.5f, 1.0f)); };
+    add (section (4, 4, 200, 222, TR_NOOP ("Style")));
+    auto styles = radio (12, 30, 184, 120, "Classic style", TR_NOOP ("A|E|N|T|P"));
+    add (styles);
+    add (toggle (12, 166, 184, 22, "Punish", TR_NOOP ("Punish")));
+    add (section (208, 4, 308, 222, TR_NOOP ("Classic")));
+    add (dial (266, 86, 70, "Classic drive", TR_NOOP ("Drive"), big));
+    add (dial (380, 60, 36, "Classic tone", TR_NOOP ("Tone"), bipolar));
+    add (dial (460, 60, 36, "Classic mix", TR_NOOP ("Mix")));
+    add (dial (340, 148, 30, "Classic low cut", TR_NOOP ("Low cut")));
+    add (dial (410, 148, 30, "Classic high cut", TR_NOOP ("High cut")));
+    add (dial (480, 148, 30, "Classic output", TR_NOOP ("Output")));
+    add (toggle (216, 200, 80, 20, "Thump", TR_NOOP ("Thump")));
+    add (toggle (300, 200, 80, 20, "Steep", TR_NOOP ("Steep")));
+    add (toggle (400, 200, 108, 20, "Voicing", TR_NOOP ("Classic")));
+    return l;
+}
+
 Layout emberLayout()
 {
     Layout l;
@@ -2647,7 +2672,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::compressor: l = compressorLayout(); break;
         case EffectKind::hushDeEsser: l = hushDeEsser(); break;
         case EffectKind::aether: l = aetherLayout(); break;
-        case EffectKind::ember: l = emberLayout(); break;
+        case EffectKind::ember: l = withEmberClassic (emberLayout()); break;
         case EffectKind::epochVerb: l = captionsAbove (epochVerbLayout()); break;
         case EffectKind::atrium: l = captionsAbove (atriumLayout()); break;
         case EffectKind::foilPlate: l = captionsAbove (foilPlateLayout()); break;

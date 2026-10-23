@@ -19,6 +19,7 @@
 //   get <name|#index>                 print value and text
 //   defaults                          every parameter back to its default value
 //   reset                             AudioProcessor::reset
+//   transport <bpm> [pos|keep] [0|1]  the host tempo, song position (samples) and play state the plugin sees
 //   settle <seconds>                  process silence (parameter smoothing, envelopes)
 //   process <in.wav> <out.wav> [sc.wav]   run the input (and optional sidechain) through, write a 32-bit float WAV
 //   latency                           print the reported latency in samples
@@ -52,16 +53,17 @@ struct Host
     struct PlayHead final : juce::AudioPlayHead
     {
         juce::int64 samples = 0;
-        double rate = 48000.0;
+        double rate = 48000.0, bpm = 120.0;
+        bool playing = true;
         juce::Optional<PositionInfo> getPosition() const override
         {
             PositionInfo p;
-            p.setBpm (120.0);
+            p.setBpm (bpm);
             p.setTimeSignature (TimeSignature { 4, 4 });
             p.setTimeInSamples (samples);
             p.setTimeInSeconds ((double) samples / rate);
-            p.setPpqPosition ((double) samples / rate * 2.0);
-            p.setIsPlaying (true);
+            p.setPpqPosition ((double) samples / rate * bpm / 60.0);
+            p.setIsPlaying (playing);
             return p;
         }
     } playHead;
@@ -447,6 +449,14 @@ struct Host
                 log ("defaults");
             }
             else if (cmd == "reset") { plugin->reset(); log ("reset"); }
+            else if (cmd == "transport")
+            {
+                // transport <bpm> [samplePosition|keep] [playing 0|1]: the host's tempo and song position
+                playHead.bpm = a[1].getDoubleValue();
+                if (a.size() > 2 && a[2] != "keep") playHead.samples = a[2].getLargeIntValue();
+                if (a.size() > 3) playHead.playing = a[3].getIntValue() != 0;
+                log ("transport " + juce::String (playHead.bpm) + " " + juce::String (playHead.samples));
+            }
             else if (cmd == "settle") runSilence ((int) (a[1].getDoubleValue() * rate));
             else if (cmd == "process") process (juce::File (a[1]), juce::File (a[2]), a.size() > 3 ? juce::File (a[3]) : juce::File());
             else if (cmd == "editor") editorShot (juce::File (a[1]), a.size() > 2 ? a[2].getIntValue() : 1500, a.size() > 4 ? a[3].getIntValue() : -1, a.size() > 4 ? a[4].getIntValue() : -1);

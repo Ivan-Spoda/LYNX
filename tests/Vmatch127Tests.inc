@@ -13,6 +13,8 @@ lynx::PluginIdentity named (const char* name)
 
 TEST (panman_substitute_moves_the_balance_round127)
 {
+    // round 136: the substitute is Auto-pan's Rhythm voicing (her most used PanMan state as the fallback): a 1 kHz tone
+    // must swing between the sides (round 113's preset was a pass-through, round 127's a ±50 % balance)
     using namespace lynx;
     const auto id = vm127::named ("PanMan");
     const auto* e = findPluginSubstitute (id, false);
@@ -20,20 +22,27 @@ TEST (panman_substitute_moves_the_balance_round127)
     if (e == nullptr)
         return;
     const auto slot = makeSubstituteSlot (*e);
-    // render a constant 1.0 for two beats at 120 BPM: the balance must swing (round 113's preset was a pass-through)
     auto fx = makeEffect (slot);
     fx->prepare (48000.0);
     fx->setSongPosition (0.0);
-    std::vector<float> l (48000, 1.0f), r (48000, 1.0f);
+    std::vector<float> l (48000), r (48000);
+    for (int i = 0; i < 48000; ++i)
+        l[(size_t) i] = r[(size_t) i] = 0.25f * (float) std::sin (2.0 * 3.141592653589793 * 1000.0 * i / 48000.0);
     for (int i = 0; i < 48000; i += 480)
     {
-        fx->setSongPosition (i / 48000.0 * 2.0 * 960.0); // 120 BPM: two beats per second, 960 ticks per beat
+        fx->setSongPosition (i / 48000.0 * 2.0 * 960.0);
         fx->process (l.data() + i, r.data() + i, 480, slot.params, 120.0);
     }
-    const auto [lmin, lmax] = std::minmax_element (l.begin(), l.end());
-    const auto [rmin, rmax] = std::minmax_element (r.begin(), r.end());
-    CHECK (*lmax > 0.99f && *rmax > 0.99f);
-    CHECK (std::abs (*lmin - 0.5f) < 0.02f && std::abs (*rmin - 0.5f) < 0.02f);
+    float lmin = 9, lmax = 0, rmin = 9, rmax = 0;
+    for (int i = 4800; i + 480 <= 48000; i += 480)
+    {
+        double a = 0, b = 0;
+        for (int k = i; k < i + 480; ++k) { a += l[(size_t) k] * l[(size_t) k]; b += r[(size_t) k] * r[(size_t) k]; }
+        const auto ea = (float) (std::sqrt (2.0 * a / 480.0) / 0.25), eb = (float) (std::sqrt (2.0 * b / 480.0) / 0.25);
+        lmin = std::min (lmin, ea); lmax = std::max (lmax, ea); rmin = std::min (rmin, eb); rmax = std::max (rmax, eb);
+    }
+    CHECK (lmax > 0.95f && rmax > 0.95f);
+    CHECK (lmin < 0.2f && rmin < 0.2f);
 }
 
 namespace vm127

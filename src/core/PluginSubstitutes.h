@@ -184,4 +184,8 @@ bool foreignFromText (const std::string& text, ForeignPlugin& out);
 
 std::string base64Encode (const std::uint8_t* data, std::size_t size);
 bool base64Decode (const std::string& text, std::vector<std::uint8_t>& out);
+// Round 136: the FNV-1a 64 hash of a Soundtoys state's encoded preset (the bytes after "PRESET =", without the final ';').
+// LYNX does not decode those presets; her saved states are recognised by this hash (core/SoundtoysStates.inc).
+std::uint64_t soundtoysPresetHash (const std::vector<std::uint8_t>& state);
+
 } // namespace lynx
