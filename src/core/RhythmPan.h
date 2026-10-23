@@ -61,7 +61,7 @@ private:
     // analog LF shelf (first order) and colour FIR, per channel
     double shB0 = 1.0, shB1 = 0.0, shA1 = 0.0;
     std::array<double, 2> shZ {};
-    double rmsA = 0.0, attA = 0.0, relA = 0.0, rms = 0.0, gr = 0.0;
+    double rmsA = 0.0, attA = 0.0, rms = 0.0, gr = 0.0;
     std::array<std::array<float, 32>, 2> hist {};
     int histPos = 0;
     float current = 0.5f;
