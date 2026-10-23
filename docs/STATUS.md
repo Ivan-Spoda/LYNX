@@ -99,7 +99,9 @@ out-of-process plugin sandbox. macOS adds Audio Units, Linux LV2; drivers Core A
 ### FL Studio import (`.flp`)
 - Structure: channels, real samples (including Ogg Vorbis WAVs and WavPack), patterns, notes with
   slide/porta/pan/pitch, every arrangement, markers and time signatures, automation clips (1100+ in the demos),
-  controller links (Peak Controller, Envelope/Keyboard Controller, X-Y/Control Surface as constants).
+  controller links (Peak Controller, Formula Controller, Envelope/Keyboard Controller, X-Y/Control Surface as constants),
+  automation of a wrapped plugin's MIDI CCs / channel aftertouch (wrapper indices 0x1000…0x108F), MIDI Out channels
+  routed live to the plugins on their MIDI input port (round 133).
 - Mixer: routing and levels, sidechain links (level-0 routes), track EQ, colours, names, and native effects with
   their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact), LuxeVerb (exact), Convolver (exact),
   Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter / Fast LP / Free Filter (exact), Newtone / Newtime (state kept, pass-through, source sample in slave mode; Newtone edits rendered by LYNX's engine), Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,

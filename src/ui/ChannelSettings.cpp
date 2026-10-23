@@ -30,6 +30,7 @@
 #include "core/SynthPresets.h"
 #include "core/PluginLayout.h"
 #include "engine/Text.h"
+#include "ui/ControllerEditors.h"
 #include "ui/I18n.h"
 #include "ui/PluginSkin.h"
 #include "ui/Theme.h"
@@ -2155,7 +2156,14 @@ public:
         else if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::synth)
             setContentOwned (new SynthPanel (engine, channel), true);
         else if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::controller)
-            setContentOwned (new ControllerPanel (engine, channel), true);
+        {
+            if (parseKeyboardController (engine.getSong().channels[(std::size_t) channel].controllerState))
+                setContentOwned (new ControllerPanel (engine, channel), true);
+            else
+                setContentOwned (makeEnvelopeControllerEditor (engine, channel).release(), true); // editable (round 133)
+        }
+        else if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::midiOut)
+            setContentOwned (makeMidiOutEditor (engine, channel).release(), true);
         else if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
                  kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
@@ -2240,6 +2248,7 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::synth:
         case InstrumentKind::sampler:
         case InstrumentKind::controller:
+        case InstrumentKind::midiOut:
         case InstrumentKind::sakura:
         case InstrumentKind::drumpad:
         case InstrumentKind::boobass:
@@ -2298,7 +2307,13 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
     if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::synth)
         return std::make_unique<SynthPanel> (engine, channel);
     if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::controller)
-        return std::make_unique<ControllerPanel> (engine, channel);
+    {
+        if (parseKeyboardController (engine.getSong().channels[(std::size_t) channel].controllerState))
+            return std::make_unique<ControllerPanel> (engine, channel);
+        return makeEnvelopeControllerEditor (engine, channel);
+    }
+    if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::midiOut)
+        return makeMidiOutEditor (engine, channel);
     if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
         kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor

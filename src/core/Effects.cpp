@@ -1,4 +1,5 @@
 #include "core/Effects.h"
+#include "core/FormulaController.h"
 #include "core/RhythmPan.h"
 #include "core/MixSuite.h"
 #include "core/VoiceMatch.h"
@@ -2492,6 +2493,7 @@ const EffectInfo& effectInfo (EffectKind kind)
     static const EffectInfo effectorInfo { "Effector", { { "Type", 0.0f }, { "Bypass", 0.0f }, { "Wet", 1.0f }, { "X", 0.5f }, { "Y", 0.5f },
                                                          { "Mod rate", 0.5f }, { "Tempo red.", 0.0f }, { "Mod X", 0.5f }, { "Mod Y", 0.5f },
                                                          { "LFO shape", 0.0f }, { "Input", 1.0f }, { "Output", 0.5f } } };
+    static const EffectInfo formulaControllerInfo { "Formula Controller", { { "a", 0.0f }, { "b", 0.0f }, { "c", 0.0f } } };
     static const EffectInfo peakController { "Peak Controller", { { "Base", 0.0f }, { "Amount", 0.8496f }, { "Tension", 0.5f },
                                                                   { "Decay", 0.4959f }, { "LFO base", 0.0f } } };
     static const EffectInfo parametric = [] {
@@ -2616,6 +2618,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::sentryGate: return dyn::sentryInfo();
         case EffectKind::quellDenoiser: return voicetools::quellInfo();
         case EffectKind::geminiDoubler: return voicetools::geminiInfo();
+        case EffectKind::formulaController: return formulaControllerInfo;
     }
     return eq;
 }
@@ -3069,6 +3072,10 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return text;
         }
 
+        case EffectKind::formulaController: // the knobs a, b, c as the formula sees them
+            std::snprintf (text, sizeof (text), "%.3f", v);
+            return text;
+
         case EffectKind::plugin:
         case EffectKind::parallel:
         case EffectKind::vocodex:
@@ -3100,6 +3107,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
 {
     if (slot.kind == EffectKind::parallel)
         return makeParallelEffect (slot);
+    if (slot.kind == EffectKind::formulaController)
+        return formula::makeEffect (slot.state);
     if (slot.kind == EffectKind::vocodex)
         return vocodex::make (slot.state);
     if (slot.kind == EffectKind::maximus)
@@ -3236,6 +3245,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::sentryGate: return dyn::make (kind); // LYNX's dynamics suite (REA_rodada108)
         case EffectKind::quellDenoiser:
         case EffectKind::geminiDoubler: return voicetools::make (kind); // LYNX's voice tools (REA_rodada119)
+        case EffectKind::formulaController: return formula::makeEffect ({});
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();

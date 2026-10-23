@@ -44,9 +44,16 @@ struct ControllerArticulator
     int sustain = -1, lowKey = 0, highKey = 256;
     int count = 0;
     std::array<float, 64> time {}, level {}; // accumulated time of each point and level 0..1
+    std::array<float, 64> tension {};        // curve from each point to the next (-1..1, as automation clips; FL's: 0)
 };
 using EnvelopeControllerData = std::array<ControllerArticulator, 8>;
+// Reads FL's state or the one LYNX writes (below).
 std::optional<EnvelopeControllerData> parseEnvelopeController (const std::vector<std::uint8_t>& state);
+// LYNX's own state of an Envelope Controller ("LYEC" + version 1 + the 8 articulators), what its editor saves; an
+// imported FL controller is converted to it on its first edit (FL's LFO and maps, which LYNX doesn't play, are dropped).
+std::vector<std::uint8_t> writeEnvelopeController (const EnvelopeControllerData& data);
+// A new controller: each output a simple attack / decay / sustain / release envelope on any key.
+EnvelopeControllerData defaultEnvelopeController();
 
 // Fruity Keyboard Controller (REA_rodada16 §1.4): value of each key (0..131) and the note-off value
 // (with auto release). Its smoothing (attack/release 0..256) has no known time scale and is left out.
