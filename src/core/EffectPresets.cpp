@@ -65,7 +65,7 @@ constexpr int grid = 2000;
 
 EffectKind kindNamed (const std::string& name)
 {
-    for (int k = 0; k <= (int) EffectKind::formulaController; ++k)
+    for (int k = 0; k <= (int) lastEffectKind; ++k)
         if (folded (effectInfo ((EffectKind) k).name) == folded (name))
             return (EffectKind) k;
     return EffectKind::plugin;

@@ -19,7 +19,8 @@ TEST (panman_substitute_moves_the_balance_round127)
     CHECK (e != nullptr && e->effect == EffectKind::autoPan);
     if (e == nullptr)
         return;
-    const auto slot = makeSubstituteSlot (*e);
+    auto slot = makeSubstituteSlot (*e);
+    slot.params[autopan::analogStage] = 0.0f; // round 135: the analog stage's DC blocker would remove the constant test signal
     // render a constant 1.0 for two beats at 120 BPM: the balance must swing (round 113's preset was a pass-through)
     auto fx = makeEffect (slot);
     fx->prepare (48000.0);
@@ -32,8 +33,9 @@ TEST (panman_substitute_moves_the_balance_round127)
     }
     const auto [lmin, lmax] = std::minmax_element (l.begin(), l.end());
     const auto [rmin, rmax] = std::minmax_element (r.begin(), r.end());
-    CHECK (*lmax > 0.99f && *rmax > 0.99f);
-    CHECK (std::abs (*lmin - 0.5f) < 0.02f && std::abs (*rmin - 0.5f) < 0.02f);
+    // round 135: her usual PanMan setting (an equal-power LFO, 150° wide, analog stage): each side swings far
+    CHECK (*lmax > 0.6f && *rmax > 0.6f);
+    CHECK (*lmin < 0.2f && *rmin < 0.2f);
 }
 
 namespace vm127

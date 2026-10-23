@@ -17,7 +17,11 @@
 // settings — stored this way so a zeroed parameter array, e.g. Crest's side-chain EQ, has every band on), [72 + b] stereo placement (stereo, left, right, mid, side), [80] auto gain, [81] output polarity
 // inverted, [82] output pan (0.5 = centre), [83] pan mode (left / right or mid / side), and editor-only display
 // settings: [84] analyser range (60 / 90 / 120 dB), [85] analyser speed, [86] analyser tilt (0 … 6 dB/oct),
-// [87] display range (3 / 6 / 12 / 30 dB).
+// [87] display range (3 / 6 / 12 / 30 dB). Round 135 (Pro-Q 4 parity): two more shapes — Flat Tilt (the whole
+// spectrum tilted at a constant slope: the gain is the level 5 octaves above the band frequency, the opposite 5 below)
+// and All Pass (a 2nd-order phase rotation at the band frequency, width by Q) — stored at shape values between the old
+// ones (1/16 and 3/16), so every saved shape keeps its meaning; [88] character (Clean = the old sound, Subtle, Warm:
+// a gentle analog-style saturation of the output, harmonics only on hot signals).
 //
 // Dynamic EQ (docs/analise/REA_rodada103.md §2, measured on the reference): each band with a gain (bell, shelves,
 // tilt) whose range is not 0 listens to its own region of the detector signal (band pass at the band frequency and
@@ -57,11 +61,12 @@ constexpr int specRangeParam = 84;  // editor only
 constexpr int specSpeedParam = 85;  // editor only
 constexpr int specTiltParam = 86;   // editor only
 constexpr int displayRangeParam = 87; // editor only
-constexpr int paramCount = 88;
+constexpr int characterParam = 88; // round 135
+constexpr int paramCount = 89;
 constexpr int maxSections = 8; // 96 dB/oct = 16th order
 
-enum class Shape { off, bell, lowShelf, highShelf, lowCut, highCut, notch, bandPass, tiltShelf };
-constexpr int shapeCount = 9;
+enum class Shape { off, bell, lowShelf, highShelf, lowCut, highCut, notch, bandPass, tiltShelf, flatTilt, allPass };
+constexpr int shapeCount = 11;
 constexpr std::array<int, 9> slopes { 6, 12, 18, 24, 30, 36, 48, 72, 96 }; // dB/oct
 
 inline int param (int band, int field) noexcept { return band * fieldsPerBand + field; } // 0 shape 1 freq 2 gain 3 Q 4 slope
@@ -79,7 +84,11 @@ float slopeValue (int dbPerOct) noexcept;
 double outputDb (float v) noexcept;    // ±24 dB
 double gainScale (float v) noexcept;   // 0 .. 200 %
 const char* shapeName (Shape s) noexcept;
-bool hasGain (Shape s) noexcept;       // bell, shelves, tilt: the shapes a gain (and dynamics) applies to
+bool hasGain (Shape s) noexcept;       // bell, shelves, tilts: the shapes a gain (and dynamics) applies to
+// the shapes in the order of the editor's menu (the reference's order: bell … tilt shelf, flat tilt, all pass)
+const std::array<Shape, shapeCount - 1>& menuShapes() noexcept;
+int character (float v) noexcept;      // 0 clean, 1 subtle, 2 warm
+float characterSample (int character, float x) noexcept; // the character stage's transfer curve
 
 enum class Phase { zeroLatency, natural, linear };
 constexpr int phaseCount = 3;

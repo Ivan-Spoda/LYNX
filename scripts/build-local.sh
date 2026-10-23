@@ -19,7 +19,7 @@ mkdir -p build-local build-local/wavpack
 # workflow shell (key map, workspace layout, rack operations)
 CORE="$CORE src/core/KeyMap.cpp src/core/Workspace.cpp src/core/RackOps.cpp"
 # workflow P2 (note tools, mixer operations, history labels, browser search)
-CORE="$CORE src/core/NoteTools.cpp src/core/PianoRollTools.cpp src/core/EventEdit.cpp src/core/AudioEdit.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp src/core/SearchIndex.cpp src/core/EffectPresets.cpp"
+CORE="$CORE src/core/NoteTools.cpp src/core/PianoRollTools.cpp src/core/EventEdit.cpp src/core/AudioEdit.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp src/core/SearchIndex.cpp src/core/EffectPresets.cpp src/core/ParamHelp.cpp"
 # start-up sound (procedural)
 CORE="$CORE src/core/StartupSound.cpp"
 # FL's 3x Osc engine (REA round 47)
@@ -58,6 +58,7 @@ CORE="$CORE src/core/DynamicsSuite.cpp src/core/FabFilterStates.cpp"
 CORE="$CORE src/core/VoiceTools.cpp"
 # MIDI CC automation of hosted plugins, Formula Controller (round 133, issue #3)
 CORE="$CORE src/core/MidiControls.cpp src/core/FormulaController.cpp"
+CORE="$CORE src/core/VoiceShift.cpp"
 # WavPack decoder (C)
 if [[ -z "${CC:-}" ]]; then
     case "$CXX" in
