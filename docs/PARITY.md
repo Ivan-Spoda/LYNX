@@ -311,10 +311,10 @@ edits (Remove / Bypass, Latched / Momentary), Hold, Auto Key.
 | Hold (freeze the read-out) | ✅ | round 128: click the ring (HOLD lights) |
 | Scales | ⚠️ | 16: the modern list (chromatic, major, minor, harmonic / melodic minor, modes, pentatonics, blues, whole tone, diminished) + custom; no historical tunings (Pythagorean, just, 19/24/31/53-tone …) |
 | Auto Key (detect the key) | ✅ | round 128: button under Scale; key + major / minor from what was sung while the editor is open (pitch-class time, Krumhansl–Kessler profiles) |
-| Learn (scale from MIDI) | ✅ | round 135: LEARN SCALE (correction section, top right): while on, the notes played on the MIDI channel build the custom scale (switching it on starts a new one) and are not used as targets |
+| Learn (scale from MIDI) | ✅ | round 135 (the original's "Learn Scale from MIDI" switch, read from its parameter list): LEARN SCALE (correction section, top right): while on, the notes played on the MIDI channel build the custom scale (switching it on starts a new one) and are not used as targets |
 | Keyboard at the bottom: click a note = remove / bypass, latch | ✅ | round 128: four-octave keyboard with BYPASS / REMOVE modes and LATCH; a key edits its note name in every octave (no single-octave edits) |
 | Per-note Bypass (pass uncorrected) vs Remove | ✅ | round 128 (translated from the state's legacy scale edits) |
-| Classic mode | ⚠️ | round 135: CLASSIC (correction section, top left): the correction glides at a constant rate (a semitone per retune time) instead of the exponential approach — LYNX's own law, not measured against the original |
+| Classic mode | ✅ | round 135: CLASSIC (correction section, top left): the short-latency path with the same retune. [EXEC] Auto-Tune Pro hosted black-box: "Use Classic Mode DSP" leaves the retune trajectory unchanged (452 Hz at 150 ms: the same pitch at every point to 0.1 Hz) and drops the latency from 2670 to 37 samples; LYNX's classic = its low-latency mode |
 | Formant Correction on / off | ✅ | |
 | Throat Length | ⚠️ | "Formant shift" in semitones instead of a throat length % |
 | Transpose ±12 | ✅ | |

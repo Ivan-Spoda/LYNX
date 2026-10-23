@@ -56,10 +56,15 @@ Left: Host Sync / MIDI triggering, audition triggering, 6 side-chain EQ bands, 3
 ## 6. LYNX Tune ← Auto-Tune Pro
 - LEARN SCALE: while on, the pitch classes held on the MIDI channel (engine meter 3, a 12-bit mask) build the custom
   scale in the editor (switching it on starts a new one); learning notes are not used as targets.
-- CLASSIC: the correction glides at a constant rate (one semitone per retune time) — LYNX's own law.
+- CLASSIC: the short-latency path with the same retune. [EXEC] Auto-Tune Pro 11.6 hosted black-box (its public
+  parameters only: "Use Classic Mode DSP", "Learn Scale from MIDI"): a 452 Hz tone, chromatic, retune 150 ms, rendered
+  with Classic off / on — the output pitch at 10 … 800 ms after the onset is the same to 0.1 Hz (451.2 → 440.3 Hz),
+  the reported latency drops from 2670 to 37 samples. LYNX's Classic therefore keeps the retune and runs the
+  low-latency configuration (1.25 periods instead of 2). Data: D:\lynx-work\parity135\f (modern.wav, classic.wav).
 - Params appended in one block commented "round 135f" (sub-round w appends Waves Tune RT params after it).
 
 ## Where I stopped
+- Black-box: Auto-Tune Pro (re-activated by the user) for Classic; no GUI opened. Waves not used.
 - Done: §1–§6 with tests (tests/Parity135fTests.inc), pt-BR strings, PARITY.md rows + "135" score columns.
 - Not done (ranked): Prism free band edges / phase modes / oversampling; Facet 24 bands (needs maxEffectParams > 96)
   and Brickwall; Crest Host Sync / MIDI triggering; Ember's Saturn rows (6 bands, modulation, M/S) — left alone so

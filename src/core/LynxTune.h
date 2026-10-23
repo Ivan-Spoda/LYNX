@@ -57,8 +57,7 @@ enum Param : int
     // round 135f (Auto-Tune Pro parity, appended; off by default)
     learnMidi,               // on / off: the notes held on the MIDI channel teach the scale (the editor turns them into
                              // the custom scale's note switches) instead of being the targets
-    classicMode,             // on / off: the older correctors' retune — the correction glides at a constant rate
-                             // (one semitone per retune time) instead of the exponential approach
+    classicMode,             // on / off: the classic DSP — the same retune, the short-latency path (as low latency)
     count
 };
 

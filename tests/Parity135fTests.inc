@@ -418,8 +418,8 @@ TEST (parity135f_lynxtune_learn_and_classic)
     fx->process (l.data(), r.data(), 2048, p, 120.0);
     const auto mask = (unsigned) std::lround (fx->controlOutput (3) * 4096.0f);
     CHECK (mask == ((1u << 0) | (1u << 4)));
-    // classic: a sung 452 Hz (between A and A#) is still pulled to A (440 Hz), along another path than the default
-    auto run = [] (bool classic) {
+    // classic ([EXEC] Auto-Tune Pro: the same retune, the short-latency DSP): the same pull to A (440 Hz), less latency
+    auto run = [] (bool classic, int* latency) {
         auto q = parity135f::defaults (lynx::EffectKind::lynxTune);
         q[scale] = 0.0f; // chromatic
         q[retune] = std::sqrt (150.0f / 400.0f);
@@ -430,17 +430,17 @@ TEST (parity135f_lynxtune_learn_and_classic)
         parity135f::sine (a, 96000, 48000.0, 452.0, 0.3);
         b = a;
         for (int i = 0; i < 96000; i += 512) t->process (a.data() + i, b.data() + i, std::min (512, 96000 - i), q, 120.0);
+        *latency = t->latencySamples();
         return a;
     };
-    const auto normal = run (false), classic = run (true);
+    int latNormal = 0, latClassic = 0;
+    const auto normal = run (false, &latNormal), classic = run (true, &latClassic);
     auto freq = [] (const std::vector<float>& x, int from, int to) {
         int crossings = 0;
         for (int i = from + 1; i < to; ++i) if (x[(std::size_t) i - 1] < 0.0f && x[(std::size_t) i] >= 0.0f) ++crossings;
         return crossings * 48000.0 / (to - from);
     };
     const auto fn = freq (normal, 72000, 96000), fc = freq (classic, 72000, 96000);
-    double diff = 0.0;
-    for (int i = 0; i < 24000; ++i) diff = std::max (diff, (double) std::abs (normal[(std::size_t) i] - classic[(std::size_t) i]));
-    std::printf ("  lynx tune classic: end %.1f Hz (default %.1f Hz), early difference %.3f\n", fc, fn, diff);
-    CHECK (std::abs (fc - 440.0) < 3.0 && std::abs (fn - 440.0) < 3.0 && diff > 0.01);
+    std::printf ("  lynx tune classic: end %.1f Hz (default %.1f Hz), latency %d (default %d)\n", fc, fn, latClassic, latNormal);
+    CHECK (std::abs (fc - 440.0) < 3.0 && std::abs (fn - 440.0) < 3.0 && latClassic < latNormal);
 }

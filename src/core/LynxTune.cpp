@@ -194,7 +194,10 @@ public:
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
         const auto rg = rangeIndex (p[range]);
-        const auto low = p[lowLatency] >= 0.5f;
+        // round 135: Classic runs the short-latency path. [EXEC] Auto-Tune Pro hosted black-box: "Use Classic Mode DSP"
+        // keeps the retune trajectory (a 452 Hz tone at 150 ms: the same pitch at every point to 0.1 Hz) and drops the
+        // reported latency from 2670 to 37 samples
+        const auto low = p[lowLatency] >= 0.5f || p[classicMode] >= 0.5f;
         if (rg != curRange || low != curLow)
             configure (rg, low);
 
@@ -233,7 +236,6 @@ public:
                 mask = heldMask;
         }
         meterHeld.store ((float) heldMask / 4096.0f, std::memory_order_relaxed);
-        const bool classic = p[classicMode] >= 0.5f;
 
         const auto aRef = referenceHz (p[reference]);
         const auto tau = retuneMs (p[retune]) * 0.001;
@@ -353,13 +355,7 @@ public:
                 const auto x = std::clamp ((noteAge - 0.2) / 0.4, 0.0, 1.0);
                 t += human * 0.135 * x * x * (3.0 - 2.0 * x);
             }
-            if (classic) // round 135: a constant-rate glide, one semitone per retune time
-            {
-                const auto step = t > 0.0 ? dt / t : 1e9;
-                shift += std::clamp (wanted - shift, -step, step);
-            }
-            else
-                shift += (t > 0.0 ? 1.0 - std::exp (-dt / t) : 1.0) * (wanted - shift);
+            shift += (t > 0.0 ? 1.0 - std::exp (-dt / t) : 1.0) * (wanted - shift);
 
             auto semis = shift + trans;
             if (natural || extra != 0.0)
