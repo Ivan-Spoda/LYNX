@@ -183,3 +183,30 @@ constexpr PanManState panManStates[] = {
     { 0x0dfc1a81f3a537b5ull, { 1.000000f, 0.767012f, 1.000000f, 0.399998f, 0.657143f, 0.500000f, 0.040157f, 0.000000f, 0.992917f, 0.514882f, 1.000000f, 0.500000f }, 1 },
 };
 
+// Echoform: tape voicing (1 ping-pong tape, 2 studio tape, 3 studio tape hot), Note L (0.45 = 1/4, 0.35 = 1/8),
+// the loop gain per period and the mix — from the trial's impulse responses at each state (REA_rodada136 §4)
+struct EchoBoyState { std::uint64_t hash; int voicing; float note, loopGain, mix; int slots; };
+constexpr EchoBoyState echoBoyStates[] = {
+    { 0x80384ab84f6e980bull, 1, 0.45f, 0.3560f, 1.00f, 51 },
+    { 0x926e82b859ff4accull, 1, 0.45f, 0.3560f, 1.00f, 41 },
+    { 0x4ce01646cb157d6full, 2, 0.45f, 0.0574f, 1.00f, 29 },
+    { 0x1ae24caa8bd39c87ull, 1, 0.45f, 0.1300f, 1.00f, 24 },
+    { 0xaa9d58b8672f9634ull, 1, 0.45f, 0.3560f, 1.00f, 18 },
+    { 0xb0c64df657ba356full, 1, 0.45f, 0.3560f, 1.00f, 16 },
+    { 0x01d4215a00140591ull, 1, 0.45f, 0.3560f, 1.00f, 10 },
+    { 0x6fbdcb0d5ef7e5f0ull, 1, 0.45f, 0.0623f, 1.00f, 8 },
+    { 0x24e01caa91dd2b9dull, 1, 0.45f, 0.1300f, 1.00f, 7 },
+    { 0x123cc95a091d1a6aull, 1, 0.45f, 0.3560f, 1.00f, 6 },
+    { 0x611cbbfafe7a5cb8ull, 1, 0.45f, 0.1300f, 1.00f, 5 },
+    { 0x4f7eb4570c34e41eull, 1, 0.45f, 0.3560f, 1.00f, 5 },
+    { 0xec1ee6798b55b7d9ull, 2, 0.45f, 0.0574f, 1.00f, 3 },
+    { 0x1540962e0bedda4bull, 1, 0.45f, 0.0623f, 1.00f, 2 },
+    { 0x7c6d07fb0e5319d6ull, 1, 0.45f, 0.1300f, 1.00f, 2 },
+    { 0x68b202571a417419ull, 1, 0.45f, 0.3560f, 1.00f, 2 },
+    { 0xb788752567996ba2ull, 3, 0.35f, 0.0466f, 0.53f, 2 },
+    { 0xe7bccb59f1456fb9ull, 1, 0.45f, 0.3560f, 1.00f, 1 },
+    { 0x2545a9e225db5e2full, 1, 0.45f, 0.3560f, 1.00f, 1 },
+    { 0x3dc7d887bb140ac7ull, 2, 0.35f, 0.0000f, 0.50f, 1 },
+    { 0x9cd1d8b704958284ull, 3, 0.35f, 0.0466f, 0.53f, 1 },
+};
+

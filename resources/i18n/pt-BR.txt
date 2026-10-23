@@ -3163,3 +3163,6 @@ countries: br
 "Drive stage" = "Estágio de drive"
 "Formant ±12 st" = "Formante ±12 st"
 "DRIVE" = "DRIVE"
+# round 136: Echoform's tape voicing
+"Tape voicing" = "Voz de fita"
+"Off|Ping-pong tape|Studio tape|Studio tape hot" = "Desligado|Fita pingue-pongue|Fita de estúdio|Fita de estúdio quente"

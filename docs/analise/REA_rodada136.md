@@ -144,6 +144,33 @@ Her states, her three takes (1/3-octave RMS / max dB; level):
 Left: LYNX Tune's own resynthesis at neutral settings adds +3–4 dB at 158–200 Hz on her lowest take (an engine
 matter, not this role); the trial's formant-up low cut; Robot mode (1 slot) plays as Quantize.
 
+## 4. EchoBoy → Echoform, Tape voicing (`echoform::tapeVoicing`)
+
+[EXEC] Impulse trains (feedback set to 0) show NO delay modulation: every first-pass delay is constant and integral
+across 20 s and repeat runs, so the system is linear and time-invariant except a soft saturation on its input
+(her ping-pong style: the exact low-level impulse response alone nulls her take at −16 dB with +1.1 dB of level;
+with the input saturation −26 dB). Structures (the trial's 32-sample latency removed):
+- ping-pong (her edited style, 9 + 6 + 3 + 2 states): both inputs summed; left echo one beat + 38, right two beats + 43,
+  each recirculating every two beats (×0.356 / 0.130 / 0.062 by state); eight diffusion taps around each first tap
+  (−0.153 × the tap at −595 / −493 / −366 / −300, +0.148 at +300 … +595 on the left; −641 / −519 / −465 / −331 / +331 …
+  +641 on the right);
+- studio tape, single (and its 1/8-note, saturated variant): each side its own; left T − 184 and 2T + 296, right
+  T + 200 and 2T − 280 (alternating), the second tap at √(G / G₀) × its measured ratio, a 2T loop;
+- each pass's colour: the kernel deconvolved from the response, fitted as a 3rd-order IIR (−21 dB ping-pong, −57 dB
+  studio tape; a long negative tail = a low cut); equal-power mix (her 50 / 53 % states).
+
+| state (slots) | settings | before (round 129 preset): null / level / 1/3-oct RMS | after |
+|---|---|---|---|
+| 0 (51; 158 with its twins) | ping-pong 1/4, fb 0.52, sat 3.7 dB, edited | +2.5…+3.5 / −1.0…+0.8 / 1.1–2.4 | **−17.7…−18.4 (R −16.9…−20.3) / −0.2…+0.3 / 0.40–0.49** |
+| 3 (24; 38) | the same, fb 0.19 | +2.8…+3.8 / −0.3…+1.3 / 1.2–1.8 | **−18.1…−18.9 (R −17.0…−20.8) / ±0.3 / 0.39–0.42** |
+| 7 (8; 10) | the same, fb 0.09 | +2.8…+3.8 / −0.2…+1.4 / 1.2–1.7 | **−18.2…−18.9 / ±0.3 / 0.40–0.42** |
+| 2 (29; 32) | single studio tape 1/4, fb 0.32 | +4.6…+5.0 / +2.5…+3.4 / 3.3–3.6 | **−24.8…−26.1 / −0.1 / 0.10–0.14** |
+| 16 (2; 3) | single 1/8, sat 12.5 dB, mix 53 % | −2.1…−3.1 / +0.9…+1.2 / 1.0–1.1 | **−26.5…−29.6 / ±0.1 / 0.04–0.12** |
+| 20 (1) | single 1/8, no feedback, mix 50 % | −3.1…−3.7 / +1.0 / 1.0–1.1 | **−51.3…−52.4 / −0.02 / 0.02** |
+
+Not done: the Dual state (1 slot) keeps round 129's preset; her style's hiss; the ping-pong kernel's remaining
+structure (−21 dB) and its saturation shape.
+
 ## Where I stopped
 - Batch 1 (this commit): the state read-back + hash tables, Decapitator → Ember Classic (style A), PanMan → Auto-pan
   Rhythm, editor routing (Ember in Classic opens the layout editor with the Classic controls), tests

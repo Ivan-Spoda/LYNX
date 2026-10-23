@@ -199,3 +199,29 @@ TEST (alterboy_substitute_plays_her_usual_setting_round136)
         CHECK (std::abs (outDb - gain) < 1.0);
     }
 }
+
+TEST (echoform_tape_voicing_matches_the_trials_echo_round136)
+{
+    using namespace lynx;
+    namespace e = echosuite::echoform;
+    // [EXEC] her EchoBoy state 20 (studio tape, 1/8 note, no feedback, mix 50 %) at 120 BPM, a left impulse: the dry
+    // 0.708 at 0 and one echo 0.407 at 11 816 samples (the trial's 32-sample latency removed); nothing on the right
+    auto slot = makeEffectSlot (EffectKind::echoform);
+    slot.params[(size_t) e::tapeVoicing] = e::tapeVoicingValue (2);
+    slot.params[(size_t) e::syncL] = slot.params[(size_t) e::syncR] = 0.625f;
+    slot.params[(size_t) e::noteL] = slot.params[(size_t) e::noteR] = 0.35f;
+    slot.params[(size_t) e::feedback] = 0.0f;
+    slot.params[(size_t) e::mix] = 0.5f;
+    slot.params[(size_t) e::output] = 0.5f;
+    auto fx = makeEffect (slot);
+    fx->prepare (48000.0);
+    std::vector<float> l (24000, 0.0f), r (24000, 0.0f);
+    l[0] = 0.003f;
+    for (int off = 0; off < 24000; off += 512)
+        fx->process (l.data() + off, r.data() + off, std::min (512, 24000 - off), slot.params, 120.0);
+    CHECK (std::abs (l[0] / 0.003f - 0.708f) < 0.01f);
+    CHECK (std::abs (l[11816] / 0.003f - 0.407f) < 0.01f);
+    float rmax = 0.0f;
+    for (auto v : r) rmax = std::max (rmax, std::abs (v));
+    CHECK (rmax < 1e-9f);
+}

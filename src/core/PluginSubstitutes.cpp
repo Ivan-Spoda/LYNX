@@ -223,14 +223,15 @@ waves = SuperTap
 [soundtoys-echoboy]
 product = EchoBoy
 vendor = Soundtoys
-# round 129 (docs/PARITY.md): LYNX's multi-mode echo plays EchoBoy's role (styles, saturation, wow / flutter, note
-# sync; was Fruity Delay 3 at FL's default). Its state is encoded: a tape echo, 1/4 note at the project tempo,
-# 25 % feedback, 25 % mix
+# round 129 (docs/PARITY.md): LYNX's multi-mode echo plays EchoBoy's role. Round 136: her states play Echoform's Tape
+# voicing (the loop structures measured on the official trial, REA_rodada136 §4), recognised by the hash of the encoded
+# preset (not decoded here); any other state: round 129's tape echo, 1/4 note at the project tempo, 25 % feedback, 25 % mix
 lynx = Echoform
 preset = Mode=0.0415; Sync L=0.6248; Note L=0.4498; Feedback=0.125; Mix=0.25
 # [DATA] VST2 unique ID from real projects
 vst2 = StEB
 names = EchoBoy; EchoBoyJr; EchoBoy Jr
+translate = soundtoys-echoboy
 
 [soundtoys-primaltap]
 product = PrimalTap
@@ -1644,8 +1645,33 @@ int translateSoundtoysAlterBoy (const std::vector<std::uint8_t>& state, EffectSl
     return 0;
 }
 
+int translateSoundtoysEchoBoy (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    namespace e = echosuite::echoform;
+    if (slot.kind != EffectKind::echoform || slot.params.size() < (std::size_t) e::paramCount)
+        return 0;
+    const auto h = presetHash (state);
+    for (const auto& st : echoBoyStates)
+    {
+        if (st.hash != h)
+            continue;
+        auto& p = slot.params;
+        p[(std::size_t) e::tapeVoicing] = e::tapeVoicingValue (st.voicing);
+        p[(std::size_t) e::syncL] = p[(std::size_t) e::syncR] = 0.625f; // a note at the project tempo
+        p[(std::size_t) e::noteL] = p[(std::size_t) e::noteR] = st.note;
+        p[(std::size_t) e::feedback] = st.loopGain / 2.0f;              // feedbackGain = 2 v
+        p[(std::size_t) e::mix] = st.mix;
+        p[(std::size_t) e::output] = 0.5f;
+        slot.mix = 1.0f;
+        return 6;
+    }
+    return 0;
+}
+
 RawTranslator rawTranslatorNamed (std::string_view name)
 {
+    if (name == "soundtoys-echoboy")
+        return translateSoundtoysEchoBoy;
     if (name == "soundtoys-littlealterboy")
         return translateSoundtoysAlterBoy;
     if (name == "soundtoys-decapitator")

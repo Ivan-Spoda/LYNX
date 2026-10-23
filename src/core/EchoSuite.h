@@ -55,6 +55,7 @@ enum Param
     phaseR,
     hybrid,     // round 124: the hybrid echo engine (off / clean / analog) — a plain two-line echo with a level-dependent
                 // gain on every pass, measured on the H-Delay trial (REA_rodada124 §5); off = Echoform as before
+    tapeVoicing, // round 136: a measured tape-echo loop (REA_rodada136 §4): 0 = off, else one of tapeVoicingCount
     paramCount
 };
 enum class Style { single, ratio, quad, dual, pingPong }; // the two-time styles last (the panel shows the right time for both)
@@ -79,7 +80,11 @@ double pitchSemis (float v) noexcept;    // ±24
 double lowCutHz (float v) noexcept;      // 10 .. 2000
 double highCutHz (float v) noexcept;     // 200 .. 20000
 double outputDb (float v) noexcept;      // −18 .. +18 dB (round 119)
-int hybridOf (float v) noexcept;         // 0 off, 1 clean, 2 analog (round 124)
+int hybridOf (float v) noexcept;
+constexpr int tapeVoicingCount = 3; // round 136: ping-pong (edited style), studio tape, studio tape hot
+int tapeVoicingOf (float v) noexcept; // 0 = off, 1 … tapeVoicingCount
+float tapeVoicingValue (int k) noexcept;
+const char* tapeVoicingName (int k) noexcept;         // 0 off, 1 clean, 2 analog (round 124)
 float hybridValue (int h) noexcept;
 Mode modeOf (float v) noexcept;
 float modeValue (Mode m) noexcept;
