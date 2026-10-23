@@ -21,6 +21,24 @@ Scores are 0–10 (10 = a user of the original finds every control and every pie
 Round 128 covers the FabFilter / Slate / Antares roles (below). Round 129 covers the Waves / SSL / Valhalla roles
 (its own section).
 
+## Round 137: what changed (config / design, after 135 → after 137)
+
+Round 137 (`docs/analise/REA_rodada137.md`) took the biggest remaining ❌ / ⚠️ rows and re-measured rows marked "not
+measured" on the trials (EchoBoy, Pro-C 3 and Pro-Q 4 trials; Valhalla demos — black-box, short runs between the
+demo's fades).
+
+| LYNX engine | Original | Config 135 → 137 | Design 135 → 137 | Round-137 changes |
+|---|---|---|---|---|
+| Echoform | EchoBoy / PrimalTap | 7 → 8 | 6 → 7 | Rhythm echo mode (measured law: repeats, decay, 2-beat pattern, feedback replay), a bar per tap |
+| Echoform | ValhallaDelay | 8 → 9 | 7 → 8 | Era (measured bandwidth per mode), ducking law measured, quad taps / Repeat-Swell / Era translated; stale rows re-checked |
+| Echoform | H-Delay | 9 → 9 | 7 → 8 | LoFi switch independent of the mode, the note / BPM read-out on the picture |
+| Lattice Mod | ValhallaUberMod | 7 → 8 | 9 → 9 | Input pan (measured routes), translated |
+| Crest Compressor | Pro-C 3 | 8 → 9 | 8 → 8 | side-chain trigger: Host sync (note, rate, length — measured) and MIDI |
+| Voice Shift | Little AlterBoy | 9 → 10 | 8 → 8 | MIDI control of the pitch / the robot note |
+| Gemini Doubler | Doubler2 / Doubler4 | 9 / 8 → 9 / 8 | 7 → 8 | the three graphs editable (drag, double-click), axis labels |
+| Quell Denoiser | NS1 | 9 → 9 | 8 → 9 | the fader's 0–100 scale, held reduction read-out |
+| Horizon / Facet EQ | FutureVerb / Pro-Q 4 | — | — | measured only: Horizon's note list confirmed; Pro-Q 4's linear-phase latencies per resolution recorded |
+
 ## Round 135: summary (all pairs, config / design)
 
 Round 135 (`docs/analise/REA_rodada135{f,s,v,w}.md`) implemented the ❌ / ⚠️ items, biggest user-visible gaps first
@@ -132,7 +150,7 @@ range.
 | Hover tooltip next to a node (freq, gain, Q, power, solo) | ✅ | read-out box at the node with power (round 128), solo and remove |
 | Right-click a node: shape, slope, dynamic range, solo, reset, remove | ✅ | |
 | Processing: Zero Latency / Natural Phase / Linear Phase | ✅ | |
-| Linear-phase resolution | ❌ | fixed |
+| Linear-phase resolution | ❌ | fixed (LYNX: 4608 samples at 48 kHz). Round 137 [EXEC] the trial's latencies at 48 kHz: natural phase 320 (LYNX 320 ✅); linear phase Low 3072 / Medium 5120 (default) / High 9216 / Very High 17408 / Maximum 66560 = 1024 + 2^11 … 2^16 (no 2^15) — an FIR of 2× that half-length; needs per-instance buffers sized by the resolution |
 | Character (Clean / Subtle / Warm) | ✅ | round 135: in the Processing menu (shown after the mode in the bottom bar); LYNX's own soft-knee curves on the output, unity below about −20 dBFS (the reference's law is not measured) |
 | Gain scale | ✅ | |
 | Output level | ✅ | |
