@@ -477,6 +477,16 @@ public:
             return;
         }
 
+        if (args.contains ("--editortest"))
+        {
+            // LYNX.exe --editortest plugin.vst3 report.txt ["name"]: opens the plugin's own editor in a window for a few
+            // seconds, then closes it (a plugin whose UI crashes the host ends the process before the report says OK)
+            const auto i = args.indexOf ("--editortest");
+            const auto only = i + 3 < args.size() && ! args[i + 3].startsWith ("--") ? args[i + 3].unquoted() : juce::String();
+            runEditorTest (args[i + 1].unquoted(), args[i + 2].unquoted(), only);
+            return;
+        }
+
         if (args.contains ("--pluginstyle")) // round 126: force one style for this run (glow, neon, hardware, vivid; auto = per plugin)
         {
             const auto i = args.indexOf ("--pluginstyle");
@@ -1137,6 +1147,78 @@ private:
         if (reportPath.isNotEmpty())
             juce::File (reportPath).replaceWithText (report);
         return allFinite;
+    }
+
+    void runEditorTest (const juce::String& pluginPath, const juce::String& reportPath, const juce::String& only)
+    {
+        struct EditorTest final : juce::Timer
+        {
+            juce::String reportPath, report;
+            std::unique_ptr<lynx::PluginHost> host;
+            std::unique_ptr<juce::AudioPluginInstance> plugin;
+            std::unique_ptr<juce::DocumentWindow> window;
+            std::function<void (bool)> done;
+
+            void step (const juce::String& line)
+            {
+                report << line << "\n";
+                juce::File (reportPath).replaceWithText (report); // written at each step: a crash leaves the last one
+            }
+
+            void timerCallback() override
+            {
+                stopTimer();
+                window = nullptr;
+                step ("step=closed");
+                plugin = nullptr;
+                step ("result=OK");
+                done (true);
+            }
+        };
+
+        auto* test = new EditorTest();
+        test->reportPath = reportPath;
+        test->done = [this, test] (bool ok)
+        {
+            setApplicationReturnValue (ok ? 0 : 1);
+            juce::MessageManager::callAsync ([this, test] { delete test; quit(); });
+        };
+        test->host = std::make_unique<lynx::PluginHost> (false);
+        test->step ("plugins_in_file=" + juce::String (test->host->addPluginFile (juce::File (pluginPath))));
+        test->step ("exe=" + juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName());
+
+        for (const auto& type : test->host->getKnownPlugins().getTypes())
+        {
+            if (juce::File (type.fileOrIdentifier).getFileName() != juce::File (pluginPath).getFileName()
+                || (only.isNotEmpty() && type.name != only))
+                continue;
+
+            juce::String error;
+            test->plugin = lynx::createRightInstance (test->host->getFormats(), type, 48000.0, 512, error);
+            test->step ("plugin=" + type.name + (test->plugin == nullptr ? " error=" + error : juce::String()));
+            break;
+        }
+
+        if (test->plugin == nullptr)
+        {
+            test->step ("result=FAILED");
+            test->done (false);
+            return;
+        }
+
+        lynx::preparePlugin (*test->plugin, 48000.0, 512);
+        test->step ("step=create_editor");
+        test->window = std::make_unique<juce::DocumentWindow> (test->plugin->getName(), juce::Colours::black, juce::DocumentWindow::closeButton);
+        test->window->setUsingNativeTitleBar (true);
+        if (auto* editor = test->plugin->createEditorIfNeeded())
+            test->window->setContentOwned (editor, true);
+        else
+            test->step ("no_editor");
+        test->step ("step=show");
+        test->window->centreWithSize (test->window->getWidth(), test->window->getHeight());
+        test->window->setVisible (true);
+        test->step ("step=shown");
+        test->startTimer (4000);
     }
 
     // LYNX.exe --plugintest plugin.vst3 report.txt ["name"]: loads the plugin (or the one named in a shell), plays notes if it is an
