@@ -15,6 +15,12 @@ namespace lynx
 // False if the format is not a known one.
 bool parseFlWrapper (const std::vector<std::uint8_t>& blob, ForeignPlugin& out);
 
+// FL's wrapper processing options (record 0x02 flags, REA round 134) onto LYNX's plugin options: "Use fixed size
+// buffers" (flag 0x2), "Process maximum size buffers" (fixed options bit 0), "Allow threaded processing" (0x1000,
+// wrapper version 7+), "Make bridged" (0x40000, version 8+). Flag 0x400000 = the defaults. Nothing changes without
+// the record.
+void applyFlWrapperOptions (const ForeignPlugin& wrapper, PluginRef& ref);
+
 // VST3 state FL stores in record 0x35 (u32 version + records: 3 component, 2 controller).
 bool splitFlVst3State (const std::vector<std::uint8_t>& state, std::vector<std::uint8_t>& component,
                        std::vector<std::uint8_t>& controller);

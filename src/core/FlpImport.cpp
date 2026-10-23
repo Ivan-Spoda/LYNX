@@ -1141,6 +1141,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         if (c.pluginName == "Fruity Wrapper" && parseFlWrapper (c.pluginState, def.plugin.foreign))
         {
             def.plugin.name = def.plugin.foreign.name;
+            applyFlWrapperOptions (def.plugin.foreign, def.plugin);
             def.plugin.midiInPort = def.plugin.foreign.midiInPort; // the MIDI Out channels on that port play it
         }
 
@@ -2031,6 +2032,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     // the app swaps in the installed plugin; without it, the slot is removed
                     made = makeEffectSlot (EffectKind::plugin);
                     made->plugin.name = foreign.name;
+                    applyFlWrapperOptions (foreign, made->plugin);
                     made->plugin.foreign = std::move (foreign);
                 }
                 else

@@ -77,6 +77,10 @@ struct Options
     bool normalize = false;          // peak to 0 dBFS
     bool masterEffects = true;       // the Master insert's effects
     bool trimPdc = true;             // drop the silence the delay compensation adds at the start
+    // FL's "HQ for all plugins" (REA round 134): engines with a separate render quality use it and HQ switches are
+    // forced on; off = the export uses the same (draft) quality as playback, so it matches what was heard
+    bool hqAllPlugins = true;
+    bool showWhenDone = false;       // FL's "Show file(s) when complete": the file manager opens on the result
     Channels channels = Channels::stereo;
 
     bool operator== (const Options&) const = default;
@@ -98,6 +102,12 @@ bool usesDither (const Options& o) noexcept;
 
 // MP3 is limited to MPEG-1 rates: higher project rates are encoded at 48 kHz (44.1 kHz family → 44.1 kHz).
 double mp3SampleRate (double rate) noexcept;
+
+// What the render window shows before the export (FL: "Length: 144 bars  Total time: 3'57''  Disk space: 38.76 MB"):
+// the music's length in bars and the file size the options give for `seconds` (one file; the tail not counted;
+// FLAC and the lossy formats are estimates).
+double lengthInBars (double seconds, double bpm, int beatsPerBar) noexcept;
+std::int64_t estimatedBytes (const Options& o, double seconds) noexcept;
 
 // Remembered between sessions as "key=value" lines; unknown or bad values fall back to the defaults (clamped).
 std::string toText (const Options& o);

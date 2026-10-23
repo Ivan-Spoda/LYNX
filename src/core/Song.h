@@ -91,6 +91,9 @@ struct ForeignPlugin
     std::string clapId, name, path;           // path: binary on the machine that saved it
     std::vector<std::uint8_t> state;          // raw 0x35 record (format depends on `format`)
     int midiInPort = -1, midiOutPort = -1;     // wrapper MIDI ports (record 0x01; −1 = none)
+    // wrapper options (record 0x02, REA round 134): processing/troubleshooting flags and the fixed-buffer options
+    std::uint32_t wrapperVersion = 0, wrapperFlags = 0, fixedOptions = 0;
+    bool hasWrapperOptions = false;
 
     bool operator== (const ForeignPlugin&) const = default;
 };
@@ -102,8 +105,10 @@ struct PluginRef
     std::string state; // plugin state in base64 (what the plugin returns when saving)
     ForeignPlugin foreign; // FL import not yet resolved (format == none: nothing pending)
     // FL wrapper processing options (REA_rodada118 Part B), saved with the project:
-    bool fixedBuffers = false;    // "Use fixed size buffers": constant block length (the device buffer), + that latency
+    bool fixedBuffers = false;    // "Use fixed size buffers": constant 2 ms blocks (flFixedBlockSize), + that latency
     bool separateProcess = false; // "Make bridged": this plugin runs in its own process even with the global option off
+    bool maxSizeBuffers = false;  // with fixedBuffers: "Process maximum size buffers" (the device buffer, not 2 ms)
+    bool threaded = true;         // "Allow threaded processing" (REA round 134): off = always on the audio thread itself
     // The wrapper's "MIDI input port" (0…255; −1 = none): the notes / controls of the MIDI Out channels on that port
     // reach this plugin (FL: Plugin wrapper settings › MIDI › Input port)
     int midiInPort = -1;
@@ -111,6 +116,7 @@ struct PluginRef
     bool operator== (const PluginRef& o) const
     {
         return id == o.id && state == o.state && foreign == o.foreign && fixedBuffers == o.fixedBuffers && separateProcess == o.separateProcess
+               && threaded == o.threaded && maxSizeBuffers == o.maxSizeBuffers
                && midiInPort == o.midiInPort;
     }
 };
@@ -517,6 +523,9 @@ struct MixerTrack
     int inputChannel = -1;
     bool inputStereo = true;
     InputMonitor monitor = InputMonitor::automatic;
+    // FL's mixer track menu "CPU › Allow threaded processing" (REA round 134): off = this insert always runs on the
+    // audio thread itself (as do inserts holding a plugin whose own option is off)
+    bool threaded = true;
 };
 
 struct Note
