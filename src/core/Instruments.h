@@ -30,6 +30,8 @@ public:
     // hosted plugins see the channel; the others play it as a plain note.
     virtual void noteOnMidi (int key, float velocity, int /*midiChannel*/) noexcept { noteOn (key, velocity); }
     virtual void noteOffMidi (int key, int /*midiChannel*/) noexcept { noteOff (key); }
+    // A short MIDI message (program change, bank select…) for the next block. Only hosted plugins take it.
+    virtual void midiMessage (const std::uint8_t* /*bytes*/, int /*size*/) noexcept {}
 
     // Adds (does not overwrite) n samples into left/right, with the gains already applied.
     virtual void render (float* left, float* right, int n, float gainLeft, float gainRight) noexcept = 0;
