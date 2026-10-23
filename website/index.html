@@ -863,11 +863,11 @@ function renderDownload(){
   const H = pt ? {
     win:'<b>Windows 10 ou 11, 64 bits.</b> O instalador não pede admin. O executável ainda não tem assinatura de código: se o SmartScreen avisar, clique em <i>Mais informações</i> → <i>Executar assim mesmo</i>.',
     mac:'<b>macOS 11 ou mais novo, Apple Silicon ou Intel.</b> O app ainda não é notarizado pela Apple: arraste o LYNX para Aplicativos e, na primeira vez, clique com o botão direito nele → <i>Abrir</i> → <i>Abrir</i> (no macOS 15 ou mais novo: tente abrir uma vez e depois <i>Ajustes do Sistema → Privacidade e Segurança → Abrir Mesmo Assim</i>). Ou no Terminal: <code>xattr -dr com.apple.quarantine /Applications/LYNX.app</code>',
-    linux:'<b>Linux x86_64 com glibc 2.39 ou mais novo</b> (Ubuntu 24.04, Debian 13, Fedora 40 ou mais novos). AppImage: <code>chmod +x LYNX-*.AppImage</code> e execute (algumas distros precisam do libfuse2). O .tar.gz traz um <code>install.sh</code> que instala no seu usuário com atalho no menu.'
+    linux:'<b>Linux x86_64 com glibc 2.35 ou mais novo</b> (Ubuntu 22.04, Debian 12, Fedora 36 ou mais novos). AppImage: <code>chmod +x LYNX-*.AppImage</code> e execute (algumas distros precisam do libfuse2). O .tar.gz traz um <code>install.sh</code> que instala no seu usuário com atalho no menu.'
   } : {
     win:'<b>Windows 10 or 11, 64-bit.</b> The installer needs no admin rights. The executable is not code-signed yet: if SmartScreen warns, choose <i>More info</i> → <i>Run anyway</i>.',
     mac:'<b>macOS 11 or newer, Apple Silicon or Intel.</b> The app is not notarized by Apple yet: drag LYNX to Applications, then the first time right-click it → <i>Open</i> → <i>Open</i> (on macOS 15 or newer: try to open it once, then <i>System Settings → Privacy &amp; Security → Open Anyway</i>). Or in Terminal: <code>xattr -dr com.apple.quarantine /Applications/LYNX.app</code>',
-    linux:'<b>Linux x86_64 with glibc 2.39 or newer</b> (Ubuntu 24.04, Debian 13, Fedora 40 or newer). AppImage: <code>chmod +x LYNX-*.AppImage</code>, then run it (some distros need libfuse2). The .tar.gz has an <code>install.sh</code> that installs for your user with a menu entry.'
+    linux:'<b>Linux x86_64 with glibc 2.35 or newer</b> (Ubuntu 22.04, Debian 12, Fedora 36 or newer). AppImage: <code>chmod +x LYNX-*.AppImage</code>, then run it (some distros need libfuse2). The .tar.gz has an <code>install.sh</code> that installs for your user with a menu entry.'
   };
   const url = (os,k) => dlUrl[os+'.'+k] || RELEASES;
   const fmt = f => (pt ? f.pt : f.en) + (f.ext ? ' (' + f.ext + ')' : '');
