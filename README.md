@@ -247,10 +247,11 @@ platforms (`<v>` is the version, e.g. `0.1.10-alpha`):
 |---|---|---|
 | **Windows** 10 / 11, 64-bit | `LYNX-<v>-setup-x64.exe` (installer) or `LYNX-<v>-windows-x64.zip` (portable) | per-user installer, no admin rights |
 | **macOS** 11 Big Sur or newer | `LYNX-<v>-macos-universal.dmg` | universal: Apple Silicon and Intel |
-| **Linux** x86_64, glibc 2.39+ | `LYNX-<v>-linux-x86_64.AppImage` or `LYNX-<v>-linux-x86_64.tar.gz` | Ubuntu 24.04+, Debian 13+, Fedora 40+, current Arch / Manjaro |
+| **Linux** x86_64, glibc 2.35+ | `LYNX-<v>-x86_64.AppImage` or `LYNX-<v>-linux-x86_64.tar.gz` | Ubuntu 22.04+, Debian 12+, Fedora 36+, current Arch / Manjaro |
 
 Release files are built from the tagged source by GitHub Actions ([`release.yml`](.github/workflows/release.yml)) and
-listed with their SHA-256 in `SHA256SUMS.txt`. Releases up to 0.1.7 are Windows-only.
+listed with their SHA-256 in `SHA256SUMS.txt`. Releases up to 0.1.7 are Windows-only; up to 0.1.12 the AppImage was named
+`LYNX-<v>-linux-x86_64.AppImage` and needed glibc 2.39.
 
 **Windows.** Run the installer: it needs no admin rights, adds Start-menu/desktop shortcuts, opens `.lynx` projects and
 offers LYNX in *Open with* for `.flp` without changing FL Studio's default. Prefer no installer? Extract the portable
@@ -276,7 +277,7 @@ chmod +x LYNX-*.AppImage
 ./LYNX-*.AppImage
 ```
 
-Some distributions need libfuse2 to run AppImages (`libfuse2t64` on Ubuntu 24.04, `fuse2` on Arch, `fuse-libs` on Fedora); otherwise
+Some distributions need libfuse2 to run AppImages (`libfuse2` on Ubuntu 22.04, `libfuse2t64` on 24.04, `fuse2` on Arch, `fuse-libs` on Fedora); otherwise
 use the `.tar.gz`: extract it and run `./install.sh`, which installs LYNX for your user under `~/.local` with a menu
 entry, an icon and the `.lynx` file type (`./install.sh --uninstall` removes it again).
 

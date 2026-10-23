@@ -45,6 +45,7 @@
 #include "ui/NoteToolDialogs.h"
 #include "ui/EventEditor.h"
 #include "ui/AudioEditor.h"
+#include "ui/TempoTapper.h"
 #include "core/EventEdit.h"
 #include "core/FacetEq.h"
 #include "ui/FacetEqEditor.h"
@@ -158,6 +159,15 @@ public:
 
     void initialise (const juce::String& commandLine) override
     {
+        // Windows, LYNX.exe in a folder with accents: run again from its ASCII short path (Waves editors crash otherwise)
+        if (int code = 0; lynx::platform::relaunchFromAsciiPath (code))
+        {
+            relaunched = true;
+            setApplicationReturnValue (code);
+            quit();
+            return;
+        }
+
         // a crash in any mode (UI, command line) writes its backtrace to %APPDATA%\LYNX\autosave
         juce::SystemStats::setApplicationCrashHandler (onCrash);
 
@@ -724,6 +734,9 @@ public:
 
     void shutdown() override
     {
+        if (relaunched)
+            return; // the copy that ran owns the session (its crash notes stay for the next start)
+
         lynx::crashguard::note ("closing");
         lynx::shutdownPluginSandboxWorker();
         splash = nullptr;
@@ -749,6 +762,7 @@ public:
 
 private:
     bool sandboxChild = false;
+    bool relaunched = false; // relaunchFromAsciiPath ran LYNX from its short path: this process only waited
     juce::String uncleanLastStep; // last step of a previous run that ended without closing
 
     // LYNX.exe --selftest report.txt: renders 2 s without a sound card and writes the result.
@@ -2872,6 +2886,16 @@ private:
                 saveWindow (std::move (wave), "-audioeditor.png");
                 saveWindow (lynx::makeAudioEditorForSnapshot (offline, d, true), "-audioeditor-spectrum.png");
             }
+
+            // the tempo tapper after five steady taps (round 132)
+            saveWindow (lynx::makeTempoTapperForSnapshot (offline, 5, 128.0), "-tempotapper.png");
+
+            // the Channel Rack's piano-roll view (round 132)
+            ui.selectTabForSnapshot (0);
+            ui.getRackForSnapshot().setPianoRollView (true);
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-rack-pianoroll-view.png");
+            ui.getRackForSnapshot().setPianoRollView (false);
 
             // the Channel Rack with the step graph lane (velocity), and the Euclidean fill window
             ui.selectTabForSnapshot (0);

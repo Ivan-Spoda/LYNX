@@ -44,6 +44,10 @@ public:
     std::function<void (int)> onShowInsert;      // an effect's / generator's insert in the Mixer
     std::function<void (int)> onOpenAutomation;  // double-click an automation clip: its editor
     std::function<void (const juce::File&)> onSendToPlaylist; // a sample's "Send to the Playlist as an audio clip"
+    std::function<void()> onPreviewVolumeChanged;             // the preview volume knob moved (the main window saves it)
+
+    // The sample preview volume knob beside the search box (0..125%, engine.setPreviewVolume): follows the engine.
+    void refreshPreviewVolume();
 
     // The project's file (.lynx, or the imported .flp): its folder shows as "Project folder".
     void setProjectFile (const juce::File& file);
@@ -129,6 +133,7 @@ private:
     class SearchJob;
     std::unique_ptr<SearchJob> job;
     juce::TextEditor searchBox;
+    juce::Slider previewVolume { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox };
     std::unique_ptr<juce::FileChooser> chooser;
     int tab = allTab;
     bool searchPending = false, projectDirty = false;

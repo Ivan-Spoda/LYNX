@@ -2,6 +2,16 @@
 
 #include "core/FlpImport.h"
 
+#include <iterator>
+#include <string>
+
+#if JUCE_WINDOWS
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #include <windows.h>
+#endif
+
 namespace lynx::platform
 {
 namespace
@@ -112,5 +122,57 @@ juce::File localFile (const juce::String& path)
 juce::File localFile (const std::string& utf8Path)
 {
     return localFile (juce::String::fromUTF8 (utf8Path.c_str()));
+}
+
+bool relaunchFromAsciiPath (int& exitCode)
+{
+   #if JUCE_WINDOWS
+    wchar_t exe[MAX_PATH * 4] {};
+    const auto length = GetModuleFileNameW (nullptr, exe, (DWORD) std::size (exe));
+    if (length == 0 || length >= std::size (exe))
+        return false;
+
+    const auto isAscii = [] (const wchar_t* text) { for (; *text != 0; ++text) if (*text > 127) return false; return true; };
+    if (isAscii (exe) || GetEnvironmentVariableW (L"LYNX_SHORT_PATH_RELAUNCH", nullptr, 0) > 0)
+        return false;
+
+    wchar_t shortExe[MAX_PATH * 4] {};
+    const auto shortLength = GetShortPathNameW (exe, shortExe, (DWORD) std::size (shortExe));
+    if (shortLength == 0 || shortLength >= std::size (shortExe) || ! isAscii (shortExe))
+        return false; // 8.3 names disabled on this volume: nothing to do
+
+    // the same arguments: the original command line without its first token (the program, quoted or not)
+    const wchar_t* rest = GetCommandLineW();
+    if (*rest == L'"')
+    {
+        for (++rest; *rest != 0 && *rest != L'"'; ++rest) {}
+        if (*rest == L'"')
+            ++rest;
+    }
+    else
+        for (; *rest != 0 && *rest != L' ' && *rest != L'\t'; ++rest) {}
+
+    std::wstring commandLine = L"\"" + std::wstring (shortExe) + L"\"" + rest;
+    SetEnvironmentVariableW (L"LYNX_SHORT_PATH_RELAUNCH", L"1"); // inherited: the child never relaunches again
+
+    STARTUPINFOW startup {};
+    startup.cb = sizeof (startup);
+    GetStartupInfoW (&startup);
+    PROCESS_INFORMATION process {};
+    if (! CreateProcessW (shortExe, commandLine.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr, &startup, &process))
+        return false;
+
+    AllowSetForegroundWindow (process.dwProcessId); // its window may come to the front
+    CloseHandle (process.hThread);
+    WaitForSingleObject (process.hProcess, INFINITE);
+    DWORD code = 0;
+    GetExitCodeProcess (process.hProcess, &code);
+    CloseHandle (process.hProcess);
+    exitCode = (int) code;
+    return true;
+   #else
+    juce::ignoreUnused (exitCode);
+    return false;
+   #endif
 }
 } // namespace lynx::platform

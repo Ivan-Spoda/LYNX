@@ -304,6 +304,7 @@ if(LYNX_BUILD_APP)
         src/ui/EventEditor.cpp
         src/ui/AudioEditor.cpp
         src/ui/ToolWindow.cpp
+        src/ui/TempoTapper.cpp
         src/ui/HistoryPanel.cpp
         src/ui/MissingFilesDialog.cpp
         src/ui/SettingsDialog.cpp

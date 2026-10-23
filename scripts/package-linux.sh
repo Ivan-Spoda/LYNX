@@ -9,7 +9,9 @@ cd "$(dirname "$0")/.."
 
 BIN="$1"; LABEL="$2"; OUTDIR="$3"; DEMO="${4:-}"
 ARCH="${ARCH:-x86_64}"
-NAME="LYNX-$LABEL-linux-$ARCH"
+NAME="LYNX-$LABEL-linux-$ARCH"            # .tar.gz
+APPIMAGE="LYNX-$LABEL-$ARCH.AppImage"     # AppImage names leave out "linux" (all AppImages are for Linux)
+APPID=com.lynx_share.LYNX                 # AppStream component id = desktop file name inside the AppImage
 APPIMAGETOOL_VERSION=1.9.0
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -28,10 +30,14 @@ tar -C "$WORK" -czf "$OUTDIR/$NAME.tar.gz" "$NAME"
 
 # --- AppImage ----------------------------------------------------------------------------------------------
 APPDIR="$WORK/LYNX.AppDir"
-mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps" "$APPDIR/usr/share/mime/packages"
+mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps" \
+    "$APPDIR/usr/share/mime/packages" "$APPDIR/usr/share/metainfo"
 install -m 755 "$PKG/LYNX" "$APPDIR/usr/bin/LYNX"
-install -m 644 resources/linux/lynx.desktop "$APPDIR/usr/share/applications/lynx.desktop"
-install -m 644 resources/linux/lynx.desktop "$APPDIR/lynx.desktop"
+install -m 644 resources/linux/lynx.desktop "$APPDIR/usr/share/applications/$APPID.desktop"
+install -m 644 resources/linux/lynx.desktop "$APPDIR/$APPID.desktop"
+# AppStream metadata with this build's version and date (validated by appimagetool when appstreamcli is installed)
+RELDATE="$(git log -1 --format=%cs 2> /dev/null || date -u +%F)"
+sed -e "s/@VERSION@/$LABEL/" -e "s/@DATE@/$RELDATE/" resources/linux/$APPID.appdata.xml > "$APPDIR/usr/share/metainfo/$APPID.appdata.xml"
 install -m 644 resources/lynx_icon_256.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/lynx.png"
 install -m 644 resources/lynx_icon_256.png "$APPDIR/lynx.png"
 ln -sf lynx.png "$APPDIR/.DirIcon"
@@ -51,7 +57,7 @@ if [[ ! -x "$TOOL" ]]; then
     chmod +x "$TOOL"
 fi
 # no FUSE needed to run the tool itself (containers, CI)
-APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" "$TOOL" --no-appstream "$APPDIR" "$OUTDIR/$NAME.AppImage" > "$WORK/appimagetool.log" 2>&1 \
+APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" "$TOOL" "$APPDIR" "$OUTDIR/$APPIMAGE" > "$WORK/appimagetool.log" 2>&1 \
     || { cat "$WORK/appimagetool.log"; exit 1; }
-chmod 755 "$OUTDIR/$NAME.AppImage"
-ls -la "$OUTDIR/$NAME.tar.gz" "$OUTDIR/$NAME.AppImage"
+chmod 755 "$OUTDIR/$APPIMAGE"
+ls -la "$OUTDIR/$NAME.tar.gz" "$OUTDIR/$APPIMAGE"
