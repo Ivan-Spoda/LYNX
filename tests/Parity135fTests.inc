@@ -415,7 +415,7 @@ TEST (parity135f_facet_new_shapes_and_character)
 TEST (parity135f_lynxtune_learn_and_classic)
 {
     using namespace lynx::lynxtune;
-    CHECK (learnMidi == moreScales + 1 && classicMode == learnMidi + 1 && count == classicMode + 1);
+    CHECK (learnMidi == moreScales + 1 && classicMode == learnMidi + 1 && speedLink == classicMode + 1);
     CHECK ((int) lynx::effectInfo (lynx::EffectKind::lynxTune).params.size() == count);
     CHECK (paramText (classicMode, 1.0f) == "On");
     auto p = parity135f::defaults (lynx::EffectKind::lynxTune);
