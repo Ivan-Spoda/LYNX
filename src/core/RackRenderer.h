@@ -110,6 +110,14 @@ struct RackState
 
     void buildAutomationTables();
 
+    // MIDI Out channels (REA_rodada133 §4): which channels each one's notes and controls reach (the plugin channels
+    // whose MIDI input port is its port), and the MIDI channel it sends on. Indexed by channel; empty / −1 otherwise.
+    std::vector<std::vector<int>> midiTargets;  // [MIDI Out channel] → plugin channels
+    std::vector<std::vector<int>> midiSources;  // [plugin channel] → MIDI Out channels
+    std::vector<int> midiOutChannel;            // [channel] MIDI channel 0…15 of a MIDI Out, −1 = not one
+    bool hasMidiRoutes = false;
+    void buildMidiRoutes();
+
     // Loads (or fetches from cache) a file's audio; nullptr on failure.
     using SampleProvider = std::function<std::shared_ptr<const SampleData> (const std::string& path)>;
 

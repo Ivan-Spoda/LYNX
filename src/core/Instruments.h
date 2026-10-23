@@ -26,6 +26,10 @@ public:
     virtual void noteOnAt (int key, float velocity, double /*startSeconds*/) noexcept { noteOn (key, velocity); }
     virtual void noteOff (int key) noexcept = 0;
     virtual void allNotesOff() noexcept = 0;
+    // A note on a given MIDI channel (0…15), from a MIDI Out channel routed to this one's MIDI input port. Only
+    // hosted plugins see the channel; the others play it as a plain note.
+    virtual void noteOnMidi (int key, float velocity, int /*midiChannel*/) noexcept { noteOn (key, velocity); }
+    virtual void noteOffMidi (int key, int /*midiChannel*/) noexcept { noteOff (key); }
 
     // Adds (does not overwrite) n samples into left/right, with the gains already applied.
     virtual void render (float* left, float* right, int n, float gainLeft, float gainRight) noexcept = 0;

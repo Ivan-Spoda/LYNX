@@ -1,4 +1,5 @@
 #include "ui/EventEditor.h"
+#include "core/MidiControls.h"
 
 #include <algorithm>
 #include <cmath>
@@ -23,7 +24,8 @@ bool sameTarget (const AutomationTarget& a, const AutomationTarget& b) noexcept
 
 bool bipolarTarget (const AutomationTarget& t) noexcept
 {
-    return t.kind == AutomationTargetKind::channelPan || t.kind == AutomationTargetKind::mixerPan;
+    return t.kind == AutomationTargetKind::channelPan || t.kind == AutomationTargetKind::mixerPan
+        || ((t.kind == AutomationTargetKind::channelParam || t.kind == AutomationTargetKind::effectParam) && midictl::isPitchBend (t.param));
 }
 
 class EventEditor final : public juce::Component,
