@@ -54,6 +54,11 @@ enum Param : int
     vibratoDelay,            // onset delay 0…1500 ms after a note starts
     vibratoOnset,            // onset rate (fade-in) 0…1500 ms
     moreScales,              // 0 = the Scale parameter; else whole tone / diminished
+    // round 135f (Auto-Tune Pro parity, appended; off by default)
+    learnMidi,               // on / off: the notes held on the MIDI channel teach the scale (the editor turns them into
+                             // the custom scale's note switches) instead of being the targets
+    classicMode,             // on / off: the older correctors' retune — the correction glides at a constant rate
+                             // (one semitone per retune time) instead of the exponential approach
     count
 };
 
@@ -79,6 +84,7 @@ double vibratoOnsetMs (float v) noexcept; // delay and onset rate share one law
 // The scale in effect: the Scale parameter, or one of the extra scales chosen by More scales (round 128)
 int effectiveScale (float scaleValue, float moreScalesValue) noexcept;
 
+// controlOutput (3): the pitch classes held on the MIDI channel, a 12-bit mask / 4096 (round 135, LEARN)
 // Latency (samples) for a sample rate and the range / low-latency parameters
 int latencyFor (double sampleRate, int range, bool lowLatency) noexcept;
 

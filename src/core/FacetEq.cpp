@@ -31,6 +31,15 @@ Section matched (const Analog& a, double w0, bool& ok) noexcept
 {
     Section s;
     ok = true;
+    if (a.n1 < 0.0 && a.n2 == a.d2 && a.n0 == a.d0 && a.d2 != 0.0)
+    {
+        // all pass (round 135): no magnitude to match — the bilinear all-pass at the band frequency, same Q
+        const double qb = 1.0 / a.d1, alpha = std::sin (std::min (w0, 0.98 * pi)) / (2.0 * qb), c = std::cos (std::min (w0, 0.98 * pi));
+        const double a0 = 1.0 + alpha;
+        s.b0 = (1.0 - alpha) / a0; s.b1 = -2.0 * c / a0; s.b2 = 1.0;
+        s.a1 = -2.0 * c / a0; s.a2 = (1.0 - alpha) / a0;
+        return s;
+    }
     const double nyq = pi / w0; // digital Nyquist on the normalized analog axis
 
     if (a.d2 == 0.0)
@@ -198,6 +207,29 @@ int analogSections (const EffectParams& p, int b, Analog* out, double extraDb = 
             const double qb = Q / std::sqrt (2.0);
             out[0] = { 0.0, 1.0 / qb, 0.0, 1.0, 1.0 / qb, 1.0 };
             return 1;
+        }
+        case Shape::allPass: // round 135: (s² − s/Qb + 1) / (s² + s/Qb + 1)
+        {
+            const double qb = Q / std::sqrt (2.0);
+            out[0] = { 1.0, -1.0 / qb, 1.0, 1.0, 1.0 / qb, 1.0 };
+            return 1;
+        }
+        case Shape::flatTilt:
+        {
+            // round 135: eight first-order shelves 1.25 octaves apart (±5 octaves around the band frequency), each
+            // a step of g / 4 dB: a constant slope of g / 5 dB per octave, 0 dB at the band frequency
+            if (std::abs (g) < 1e-9 && ! keepFlat) return 0;
+            const double A = std::pow (10.0, (g / 4.0) / 40.0);
+            double at1 = 1.0;
+            for (int k = 0; k < 8; ++k)
+            {
+                const double c = std::pow (2.0, (k - 3.5) * 1.25);
+                out[k] = { 0.0, A / c, 1.0, 0.0, 1.0 / (A * c), 1.0 };
+                at1 *= std::sqrt (mag2 (out[k], 1.0));
+            }
+            out[0].n1 /= at1;
+            out[0].n0 /= at1;
+            return 8;
         }
     }
     return 0;
@@ -521,6 +553,12 @@ public:
             for (int i = 0; i < n; ++i) { left[i] *= outL; right[i] *= outR; }
         else if (outL != 1.0f)
             for (int i = 0; i < n; ++i) { left[i] *= outL; right[i] *= outL; }
+        if (characterNow > 0) // round 135: the character stage (Clean = untouched)
+            for (int i = 0; i < n; ++i)
+            {
+                left[i] = characterSample (characterNow, left[i]);
+                right[i] = characterSample (characterNow, right[i]);
+            }
         for (int b = 0; b < bands; ++b) meters[(std::size_t) b].store ((float) det[(std::size_t) b].gain, std::memory_order_relaxed);
     }
 
@@ -600,6 +638,7 @@ private:
         outL = level * (float) (pan > 0.0 ? 1.0 - pan : 1.0);
         outR = level * (float) (pan < 0.0 ? 1.0 + pan : 1.0);
         outMidSide = panMidSide (params[(std::size_t) panModeParam]) && outL != outR;
+        characterNow = character (params[(std::size_t) characterParam]);
 
         const int sb = soloBand (params[(std::size_t) soloParam]);
         const bool wasSolo = soloOn;
@@ -811,6 +850,7 @@ private:
     std::array<std::atomic<float>, bands> meters {};
     double attackCoef = 0.1, releaseCoef = 0.001;
     float outGain = 1.0f, outL = 1.0f, outR = 1.0f;
+    int characterNow = 0;
     std::array<Placement, bands> placed {};
     bool anyPlaced = false, anyMidSide = false, outMidSide = false;
     bool anyDynamic = false, soloOn = false, firLoaded = false, firDirty = true, sideGiven = false;
@@ -829,8 +869,36 @@ private:
 } // namespace
 
 
-Shape shape (float v) noexcept { return (Shape) std::clamp ((int) std::lround (v * (shapeCount - 1)), 0, shapeCount - 1); }
-float shapeValue (Shape s) noexcept { return (float) (int) s / (float) (shapeCount - 1); }
+// the nine original shapes sit at k / 8 (saved projects); round 135's at 1/16 (flat tilt) and 3/16 (all pass)
+Shape shape (float v) noexcept
+{
+    const int k = std::clamp ((int) std::lround (v * 16.0f), 0, 16);
+    if (k % 2 == 0) return (Shape) (k / 2);
+    if (k == 1 && std::abs (v - 1.0f / 16.0f) < 0.02f) return Shape::flatTilt;
+    if (k == 3 && std::abs (v - 3.0f / 16.0f) < 0.02f) return Shape::allPass;
+    return (Shape) std::clamp ((int) std::lround (v * 8.0f), 0, 8);
+}
+float shapeValue (Shape s) noexcept
+{
+    if (s == Shape::flatTilt) return 1.0f / 16.0f;
+    if (s == Shape::allPass) return 3.0f / 16.0f;
+    return (float) (int) s / 8.0f;
+}
+const std::array<Shape, shapeCount - 1>& menuShapes() noexcept
+{
+    static const std::array<Shape, shapeCount - 1> m { Shape::bell, Shape::lowShelf, Shape::lowCut, Shape::highShelf, Shape::highCut,
+                                                       Shape::notch, Shape::bandPass, Shape::tiltShelf, Shape::flatTilt, Shape::allPass };
+    return m;
+}
+int character (float v) noexcept { return std::clamp ((int) std::lround (v * 2.0f), 0, 2); }
+float characterSample (int c, float x) noexcept
+{
+    // Subtle: a soft knee that bends hot peaks a little (odd harmonics); Warm: an earlier, rounder knee. Both are unity
+    // at low level (below about −20 dBFS the curve is within 0.1 dB of a straight line).
+    if (c == 1) return x / std::sqrt (1.0f + 0.12f * x * x);
+    if (c == 2) return x / std::sqrt (1.0f + 0.3f * x * x) * (1.0f + 0.02f * std::min (1.0f, x * x));
+    return x;
+}
 double hz (float v) noexcept { return 10.0 * std::pow (3000.0, (double) std::clamp (v, 0.0f, 1.0f)); }
 float hzValue (double f) noexcept { return (float) std::clamp (std::log (f / 10.0) / std::log (3000.0), 0.0, 1.0); }
 double gainDb (float v) noexcept { return ((double) v - 0.5) * 60.0; }
@@ -849,7 +917,8 @@ double gainScale (float v) noexcept { return (double) v * 2.0; }
 
 const char* shapeName (Shape s) noexcept
 {
-    static const char* names[] = { "Off", "Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Band Pass", "Tilt Shelf" };
+    static const char* names[] = { "Off", "Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Band Pass", "Tilt Shelf",
+                                   "Flat Tilt", "All Pass" };
     return names[(int) s];
 }
 
@@ -899,6 +968,7 @@ const EffectInfo& info()
         e.params.push_back ({ "Analyzer Speed", 0.5f });
         e.params.push_back ({ "Analyzer Tilt", 0.75f });
         e.params.push_back ({ "Display Range", displayRangeValue (12.0) });
+        e.params.push_back ({ "Character", 0.0f }); // round 135
         return e;
     }();
     return i;
@@ -933,6 +1003,7 @@ std::string paramText (int p, float v)
     if (p == specSpeedParam) { static const char* a[] = { "Very slow", "Slow", "Medium", "Fast", "Very fast" }; return a[analyzerSpeed (v)]; }
     if (p == specTiltParam) { std::snprintf (t, sizeof (t), "%.1f dB/oct", analyzerTiltDb (v)); return t; }
     if (p == displayRangeParam) { std::snprintf (t, sizeof (t), "%.0f dB", displayRangeDb (v)); return t; }
+    if (p == characterParam) { static const char* a[] = { "Clean", "Subtle", "Warm" }; return a[character (v)]; }
     switch (p % fieldsPerBand)
     {
         case 0: return shapeName (shape (v));
@@ -1010,7 +1081,10 @@ double responseDb (const EffectParams& params, double sampleRate, double f, cons
     return db;
 }
 
-bool hasGain (Shape s) noexcept { return s == Shape::bell || s == Shape::lowShelf || s == Shape::highShelf || s == Shape::tiltShelf; }
+bool hasGain (Shape s) noexcept
+{
+    return s == Shape::bell || s == Shape::lowShelf || s == Shape::highShelf || s == Shape::tiltShelf || s == Shape::flatTilt;
+}
 double rangeDb (float v) noexcept { return ((double) std::clamp (v, 0.0f, 1.0f) - 0.5) * 60.0; }
 float rangeValue (double db) noexcept { return (float) std::clamp (db / 60.0 + 0.5, 0.0, 1.0); }
 double thresholdDb (float v) noexcept { return -80.0 + 80.0 * (double) std::clamp (v, 0.0f, 1.0f); }

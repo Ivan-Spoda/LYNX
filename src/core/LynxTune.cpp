@@ -101,6 +101,9 @@ const EffectInfo& info()
         e.params.push_back ({ "Onset delay", 1.0f / 3.0f });                    // 500 ms
         e.params.push_back ({ "Onset rate", 1.0f / 3.0f });                     // 500 ms
         e.params.push_back ({ "More scales", 0.0f });
+        // round 135f
+        e.params.push_back ({ "Learn MIDI", 0.0f });
+        e.params.push_back ({ "Classic", 0.0f });
         return e;
     }();
     return i;
@@ -128,6 +131,8 @@ std::string paramText (int param, float v)
         case mix: std::snprintf (t, sizeof t, "%.0f%%", 100.0 * v); return t;
         case tracking: std::snprintf (t, sizeof t, "%.0f%%", 100.0 * v); return t;
         case formantPreserve:
+        case learnMidi:
+        case classicMode:
         case lowLatency: return onOff();
         case formantShift: std::snprintf (t, sizeof t, "%+.1f st", formantSemitones (v)); return t;
         case transpose: std::snprintf (t, sizeof t, "%+d st", transposeSemitones (v)); return t;
@@ -218,15 +223,17 @@ public:
 
         // MIDI targets: the pitch classes held on the source channel (none held: the scale)
         const auto ch = midiChannelIndex (p[midiChannel]);
+        std::uint16_t heldMask = 0;
         if (ch >= 0 && held != nullptr && ch < heldCount)
         {
-            std::uint16_t m = 0;
             for (int k = 0; k < 128; ++k)
                 if ((held[ch][(std::size_t) (k >> 6)] >> (k & 63)) & 1u)
-                    m = (std::uint16_t) (m | (1u << (k % 12)));
-            if (m != 0)
-                mask = m;
+                    heldMask = (std::uint16_t) (heldMask | (1u << (k % 12)));
+            if (heldMask != 0 && p[learnMidi] < 0.5f) // learning (round 135): the notes teach the scale instead
+                mask = heldMask;
         }
+        meterHeld.store ((float) heldMask / 4096.0f, std::memory_order_relaxed);
+        const bool classic = p[classicMode] >= 0.5f;
 
         const auto aRef = referenceHz (p[reference]);
         const auto tau = retuneMs (p[retune]) * 0.001;
@@ -346,7 +353,13 @@ public:
                 const auto x = std::clamp ((noteAge - 0.2) / 0.4, 0.0, 1.0);
                 t += human * 0.135 * x * x * (3.0 - 2.0 * x);
             }
-            shift += (t > 0.0 ? 1.0 - std::exp (-dt / t) : 1.0) * (wanted - shift);
+            if (classic) // round 135: a constant-rate glide, one semitone per retune time
+            {
+                const auto step = t > 0.0 ? dt / t : 1e9;
+                shift += std::clamp (wanted - shift, -step, step);
+            }
+            else
+                shift += (t > 0.0 ? 1.0 - std::exp (-dt / t) : 1.0) * (wanted - shift);
 
             auto semis = shift + trans;
             if (natural || extra != 0.0)
@@ -400,6 +413,7 @@ public:
             case 0: return std::max (0.0f, meterSung.load (std::memory_order_relaxed)) / 127.0f;
             case 1: return std::max (0.0f, meterTarget.load (std::memory_order_relaxed)) / 127.0f;
             case 2: return std::clamp (0.5f + meterShift.load (std::memory_order_relaxed) / 4.0f, 0.0f, 1.0f);
+            case 3: return meterHeld.load (std::memory_order_relaxed);
             default: return 0.0f;
         }
     }
@@ -435,7 +449,7 @@ private:
     const NoteMask* held = nullptr;
     int heldCount = 0;
     std::atomic<int> latencyNow { 1200 };
-    std::atomic<float> meterSung { -1.0f }, meterTarget { -1.0f }, meterShift { 0.0f };
+    std::atomic<float> meterSung { -1.0f }, meterTarget { -1.0f }, meterShift { 0.0f }, meterHeld { 0.0f };
 };
 } // namespace
 

@@ -1065,6 +1065,9 @@ Layout lynxTune()
     v.push_back (display (300, 116, 200, 200, "pitchring"));
     v.push_back (knob (574, 224, 60, "Natural vibrato", TR_NOOP ("NATURAL VIBRATO"), 284, bipolar | showValue));
     v.push_back (knob (700, 200, 104, "Humanize", TR_NOOP ("HUMANIZE"), 284, big | showValue));
+    // round 135: CLASSIC (the older correctors' retune) and LEARN (the scale from the notes played on the MIDI channel)
+    v.push_back (toggle (12, 116, 90, 18, "Classic", TR_NOOP ("Classic")));
+    v.push_back (toggle (690, 116, 104, 18, "Learn MIDI", TR_NOOP ("Learn scale")));
     // --- pitch graph / advanced (pages)
     v.push_back (section (0, 336, 800, 142, nullptr, boxed));
     v.push_back (pageTabs (8, 340, 220, 20, TR_NOOP ("Pitch graph|Advanced")));
