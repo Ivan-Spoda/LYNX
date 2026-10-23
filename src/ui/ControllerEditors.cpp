@@ -439,14 +439,15 @@ public:
         for (auto y : { 0.25f, 0.5f, 0.75f })
             g.drawHorizontalLine ((int) (area.getY() + area.getHeight() * y), area.getX(), area.getRight());
         const auto span = timeSpan (a);
+        const auto step = span <= 2.0f ? 0.25f : span <= 8.0f ? 1.0f : 4.0f;
         g.setFont (theme::font (theme::type::caption));
-        for (int s = 1; s < (int) span; ++s)
+        for (float t = step; t < span - 1.0e-4f; t += step)
         {
-            const auto x = toX (a, (float) s);
+            const auto x = toX (a, t);
             g.setColour (theme::colour::border);
             g.drawVerticalLine ((int) x, area.getY(), area.getBottom());
             g.setColour (theme::colour::textDisabled);
-            g.drawText (juce::String (s) + (a.tempo ? tr (" beat") : " s"), (int) x + 2, (int) area.getBottom() - 14, 50, 12,
+            g.drawText (juce::String (t, step < 1.0f ? 2 : 0) + (a.tempo ? tr (" beat") : " s"), (int) x + 2, (int) area.getBottom() - 14, 60, 12,
                         juce::Justification::centredLeft);
         }
         if (! a.envOn || a.count == 0)
@@ -691,15 +692,19 @@ public:
         for (auto* s : { &lowKey, &highKey })
         {
             s->setSliderStyle (juce::Slider::IncDecButtons);
-            s->setRange (0, 131, 1);
-            s->setTextBoxStyle (juce::Slider::TextBoxLeft, false, 54, 22);
+            s->setRange (0, 127, 1);
+            s->setTextBoxStyle (juce::Slider::TextBoxLeft, false, 70, 22);
+            s->textFromValueFunction = [] (double v) { return juce::MidiMessage::getMidiNoteName ((int) v, true, true, 4); };
+            s->updateText();
             addAndMakeVisible (*s);
         }
-        lowKey.textFromValueFunction = highKey.textFromValueFunction = [] (double v) {
-            return juce::MidiMessage::getMidiNoteName ((int) v, true, true, 4);
+        highKey.textFromValueFunction = [] (double v) {
+            return v >= 127.0 ? tr ("all above") : juce::MidiMessage::getMidiNoteName ((int) v, true, true, 4);
         };
+        highKey.updateText();
         lowKey.onValueChange = [this] { auto a = articulator(); a.lowKey = (int) lowKey.getValue(); store (a); };
-        highKey.onValueChange = [this] { auto a = articulator(); a.highKey = (int) highKey.getValue(); store (a); };
+        // the top of the range means every key (FL saves 256)
+        highKey.onValueChange = [this] { auto a = articulator(); a.highKey = highKey.getValue() >= 127.0 ? 256 : (int) highKey.getValue(); store (a); };
         keysLabel.setText (tr ("Keys"), juce::dontSendNotification);
         keysLabel.setFont (theme::font (theme::type::small));
         addAndMakeVisible (keysLabel);
@@ -799,8 +804,8 @@ private:
         enabled.setToggleState (a.envOn, juce::dontSendNotification);
         bipolar.setToggleState (a.bipolar, juce::dontSendNotification);
         tempo.setToggleState (a.tempo, juce::dontSendNotification);
-        lowKey.setValue (juce::jlimit (0, 131, a.lowKey), juce::dontSendNotification);
-        highKey.setValue (juce::jlimit (0, 131, a.highKey), juce::dontSendNotification);
+        lowKey.setValue (juce::jlimit (0, 127, a.lowKey), juce::dontSendNotification);
+        highKey.setValue (juce::jlimit (0, 127, a.highKey), juce::dontSendNotification);
 
         juce::StringArray targets;
         for (const auto& automation : engine.getSong().automations)
@@ -857,6 +862,7 @@ public:
         program.setRange (0, 128, 1);
         program.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 54, 22);
         program.textFromValueFunction = [] (double v) { return v < 0.5 ? tr ("none") : juce::String ((int) v); };
+        program.updateText();
         program.onValueChange = [this] { edit ([v = (int) program.getValue()] (midictl::MidiOutSettings& s) { s.program = v; }); };
         for (auto* l : { &channelLabel, &portLabel, &programLabel })
         {

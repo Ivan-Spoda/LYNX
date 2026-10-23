@@ -3118,3 +3118,4 @@ countries: br
 "Curve (b = tension)" = "Curva (b = tensão)"
 "Steps (b = count)" = "Degraus (b = quantidade)"
 "Switch: a when c is off, b when on" = "Chave: a com c desligado, b com c ligado"
+"all above" = "todas acima"

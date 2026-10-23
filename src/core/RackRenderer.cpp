@@ -1468,6 +1468,18 @@ void RackRenderer::process (const RackState* state,
             auto& held = heldNotes[(std::size_t) std::min (e.channel, maxChannels - 1)];
             const auto bit = std::uint64_t { 1 } << (e.key & 63);
             const auto inRange = e.key >= 0 && e.key < 128;
+            // played on a MIDI Out channel: the plugins on its port get the note with its MIDI channel
+            if (state->hasMidiRoutes && (std::size_t) e.channel < state->midiTargets.size())
+                for (const auto t : state->midiTargets[(std::size_t) e.channel])
+                    if (t < (int) state->instruments.size() && state->instruments[(std::size_t) t] != nullptr)
+                    {
+                        auto& target = *state->instruments[(std::size_t) t];
+                        const auto midiChannel = state->midiOutChannel[(std::size_t) e.channel];
+                        if (e.type == NoteEvent::Type::on)
+                            target.noteOnMidi (e.key, e.velocity, midiChannel);
+                        else if (e.type == NoteEvent::Type::off)
+                            target.noteOffMidi (e.key, midiChannel);
+                    }
             if (e.type == NoteEvent::Type::on)
             {
                 instrument.noteOn (e.key, e.velocity);

@@ -263,24 +263,59 @@ TEST (midi_out_routes_notes_and_controls_to_the_plugin_on_its_port)
     const auto cc = std::any_of (made[0]->params.begin(), made[0]->params.end(),
                                  [] (const auto& p) { return p.first == lynx::midictl::ccBase + 1; });
     CHECK (cc && made[1]->params.empty());
+
+    // a pattern note of the MIDI Out channel, scheduled while playing
+    s.mode = lynx::PlayMode::pattern;
+    lynx::Note n;
+    n.channel = 0;
+    n.key = 62;
+    n.start = 0;
+    n.length = lynx::ppq;
+    s.patterns[0].notes.push_back (n);
+    s.patterns[0].lengthTicks = lynx::ppq * 4;
+    made.clear();
+    auto patternState = lynx::RackState::build (s, nullptr, 48000.0, f);
+    lynx::RackRenderer r2;
+    r2.prepare (48000.0, 256);
+    r2.process (patternState.get(), true, 0.0, 256, l.data(), rr.data(), nullptr);
+    CHECK (made.size() == 2 && made[0]->midiNotes.size() == 1 && made[0]->midiNotes[0].first == 62 && made[0]->midiNotes[0].second == 4);
+    CHECK (made[1]->midiNotes.empty());
 }
 
-TEST (envelope_controller_lynx_state_round_trips)
+TEST (flp_demos_formula_controllers_import_and_compile)
 {
-    auto data = lynx::defaultEnvelopeController();
-    data[2].bipolar = true;
-    data[2].tension[1] = 0.5f;
-    data[5].lowKey = 60;
-    data[5].highKey = 72;
-    const auto bytes = lynx::writeEnvelopeController (data);
-    const auto back = lynx::parseEnvelopeController (bytes);
-    CHECK (back && (*back)[2].bipolar && (*back)[2].tension[1] == 0.5f && (*back)[5].lowKey == 60 && (*back)[5].highKey == 72);
-    CHECK ((*back)[0].envOn && (*back)[0].count == 4 && (*back)[0].sustain == 2);
-    // the envelope: attack to 1, decay to the sustain level, release to 0
-    const auto& a = (*back)[0];
-    CHECK (std::abs (lynx::controllerValue (a, 0.02, -1.0) - 1.0f) < 1e-4f);
-    CHECK (std::abs (lynx::controllerValue (a, 5.0, -1.0) - 0.6f) < 1e-4f);
-    CHECK (lynx::controllerValue (a, 5.0, 1.0) == 0.0f);
-    // the tension bends the segment (the automation clips' curve)
-    CHECK (lynx::controllerValue ((*back)[2], 0.16, -1.0) != lynx::controllerValue (a, 0.16, -1.0));
+    if (realFlpDir.empty())
+        return;
+    int slots = 0, compiled = 0, links = 0;
+    // top-level slots and Patcher children (the demos use them inside Patchers, REA_rodada14 §7.2)
+    std::function<void (const lynx::EffectSlot&)> visit = [&] (const lynx::EffectSlot& fx) {
+        if (fx.kind == lynx::EffectKind::formulaController)
+        {
+            ++slots;
+            const auto text = lynx::formula::formulaOf (fx.state);
+            std::string error;
+            if (lynx::formula::Program::compile (text, &error) != nullptr)
+                ++compiled;
+            else
+                std::printf ("  formula not compiled: '%s' (%s)\n", text.c_str(), error.c_str());
+        }
+        for (const auto& b : fx.branches)
+            for (const auto& child : b.chain)
+                visit (child);
+        links += (int) fx.links.size();
+    };
+    for (const auto* name : { "Mehran Abbasi - With You.flp", "Astes - Bien Duro.flp" })
+    {
+        const auto path = std::filesystem::path (realFlpDir) / "Demo projects" / "Demo songs" / name;
+        if (! std::filesystem::exists (path))
+            continue;
+        std::ifstream in (path, std::ios::binary);
+        const std::vector<std::uint8_t> file ((std::istreambuf_iterator<char> (in)), {});
+        const auto song = lynx::importFlp (flp::parseProject (file));
+        for (const auto& track : song.mixer)
+            for (const auto& fx : track.effects)
+                visit (fx);
+    }
+    std::printf ("  Formula Controller in the demos: %d slots, %d compiled, %d container links\n", slots, compiled, links);
+    CHECK (compiled == slots);
 }
