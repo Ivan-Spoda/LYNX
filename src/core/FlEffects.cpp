@@ -1,4 +1,5 @@
 #include "core/FlEffects.h"
+#include "core/FormulaController.h"
 #include "core/Reeverb2.h"
 #include "core/LuxeVerb.h"
 #include "core/ConvolverFx.h"
@@ -1171,6 +1172,17 @@ std::optional<EffectSlot> fruityMultibandExact (const std::vector<std::uint8_t>&
 std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std::vector<std::uint8_t>& state, double bpm)
 {
     // Newtone / Newtime: FL's state kept as it is; the source sample is resolved by the project import (REA_rodada73)
+    // Formula Controller (REA_rodada133 §3): the knobs as parameters, the formula in the slot's state (FL's own bytes)
+    if (pluginName == "Fruity Formula Controller")
+        if (const auto parsed = formula::parseState (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::formulaController);
+            slot.params[0] = parsed->a;
+            slot.params[1] = parsed->b;
+            slot.params[2] = parsed->c;
+            slot.state = state;
+            return slot;
+        }
     if (pluginName == "Newtone" || pluginName == "Newtime")
     {
         auto slot = makeEffectSlot (pluginName == "Newtone" ? EffectKind::newtone : EffectKind::newtime);
@@ -1476,7 +1488,8 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::sentryGate:
         case EffectKind::quellDenoiser:
         case EffectKind::geminiDoubler:
-        case EffectKind::apexLimiter: return {}; // LYNX's own effects: no FL counterpart
+        case EffectKind::apexLimiter: return {};
+        case EffectKind::formulaController: return { "Fruity Formula Controller" }; // LYNX's own effects: no FL counterpart
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb:

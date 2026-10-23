@@ -1518,6 +1518,7 @@ const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, 
                                       EffectKind::echoform, EffectKind::spiralEcho, EffectKind::orbit, EffectKind::latticeMod, // LYNX's delay / modulation suite
                                       EffectKind::crestCompressor, EffectKind::prismMultiband, EffectKind::sentryGate, // LYNX's dynamics suite
                                       EffectKind::quellDenoiser, EffectKind::geminiDoubler, // LYNX's voice tools
+                                      EffectKind::formulaController, EffectKind::peakController, // controllers (link their output to any knob)
                                       EffectKind::fruityLimiter, EffectKind::fruityCompressor,
                                       EffectKind::fruityWaveShaper, EffectKind::fruitySoftClipper,
                                       EffectKind::reeverb2, EffectKind::reeverb1,

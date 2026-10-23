@@ -72,7 +72,9 @@ enum class InstrumentKind : std::uint8_t
     drumaxx,    // FL's Drumaxx engine (REA_rodada67 §6–§9): the plugin's raw saved state ("SSLF" stream) in ChannelDef::pluginState
     slayer,     // FL Slayer (REA_rodada68 §2–6): raw saved state in pluginState, the user's Slayer_Engine.dll in samplePath
     fruitydance, // Fruity Dance (REA_rodada68 §8): a visual plugin (dancing character) that keeps its state and makes no sound
-    directwave  // DirectWave (REA_rodada72): raw saved state in pluginState, one zone per zone of the played program, sample formats in modelParams
+    directwave, // DirectWave (REA_rodada72): raw saved state in pluginState, one zone per zone of the played program, sample formats in modelParams
+    midiOut     // FL's MIDI Out (REA_rodada16 §1, REA_rodada133 §4): no sound; its notes and MIDI controls go to the plugins whose
+                // MIDI input port is its port (PluginRef::midiInPort). FL's state (channel @4, port @24) in pluginState
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
@@ -103,15 +105,19 @@ struct PluginRef
     std::string state; // plugin state in base64 (what the plugin returns when saving)
     ForeignPlugin foreign; // FL import not yet resolved (format == none: nothing pending)
     // FL wrapper processing options (REA_rodada118 Part B), saved with the project:
-    bool fixedBuffers = false;    // "Use fixed size buffers": constant block length (the device buffer), + that latency
+    bool fixedBuffers = false;    // "Use fixed size buffers": constant 2 ms blocks (flFixedBlockSize), + that latency
     bool separateProcess = false; // "Make bridged": this plugin runs in its own process even with the global option off
     bool maxSizeBuffers = false;  // with fixedBuffers: "Process maximum size buffers" (the device buffer, not 2 ms)
     bool threaded = true;         // "Allow threaded processing" (REA round 134): off = always on the audio thread itself
+    // The wrapper's "MIDI input port" (0…255; −1 = none): the notes / controls of the MIDI Out channels on that port
+    // reach this plugin (FL: Plugin wrapper settings › MIDI › Input port)
+    int midiInPort = -1;
 
     bool operator== (const PluginRef& o) const
     {
         return id == o.id && state == o.state && foreign == o.foreign && fixedBuffers == o.fixedBuffers && separateProcess == o.separateProcess
-               && threaded == o.threaded && maxSizeBuffers == o.maxSizeBuffers;
+               && threaded == o.threaded && maxSizeBuffers == o.maxSizeBuffers
+               && midiInPort == o.midiInPort;
     }
 };
 
@@ -403,7 +409,8 @@ enum class EffectKind : std::uint8_t
     prismMultiband,  // LYNX's Prism Multiband (REA_rodada108, core/DynamicsSuite.h): 4-band dynamics
     sentryGate,      // LYNX's Sentry Gate (REA_rodada108, core/DynamicsSuite.h): gate / expander
     quellDenoiser,   // LYNX's Quell Denoiser (REA_rodada119, core/VoiceTools.h): one-knob multiband noise suppressor
-    geminiDoubler    // LYNX's Gemini Doubler (REA_rodada119, core/VoiceTools.h): two pitch-shifted delay voices
+    geminiDoubler,   // LYNX's Gemini Doubler (REA_rodada119, core/VoiceTools.h): two pitch-shifted delay voices
+    formulaController // FL's Formula Controller (REA_rodada133, core/FormulaController.h): no sound; output = formula of a, b, c
 };
 
 constexpr int maxEffectParams = 96; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches); Facet EQ 88 (round 128)

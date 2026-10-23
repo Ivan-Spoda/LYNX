@@ -170,6 +170,19 @@ juce::PopupMenu pluginProcessingMenu (AudioEngine& engine, const PluginRef& curr
                 ref->threaded = ! ref->threaded;
         });
     });
+
+    // FL's wrapper "MIDI input port": the MIDI Out channels on this port play the plugin (REA_rodada133 §4)
+    juce::PopupMenu ports;
+    auto setPort = [&engine, find] (int port) {
+        engine.editSong ([find, port] (Song& song) {
+            if (auto* ref = find (song))
+                ref->midiInPort = port;
+        });
+    };
+    ports.addItem (tr ("None"), true, current.midiInPort < 0, [setPort] { setPort (-1); });
+    for (int port = 0; port < 32; ++port)
+        ports.addItem (tr ("Port {0}", { juce::String (port) }), true, current.midiInPort == port, [setPort, port] { setPort (port); });
+    menu.addSubMenu (current.midiInPort >= 0 ? tr ("MIDI input port ({0})", { juce::String (current.midiInPort) }) : tr ("MIDI input port"), ports);
     return menu;
 }
 

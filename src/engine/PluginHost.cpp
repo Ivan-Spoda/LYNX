@@ -246,7 +246,24 @@ std::optional<std::string> PluginInstrument::captureState()
 
 void PluginInstrument::setParameterFromUi (int index, float value)
 {
+    if (midiControls.set (index, value)) // a MIDI CC / aftertouch / bend "parameter": sent with the next block
+        return;
     guardedUiParameter (*plugin, crashed, name, index, value);
+}
+
+void PluginInstrument::noteOnMidi (int key, float velocity, int midiChannel) noexcept
+{
+    midi.addEvent (juce::MidiMessage::noteOn (juce::jlimit (0, 15, midiChannel) + 1, juce::jlimit (0, 127, key), juce::jlimit (0.0f, 1.0f, velocity)), 0);
+}
+
+void PluginInstrument::noteOffMidi (int key, int midiChannel) noexcept
+{
+    midi.addEvent (juce::MidiMessage::noteOff (juce::jlimit (0, 15, midiChannel) + 1, juce::jlimit (0, 127, key)), 0);
+}
+
+void PluginInstrument::flushMidiControls() noexcept
+{
+    midiControls.flush (0, [this] (const std::uint8_t* bytes, int size) { midi.addEvent (bytes, size, 0); });
 }
 
 void PluginInstrument::noteOn (int key, float velocity) noexcept
@@ -267,7 +284,7 @@ void PluginInstrument::allNotesOff() noexcept
 
 void PluginInstrument::setParameter (int index, float value) noexcept
 {
-    if (crashed.load (std::memory_order_relaxed))
+    if (crashed.load (std::memory_order_relaxed) || midiControls.set (index, value))
         return;
     if (const auto code = crashguard::run ([&] { setPluginParameter (*plugin, index, value); }); code != 0)
         failed (code);
@@ -280,6 +297,7 @@ void PluginInstrument::render (float* left, float* right, int n, float gl, float
         midi.clear();
         return; // silent
     }
+    flushMidiControls();
 
     if (fixed != nullptr)
     {
@@ -353,6 +371,7 @@ PluginEffect::PluginEffect (std::unique_ptr<juce::AudioPluginInstance> instance,
       name (plugin->getName().toStdString())
 {
     buffer.setSize (bufferChannels (*plugin), blockSize);
+    midi.ensureSize (2048); // MIDI CC "parameters" (core/MidiControls.h)
     if (fixedBlock > 0)
         fixed = std::make_unique<FixedBlock> (juce::jmin (fixedBlock, blockSize), 2);
     plugin->setPlayHead (&timelinePlayHead());
@@ -377,14 +396,21 @@ std::optional<std::string> PluginEffect::captureState()
     return guardedState (*plugin, crashed, name);
 }
 
+void PluginEffect::flushMidiControls() noexcept
+{
+    midiControls.flush (0, [this] (const std::uint8_t* bytes, int size) { midi.addEvent (bytes, size, 0); });
+}
+
 void PluginEffect::setParameterFromUi (int index, float value)
 {
+    if (midiControls.set (index, value))
+        return;
     guardedUiParameter (*plugin, crashed, name, index, value);
 }
 
 void PluginEffect::setParameter (int index, float value) noexcept
 {
-    if (crashed.load (std::memory_order_relaxed))
+    if (crashed.load (std::memory_order_relaxed) || midiControls.set (index, value))
         return;
     if (const auto code = crashguard::run ([&] { setPluginParameter (*plugin, index, value); }); code != 0)
         failed (code);
@@ -394,6 +420,7 @@ void PluginEffect::process (float* left, float* right, int n, const EffectParams
 {
     if (crashed.load (std::memory_order_relaxed))
         return; // bypassed: the input plays through
+    flushMidiControls();
 
     if (fixed != nullptr)
     {
@@ -1323,7 +1350,7 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::St
         }
         const auto positions = flVst3SlotPositions (saved, ids);
         song.forEachTarget ([&] (AutomationTarget& t) {
-            if (isThisPlugin (t))
+            if (isThisPlugin (t) && ! midictl::isMidiParam (t.param)) // (MIDI CC indices are not slots)
                 t.param = t.param >= 0 && t.param < (int) positions.size() ? positions[(std::size_t) t.param] : -1;
         });
     };

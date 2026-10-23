@@ -1413,8 +1413,93 @@ bool synthFromHarmor (const std::vector<std::uint8_t>& state, SynthSettings& syn
 }
 // --- Fruity Envelope Controller (REA_rodada15 §10) ---
 
+namespace
+{
+constexpr std::uint32_t lynxEnvelopeMagic = 0x4345594Cu; // "LYEC"
+
+std::optional<EnvelopeControllerData> parseLynxEnvelopeController (const std::vector<std::uint8_t>& state)
+{
+    Reader r { state.data(), state.size() };
+    if ((std::uint32_t) r.i32() != lynxEnvelopeMagic || r.i32() != 1)
+        return std::nullopt;
+    EnvelopeControllerData out {};
+    for (auto& a : out)
+    {
+        const auto flags = r.i32();
+        a.bipolar = (flags & 1) != 0;
+        a.envOn = (flags & 2) != 0;
+        a.tempo = (flags & 4) != 0;
+        a.base = std::clamp (r.get<float>(), 0.0f, 1.0f);
+        a.envLevel = std::clamp (r.get<float>(), -1.0f, 1.0f);
+        a.sustain = r.i32();
+        a.lowKey = r.i32();
+        a.highKey = r.i32();
+        a.count = std::clamp (r.i32(), 0, (int) a.time.size());
+        for (int i = 0; i < a.count; ++i)
+        {
+            a.time[(std::size_t) i] = std::max (0.0f, r.get<float>());
+            a.level[(std::size_t) i] = std::clamp (r.get<float>(), 0.0f, 1.0f);
+            a.tension[(std::size_t) i] = std::clamp (r.get<float>(), -1.0f, 1.0f);
+            if (i > 0)
+                a.time[(std::size_t) i] = std::max (a.time[(std::size_t) i], a.time[(std::size_t) i - 1]);
+        }
+        if (a.sustain >= a.count)
+            a.sustain = -1;
+        if (r.failed)
+            return std::nullopt;
+    }
+    return out;
+}
+} // namespace
+
+std::vector<std::uint8_t> writeEnvelopeController (const EnvelopeControllerData& data)
+{
+    std::vector<std::uint8_t> out;
+    auto put = [&] (const void* p, std::size_t n) { out.insert (out.end(), (const std::uint8_t*) p, (const std::uint8_t*) p + n); };
+    auto i32 = [&] (std::int32_t v) { put (&v, 4); };
+    auto f32 = [&] (float v) { put (&v, 4); };
+    i32 ((std::int32_t) lynxEnvelopeMagic);
+    i32 (1);
+    for (const auto& a : data)
+    {
+        i32 ((a.bipolar ? 1 : 0) | (a.envOn ? 2 : 0) | (a.tempo ? 4 : 0));
+        f32 (a.base);
+        f32 (a.envLevel);
+        i32 (a.sustain);
+        i32 (a.lowKey);
+        i32 (a.highKey);
+        const auto count = std::clamp (a.count, 0, (int) a.time.size());
+        i32 (count);
+        for (int i = 0; i < count; ++i)
+        {
+            f32 (a.time[(std::size_t) i]);
+            f32 (a.level[(std::size_t) i]);
+            f32 (a.tension[(std::size_t) i]);
+        }
+    }
+    return out;
+}
+
+EnvelopeControllerData defaultEnvelopeController()
+{
+    EnvelopeControllerData out {};
+    for (auto& a : out)
+    {
+        a.envOn = true;
+        a.base = 0.0f;
+        a.envLevel = 1.0f;
+        a.count = 4;
+        a.time = { 0.0f, 0.02f, 0.3f, 0.8f };
+        a.level = { 0.0f, 1.0f, 0.6f, 0.0f };
+        a.sustain = 2;
+    }
+    return out;
+}
+
 std::optional<EnvelopeControllerData> parseEnvelopeController (const std::vector<std::uint8_t>& state)
 {
+    if (auto mine = parseLynxEnvelopeController (state))
+        return mine;
     Reader r { state.data(), state.size() };
     auto version = (std::uint32_t) r.i32();
     if (version > 0xffff)
@@ -1488,7 +1573,9 @@ float controllerValue (const ControllerArticulator& a, double sinceOn, double si
             if (t < a.time[(std::size_t) i])
             {
                 const auto t0 = a.time[(std::size_t) i - 1], t1 = a.time[(std::size_t) i];
-                const auto f = t1 > t0 ? (t - t0) / (t1 - t0) : 1.0;
+                auto f = t1 > t0 ? (t - t0) / (t1 - t0) : 1.0;
+                if (const auto k = a.tension[(std::size_t) i - 1]; k != 0.0f) // the automation clips' curve
+                    f = std::pow (f, std::pow (2.0, k * 3.0));
                 return a.level[(std::size_t) i - 1] + (a.level[(std::size_t) i] - a.level[(std::size_t) i - 1]) * f;
             }
         return (double) a.level[(std::size_t) a.count - 1];

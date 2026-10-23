@@ -110,6 +110,7 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::slayer: return "slayer";
         case InstrumentKind::fruitydance: return "fruitydance";
         case InstrumentKind::directwave: return "directwave";
+        case InstrumentKind::midiOut: return "midiOut";
     }
     return "synth";
 }
@@ -124,7 +125,7 @@ InstrumentKind instrumentFromId (const juce::String& id)
                     InstrumentKind::fruitkick, InstrumentKind::bassdrum, InstrumentKind::toxic,
                     InstrumentKind::threeosc, InstrumentKind::autogun, InstrumentKind::transistorbass,
                     InstrumentKind::simsynth, InstrumentKind::wasp, InstrumentKind::plucked, InstrumentKind::beepmap, InstrumentKind::sawer, InstrumentKind::flkeys,
-                    InstrumentKind::granulizer, InstrumentKind::drumaxx, InstrumentKind::slayer, InstrumentKind::fruitydance, InstrumentKind::directwave })
+                    InstrumentKind::granulizer, InstrumentKind::drumaxx, InstrumentKind::slayer, InstrumentKind::fruitydance, InstrumentKind::directwave, InstrumentKind::midiOut })
         if (id == instrumentId (k))
             return k;
 
@@ -227,6 +228,7 @@ const char* effectId (EffectKind k)
         case EffectKind::sentryGate: return "sentryGate";
         case EffectKind::quellDenoiser: return "quellDenoiser";
         case EffectKind::geminiDoubler: return "geminiDoubler";
+        case EffectKind::formulaController: return "formulaController";
     }
     return "eq";
 }
@@ -248,6 +250,8 @@ juce::var pluginToVar (const PluginRef& p)
         o->setProperty ("threaded", false);
     if (p.maxSizeBuffers)
         o->setProperty ("maxSizeBuffers", true);
+    if (p.midiInPort >= 0)
+        o->setProperty ("midiInPort", p.midiInPort);
     return juce::var (o.release());
 }
 
@@ -263,6 +267,7 @@ PluginRef pluginFromVar (const juce::var& v)
     p.separateProcess = (bool) v.getProperty ("separateProcess", false);
     p.threaded = (bool) v.getProperty ("threaded", true);
     p.maxSizeBuffers = (bool) v.getProperty ("maxSizeBuffers", false);
+    p.midiInPort = juce::jlimit (-1, 255, (int) v.getProperty ("midiInPort", -1));
     return p;
 }
 
@@ -426,7 +431,7 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::echoform, EffectKind::spiralEcho, EffectKind::orbit, EffectKind::latticeMod,
                     EffectKind::fruitySend,
                     EffectKind::crestCompressor, EffectKind::prismMultiband, EffectKind::sentryGate,
-                    EffectKind::quellDenoiser, EffectKind::geminiDoubler })
+                    EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::formulaController })
         if (id == effectId (k))
             return k;
 

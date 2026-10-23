@@ -15,6 +15,7 @@
 #include "core/FlPluginDb.h"
 #include "core/PluginSubstitutes.h"
 #include "core/Instruments.h"
+#include "core/MidiControls.h"
 #include "core/ModuleWarmup.h"
 
 namespace lynx
@@ -72,13 +73,19 @@ public:
     void setParameterFromUi (int index, float value);
     void setRenderMode (bool offline) { if (! hasCrashed()) setPluginRenderMode (*plugin, offline, blockSize); }
     bool usesFixedBlocks() const noexcept { return fixed != nullptr; }
+    // The MIDI "parameters" (core/MidiControls.h): CC / aftertouch / pitch bend values last asked for.
+    float midiControlValue (int index) const noexcept { return midiControls.value (index); }
+    void noteOnMidi (int key, float velocity, int midiChannel) noexcept override;
+    void noteOffMidi (int key, int midiChannel) noexcept override;
 
 private:
     void failed (std::uint32_t code) noexcept;
+    void flushMidiControls() noexcept;
 
     std::unique_ptr<juce::AudioPluginInstance> plugin;
     juce::AudioBuffer<float> buffer;
     juce::MidiBuffer midi;
+    midictl::State midiControls;
     int blockSize;
     std::string name;
     std::atomic<bool> crashed { false };
@@ -114,13 +121,16 @@ public:
     void setParameterFromUi (int index, float value);
     void setRenderMode (bool offline) { if (! hasCrashed()) setPluginRenderMode (*plugin, offline, blockSize); }
     bool usesFixedBlocks() const noexcept { return fixed != nullptr; }
+    float midiControlValue (int index) const noexcept { return midiControls.value (index); }
 
 private:
     void failed (std::uint32_t code) noexcept;
+    void flushMidiControls() noexcept;
 
     std::unique_ptr<juce::AudioPluginInstance> plugin;
     juce::AudioBuffer<float> buffer;
     juce::MidiBuffer midi;
+    midictl::State midiControls;
     int blockSize;
     std::string name;
     std::atomic<bool> crashed { false };
