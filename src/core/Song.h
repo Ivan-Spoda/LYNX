@@ -395,8 +395,11 @@ enum class EffectKind : std::uint8_t
     prismMultiband,  // LYNX's Prism Multiband (REA_rodada108, core/DynamicsSuite.h): 4-band dynamics
     sentryGate,      // LYNX's Sentry Gate (REA_rodada108, core/DynamicsSuite.h): gate / expander
     quellDenoiser,   // LYNX's Quell Denoiser (REA_rodada119, core/VoiceTools.h): one-knob multiband noise suppressor
-    geminiDoubler    // LYNX's Gemini Doubler (REA_rodada119, core/VoiceTools.h): two pitch-shifted delay voices
+    geminiDoubler,   // LYNX's Gemini Doubler (REA_rodada119, core/VoiceTools.h): two pitch-shifted delay voices
+    voiceShift       // LYNX's Voice Shift (REA_rodada135s, core/VoiceShift.h): pitch / formant / quantize / robot + drive
 };
+// the last EffectKind (loops over every kind; update when one is appended)
+constexpr EffectKind lastEffectKind = EffectKind::voiceShift;
 
 constexpr int maxEffectParams = 96; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches); Facet EQ 88 (round 128)
 constexpr int maxEffectSlots = 10; // as in FL

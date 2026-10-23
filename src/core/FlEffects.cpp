@@ -1476,6 +1476,7 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::sentryGate:
         case EffectKind::quellDenoiser:
         case EffectKind::geminiDoubler:
+        case EffectKind::voiceShift:
         case EffectKind::apexLimiter: return {}; // LYNX's own effects: no FL counterpart
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };

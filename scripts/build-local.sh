@@ -55,7 +55,7 @@ CORE="$CORE src/core/FacetEq.cpp src/core/ApexLimiter.cpp"
 # LYNX's dynamics suite and FabFilter state translation (round 108)
 CORE="$CORE src/core/DynamicsSuite.cpp src/core/FabFilterStates.cpp"
 # LYNX's voice tools: Quell Denoiser, Gemini Doubler (round 119)
-CORE="$CORE src/core/VoiceTools.cpp"
+CORE="$CORE src/core/VoiceTools.cpp src/core/VoiceShift.cpp"
 # WavPack decoder (C)
 if [[ -z "${CC:-}" ]]; then
     case "$CXX" in

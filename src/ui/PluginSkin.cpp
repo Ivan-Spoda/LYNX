@@ -55,6 +55,7 @@ juce::Colour accentFor (EffectKind kind)
             return colour::ember;
         case EffectKind::lynxTune: case EffectKind::pitchCorrect: case EffectKind::pitchShift: case EffectKind::flPitchShifter:
         case EffectKind::vocoder: case EffectKind::vocodex: case EffectKind::quellDenoiser: case EffectKind::aether: case EffectKind::newtone:
+        case EffectKind::voiceShift:
             return colour::rose;
         case EffectKind::utility: case EffectKind::stereoShaper: case EffectKind::stereoEnhancer: case EffectKind::spreader:
         case EffectKind::fruityBalance: case EffectKind::fruitySend:
@@ -231,7 +232,7 @@ Style defaultStyleFor (int key)
         case K::fruityBloodOverdrive: case K::fruityCompressor: case K::fruityLimiter: case K::reeverb2: case K::aether: case K::vocoder:
             return H;
         // creative, pitch and fun: Vivid
-        case K::geminiDoubler: case K::ember: case K::grossBeat: case K::flPitchShifter: case K::fruityFastDist: case K::effector:
+        case K::geminiDoubler: case K::voiceShift: case K::ember: case K::grossBeat: case K::flPitchShifter: case K::fruityFastDist: case K::effector:
         case K::fruityPanOMatic: case K::transientProcessor: case K::squeeze: case K::hyperChorus: case K::fruityFlanger: case K::fruityDelay3:
         case K::multibandDelay: case K::horizon: case K::distructor:
             return V;

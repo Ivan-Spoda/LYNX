@@ -1714,6 +1714,12 @@ private:
         return { d.getCentreX() - 420.0f, d.getBottom() - 176.0f, 840.0f, 168.0f };
     }
     int count() const { return mixsuite::ember::bandCount (v (mixsuite::ember::bands)); }
+    // round 135: the Decapitator-role strip along the top of the display (voice row, PUNISH, THUMP, STEEP, the wide
+    // filter ranges) and the in / out meter at its right; the band handles start under it
+    static constexpr float handleTop = 64.0f;
+    juce::Rectangle<float> stripArea() const { const auto d = disp(); return { d.getX() + 8.0f, d.getY() + 6.0f, d.getWidth() - 16.0f, 24.0f }; }
+    juce::Rectangle<float> vuArea() const { const auto d = disp(); return { d.getRight() - 64.0f, d.getY() + 38.0f, 56.0f, 120.0f }; }
+    bool wide() const { return v (mixsuite::ember::wideCuts) >= 0.5f; }
     int fp (int b, int f) const { return mixsuite::ember::bandParam (b, f); }
     double xoHz (int i) const { return mixsuite::ember::crossoverHz (v (mixsuite::ember::xover1 + i)); }
     float edgeX (int i) const
@@ -1726,7 +1732,7 @@ private:
     float handleY (int b) const
     {
         const auto d = disp();
-        return d.getY() + 40.0f + (panelArea().getY() - 30.0f - d.getY() - 40.0f) * (1.0f - v (fp (b, 1)));
+        return d.getY() + handleTop + (panelArea().getY() - 30.0f - d.getY() - handleTop) * (1.0f - v (fp (b, 1)));
     }
     juce::Rectangle<float> handle (int b) const { return juce::Rectangle<float> (38.0f, 16.0f).withCentre ({ 0.5f * (edgeX (b) + edgeX (b + 1)), handleY (b) }); }
     int handleAt (juce::Point<float> p) const
@@ -1778,8 +1784,17 @@ private:
             out.push_back (button ({ a.getRight() - 50.0f, a.getY() + 10.0f, 20.0f, 20.0f }, idNext, ">", false, tr ("Previous / next band")));
             out.push_back (button ({ a.getRight() - 26.0f, a.getY() + 10.0f, 20.0f, 20.0f }, idRemove, "x", false, tr ("Remove the band (its neighbour takes its range)")));
         }
-        out.push_back (toggle ({ a.getRight() - 140.0f, a.getY() + 52.0f, 128.0f, 22.0f }, autoGain, tr ("Auto gain")));
-        out.push_back (knob ({ a.getRight() - 112.0f, a.getY() + 84.0f, 70.0f, 80.0f }, mix, tr ("Dry / wet"), 0));
+        out.push_back (toggle ({ a.getRight() - 146.0f, a.getY() + 52.0f, 136.0f, 22.0f }, autoGain, tr ("Auto gain")));
+        out.push_back (knob ({ a.getRight() - 148.0f, a.getY() + 84.0f, 66.0f, 80.0f }, mix, tr ("Dry / wet"), 0));
+        out.push_back (knob ({ a.getRight() - 78.0f, a.getY() + 84.0f, 66.0f, 80.0f }, output, tr ("Output"), 0, true)); // round 135: on the panel
+        // round 135: the strip (one click per voicing, the reference's switches)
+        const auto s = stripArea();
+        out.push_back (tabs ({ s.getX(), s.getY(), 420.0f, s.getHeight() }, voice, tr ("Style menu|Tape pre|Console|Grit|Triode|Pentode"),
+                             { 0.0f, 0.2f, 0.4f, 0.6f, 0.8f, 1.0f }));
+        out.push_back (toggle ({ s.getX() + 432.0f, s.getY(), 84.0f, s.getHeight() }, punish, tr ("Punish")));
+        out.push_back (toggle ({ s.getX() + 522.0f, s.getY(), 80.0f, s.getHeight() }, thump, tr ("Thump")));
+        out.push_back (toggle ({ s.getX() + 608.0f, s.getY(), 76.0f, s.getHeight() }, steep, tr ("Steep")));
+        out.push_back (toggle ({ s.getX() + 690.0f, s.getY(), 110.0f, s.getHeight() }, wideCuts, tr ("Wide cuts")));
         const auto bar = barArea();
         const auto cy = bar.getCentreY();
         out.push_back (barMenu ({ 10.0f, cy - 11.0f, 160.0f, 22.0f }, xoverSlope, tr ("Crossover"), "12 dB/oct|24 dB/oct|48 dB/oct", { 0.0f, 0.5f, 1.0f }));
@@ -1787,9 +1802,8 @@ private:
         out.push_back (barMenu ({ 322.0f, cy - 11.0f, 100.0f, 22.0f }, bands, tr ("Bands"), "1|2|3|4"));
         out.push_back (barValue ({ 428.0f, cy - 11.0f, 100.0f, 22.0f }, inputGain, tr ("In")));
         out.push_back (barValue ({ 534.0f, cy - 11.0f, 90.0f, 22.0f }, tone, tr ("Tilt")));
-        out.push_back (barValue ({ 630.0f, cy - 11.0f, 110.0f, 22.0f }, lowCut, tr ("Low cut")));
-        out.push_back (barValue ({ 746.0f, cy - 11.0f, 120.0f, 22.0f }, highCut, tr ("High cut")));
-        out.push_back (barValue ({ bar.getRight() - 90.0f, cy - 11.0f, 82.0f, 22.0f }, output, tr ("Out")));
+        out.push_back (barValue ({ 630.0f, cy - 11.0f, 120.0f, 22.0f }, wide() ? lowCutWide : lowCut, tr ("Low cut")));
+        out.push_back (barValue ({ 756.0f, cy - 11.0f, 130.0f, 22.0f }, wide() ? highCutWide : highCut, tr ("High cut")));
     }
 
     // band settings as a block (style, drive, mix, level + round 128's power, state, tone, feedback, dynamics) to move
@@ -1884,7 +1898,7 @@ private:
         const auto d = disp();
         if (dragHandle >= 0)
         {
-            const auto f = 1.0f - (e.position.y - d.getY() - 40.0f) / (panelArea().getY() - 30.0f - d.getY() - 40.0f);
+            const auto f = 1.0f - (e.position.y - d.getY() - handleTop) / (panelArea().getY() - 30.0f - d.getY() - handleTop);
             set ({ { fp (dragHandle, 1), juce::jlimit (0.0f, 1.0f, f) } });
             ui::showValueTip (*this, handle (dragHandle).toNearestInt(), tr ("Drive") + " " + text (fp (dragHandle, 1)));
             return;
@@ -1952,11 +1966,28 @@ private:
             g.drawRoundedRectangle (h, 4.0f, 1.0f);
             g.setColour (colour::textPrimary);
             g.setFont (font (type::caption, true));
-            juce::String tag = caps (text (fp (b, 0))) + "  " + text (fp (b, 1));
+            // round 135: band 1 shows the voicing when one is chosen (it replaces the style)
+            const auto vk = mixsuite::ember::voiceIndex (v (mixsuite::ember::voice));
+            juce::String tag = caps (b == 0 && vk > 0 && n == 1 ? tr (mixsuite::ember::voiceName (vk)) : text (fp (b, 0))) + "  " + text (fp (b, 1));
             if (! powered (b)) tag = tr ("OFF") + "  " + tag;
             else if (state (b) == mixsuite::ember::BandState::solo) tag = "S  " + tag;
             else if (state (b) == mixsuite::ember::BandState::mute) tag = "M  " + tag;
             g.drawText (tag, juce::Rectangle<float> (region.getX() + 2.0f, h.getY() - 18.0f, region.getWidth() - 4.0f, 14.0f), juce::Justification::centred, true);
+        }
+        // round 135: the in / out level meter (the reference's VU: what the drive does to the level)
+        {
+            const auto m = vuArea();
+            g.setColour (colour::bg0.withAlpha (0.7f));
+            g.fillRoundedRectangle (m.expanded (4.0f, 16.0f).withTrimmedBottom (-2.0f), 4.0f);
+            const auto bars = m.withTrimmedTop (2.0f).withTrimmedBottom (14.0f);
+            const auto in = dbOf (liveMeter (2)), out = dbOf (liveMeter (3));
+            drawMeter (g, bars.withWidth (bars.getWidth() * 0.5f - 2.0f), in, -48.0f, inColour());
+            drawMeter (g, bars.withTrimmedLeft (bars.getWidth() * 0.5f + 2.0f), out, -48.0f, colour::accent);
+            g.setColour (colour::textSecondary);
+            g.setFont (font (type::caption));
+            g.drawText (tr ("IN"), juce::Rectangle<float> (bars.getX(), m.getY() - 14.0f, bars.getWidth() * 0.5f, 12.0f), juce::Justification::centred, false);
+            g.drawText (tr ("OUT"), juce::Rectangle<float> (bars.getCentreX(), m.getY() - 14.0f, bars.getWidth() * 0.5f, 12.0f), juce::Justification::centred, false);
+            g.drawText (juce::String (out > -100.0f ? out : -99.0f, 1), juce::Rectangle<float> (m.getX() - 4.0f, bars.getBottom() + 1.0f, m.getWidth() + 8.0f, 12.0f), juce::Justification::centred, false);
         }
         for (int i = 1; i < n; ++i)
         {

@@ -329,7 +329,8 @@ edits (Remove / Bypass, Latched / Momentary), Hold, Auto Key.
 Trials: Waves (WaveShell 17.1, demo mode) and Valhalla DSP (demos) hosted here; the reference screenshots are from
 rounds 100 / 101 / 113 / 119 and this round (outside git: `D:\lynx-work\parity129\ref`, `D:\lynx-test-archive`).
 The Soundtoys 5 trials were installed during this round but every one of them stops on its iLok activation window
-until the user starts the trial, so their tables are from the official manuals ("manual only"). Black-box only.
+until the user starts the trial, so their tables were from the official manuals ("manual only"). Round 135: the user
+activated them; the Decapitator, PanMan, Little Plate and Little AlterBoy tables are now from the trials (black-box).
 Late in the round (after the user activated the Waves trials) the Waves shell loaded again and RComp, DeEsser,
 Doubler4, Waves Tune Real-Time, SSL E-Channel, H-Delay and Doubler2 were captured; the tables above agree with those
 captures (RComp: Thresh / Gain faders on the input / output meters, ARC · Electro · Warm, Mix, Trim — ARC / Electro /
@@ -356,11 +357,11 @@ range buttons — see its table). Our host still shows their demo banner.
 | Spiral Echo | ValhallaFreqEcho | 9 | 9 | 9 | 9 |
 | Orbit | ValhallaSpaceModulator | 7 | 7 | 8 | 7 |
 | Lattice Mod | ValhallaUberMod | 6 | 7 | 7 | 7 |
-| Ember Saturator | Decapitator (Soundtoys, manual only) | 4 | 4 | 5 | 4 |
-| Fruity Delay 3 (stand-in) | EchoBoy / PrimalTap (Soundtoys, manual only) | 2 | 2 | 5 (Echoform) | 5 (Echoform) |
-| Auto-pan (stand-in) | PanMan (Soundtoys, manual only) | 2 | 2 | 3 | 2 |
-| Reeverb 2 (stand-in) | Little Plate (Soundtoys, manual only) | 4 | 3 | 6 (Foil Plate) | 5 (Foil Plate) |
-| — | Little AlterBoy (Soundtoys, manual only) | 0 | 0 | 0 | 0 |
+| Ember Saturator | Decapitator (Soundtoys; trial measured in round 135) | 4 | 4 | 5 → **8** (r135) | 4 → **7** (r135) |
+| Fruity Delay 3 (stand-in) | EchoBoy / PrimalTap (Soundtoys) | 2 | 2 | 5 (Echoform) | 5 (Echoform) |
+| Auto-pan (stand-in) | PanMan (Soundtoys; trial measured in round 135) | 2 | 2 | 3 → **7** (r135) | 2 → **6** (r135) |
+| Reeverb 2 (stand-in) | Little Plate (Soundtoys; trial measured in round 135) | 4 | 3 | 6 → **8** (Foil Plate, r135) | 5 → **6** (Foil Plate, r135) |
+| Voice Shift (round 135) | Little AlterBoy (Soundtoys; trial measured in round 135) | 0 | 0 | 0 → **9** (r135) | 0 → **8** (r135) |
 
 Scores "after" = with round 129's changes (below). The biggest single gap was the frame every original has around its
 controls — undo / redo, A / B, presets — which none of LYNX's engines had; it is now in every LYNX engine editor.
@@ -1400,61 +1401,44 @@ Sources: [VintageVerb](https://valhalladsp.com/shop/reverb/valhalla-vintage-verb
 A single "info line" layout item in `PluginEditors.cpp` would close the help-line gap for all four in one change.
 
 ## Ember Saturator ← Decapitator (Soundtoys)
-Sources: docs/specs/decapitator.md (vendor guide v5 pp. 4–9, reviews); `mixsuite::ember` in src/core/MixSuite.{h,cpp} (`emberInfo`, `Saturator::chunk`); `EmberEditor` in src/ui/ProEditors.cpp; ProEditor header in src/ui/ProEditorBase.h; screenshot lynx-before/Ember Saturator.png. Trial on this PC: no. **Manual only (trial not installed).** I judged only Decapitator-workflow fit. Saturn parity is out of scope.
+Sources: the official trial (Decapitator 5.5.5, hosted black-box in our host: its 12 host parameters with every value
+text, screenshots, and measurements of sines / noise through it — docs/analise/REA_rodada135s.md §2); docs/specs/decapitator.md;
+`mixsuite::ember` in src/core/MixSuite.{h,cpp}; `EmberEditor` in src/ui/ProEditors.cpp. Round 135 re-checked every row on the trial
+(it was "manual only" before). The Soundtoys control strip (◀ ▶ preset name, save, revert, settings, menu, BYPASS) has
+**no A/B**: LYNX's header (undo / redo, A/B, presets) is a superset.
 
-| Original feature | Original (range / default / where) | LYNX now | Status | Note |
+| Original feature | Original (range / default / where) [EXEC trial] | LYNX now | Status | Note |
 |---|---|---|---|---|
-| Drive | 0…10 scale, big centre knob | Drive 0…+36 dB, big knob in band panel + drag handle on spectrum; default 0 | ⚠️ | dB readout, not 0–10; taper not matched to Decap (never measured) |
-| Punish | +20 dB pre-gain switch | — | ❌ | Ember's 36 dB drive covers the gain but there is no one-click switch, and a 0–10 + Punish law is missing |
-| Style A (Ampex 350 preamp) | button | Tube (biased tanh) | ⚠️ | 4 generic styles, not 5 named voicings |
-| Style E (EMI TG) | button | — | ❌ | |
-| Style N (Neve 1057, "FuzzFace") | button | Transistor / Fuzz (nearest) | ⚠️ | |
-| Style T (triode, even harmonics) | button | Tube (asymmetric → even) | ⚠️ | closest match |
-| Style P (pentode, odd harmonics) | button | Tape (x/√(1+x²), odd) | ⚠️ | |
-| Style selector form | 5 adjacent letter buttons, one click | dropdown "Tube/Tape/Transistor/Fuzz" | ⚠️ | needs 2 clicks; styles cannot be A/B'd by ear quickly |
-| Per-style EQ / dynamic response | built into each style | Tape only: ±6 dB 3 kHz pre/de-emphasis | ⚠️ | no style-specific pre/post EQ or bias sag |
-| Low Cut | 20 Hz…1 kHz, before saturation | 20…500 Hz (0 = off), before drive, 12 dB/oct | ⚠️ | range ends at 500 Hz; reviewer vocal setting (~800 Hz) is out of reach |
-| Thump | resonant LF bump at Low Cut freq | — | ❌ | Q > 0.707 on the HPF |
-| Tone | Dark…Bright tilt, **before** saturation, centre default | "Tilt" ±6 dB around 1 kHz, default 0 — applied **after** the curve | ⚠️ | pre/post order is wrong: Decap's Tone changes what gets distorted |
-| High Cut | 1…20 kHz, 6 dB/oct, after saturation | 2…20 kHz (1 = off), 12 dB/oct, after | ⚠️ | range and slope differ |
-| Steep | High Cut 30 dB/oct | — | ❌ | Ember has only a 12 dB/oct high cut |
-| Auto (gain) | on (per review); Output tracks −Drive | "Auto gain" toggle, default on; RMS makeup of a −12 dBFS sine through the curve | ⚠️ | different law; Decap moves the visible Output knob, LYNX does not |
-| Output | −24…0 dB | "Out" ±18 dB in bottom bar (bar value) | ⚠️ | range differs; the value is hidden in the bottom bar, not on the main panel |
-| Mix | Dry…Wet, 100 % implied | "Dry / wet" 0–100 % (default 100) + per-band Mix | ✅ | the band Mix sits beside it and can be confused with it |
-| Dry path latency alignment | n/d | dry delayed by oversampler latency | ✅ | |
-| Oversampling / quality | not user-exposed | 2×/4×/8× menu (bottom bar) | ➕ | |
-| Multiband (up to 4 bands, crossovers, slopes) | — | yes | ➕ | Saturn role; adds clutter for a Decap user |
-| Band Level ±18 dB | — | yes | ➕ | |
-| VU meter | analog VU on the panel | none on Ember's editor (engine stores in/out peak, nothing draws it) | ❌ | no level feedback while driving |
-| Spectrum display | — | post spectrum fills the window | ➕ | |
-| Preset menu (factory + user, save) | Soundtoys control strip | ProEditor header: no preset box at all | ❌ | |
-| Prev / next preset | yes | — | ❌ | |
-| A/B compare | Soundtoys strip (not verified in this guide) | — | ❌ | |
-| Undo/redo | — / host | song-level Ctrl+Z (`set(..., undoable)`) | ⚠️ | |
-| Bypass | host / power | LED in header + mixer slot on/off | ✅ | |
-| Knob gestures | drag, fine, double-click default (Soundtoys convention) | drag, Ctrl fine, wheel, dbl/Alt reset, right-click value/automation menu | ✅ | |
-| Value readouts | on hover / drag | below every control + value tooltip | ✅ | |
-| Help / tooltips | manual | hint bar + header gesture text | ✅ | |
-| Resizable window | fixed size | fixed 860×520 (ProEditorWindow, not resizable) | ✅ | equivalent |
-| One-screen compact layout | ~1 panel: VU top, Drive centre, styles row, filters row | spectrum on top, band panel floating at the bottom, global settings in the bottom bar | ⚠️ | a Decap user hunts for Output and filter switches |
-| Section grouping "Low Cut / Tone / High Cut" | one row with Thump/Steep switches beside | three faders under "Tone (all bands)" | ⚠️ | labels exist, switches do not |
+| Drive | 0.0…10.0, big knob, default 0; ≈ 3.2 dB per step at −18 dBFS | Drive 0…+36 dB; read-out "+x dB (n.n)" on the 0–10 scale (3.6 dB / step) | ✅ | round 135: the 0–10 read-out |
+| Punish | on / off, top left; ≈ +20 dB before the drive | **Punish** in the strip on top of the display | ✅ | round 135: +20 dB pre-drive (single- and multiband) |
+| Style A / E / N / T / P | 5 one-click buttons, bottom row | **one-click voicing row** (Tape pre, Console, Grit, Triode, Pentode; "Style menu" = the old 4 styles) | ✅ | round 135: five voicings (a curve each — a new "console" curve for E — and their own broad EQ, from the measured responses); own names |
+| Per-style tone / harmonics | E brightest top (+3 dB > 8 kHz), N darker top, T thinner bass, P bass bump [EXEC noise, Drive 5] | each voicing's pre / post shelves follow these | ⚠️ | voicing curves not fitted to the measured harmonics (round 136 tunes the models) |
+| Low Cut | 20 Hz…1 kHz, 12 dB/oct, before the drive | **Wide cuts**: 20 Hz…1 kHz (old range 20–500 Hz kept for older projects) | ✅ | round 135 |
+| Thump | switch beside Low Cut: a resonant bump at the cutoff (+3.5 dB) | **Thump** (low cut Q 1.6) | ✅ | round 135 |
+| Tone | Dark…Bright ±12 (a pre-drive tilt: +12 = −18 dB at 30 Hz / +3 dB at 16 kHz) | Tilt ±6 dB around 1 kHz, after the curve | ⚠️ | position (pre / post) left to the DSP round |
+| High Cut | 1…20 kHz, gentle ≈ 6 dB/oct | **Wide cuts**: 1…20 kHz, 6 dB/oct (old: 2–20 kHz, 12 dB/oct) | ✅ | round 135 |
+| Steep | switch beside High Cut: ≈ 30 dB/oct | **Steep** (5th-order Butterworth, 30 dB/oct) | ✅ | round 135 |
+| Auto | on (default); links the Output knob to Drive in the GUI — the audio is identical on / off [EXEC] | Auto gain (RMS make-up) | ⚠️ | different law; her states are translated with LYNX's auto gain off and her trim |
+| Output | −24…0 dB, main panel | **Output on the band panel** (±18 dB), beside Dry / wet | ✅ | round 135: moved from the bottom bar to the panel |
+| Mix | Dry…Wet, default 100 % | Dry / wet | ✅ | |
+| VU meter ("attitude") | analog VU on top | **IN / OUT meters** at the right of the display with the output read-out | ✅ | round 135 |
+| Latency | 62 samples at 48 kHz [EXEC] | the oversampler's latency (reported) | ✅ | |
+| Oversampling | not exposed | 2× / 4× / 8× (bottom bar) | ➕ | |
+| Multiband (Saturn role) | — | up to 4 bands | ➕ | |
+| Preset strip ◀ ▶ / save / revert | Soundtoys strip | LYNX preset bar (◀ ▶, factory incl. a "Voicings" folder, user presets) | ✅ | |
+| A/B | — (none in the strip) | LYNX's A/B | ➕ | |
+| Translation of her saved state | encoded | **her 7 distinct states translated** (read in the trial: style A, Drive 1.9–2.0, Tone +1.7 / +4.2, High Cut 8.1 kHz / off, Mix 88 / 100 %, Trim −3.0 / −3.2 dB) | ✅ | round 135: payload hash → settings (core/SoundtoysStates.inc); other states: the light default |
+| One-screen layout | VU top, Drive left, filters row, styles row | display + band panel; the reference's switches in one strip on top | ⚠️ | layout differs (spectrum-first editor) |
 
-**Scores**: configuration 4/10, design 4/10.
+**Scores**: configuration 4/10 → **8/10**, design 4/10 → **7/10** (round 135).
 
-**Top gaps** (ordered by what a user touches first):
-1. **Style row with 5 Decap-like voicings** (A/E/N/T/P equivalents, under LYNX names, no hardware or trade names). Today the 4-entry dropdown is in `EmberEditor::layoutControls`. Add 1-click tab buttons (`K::tabs`). Two new curves plus per-style pre/post EQ in `ember::shape` and `Saturator::chunk`. Needs engine changes. Effort M (L to fit measured curves).
-2. **Move Tone before the drive.** Today it is applied after the curve in `Saturator::chunk`. Engine change (or a "pre/post" option to keep Saturn translations). Effort S.
-3. **Punish switch (+20 dB) and Thump / Steep switches.** New parameters in `ember::Param` / `emberInfo`, appended so saved states stay valid. Thump = resonant Q on `lowcut.filter`. Steep = 5th-order HC with a 6 dB/oct default mode. Toggles go next to the faders. Engine change. Effort S–M.
-4. **Filter ranges.** Low Cut to 1 kHz and High Cut down to 1 kHz (`lowCutHz` / `highCutHz`). This changes the value law, so it needs a translation guard for existing projects. Effort S.
-5. **Output on the main panel, with Auto following Drive visibly.** Output −24…0 range option. UI change plus an auto-gain law change. Effort S.
-6. **In/out level meter (VU-style)** in the band panel or at the right edge. The data already exists (`meters.set`). UI only (`EmberEditor::paintBody` with `drawMeter`). Effort S.
-7. **Drive readout as 0–10** when in single-band mode, optionally. UI / `paramText`. Effort S.
-8. **Preset box, prev/next and A/B** in the ProEditor header (shared by all display-first editors). UI + preset storage. Effort M.
+**Left**: Tone before the curve; the voicings' harmonic profiles fitted to the trial (round 136); Auto as an Output-follows-
+Drive link instead of a make-up gain.
 
 ---
 
 ## Fruity Delay 3 (stand-in) / Echoform ← EchoBoy (Soundtoys), with PrimalTap
-Sources: docs/specs/echoboy.md (Pro Tools-era guide pp. 22–54, store page); `[soundtoys-echoboy]` / `[soundtoys-primaltap]` in src/core/PluginSubstitutes.cpp (→ Fruity Delay 3, no preset, no translation); `fruityDelay3()` and `echoformLayout()` in src/core/PluginLayout.cpp; `echoform::*` in src/core/EchoSuite.cpp; screenshots lynx-before/Fruity Delay 3.png and Echoform.png. PrimalTap facts are from search snippets of the manual (gear4music PDF copy), not a full read. Trial on this PC: no. **Manual only (trial not installed).**
+Sources: docs/specs/echoboy.md (Pro Tools-era guide pp. 22–54, store page); `[soundtoys-echoboy]` / `[soundtoys-primaltap]` in src/core/PluginSubstitutes.cpp (→ Fruity Delay 3, no preset, no translation); `fruityDelay3()` and `echoformLayout()` in src/core/PluginLayout.cpp; `echoform::*` in src/core/EchoSuite.cpp; screenshots lynx-before/Fruity Delay 3.png and Echoform.png. PrimalTap facts are from search snippets of the manual (gear4music PDF copy), not a full read. Trial on this PC: no. **Manual only (trial not installed).** Round 135: the EchoBoy / PrimalTap trials are now active; their parameter lists, a screenshot and her 22 EchoBoy states read black-box in the trial (Ping-Pong 1/4 note, feedback 0.52, saturation 3.72, "Edited Style" in most slots) are in docs/analise/REA_rodada135s.md §4.
 
 | Original feature | Original (range / default / where) | Fruity Delay 3 now | Echoform now | Status (best) | Note |
 |---|---|---|---|---|---|
@@ -1510,97 +1494,72 @@ Sources: docs/specs/echoboy.md (Pro Tools-era guide pp. 22–54, store page); `[
 ---
 
 ## Auto-pan (stand-in) ← PanMan (Soundtoys)
-Sources: docs/specs/panman.md (v5 guide pp. 5–25); `AutoPan` and `autoPanInfo` in src/core/Effects.cpp. There is no custom layout (generic generated panel). Trial on this PC: no. **Manual only (trial not installed).**
+Sources: the official trial (PanMan 5.5.5, black-box: 16 host parameters, screenshots of its sources, measurements —
+docs/analise/REA_rodada135s.md §3); `AutoPan` / `autopan::` in src/core/Effects.{h,cpp}; `autoPanLayout()` in PluginLayout.cpp. Round 135
+gave Auto-pan the rhythmic-panner sources while FL's own LFO (the Love Philter conversion it was made for) stays its
+default source.
 
-| Original feature | Original | LYNX now | Status | Note |
+| Original feature | Original [EXEC trial] | LYNX now | Status | Note |
 |---|---|---|---|---|
-| Offset | −105…+105°, default 0 | Pan −100…+100 % (balance) | ⚠️ | no "beyond the speakers" |
-| Width | 0…210°, default 180 | Depth −100…+100 % (`2p−1`) | ⚠️ | **bug: the substitute preset `Depth=0.5` gives depth 0, so the substitute is a pass-through** (comment says "moderate sweep") |
-| Rate (Hz, free) | 0.1–10 Hz | — (beats only) | ❌ | |
-| Rate (synced) | note values | Period 0…64 beats, default 1 beat | ⚠️ | shown as raw beats, not note names |
-| Direction L→R / Back-and-forth / R→L | menu | triangle only (+ Phase) | ⚠️ | |
-| Smoothing | Hard…Soft | Tension (curve shape) | ⚠️ | |
-| Sources: Rhythm Step (3/4/5), Rhythm Shape editor, Random, PingPong / Random Step (audio-triggered) | source menu | — | ❌ | |
-| Feel / Groove | knobs | — | ❌ | |
-| Tweak: envelope (Threshold, Rate Mod, Width Mod, Attack/Release 0–5000 ms, Env/Gate) | Tweak page | — | ❌ | |
-| Trigger (threshold, HPF/LPF filter, Divider 1–12, Manual) | Tweak | — | ❌ | |
-| Analog / Digital input stage | switch | — | ❌ | |
-| Input / Output level + LEDs | knobs | — | ❌ | |
-| Pan law | undocumented | linear balance or "FL pan law" toggle | ➕ | |
-| Control only (automation source) | — | yes | ➕ | |
-| Pan position display | animated ball/position | none (generic knobs) | ❌ | |
-| Presets / A/B | Soundtoys strip | none | ❌ | |
+| Offset | −105…+105°, default 0 | Offset (the Pan control) ±100 % | ✅ | ±90° = a hard side |
+| Width | 0…210°, default 180 | Width (Depth) ±100 % (180° = 100 %) | ⚠️ | no "beyond the speakers" above 180° |
+| Smoothing | Hard…Soft, default Soft | **Smoothing** (LFO: square → sine; steps: jump → glide over a third of a step) | ✅ | round 135 |
+| Pan law | equal power: centre −3 dB per side, the far side silent at the extremes | **equal-power balance** for the new sources (FL's laws for the FL source) | ✅ | round 135, measured |
+| Rate (free) | 100 s … 10 Hz (0.01 · 1000^v Hz), default 0.25 Hz | **Rate** 0.01–10 Hz, same law and default | ✅ | round 135 |
+| Sources: LFO / Rhythm Step / Rhythm Shape | LFO button; rhythm note + steps (2…8) | **Source**: FL LFO · LFO · Rhythm steps (2–8 steps on 1/1…1/32 notes) | ⚠️ | round 135; no free rhythm-shape editor (her "shape" presets play as 2 steps) |
+| Direction ◀ / ◀▶ / ▶ | three buttons | **Direction** (right to left, back and forth, left to right) | ✅ | round 135 |
+| Input / Output | −24…+24 dB, LED meters | **Input / Output** ±24 dB + IN / OUT meters | ✅ | round 135 |
+| Analog / Digital | switch (default Analog): asymmetric saturation, H2 −36 dBc at −18 dBFS | **Digital / Analog** (fitted on the measured harmonics) | ✅ | round 135 |
+| Pan position display | L … C … R LED strip | **pan-position strip** (live) | ✅ | round 135 |
+| Feel / Groove | knobs (rhythm modes) | — | ❌ | |
+| Tweak: envelope / trigger (Rate / Width mod, threshold, divider, manual trigger) | Tweak page | — | ❌ | |
+| Tap tempo / MIDI | in rhythm modes | follows the project tempo | ⚠️ | |
+| Presets | Soundtoys strip | FL presets (Auto-pan is an FL effect) | ⚠️ | |
+| Translation of her saved state | encoded | **her 7 settings translated** (LFO 3.56 Hz / 150° / soft — 52 % of her slots; 5-step and 2-step rhythm presets; analog) | ✅ | round 135: the hidden source / steps / direction read from the trial's window per setting |
 
-**Scores**: configuration 2/10, design 2/10.
-
-**Top gaps:**
-1. **Fix the substitute preset** (`Depth=0.5` → e.g. `0.75`, or make "no movement" an explicit, commented choice). File: src/core/PluginSubstitutes.cpp. Table only. Effort S.
-2. **Free Hz rate, note-name sync readout, Direction (ramp up / down / triangle).** AutoPan params + `paramText`. Engine change. Effort S.
-3. **Rhythm Step (3/4/5) and Random sources.** Engine change. Effort M.
-4. **A dedicated layout with a pan-position display.** PluginLayout.cpp function plus a display in PluginEditors.cpp. UI only. Effort M.
-5. **Envelope Tweak (Rate/Width mod) and audio trigger (PingPong).** Engine change. Effort M–L.
-6. Alternatively, write a new LYNX panner engine and keep Auto-pan FL-exact. Effort L.
+**Scores**: configuration 3/10 → **7/10**, design 2/10 → **6/10** (round 135).
 
 ---
 
-## Reeverb 2 (stand-in) ← Little Plate (Soundtoys)
-Sources: store/press pages and the KVR review. The official PDF (soundtoys.com/wp-content/uploads/Little-Plate-Manual.pdf) returned 403. `[soundtoys-littleplate]` (Dry=0, Wet=0.8, mix 0.25); `reeverb2Info` in Effects.cpp; screenshot Fruity Reeverb 2.png; Foil Plate (`foilInfo`, src/core/LynxVerbs.cpp) checked as an alternative. Trial on this PC: no. **Manual only (trial not installed).**
+## Foil Plate ← Little Plate (Soundtoys)
+Sources: the official trial (Little Plate 5.5.5, black-box: 5 host parameters — Mix, Decay 0.5 s…∞, Low Cut 20 Hz…1 kHz,
+Mod on / off; screenshot); `foilInfo` / `FoilFx` in src/core/LynxVerbs.cpp. The substitute is Foil Plate since round 129.
 
-| Original feature | Original | Reeverb 2 now | Foil Plate (alt.) | Status | Note |
-|---|---|---|---|---|---|
-| Decay (one big knob) | ~0.5 s … ∞ (EMT 140 hardware ≈ 1–5 s) | "Dec" small knob among 17 controls | Decay 0.5–30 s | ⚠️ | no infinite hold in either |
-| Low Cut | HPF to tame boom (range not published) | L.Cut | Low EQ freq/gain shelf ±12 dB | ✅ / ⚠️ | |
-| Mix | dry/wet | Dry/ER/Wet faders (+ slot mix) | Mix | ⚠️ / ✅ | three faders replace one knob |
-| Mod switch | on/off "chaotic variations" | Mod depth + speed | Mod rate/depth | ✅ | |
-| Plate character (EMT 140) | single voicing | generic room algorithm | 12 plate types | ❌ / ✅ | |
-| No predelay / size / damping exposed | minimal panel | many extra controls | Predelay, Size, Width, High EQ | ➕ | extras clutter a 3-knob plugin |
-| Presets (25 factory + user) | Soundtoys strip | FL factory only / none | none | ❌ | |
-| 3-control layout | Decay big, Low Cut + Mix small, Mod switch | 17-control FL panel | 12-control panel | ⚠️ | |
+| Original feature | Original [EXEC trial] | Foil Plate | Status | Note |
+|---|---|---|---|---|
+| Decay (one big knob) | 0.5 s … 32 s … ∞, default 3 s | Decay 0.5–30 s (big knob) + **Infinite** | ✅ | round 135: ∞ holds the plate |
+| Low Cut | 20 Hz…1 kHz, default 20 | **Low cut** 20 Hz–1 kHz (0 = off), 12 dB/oct | ✅ | round 135 |
+| Mix | 0–100 %, default 100 % | Mix (the substitute: 100 % wet at the slot's 25 %) | ✅ | |
+| Mod | on / off | Mod rate / depth | ✅ | |
+| Plate character | one EMT-style plate | 12 plate types | ✅ | |
+| Extras (predelay, size, width, EQ) | none on the panel | yes | ➕ | a fuller panel than the 3-knob original |
+| Presets | Soundtoys strip | LYNX preset bar | ✅ | |
 
-**Scores**: configuration 4/10, design 3/10 with Reeverb 2. Foil Plate would score about 6 / 5.
-
-**Top gaps:**
-1. **Route `[soundtoys-littleplate]` to Foil Plate** (plate model, decay to 30 s, mod) with a medium decay and a sensible low EQ. Table only. Effort S.
-2. **∞ decay at the top of Decay.** `foilDecayKnots` + a freeze path in `FoilFx`. Engine change. Effort S–M.
-3. **A true Low Cut HPF on Foil.** New param. Effort S.
-4. Optionally, a compact layout (big Decay knob). UI only. Effort S.
+**Scores**: configuration 6/10 → **8/10**, design 5/10 → **6/10** (round 135).
 
 ---
 
-## (no role) ← Little AlterBoy (Soundtoys)
-Sources: docs/specs/little-alterboy.md (2019 guide pp. 3–6); `LynxTune.cpp` (`info`, `paramText`); `flPitchShifterInfo` in Effects.cpp; `vocal::Psola` + YIN in core/VocalPitch.h. Trial on this PC: no. **Manual only (trial not installed).** Usage weight: 696 slots / 399 projects; 67 % of slots share one state.
+## Voice Shift ← Little AlterBoy (Soundtoys)
+Sources: the official trial (Little AlterBoy 5.5.5, black-box: 7 host parameters with their value texts, screenshot,
+measurements of harmonic test tones — docs/analise/REA_rodada135s.md §1); docs/specs/little-alterboy.md;
+src/core/VoiceShift.{h,cpp}; `voiceShiftLayout()`. Round 135 created **Voice Shift**, LYNX's own voice shifter (YIN +
+TD-PSOLA from core/VocalPitch.h), for this role: 696 slots in 399 of her projects had no LYNX module before.
 
-| Original feature | Original | LYNX Tune | FL Pitch Shifter | Status | Note |
-|---|---|---|---|---|---|
-| PITCH | −12…+12 st, 0.1 st display | Transpose ±12 st, **integer** | Pitch (continuous) | ⚠️ | |
-| FORMANT | range unpublished (tips use −1…−3) | Formant shift ±7 st | Formant | ⚠️ | |
-| LINK (formant follows pitch) | on/off | Formant preserve off ≈ Link on | Formant correction | ✅ | inverse sense |
-| Mode TRANSPOSE | plain shift | Transpose with Scale "chromatic" + correction | Pitch | ⚠️ | LYNX Tune always corrects; there is no "no-correction" mode |
-| Mode QUANTIZE | chromatic, as fast as possible | Scale chromatic + Retune 0 ms | — | ✅ | |
-| Mode ROBOT | lock to one C (C5?) + Pitch | one-key mask + Retune 0 (nearest octave, not fixed) | — | ⚠️ | |
-| MIDI → Pitch | host MIDI | MIDI param (target notes) | — | ⚠️ | |
-| DRIVE (Decap tube) | knob | — (chain Ember) | — | ❌ | |
-| MIX | dry/wet | Mix | Mix | ✅ | |
-| Simple 6-control panel | one screen | full tuner UI (key, scale, 12 keys…) | FL panel | ❌ | |
-| Substitute entry | — | none (`PLUGIN_FALLBACK.md`: "not mapped yet") | — | ❌ | |
+| Original feature | Original [EXEC trial] | Voice Shift | Status | Note |
+|---|---|---|---|---|
+| PITCH | −12.0…+12.0 st, 0.1 st read-out, default 0 | Pitch ±12 st, read-out box (0.1 st), big knob | ✅ | transpose +2.5 st: 231 Hz on both |
+| FORMANT | −12.0…+12.0 st, default 0 | Formant ±12 st, read-out box | ✅ | |
+| LINK | on / off between the knobs | Link (formants follow the pitch; Formant offsets them) | ✅ | |
+| MODE Transpose / Quantize / Robot | three buttons | Mode radio (same three) | ✅ | Quantize: nearest semitone at once (210 → 208 Hz on both); Robot: C4 at Pitch 0 (262 Hz on both), Pitch moves it |
+| DRIVE | 0.0…10.0 | Drive 0–10 (tube stage on the shifted voice, ≈ 1.75 dB / step, make-down above 6) | ✅ | curve fitted roughly on the trial's level / harmonics (round 136 may refine) |
+| MIX | 0–100 %, default 100, linear | Mix (linear, dry delayed by the latency) | ✅ | measured linear on the trial |
+| Latency | 2417 samples at 48 kHz (reported) | two periods of 70 Hz (≈ 1376 at 48 kHz), reported | ⚠️ | different (both compensated by PDC) |
+| MIDI → pitch | host MIDI | — | ❌ | |
+| One-screen panel | Pitch / Formant · Mode · Drive / Mix | the same three sections | ✅ | |
+| Presets | Soundtoys strip | LYNX preset bar with 7 factory presets | ✅ | |
+| Substitute entry | — | `[soundtoys-littlealterboy]` (VST2 `StLa`, names) | ✅ | round 135 |
+| Translation of her saved state | encoded | **her 4 distinct settings translated** (Quantize, formant +1.2 st, drive 4.6, mix 100 % = 84 % of her slots; an octave-down Transpose; two 44 % mixes); others: her usual setting | ✅ | round 135 |
 
-**Scores**: configuration 0/10 today (no role; about 5/10 if mapped to LYNX Tune), design 0/10.
+**Scores**: configuration 0/10 → **9/10**, design 0/10 → **8/10** (round 135).
 
-**What a LYNX engine needs:**
-- Pitch ±12 st (0.1 st)
-- Formant (range to be measured)
-- Link
-- Mode {Transpose, Quantize, Robot (fixed reference note)}
-- Drive (reuse an Ember tube curve)
-- Mix
-- Reported latency
-
-**Can an existing engine cover it?** LYNX Tune already owns YIN + the formant-capable PSOLA and covers Quantize, Mix, Link-ish and MIDI. It lacks a no-correction transpose, a fixed-note Robot, fractional Pitch and Drive. FL's Pitch Shifter covers only Transpose + Link.
-
-**Top gaps:**
-1. **Read her dominant state first** (spec §8.1, needs the trial). If it is the default, a near pass-through is enough. Effort S once the trial is available.
-2. **Small "Voice Shift" engine** on `vocal::Psola` + YIN with the six controls above, or a "Voice" mode inside LYNX Tune (bypass correction, fixed-note target, 0.1 st transpose, Drive). New engine, layout and `[soundtoys-littlealterboy]` entry (vst2 `StLa`) in PluginSubstitutes.cpp. Effort M.
-3. **Drive stage** reusing `ember::shape` on the wet path. Effort S.
-
-Sources (web): [Little Plate manual (403)](https://www.soundtoys.com/wp-content/uploads/Little-Plate-Manual.pdf), [KVR Little Plate](https://www.kvraudio.com/product/14315), [Soundtoys "Introducing Little Plate"](https://store.soundtoys.com/introducing-little-plate/), [Decapitator guide (B&H copy)](https://static.bhphoto.com/lit_files/89645.pdf), [PrimalTap manual copy](https://r2.gear4music.com/media/69/699356/download_699356.pdf), [PrimalTap at Plugin Boutique](https://www.pluginboutique.com/product/2-Effects/10-Delay/1857-PrimalTap), [SOS Soundtoys 5 review](https://www.soundonsound.com/reviews/soundtoys-5), [Mixdown: Soundtoys 5 rhythm editor](https://mixdownmag.com.au/features/soundtoys-5-and-its-rhythm-editor-right-on-time/).
-
+Sources (web): [Decapitator guide (B&H copy)](https://static.bhphoto.com/lit_files/89645.pdf), [SOS Soundtoys 5 review](https://www.soundonsound.com/reviews/soundtoys-5); the rest from the official trials (round 135).

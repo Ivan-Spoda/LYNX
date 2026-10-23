@@ -124,6 +124,7 @@ add_library(lynx_core STATIC
     src/core/ApexLimiter.cpp
     src/core/DynamicsSuite.cpp
     src/core/VoiceTools.cpp
+    src/core/VoiceShift.cpp
     src/core/FabFilterStates.cpp
     src/core/FlResampler.cpp
     src/core/FlKeys.cpp

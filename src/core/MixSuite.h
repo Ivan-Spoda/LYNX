@@ -208,6 +208,11 @@ enum Param
     band2On, band2State, band2Bass, band2Mid, band2Treble, band2Presence, band2Feedback, band2FeedbackFreq, band2Dynamics,
     band3On, band3State, band3Bass, band3Mid, band3Treble, band3Presence, band3Feedback, band3FeedbackFreq, band3Dynamics,
     band4On, band4State, band4Bass, band4Mid, band4Treble, band4Presence, band4Feedback, band4FeedbackFreq, band4Dynamics,
+    // round 135 (the Decapitator role, appended; every default is the old sound): PUNISH (+20 dB before the drive),
+    // THUMP (a resonant low cut), STEEP (a 30 dB/oct high cut), a one-click VOICE (0 = the Style menu, else one of five
+    // voicings: a curve and its own EQ), and the reference's filter ranges ("wide cuts": a low cut 20 Hz – 1 kHz and a
+    // 6 dB/oct high cut 1 – 20 kHz, read from the two parameters after it)
+    punish, thump, steep, voice, wideCuts, lowCutWide, highCutWide,
     count
 };
 constexpr int maxBands = 4;
@@ -223,14 +228,25 @@ double toneDb (float v) noexcept;       // ±18 dB: bass (low shelf 120 Hz), mid
 double feedbackAmount (float v) noexcept; // 0 … 1: the band-passed output fed back into the shaper (loop gain up to 0.9)
 double feedbackHz (float v) noexcept;   // 10 Hz … 1 kHz (log): the feedback band's centre
 double dynamicsAmount (float v) noexcept; // −1 (compress) … +1 (expand) the band's level after the drive
-enum class Style { tube, tape, transistor, fuzz };
-constexpr int styles = 4;
+enum class Style { tube, tape, transistor, fuzz, console }; // console: only through a voice (round 135)
+constexpr int styles = 4; // the Style parameter's choices
 Style styleOf (float v) noexcept;
 double driveDb (float v) noexcept;     // 0 .. +36 dB
 double toneTilt (float v) noexcept;    // −1 (dark) .. +1 (bright), ±6 dB tilt around 1 kHz
 double lowCutHz (float v) noexcept;    // 0 = off, else 20 .. 500 Hz (before the drive)
 double highCutHz (float v) noexcept;   // 1 = off, else 2 .. 20 kHz (after the drive)
 int oversampling (float v) noexcept;   // 2, 4 or 8
+// round 135
+constexpr int voices = 5;               // Voice: 0 = off (the Style menu), 1 … 5
+int voiceIndex (float v) noexcept;      // 0 … 5
+const char* voiceName (int k) noexcept; // LYNX's names of the five voicings
+Style voiceStyle (int k) noexcept;      // the curve of a voicing
+double lowCutWideHz (float v) noexcept; // 0 = off, else 20 Hz … 1 kHz (log)
+double highCutWideHz (float v) noexcept;// 1 = off, else 1 … 20 kHz (log)
+constexpr double punishDb = 20.0;
+constexpr double thumpQ = 1.6;          // the low cut's Q with THUMP on [EXEC trial: +3.5 dB at the cutoff]
+// the drive on the reference's 0 … 10 scale (the read-out of the single-band mode): 3.6 dB per step
+double driveSteps (float v) noexcept;
 float shape (Style s, float x) noexcept; // the transfer curve (no drive, no DC removal)
 int bandCount (float v) noexcept;      // 1 .. 4
 double crossoverHz (float v) noexcept; // 30 Hz .. 18 kHz (log)

@@ -175,6 +175,10 @@ std::vector<std::pair<std::string, std::string>> juceXmlStateAttributes (const s
 std::string wavesPluginName (const std::vector<std::uint8_t>& state);
 // The "RealWorld" parameter values of the active setup of a Waves preset chunk ("*" = unused -> NaN).
 std::vector<double> wavesRealWorldParams (const std::vector<std::uint8_t>& state);
+// Round 135: the FNV-1a hash of a Soundtoys state's PRESET payload (nullopt when not one), and how many of her
+// Soundtoys states (read black-box in the official trials) are translated by it.
+std::optional<std::uint64_t> soundtoysStateHash (const std::vector<std::uint8_t>& state);
+int knownSoundtoysStates() noexcept;
 
 // --- lossless text form of an .flp plugin reference (.lynx keeps it for substitutes) ------------------------------
 // Base64 of a versioned binary record of every ForeignPlugin field; foreignFromText(foreignToText(p)) == p, the

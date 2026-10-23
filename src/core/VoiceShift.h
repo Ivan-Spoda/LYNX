@@ -1,0 +1,45 @@
+#pragma once
+
+// Voice Shift (round 135): LYNX's monophonic voice shifter, in the role of the small "voice manipulation" effects used
+// on vocal chains (pitch, formant, a hard-tune mode and a robot mode with a bit of tube drive). Original code on LYNX's
+// own YIN detector and TD-PSOLA shifter (core/VocalPitch.h); the controls follow the parameter list of the official
+// trial of the plugin it stands in for, read black-box through the host API (docs/analise/REA_rodada135s.md §1):
+//
+//   Pitch     −12 … +12 semitones (0.1 st steps on screen)      Formant  −12 … +12 semitones
+//   Link      the formants follow the pitch (a varispeed-like shift; Formant then offsets them)
+//   Mode      Transpose (plain shift) · Quantize (the nearest semitone, at once) · Robot (one fixed note: C4 at
+//             Pitch 0, measured on the trial; Pitch moves it)
+//   Drive     0 … 10: a tube stage on the shifted voice           Mix      dry / wet (linear, measured)
+//
+// Latency: two periods of the lowest detected pitch (70 Hz), reported to PDC; the dry signal is delayed to match.
+// Meters (controlOutput): 0 = sung note / 127 (0 = unvoiced), 1 = the note sent out / 127.
+
+#include <memory>
+#include <string>
+
+namespace lynx
+{
+struct EffectInfo;
+class Effect;
+
+namespace voiceshift
+{
+enum Param : int { pitch, formant, link, mode, drive, mix, count };
+enum class Mode { transpose, quantize, robot };
+
+double pitchSemitones (float v) noexcept;   // −12 … +12
+double formantSemitones (float v) noexcept; // −12 … +12
+float semitoneValue (double st) noexcept;   // inverse of both
+Mode modeOf (float v) noexcept;
+double driveAmount (float v) noexcept;      // 0 … 10
+constexpr double robotNote = 60.0;          // C4 (261.6 Hz) at Pitch 0 [EXEC trial: 262 Hz]
+constexpr double minHz = 70.0, maxHz = 1000.0;
+int latencyFor (double sampleRate) noexcept;
+// the drive stage's static curve (no state): input → output at a drive amount 0 … 10
+float driveCurve (float x, double amount) noexcept;
+
+const EffectInfo& info();
+std::string paramText (int param, float v);
+std::unique_ptr<Effect> make();
+} // namespace voiceshift
+} // namespace lynx
