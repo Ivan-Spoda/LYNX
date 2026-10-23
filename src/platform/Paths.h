@@ -34,4 +34,10 @@ juce::String pluginFormatNames();
 // (FL Studio's data was written for a case-insensitive file system).
 juce::File localFile (const juce::String& path);
 juce::File localFile (const std::string& utf8Path);
+
+// Windows: when LYNX.exe sits in a folder whose path has non-ASCII characters ("Área de Trabalho"), some plugins
+// crash opening their editor (Waves 17's WebView builds a path from the host's module name and throws on it). This
+// starts LYNX again through the folder's 8.3 short name (plain ASCII), waits for it and returns true with its exit
+// code: the caller then quits. False (nothing done) when the path is ASCII, has no short name, or on other systems.
+bool relaunchFromAsciiPath (int& exitCode);
 } // namespace lynx::platform
