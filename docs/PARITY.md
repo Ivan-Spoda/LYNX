@@ -792,12 +792,12 @@ third-party control reference josephnilo.com/blog/waves-ns1-explained. Trial on 
 |---|---|---|---|---|
 | NS1 fader (the only control) | 0–100 %, tall vertical fader on the right | "Amount" tall vertical slider on the right, 0–100 % | ✅ | same place, same unit |
 | Fader default | 0.0 (default preset reads 0.0) | 30 % | ⚠️ | LYNX opens already suppressing; her states are 23–70 % (translated, so only new inserts are affected) |
-| Fader scale | 0…100 printed both sides every 10 | none (bare track, pink fill) | ⚠️ | a user reads the setting off the scale |
+| Fader scale | 0…100 printed both sides every 10 | round 137: 0 … 100 printed beside the fader every 10 | ✅ | round 137 (one side) |
 | Fader read-out | numeric box under the fader ("0.0"), editable | "30.0%" value under the slider, right-click entry | ✅ | |
 | Attenuation meter | left, vertical, 0 … −48 dB, ticks every 6 dB both sides | left, vertical, 0 … −30 dB, ticks every 6 dB | ⚠️ | NS1 can show 48 dB; Quell clips its scale at 30 (Quell max reduction ~25 dB so fine for the engine, but the scale differs) |
 | Meter read-out | numeric box under the meter | "0.0 dB" under the meter | ✅ | |
 | Meter meaning | "overall energy removed from the input" | broadband reduction | ✅ | |
-| Meter peak hold / reset | numeric read-out box (Waves convention: click to reset) | live value only | ⚠️ | |
+| Meter peak hold / reset | numeric read-out box (Waves convention: click to reset) | round 137: the read-out under the meter holds the deepest reduction; click the meter = reset | ✅ | round 137 |
 | Listen (hear the removed noise) | — | toggle bottom-left | ➕ | |
 | Output trim | — | −12…+12 dB knob bottom-right | ➕ | |
 | Mono / Stereo components | NS1 Mono, NS1 Stereo | one stereo engine, linked | ✅ | LYNX is per-slot stereo; fine |

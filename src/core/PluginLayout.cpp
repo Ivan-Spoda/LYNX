@@ -2073,6 +2073,7 @@ Layout quellDenoiser()
     v.push_back (section (4, 4, 292, 412, TR_NOOP ("Noise suppressor")));
     v.push_back (meter (30, 34, 70, 300, 0, TR_NOOP ("Reduction")));
     v.push_back (slider (Item::vslider, 170, 30, 70, 316, "Amount", TR_NOOP ("Amount")));
+    v.push_back (display (128, 30, 42, 316, "faderscale")); // round 137: the fader's 0 … 100 scale
     v.push_back (value (170, 372, 70, 20, "Amount", 0));
     v.push_back (toggle (22, 372, 96, 22, "Listen", TR_NOOP ("Listen")));
     v.push_back (toggle (22, 342, 96, 22, "Matched", TR_NOOP ("Matched"))); // round 124: the engine fitted to NS1

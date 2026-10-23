@@ -1387,8 +1387,9 @@ public:
     {
         using namespace theme;
         const auto s = scale();
-        skin::well (g, r, radius::md * s, fx.enabled ? accent : juce::Colours::transparentBlack);
         const juce::String id (item.display != nullptr ? item.display : "");
+        if (id != "faderscale") // round 137: the fader scale is bare text beside its fader
+            skin::well (g, r, radius::md * s, fx.enabled ? accent : juce::Colours::transparentBlack);
         const auto curveColour = fx.enabled ? accent : colour::textDisabled;
         const auto inner = r.reduced (6.0f * s);
         if (dynui::paint (g, id, r, s, fx, [this] (int k) { return liveMeter (k); }, dynHistory)) // the dynamics suite
@@ -1826,8 +1827,10 @@ public:
                 }
                 g.setColour ((fx.enabled ? accent : colour::textDisabled).withAlpha (0.85f));
                 g.fillRoundedRectangle (well.withTrimmedLeft (well.getWidth() * 0.35f).withHeight (well.getHeight() * amount), radius::sm);
+                // round 137: the read-out holds the deepest reduction (the reference's peak box; click the meter = reset)
+                grHold = juce::jmax (grHold, amount);
                 g.setColour (colour::textSecondary);
-                g.drawText ((amount > 0.0005f ? juce::String (-amount * 30.0f, 1) : juce::String ("0.0")) + " dB", bar.withTop (bar.getBottom() - 14.0f * s), juce::Justification::centred, false);
+                g.drawText ((grHold > 0.0005f ? juce::String (-grHold * 30.0f, 1) : juce::String ("0.0")) + " dB", bar.withTop (bar.getBottom() - 14.0f * s), juce::Justification::centred, false);
                 return;
             }
             g.setColour (colour::gridBeat);
@@ -1841,6 +1844,21 @@ public:
                 g.setFont (font (juce::jmax (7.0f, juce::jmin (10.0f * s, bar.getHeight() * 0.95f)), true));
                 g.drawText (caps (tr (item.label)) + "  " + juce::String (amount * 30.0f, 1) + " dB", bar.reduced (3.0f * s, 0.0f),
                             juce::Justification::centredLeft, false);
+            }
+            return;
+        }
+        else if (id == "faderscale") // round 137: a 0 … 100 scale beside a tall fader (the reference prints it on both sides)
+        {
+            auto area = r.withTrimmedBottom (13.0f * s);
+            const auto top = area.getY() + 5.0f * s, bottom = area.getBottom() - 5.0f * s;
+            g.setFont (font (juce::jmax (7.0f, 8.5f * s)));
+            for (int k = 0; k <= 100; k += 10)
+            {
+                const auto y = bottom - (bottom - top) * (float) k / 100.0f;
+                g.setColour (colour::gridBeat);
+                g.drawHorizontalLine ((int) y, area.getRight() - 6.0f * s, area.getRight());
+                g.setColour (colour::textSecondary);
+                g.drawText (juce::String (k), juce::Rectangle<float> (area.getX(), y - 5.0f * s, area.getWidth() - 8.0f * s, 10.0f * s), juce::Justification::centredRight, false);
             }
             return;
         }
@@ -2649,6 +2667,7 @@ public:
         ui::showValueTip (*this, rectOf (item).toNearestInt(), valueText (h.px, x) + " / " + valueText (h.py, y));
     }
     int geminiHandle = -1;
+    float grHold = 0.0f; // round 137: the tall reduction meter's held value
     bool geminiDragging = false;
 
     void xyMouse (const juce::MouseEvent& e, const LayoutItem& item)
@@ -2790,6 +2809,12 @@ public:
         {
             ioMeters = {};
             ioClip = false;
+            repaint();
+            return;
+        }
+        if (item.type == Item::display && juce::String (item.display) == "grmeter") // round 137: reset the held reduction
+        {
+            grHold = 0.0f;
             repaint();
             return;
         }
