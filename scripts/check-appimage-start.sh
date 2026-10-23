@@ -14,8 +14,11 @@ trap 'kill "$APID" "$XPID" 2> /dev/null; sleep 1; kill -9 "$APID" 2> /dev/null; 
 APID=
 for _ in $(seq 50); do [[ -e /tmp/.X11-unix/X${DISP#:} ]] && break; sleep 0.1; done
 
+# REQUIRE_OFFLINE=1 (CI) fails when no network namespace can be made
 offline=()
-if unshare -rn true 2> /dev/null; then offline=(unshare -rn); echo "network: none (unshare -rn)"
+if unshare -n true 2> /dev/null; then offline=(unshare -n); echo "network: none (unshare -n)"
+elif unshare -rn true 2> /dev/null; then offline=(unshare -rn); echo "network: none (unshare -rn)"
+elif [[ "${REQUIRE_OFFLINE:-0}" == 1 ]]; then echo "ERROR: cannot create a network namespace"; exit 1
 else echo "network: left on (no network namespace in this environment)"; fi
 
 mkdir -p "$WORK/home"

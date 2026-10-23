@@ -227,7 +227,9 @@ jobs:
     name: Linux (AppImage, tar.gz)
     needs: version
     runs-on: ubuntu-24.04
-    container: ubuntu:22.04
+    container:
+      image: ubuntu:22.04
+      options: --cap-add=SYS_ADMIN   # lets check-appimage-start.sh run the AppImage in a network namespace (offline)
     env:
       LABEL: ${{ needs.version.outputs.label }}
       DEBIAN_FRONTEND: noninteractive
@@ -279,7 +281,7 @@ jobs:
       # The catalog runs the AppImage offline for ~11 s and expects a window: start it without network (when the
       # container allows a network namespace), check that it is still running and shows a top-level window.
       - name: AppImage starts offline and shows its window
-        run: ./scripts/check-appimage-start.sh "dist/LYNX-$LABEL-x86_64.AppImage"
+        run: REQUIRE_OFFLINE=1 ./scripts/check-appimage-start.sh "dist/LYNX-$LABEL-x86_64.AppImage"
 
       - name: Upload package
         uses: actions/upload-artifact@v7
