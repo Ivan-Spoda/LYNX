@@ -162,6 +162,15 @@ public:
 
     void initialise (const juce::String& commandLine) override
     {
+        // Windows, LYNX.exe in a folder with accents: run again from its ASCII short path (Waves editors crash otherwise)
+        if (int code = 0; lynx::platform::relaunchFromAsciiPath (code))
+        {
+            relaunched = true;
+            setApplicationReturnValue (code);
+            quit();
+            return;
+        }
+
         // a crash in any mode (UI, command line) writes its backtrace to %APPDATA%\LYNX\autosave
         juce::SystemStats::setApplicationCrashHandler (onCrash);
 
@@ -737,6 +746,9 @@ public:
 
     void shutdown() override
     {
+        if (relaunched)
+            return; // the copy that ran owns the session (its crash notes stay for the next start)
+
         lynx::crashguard::note ("closing");
         lynx::shutdownPluginSandboxWorker();
         splash = nullptr;
@@ -762,6 +774,7 @@ public:
 
 private:
     bool sandboxChild = false;
+    bool relaunched = false; // relaunchFromAsciiPath ran LYNX from its short path: this process only waited
     juce::String uncleanLastStep; // last step of a previous run that ended without closing
 
     // LYNX.exe --selftest report.txt: renders 2 s without a sound card and writes the result.
