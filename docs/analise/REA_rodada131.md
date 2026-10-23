@@ -98,9 +98,12 @@ played length (NoteRecorder; this also fixes it for loop regions). Take position
 Tests: `bugs131_song_mode_loops_back_to_the_start_at_the_song_end` [EXEC core].
 
 ## Verification
-- core tests: `scripts/build-local.sh` with the FL Data dir — see the landing log for the totals [EXEC].
+- core tests: `scripts/build-local.sh` with the FL Data dir: 1434587 checks, 0 failures (after merging main with
+  feat132) [EXEC].
 - Windows: `OUT=build-win-bugs131 scripts/build-windows-zig.sh` OK; `--windowtest` result=OK; `--selftest` result=OK;
-  `--snapshot` toolbar shows the MIDI light [EXEC].
+  `--snapshot` toolbar shows the MIDI light [EXEC]. One `--windowtest` run out of six failed on the activation
+  checks while other rounds were opening windows on the same desktop (something else took the foreground); the
+  reruns passed.
 
 ## Where I stopped
 - Landed on main (see the round's final report for the commit). Issue #4 got a short comment; not closed (main
