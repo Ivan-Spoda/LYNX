@@ -30,6 +30,8 @@ public:
     // hosted plugins see the channel; the others play it as a plain note.
     virtual void noteOnMidi (int key, float velocity, int /*midiChannel*/) noexcept { noteOn (key, velocity); }
     virtual void noteOffMidi (int key, int /*midiChannel*/) noexcept { noteOff (key); }
+    // A short MIDI message (program change, bank select…) for the next block. Only hosted plugins take it.
+    virtual void midiMessage (const std::uint8_t* /*bytes*/, int /*size*/) noexcept {}
 
     // Adds (does not overwrite) n samples into left/right, with the gains already applied.
     virtual void render (float* left, float* right, int n, float gainLeft, float gainRight) noexcept = 0;
@@ -87,6 +89,9 @@ struct SampleData
 // prepare()/configure(), so set it before preparing the graph for the render and clear it afterwards.
 void setOfflineRendering (bool on) noexcept;
 bool offlineRendering() noexcept;
+// FL's "HQ for all plugins" during an export (REA round 134): effects with an HQ switch use HQ whatever it is set to.
+void setHqForAllPlugins (bool on) noexcept;
+bool hqForAllPlugins() noexcept;
 
 // Where the song is, for hosted plugins (tempo-synced effects, LFO/volume shapers, arpeggiators read the host's
 // transport): the renderer publishes it at the start of each chunk it renders.

@@ -2505,6 +2505,12 @@ std::atomic<bool> offlineRenderingFlag { false };
 
 void setOfflineRendering (bool on) noexcept { offlineRenderingFlag.store (on); }
 bool offlineRendering() noexcept { return offlineRenderingFlag.load(); }
+namespace
+{
+std::atomic<bool> hqAllFlag { false };
+}
+void setHqForAllPlugins (bool on) noexcept { hqAllFlag.store (on); }
+bool hqForAllPlugins() noexcept { return hqAllFlag.load (std::memory_order_relaxed); }
 
 HostTimeline& hostTimeline() noexcept
 {

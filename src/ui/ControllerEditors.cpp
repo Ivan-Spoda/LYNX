@@ -871,7 +871,7 @@ public:
         }
         channelLabel.setText (tr ("MIDI channel"), juce::dontSendNotification);
         portLabel.setText (tr ("Port"), juce::dontSendNotification);
-        programLabel.setText (tr ("Program (not sent yet)"), juce::dontSendNotification);
+        programLabel.setText (tr ("Program (sent on play)"), juce::dontSendNotification);
         addAndMakeVisible (midiChannel);
         addAndMakeVisible (port);
         addAndMakeVisible (program);

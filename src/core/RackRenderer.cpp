@@ -28,7 +28,7 @@ namespace
 // a hosted plugin is created again when its processing options change (fixed blocks, own process)
 bool samePluginProcessing (const PluginRef& a, const PluginRef& b) noexcept
 {
-    return a.fixedBuffers == b.fixedBuffers && a.separateProcess == b.separateProcess;
+    return a.fixedBuffers == b.fixedBuffers && a.separateProcess == b.separateProcess && a.maxSizeBuffers == b.maxSizeBuffers;
 }
 
 // Silent instrument: plugin channel that could not be loaded.
@@ -387,6 +387,25 @@ void RackState::buildMixerGraph()
         pluginEffects += (int) std::count_if (t.effects.begin(), t.effects.end(), [] (const EffectSlot& e) { return e.kind == EffectKind::plugin; });
 
     parallel = plugins + pluginEffects >= 2 || song.channels.size() >= 24;
+
+    // plugins whose "Allow threaded processing" is off pin their channel / insert to the audio thread
+    threadedChannels.clear();
+    audioThreadChannels.clear();
+    for (int c = 0; c < (int) song.channels.size(); ++c)
+    {
+        const auto& ch = song.channels[(std::size_t) c];
+        (ch.instrument == InstrumentKind::plugin && ! ch.plugin.threaded ? audioThreadChannels : threadedChannels).push_back (c);
+    }
+    threadedLayers.assign (mixerLayers.size(), {});
+    audioThreadLayers.assign (mixerLayers.size(), {});
+    for (std::size_t d = 0; d < mixerLayers.size(); ++d)
+        for (const auto t : mixerLayers[d])
+        {
+            const auto& effects = song.mixer[(std::size_t) t].effects;
+            const auto pinned = ! song.mixer[(std::size_t) t].threaded || std::any_of (effects.begin(), effects.end(),
+                                             [] (const EffectSlot& e) { return e.kind == EffectKind::plugin && ! e.plugin.threaded; });
+            (pinned ? audioThreadLayers : threadedLayers)[d].push_back (t);
+        }
 }
 
 std::vector<int> RackState::currentLatencies() const
@@ -1423,6 +1442,35 @@ void RackRenderer::process (const RackState* state,
                 arp->reset();
     }
 
+    // FL's MIDI Out sends its bank and program when playback starts (REA_rodada16 §1.3)
+    if (playing && ! wasPlaying && state->hasMidiRoutes)
+        for (std::size_t c = 0; c < state->midiTargets.size(); ++c)
+        {
+            if (state->midiTargets[c].empty())
+                continue;
+            const auto s = midictl::parseMidiOut (state->song.channels[c].pluginState);
+            const auto status = (std::uint8_t) (s.channel & 15);
+            for (const auto t : state->midiTargets[c])
+            {
+                auto& target = *state->instruments[(std::size_t) t];
+                if (s.bankMsb >= 0)
+                {
+                    const std::uint8_t m[3] { (std::uint8_t) (0xB0 | status), 0, (std::uint8_t) s.bankMsb };
+                    target.midiMessage (m, 3);
+                }
+                if (s.bankLsb >= 0)
+                {
+                    const std::uint8_t m[3] { (std::uint8_t) (0xB0 | status), 32, (std::uint8_t) s.bankLsb };
+                    target.midiMessage (m, 3);
+                }
+                if (s.program > 0)
+                {
+                    const std::uint8_t m[2] { (std::uint8_t) (0xC0 | status), (std::uint8_t) (s.program - 1) };
+                    target.midiMessage (m, 2);
+                }
+            }
+        }
+
     // started playing or jumped: audio clips in progress must start mid-way
     resumeAudio = playing && (! wasPlaying || jumped);
     wasPlaying = playing;
@@ -1658,8 +1706,20 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         times->channelNs[(std::size_t) c].fetch_add (ProcessTimes::now() - before, std::memory_order_relaxed);
     };
 
-    if (workers != nullptr && state.parallel)
+    if (workers != nullptr && state.parallel && state.audioThreadChannels.empty())
         workers->parallelFor (channels, channel);
+    else if (workers != nullptr && state.parallel)
+    {
+        // "Allow threaded processing" off: those channels on this thread, the rest in parallel
+        auto threaded = [&state, &channel, channels] (int i) {
+            if (const auto c = state.threadedChannels[(std::size_t) i]; c < channels)
+                channel (c);
+        };
+        workers->parallelFor ((int) state.threadedChannels.size(), threaded);
+        for (const auto c : state.audioThreadChannels)
+            if (c < channels)
+                channel (c);
+    }
     else
         for (int c = 0; c < channels; ++c)
             channel (c);
@@ -1689,8 +1749,10 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
     trackActive.fill (0);
     tapActive.fill (0);
 
-    for (const auto& layer : state.mixerLayers)
+    for (std::size_t d = 0; d < state.mixerLayers.size(); ++d)
     {
+        const auto split = d < state.audioThreadLayers.size() && ! state.audioThreadLayers[d].empty();
+        const auto& layer = split ? state.threadedLayers[d] : state.mixerLayers[d];
         auto track = [this, &state, &layer, numSamples, meters] (int i) { processTrack (state, layer[(std::size_t) i], numSamples, meters); };
 
         if (workers != nullptr && state.parallel && layer.size() > 1)
@@ -1698,6 +1760,10 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         else
             for (int i = 0; i < (int) layer.size(); ++i)
                 track (i);
+
+        if (split) // inserts with a plugin whose "Allow threaded processing" is off
+            for (const auto t : state.audioThreadLayers[d])
+                processTrack (state, t, numSamples, meters);
     }
 
     // 3) Master: inputs, effects, fader. Without a configured mixer, it stays at 0 dB.

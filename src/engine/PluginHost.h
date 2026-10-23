@@ -25,10 +25,11 @@ namespace lynx
 // when the mode changes; call only while it is not processing (offline renders, before/after the render loop).
 void setPluginRenderMode (juce::AudioPluginInstance& plugin, bool offline, int blockSize);
 
-// Block length of "Use fixed size buffers" (PluginRef::fixedBuffers): the audio device's buffer size, as FL (set when
-// the device starts; 512 until then). Plugins created afterwards use it.
-int fixedPluginBlock() noexcept;
-void setFixedPluginBlock (int samples) noexcept;
+// Block length of "Use fixed size buffers" (PluginRef::fixedBuffers): 2 ms as FL's wrapper, or the audio device's
+// buffer with "Process maximum size buffers" (flFixedBlockSize; set when the device starts, 512 / 44.1 kHz until
+// then). Plugins created afterwards use it.
+int fixedPluginBlock (bool maximumSize) noexcept;
+void setFixedPluginBlock (int deviceBlock, double sampleRate) noexcept;
 
 // Adapters: a JUCE plugin seen by the core as an Instrument/Effect.
 // Notes become MIDI at the start of the next rendered chunk; since the core
@@ -76,6 +77,7 @@ public:
     float midiControlValue (int index) const noexcept { return midiControls.value (index); }
     void noteOnMidi (int key, float velocity, int midiChannel) noexcept override;
     void noteOffMidi (int key, int midiChannel) noexcept override;
+    void midiMessage (const std::uint8_t* bytes, int size) noexcept override { midi.addEvent (bytes, size, 0); }
 
 private:
     void failed (std::uint32_t code) noexcept;

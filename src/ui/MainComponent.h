@@ -218,6 +218,13 @@ private:
     void collectSamples();
     void keepOverwrittenCopy (const juce::File& file); // the previous file of a save, kept in the backup folder
     void rotateBackups (const juce::String& stem);
+    // unused recordings (REA round 134, FL's "Delete unused recorded files" / "Delete unused files and save project")
+    void offerToDeleteUnusedRecordings (bool keepsCurrentState, std::function<void()> then);
+    void deleteUnusedRecordingsAndSave();
+    void saveToNewProjectFolder();                    // FL's File › "Save to new project folder..."
+    juce::File recordingFolderFor (const juce::File& projectFile) const;
+    std::vector<std::string> savedSamples;            // samples of the project as it is on disk (when last unmodified)
+    bool askUnusedRecordings = true;                  // Settings › General › Backup
     void startSession();                              // crash detection: a marker that a clean exit removes
     void checkPreviousSession (juce::Time sessionStart);
     std::unique_ptr<juce::InterProcessLock> sessionLock;
