@@ -29,6 +29,10 @@
 #include "ui/AutomationUi.h"
 #include "ui/PluginSkin.h"
 #include "ui/ChannelSettings.h"
+#include "ui/ControllerEditors.h"
+#include "core/FormulaController.h"
+#include "core/MidiControls.h"
+#include "core/FlSynths.h"
 #include "ui/Dialogs.h"
 #include "core/RackOps.h"
 #include "ui/ExportDialog.h"
@@ -545,6 +549,15 @@ public:
             // --drags: also mouse drags over the editors (their menus may flash on screen: not for the selftest)
             const auto ok = runEffectFuzz (rounds, args[i + 1].unquoted(), args.contains ("--drags"));
             setApplicationReturnValue (ok ? 0 : 1);
+            quit();
+            return;
+        }
+
+        if (args.contains ("--controllershot"))
+        {
+            // LYNX.exe --controllershot prefix: the built-in controllers' editors (round 133) as PNGs
+            const auto i = args.indexOf ("--controllershot");
+            runControllerShot (args[i + 1].unquoted());
             quit();
             return;
         }
@@ -1072,7 +1085,7 @@ private:
             juce::Random random (111);
             const auto value = [&] { const auto r = random.nextInt (6); return r == 0 ? 0.0f : r == 1 ? 1.0f : random.nextFloat(); };
 
-            for (int k = 0; k <= (int) lynx::EffectKind::geminiDoubler; ++k)
+            for (int k = 0; k <= (int) lynx::EffectKind::formulaController; ++k)
             {
                 const auto kind = (lynx::EffectKind) k;
                 if (! lynx::NativeEffectWindows::canOpen (kind))
@@ -2605,6 +2618,51 @@ private:
             }
         }
         quit();
+    }
+
+    void runControllerShot (const juce::String& prefix)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        lynx::AudioEngine offline (false);
+        lynx::Song song;
+        song.mixer = lynx::Song::defaultMixer (2);
+        song.mixer[1].name = "Insert 1";
+        auto fx = lynx::makeEffectSlot (lynx::EffectKind::formulaController);
+        lynx::formula::State formula;
+        formula.formula = "a*Sin(SongTime*Pi*b*4)+c";
+        fx.state = lynx::formula::writeState (formula);
+        fx.params[0] = 0.5f;
+        fx.params[1] = 0.25f;
+        fx.params[2] = 0.5f;
+        song.mixer[1].effects.push_back (fx);
+        lynx::ChannelDef env;
+        env.name = "Envelope Controller";
+        env.instrument = lynx::InstrumentKind::controller;
+        env.controllerState = lynx::writeEnvelopeController (lynx::defaultEnvelopeController());
+        song.channels.push_back (env);
+        lynx::ChannelDef out;
+        out.name = "MIDI Out";
+        out.instrument = lynx::InstrumentKind::midiOut;
+        lynx::midictl::MidiOutSettings settings;
+        settings.port = 1;
+        lynx::midictl::writeMidiOut (out.pluginState, settings);
+        song.channels.push_back (out);
+        song.patterns.emplace_back();
+        offline.setSong (std::move (song));
+        offline.dispatchPendingMessages();
+        auto shoot = [&] (std::unique_ptr<juce::Component> c, const juce::String& name) {
+            if (c == nullptr)
+                return;
+            savePng (c->createComponentSnapshot (c->getLocalBounds()), prefix + name);
+        };
+        shoot (lynx::makeChannelSettingsPanel (offline, 0), "-envelope-controller.png");
+        shoot (lynx::makeChannelSettingsPanel (offline, 1), "-midi-out.png");
+        lynx::FormulaControllerWindows::open (offline, 1, 0);
+        for (int k = 0; k < juce::TopLevelWindow::getNumTopLevelWindows(); ++k)
+            if (auto* w = dynamic_cast<juce::DocumentWindow*> (juce::TopLevelWindow::getTopLevelWindow (k)))
+                if (w->getName().startsWith ("Formula") && w->getContentComponent() != nullptr)
+                    savePng (w->getContentComponent()->createComponentSnapshot (w->getContentComponent()->getLocalBounds()), prefix + "-formula-controller.png");
+        lynx::FormulaControllerWindows::closeAll();
     }
 
     void runSnapshot (const juce::String& prefix, const juce::String& projectPath)

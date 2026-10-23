@@ -226,6 +226,7 @@ private:
             case InstrumentKind::audioClip:
             case InstrumentKind::plugin:
             case InstrumentKind::controller:
+            case InstrumentKind::midiOut:
             case InstrumentKind::sakura:
             case InstrumentKind::drumpad:
             case InstrumentKind::boobass:
@@ -2511,6 +2512,21 @@ HostTimeline& hostTimeline() noexcept
     return timeline;
 }
 
+namespace
+{
+// FL's MIDI Out: makes no sound itself (its notes are routed to the plugins on its port by the renderer)
+class MidiOutInstrument final : public Instrument
+{
+public:
+    void prepare (double) noexcept override {}
+    void noteOn (int, float) noexcept override {}
+    void noteOff (int) noexcept override {}
+    void allNotesOff() noexcept override {}
+    void render (float*, float*, int, float, float) noexcept override {}
+    bool idle() const noexcept override { return true; }
+};
+} // namespace
+
 float samplerGain (float db) noexcept
 {
     if (! std::isfinite (db) || db == 0.0f)
@@ -2522,6 +2538,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
 {
     if (kind == InstrumentKind::controller)
         return std::make_unique<ControllerInstrument>();
+    if (kind == InstrumentKind::midiOut)
+        return std::make_unique<MidiOutInstrument>();
 
     if (kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip)
         return std::make_unique<SamplerInstrument> (std::move (sample), kind == InstrumentKind::audioClip);

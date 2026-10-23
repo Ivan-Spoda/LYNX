@@ -1688,8 +1688,20 @@ void AudioEngine::applyControllers()
     for (const auto& [target, v] : pluginChanges)
     {
         if (target.kind == AutomationTargetKind::channelParam)
+        {
             if (auto* p = dynamic_cast<PluginInstrument*> (getChannelInstrument (target.index).get()))
                 p->setParameterFromUi (target.param, v);
+            // a MIDI Out's controls: the plugins on its port (REA_rodada133 §4)
+            if (target.index >= 0 && target.index < (int) song.channels.size()
+                && song.channels[(std::size_t) target.index].instrument == InstrumentKind::midiOut)
+            {
+                const auto port = midictl::parseMidiOut (song.channels[(std::size_t) target.index].pluginState).port;
+                for (int c = 0; c < (int) song.channels.size(); ++c)
+                    if (song.channels[(std::size_t) c].instrument == InstrumentKind::plugin && song.channels[(std::size_t) c].plugin.midiInPort == port)
+                        if (auto* p = dynamic_cast<PluginInstrument*> (getChannelInstrument (c).get()))
+                            p->setParameterFromUi (target.param, v);
+            }
+        }
 
         if (target.kind == AutomationTargetKind::effectParam)
             if (auto* p = dynamic_cast<PluginEffect*> (getEffect (target.index, target.slot).get()))

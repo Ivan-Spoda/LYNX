@@ -4,6 +4,8 @@
 #include <map>
 
 #include "core/Effects.h"
+#include "core/MidiControls.h"
+#include "core/FlSynths.h"
 #include "engine/Text.h"
 #include "core/EditorGestures.h"
 #include "ui/EditorTools.h"
@@ -32,6 +34,18 @@ juce::AudioPluginInstance* pluginFor (AudioEngine& engine, const AutomationTarge
             return &p->getInstance();
 
     return nullptr;
+}
+
+// The CC / aftertouch / pitch bend value the plugin was last sent (or the controller's rest value).
+float midiControlValue (AudioEngine& engine, const AutomationTarget& t)
+{
+    if (t.kind == AutomationTargetKind::channelParam)
+        if (auto* p = dynamic_cast<PluginInstrument*> (engine.getChannelInstrument (t.index).get()))
+            return p->midiControlValue (t.param);
+    if (t.kind == AutomationTargetKind::effectParam)
+        if (auto* p = dynamic_cast<PluginEffect*> (engine.getEffect (t.index, t.slot).get()))
+            return p->midiControlValue (t.param);
+    return midictl::defaultValue (t.param);
 }
 
 // Point editor: time horizontal (bars), value vertical.
@@ -605,7 +619,9 @@ juce::String describeAutomationTarget (AudioEngine& engine, const AutomationTarg
         {
             juce::String param = tr ("Param {0}", { juce::String (t.param + 1) });
 
-            if (auto* plugin = pluginFor (engine, t))
+            if (midictl::isMidiParam (t.param))
+                param = midiParamLabel (t.param);
+            else if (auto* plugin = pluginFor (engine, t))
             {
                 if (t.param >= 0 && t.param < plugin->getParameters().size())
                     param = plugin->getParameters()[t.param]->getName (40);
@@ -640,7 +656,9 @@ void createAutomationClip (AudioEngine& engine, const AutomationTarget& target)
 {
     auto value = engine.getSong().targetValue (target);
 
-    if (auto* plugin = pluginFor (engine, target); plugin != nullptr && target.param < plugin->getParameters().size())
+    if (midictl::isMidiParam (target.param) && (target.kind == AutomationTargetKind::channelParam || target.kind == AutomationTargetKind::effectParam))
+        value = midiControlValue (engine, target);
+    else if (auto* plugin = pluginFor (engine, target); plugin != nullptr && target.param >= 0 && target.param < plugin->getParameters().size())
         value = plugin->getParameters()[target.param]->getValue();
 
     if (value < 0.0f)
@@ -701,6 +719,89 @@ std::unique_ptr<juce::Component> makeAutomationEditor (AudioEngine& engine, int 
     return std::make_unique<AutomationEditor> (engine, automation);
 }
 
+std::vector<ControllerOutput> controllerOutputs (const Song& song)
+{
+    std::vector<ControllerOutput> out;
+    for (int c = 0; c < (int) song.channels.size(); ++c)
+    {
+        const auto& ch = song.channels[(std::size_t) c];
+        if (ch.instrument != InstrumentKind::controller)
+            continue;
+        const auto name = nameOf (ch.name);
+        if (parseKeyboardController (ch.controllerState))
+        {
+            out.push_back ({ -1, 0, 0, c, name + " - " + tr ("Key value") });
+            continue;
+        }
+        for (int k = 0; k < 8; ++k)
+            out.push_back ({ -1, 0, k, c, name + " - " + tr ("Output {0}", { juce::String (k + 1) }) });
+    }
+    for (int t = 0; t < (int) song.mixer.size(); ++t)
+        for (int s = 0; s < (int) song.mixer[(std::size_t) t].effects.size(); ++s)
+        {
+            const auto kind = song.mixer[(std::size_t) t].effects[(std::size_t) s].kind;
+            const auto track = t == 0 ? tr ("Master") : nameOf (song.mixer[(std::size_t) t].name);
+            const auto where = (track.isNotEmpty() ? track : tr ("Insert {0}", { juce::String (t) })) + " (" + juce::String (s + 1) + ")";
+            if (kind == EffectKind::formulaController)
+                out.push_back ({ t, s, 0, -1, tr ("Formula Controller") + " " + where });
+            else if (kind == EffectKind::peakController)
+            {
+                out.push_back ({ t, s, 1, -1, tr ("Peak Controller") + " " + where + " - " + tr ("Peak") });
+                out.push_back ({ t, s, 2, -1, tr ("Peak Controller") + " " + where + " - " + tr ("LFO") });
+                out.push_back ({ t, s, 0, -1, tr ("Peak Controller") + " " + where + " - " + tr ("Peak + LFO") });
+            }
+        }
+    return out;
+}
+
+void linkToController (AudioEngine& engine, const AutomationTarget& target, const ControllerOutput& source)
+{
+    const auto name = describeAutomationTarget (engine, target).toStdString() + " <- " + source.label.toStdString();
+    engine.editSong ([&] (Song& s) {
+        // one controller per target (FL's Link dialog replaces the old link)
+        for (int i = (int) s.automations.size() - 1; i >= 0; --i)
+            if (s.automations[(std::size_t) i].isLive() && s.automations[(std::size_t) i].target == target)
+                s.removeAutomation (i);
+        Automation a;
+        a.name = name;
+        a.target = target;
+        a.source.track = source.track;
+        a.source.slot = source.slot;
+        a.source.output = source.output;
+        a.source.channel = source.channel;
+        s.automations.push_back (std::move (a));
+    });
+}
+
+void addControllerLinkItems (juce::PopupMenu& menu, AudioEngine& engine, const AutomationTarget& target)
+{
+    const auto& song = engine.getSong();
+    const auto outputs = controllerOutputs (song);
+    const auto current = std::find_if (song.automations.begin(), song.automations.end(),
+                                       [&] (const Automation& a) { return a.isLive() && a.target == target; });
+    juce::PopupMenu sub;
+    for (const auto& o : outputs)
+    {
+        const auto ticked = current != song.automations.end() && current->source.track == o.track && current->source.slot == o.slot
+                            && current->source.output == o.output && current->source.channel == o.channel;
+        sub.addItem (o.label, true, ticked, [&engine, target, o] { linkToController (engine, target, o); });
+    }
+    if (outputs.empty())
+        sub.addItem (tr ("(add an Envelope, Formula or Peak Controller first)"), false, false, [] {});
+    if (current != song.automations.end())
+    {
+        sub.addSeparator();
+        sub.addItem (tr ("Remove controller link"), [&engine, target] {
+            engine.editSong ([target] (Song& s) {
+                for (int i = (int) s.automations.size() - 1; i >= 0; --i)
+                    if (s.automations[(std::size_t) i].isLive() && s.automations[(std::size_t) i].target == target)
+                        s.removeAutomation (i);
+            });
+        });
+    }
+    menu.addSubMenu (tr ("Link to internal controller"), sub);
+}
+
 void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const AutomationTarget& target)
 {
     menu.addItem (tr ("Create automation clip"), [&engine, target] { createAutomationClip (engine, target); });
@@ -709,6 +810,9 @@ void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const Automa
     menu.addItem (tr ("Link to MIDI controller (move a knob on the controller)"), [&engine, target] {
         engine.learnMidiController (target);
     });
+
+    if (target.kind != AutomationTargetKind::tempo)
+        addControllerLinkItems (menu, engine, target);
 
     const auto& links = engine.getSong().midiLinks;
     const auto linked = std::find_if (links.begin(), links.end(), [&] (const MidiLink& l) { return l.target == target; });
@@ -722,24 +826,85 @@ void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const Automa
         });
 }
 
+juce::String midiParamLabel (int param)
+{
+    if (midictl::isCc (param))
+    {
+        const auto cc = param - midictl::ccBase;
+        const juce::String standard = midictl::ccName (cc);
+        return tr ("MIDI CC #{0}", { juce::String (cc) }) + (standard.isEmpty() ? juce::String() : " (" + tr (standard) + ")");
+    }
+    if (midictl::isPressure (param))
+        return tr ("MIDI Channel {0} Aftertouch", { juce::String (param - midictl::pressureBase + 1) });
+    if (midictl::isPitchBend (param))
+        return tr ("MIDI Channel {0} Pitch Bend", { juce::String (param - midictl::pitchBendBase + 1) });
+    return {};
+}
+
+void addMidiParameterItems (juce::PopupMenu& menu, AudioEngine& engine, const AutomationTarget& base)
+{
+    const auto item = [&] (juce::PopupMenu& into, int param) {
+        auto target = base;
+        target.param = param;
+        juce::PopupMenu sub;
+        addAutomationItem (sub, engine, target);
+        into.addSubMenu (midiParamLabel (param), sub);
+    };
+
+    juce::PopupMenu midi;
+    for (int group = 0; group < 4; ++group) // CC 0-31, 32-63, 64-95, 96-127
+    {
+        juce::PopupMenu ccs;
+        for (int cc = group * 32; cc < group * 32 + 32; ++cc)
+            item (ccs, midictl::ccBase + cc);
+        midi.addSubMenu (tr ("MIDI CC {0}-{1}", { juce::String (group * 32), juce::String (group * 32 + 31) }), ccs);
+    }
+    // the ones people reach for first, without digging
+    juce::PopupMenu common;
+    for (int cc : { 1, 7, 10, 11, 64, 66, 67, 74 })
+        item (common, midictl::ccBase + cc);
+    midi.addSubMenu (tr ("Common controllers"), common);
+
+    juce::PopupMenu pressure, bend;
+    for (int c = 0; c < 16; ++c)
+    {
+        item (pressure, midictl::pressureBase + c);
+        item (bend, midictl::pitchBendBase + c);
+    }
+    midi.addSubMenu (tr ("Channel aftertouch"), pressure);
+    midi.addSubMenu (tr ("Pitch bend"), bend);
+    menu.addSubMenu (tr ("Automate MIDI controller (CC, aftertouch, pitch bend)"), midi);
+}
+
 void addPluginParameterItems (juce::PopupMenu& menu, AudioEngine& engine, juce::AudioPluginInstance& plugin,
                               const AutomationTarget& base)
 {
     juce::PopupMenu params;
     const auto& list = plugin.getParameters();
+    const auto count = juce::jmin (list.size(), midictl::ccBase);
 
-    for (int i = 0; i < list.size() && i < 512; ++i)
+    // a long list (VSL's pianos expose ~950) goes into pages of 64, so the menu fits on the screen
+    constexpr int page = 64;
+    for (int first = 0; first < count; first += page)
     {
-        auto target = base;
-        target.param = i;
-        juce::PopupMenu param;
-        addAutomationItem (param, engine, target);
-        params.addSubMenu (list[i]->getName (60), param);
+        juce::PopupMenu pageMenu;
+        auto& into = count > page ? pageMenu : params;
+        for (int i = first; i < juce::jmin (count, first + page); ++i)
+        {
+            auto target = base;
+            target.param = i;
+            juce::PopupMenu param;
+            addAutomationItem (param, engine, target);
+            into.addSubMenu (juce::String (i + 1) + ". " + list[i]->getName (60), param);
+        }
+        if (count > page)
+            params.addSubMenu (tr ("Parameters {0}-{1}", { juce::String (first + 1), juce::String (juce::jmin (count, first + page)) }), pageMenu);
     }
 
     if (list.isEmpty())
         params.addItem (tr ("(the plugin exposes no parameters)"), false, false, [] {});
 
     menu.addSubMenu (tr ("Automate plugin parameter"), params);
+    addMidiParameterItems (menu, engine, base);
 }
 } // namespace lynx
