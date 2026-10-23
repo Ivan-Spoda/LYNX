@@ -25,6 +25,7 @@ struct GeneralOptions
     int undoLevels = prefs::defaultUndoLevels;
     int autosaveMinutes = prefs::defaultAutosaveMinutes; // 0 = never
     int autosaveKeep = prefs::defaultAutosaveKeep;
+    bool askUnusedRecordings = true; // offer to delete takes a project no longer uses when it closes
     bool pluginSandbox = false;
     bool pluginSubstitutes = true; // missing plugins play a LYNX equivalent (core/PluginSubstitutes.h)
     bool reducedEffects = false;

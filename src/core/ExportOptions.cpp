@@ -132,6 +132,26 @@ Options clamped (Options o)
     return o;
 }
 
+double lengthInBars (double seconds, double bpm, int beatsPerBar) noexcept
+{
+    return seconds <= 0.0 || bpm <= 0.0 ? 0.0 : seconds * bpm / 60.0 / (double) std::max (1, beatsPerBar);
+}
+
+std::int64_t estimatedBytes (const Options& o, double seconds) noexcept
+{
+    if (seconds <= 0.0)
+        return 0;
+    const auto channels = o.channels == Channels::stereo ? 2.0 : 1.0;
+    switch (o.format)
+    {
+        case Format::wav: return (std::int64_t) (seconds * o.sampleRate * channels * (o.wavBits / 8.0)) + 44;
+        case Format::flac: return (std::int64_t) (seconds * o.sampleRate * channels * (o.flacBits / 8.0) * 0.6); // ~60 % of PCM
+        case Format::mp3: return (std::int64_t) (seconds * o.mp3Kbps * 1000.0 / 8.0);
+        case Format::ogg: return (std::int64_t) (seconds * o.oggKbps * 1000.0 / 8.0);
+    }
+    return 0;
+}
+
 std::string toText (const Options& o)
 {
     std::ostringstream s;
@@ -152,6 +172,8 @@ std::string toText (const Options& o)
       << "normalize=" << (o.normalize ? 1 : 0) << "\n"
       << "masterEffects=" << (o.masterEffects ? 1 : 0) << "\n"
       << "trimPdc=" << (o.trimPdc ? 1 : 0) << "\n"
+      << "hqAllPlugins=" << (o.hqAllPlugins ? 1 : 0) << "\n"
+      << "showWhenDone=" << (o.showWhenDone ? 1 : 0) << "\n"
       << "channels=" << (int) o.channels << "\n";
     return s.str();
 }
@@ -178,6 +200,8 @@ Options fromText (const std::string& text)
     o.normalize = toInt (kv, "normalize", d.normalize ? 1 : 0) != 0;
     o.masterEffects = toInt (kv, "masterEffects", d.masterEffects ? 1 : 0) != 0;
     o.trimPdc = toInt (kv, "trimPdc", d.trimPdc ? 1 : 0) != 0;
+    o.hqAllPlugins = toInt (kv, "hqAllPlugins", d.hqAllPlugins ? 1 : 0) != 0;
+    o.showWhenDone = toInt (kv, "showWhenDone", d.showWhenDone ? 1 : 0) != 0;
     o.channels = (Channels) toInt (kv, "channels", (int) d.channels);
     return clamped (o);
 }

@@ -1445,6 +1445,15 @@ void MixerStrips::showMenu (int t)
         });
     });
 
+    // FL's last section, "CPU" (REA round 134)
+    if (t > 0)
+    {
+        menu.addSectionHeader (tr ("CPU"));
+        menu.addItem (tr ("Allow threaded processing"), true, song.mixer[(std::size_t) t].threaded, [this, t] {
+            engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].threaded = ! s.mixer[(std::size_t) t].threaded; });
+        });
+    }
+
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
 

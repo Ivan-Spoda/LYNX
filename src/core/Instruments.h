@@ -89,6 +89,9 @@ struct SampleData
 // prepare()/configure(), so set it before preparing the graph for the render and clear it afterwards.
 void setOfflineRendering (bool on) noexcept;
 bool offlineRendering() noexcept;
+// FL's "HQ for all plugins" during an export (REA round 134): effects with an HQ switch use HQ whatever it is set to.
+void setHqForAllPlugins (bool on) noexcept;
+bool hqForAllPlugins() noexcept;
 
 // Where the song is, for hosted plugins (tempo-synced effects, LFO/volume shapers, arpeggiators read the host's
 // transport): the renderer publishes it at the start of each chunk it renders.

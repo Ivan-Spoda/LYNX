@@ -86,6 +86,7 @@ bool parseFlWrapper (const std::vector<std::uint8_t>& blob, ForeignPlugin& out)
     const auto utf8 = version >= 9;
     std::uint32_t type = 0xFFFFFFFFu;
     out = {};
+    out.wrapperVersion = version;
 
     forEachRecord (r, [&] (std::uint32_t id, const std::uint8_t* p, std::size_t n) {
         switch (id)
@@ -110,7 +111,15 @@ bool parseFlWrapper (const std::vector<std::uint8_t>& blob, ForeignPlugin& out)
                     std::memcpy (&out.midiOutPort, p + 4, 4);
                 }
                 break;
-            default: break; // wrapper options, pins: LYNX does not need them
+            case 0x02: // wrapper options (Fruity Wrapper FUN_00874480 writes, FUN_00875aa0 reads; REA round 134)
+                if (n >= 17)
+                {
+                    std::memcpy (&out.wrapperFlags, p + 9, 4);
+                    std::memcpy (&out.fixedOptions, p + 13, 4);
+                    out.hasWrapperOptions = true;
+                }
+                break;
+            default: break; // pins: LYNX does not need them
         }
     });
 
@@ -127,6 +136,18 @@ bool parseFlWrapper (const std::vector<std::uint8_t>& blob, ForeignPlugin& out)
     }
 
     return true;
+}
+
+void applyFlWrapperOptions (const ForeignPlugin& w, PluginRef& ref)
+{
+    if (! w.hasWrapperOptions || (w.wrapperFlags & 0x400000u) != 0)
+        return;
+    ref.fixedBuffers = (w.wrapperFlags & 0x2u) != 0;
+    ref.maxSizeBuffers = ref.fixedBuffers && (w.fixedOptions & 0x1u) != 0;
+    if (w.wrapperVersion >= 7)
+        ref.threaded = (w.wrapperFlags & 0x1000u) != 0;
+    if (w.wrapperVersion >= 8)
+        ref.separateProcess = (w.wrapperFlags & 0x40000u) != 0;
 }
 
 bool splitFlVst3State (const std::vector<std::uint8_t>& state, std::vector<std::uint8_t>& component,

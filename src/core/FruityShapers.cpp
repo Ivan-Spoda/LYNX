@@ -1104,7 +1104,7 @@ public:
     void process (float* left, float* right, int n, const EffectParams& p, double) noexcept override
     {
         engine.setControls (rawFrom (p[0], 64, 192), rawFrom (p[1], 0, 128), rawFrom (p[2], 0, 128), rawFrom (p[3], 0, 4),
-                            p[4] >= 0.5f, p[5] >= 0.5f, p[6] >= 0.5f, p[7] >= 0.5f, offlineRendering());
+                            p[4] >= 0.5f || hqForAllPlugins(), p[5] >= 0.5f, p[6] >= 0.5f, p[7] >= 0.5f, offlineRendering());
         engine.process (left, right, n);
     }
 
