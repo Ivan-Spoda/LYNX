@@ -161,6 +161,7 @@ private:
     void addPanelMenuItems (Panel panel, juce::PopupMenu& menu); // a window's own items in its title-bar menu
     void showHistory();
     void addRecordOptions (juce::PopupMenu& menu); // count-in, wait, overdub/replace, quantise, song clip
+    void addRecordQuantizeItems (juce::PopupMenu& menu); // FL's Quantize items: start, end, duration, step sequencer
     void updateRecordQuantise(); // record quantise follows the global grid
     bool recordQuantiseOn = true;
     void showRenamePattern (int index);
@@ -206,7 +207,9 @@ private:
     void chooseFileToOpen();
     void chooseFileToOpenNow();
     void save (bool askForFile);
-    void exportAudio();
+    void exportAudio (int format = -1); // −1: the last export's format(s); 0 WAV, 1 MP3, 2 OGG, 3 FLAC alone
+    void exportMidiFile();
+    void switchSmartDisableForAll();
     void refreshToolbar();
     void updateTitle();
     bool shouldReclaimKeyboardFocus(); // the main window is active but nothing in it has the keyboard focus

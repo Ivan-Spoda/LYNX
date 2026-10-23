@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "core/Arpeggiator.h"
+#include "core/VoiceLimit.h"
 #include "core/Biquad.h"
 #include "core/Effects.h"
 #include "core/Instruments.h"
@@ -282,6 +283,7 @@ private:
     float* tapBuffer (int tap, int side) noexcept;
     std::array<char, maxChannels> channelSilent {};          // channel skipped in this chunk (idle, no notes)
     std::array<NoteMask, maxChannels> heldNotes {};          // keys held on each channel (effects that follow notes: LYNX Tune)
+    std::array<VoiceOrder, maxChannels> voiceOrders {};      // sounding notes in order, for the channels' Max polyphony
     static constexpr int chunkCapacity = 512;               // chunks processed at once
     std::vector<float> channelBuffers;                      // maxChannels * 2 * chunkCapacity
     std::vector<float> trackScratchBuffers;                 // maxMixerTracks * 2 * chunkCapacity

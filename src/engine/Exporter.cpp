@@ -108,7 +108,7 @@ bool ExportJob::run (const std::function<bool (double)>& progress, juce::String&
 
     // streaming straight into the file when nothing needs the whole render first (the classic WAV/FLAC/OGG export)
     const auto streaming = options.format != exportopts::Format::mp3 && options.channels == Channels::stereo && ! options.normalize
-                           && options.tail == TailMode::leave;
+                           && options.tail == TailMode::leave && formatsOf (options).size() == 1;
 
     if (! streaming)
     {
@@ -184,7 +184,7 @@ bool ExportJob::run (const std::function<bool (double)>& progress, juce::String&
 
 bool ExportJob::writeBuffered (std::vector<float>& left, std::vector<float>& right, juce::String& error)
 {
-    // tail, then normalising (the peak of what is kept), then mono, then dither
+    // tail, then normalising (the peak of what is kept), then mono; dither per file (each format has its own bits)
     applyTail (left, right, options.tail == TailMode::leave ? 0 : (std::int64_t) std::llround (musicSeconds * options.sampleRate), options.tail);
 
     const auto frames = (int) left.size();
@@ -201,46 +201,67 @@ bool ExportJob::writeBuffered (std::vector<float>& left, std::vector<float>& rig
     const auto channels = channelCount (options.channels);
     toChannels (left.data(), right.data(), frames, options.channels);
 
-    if (usesDither (options))
+    // FL writes every ticked format from the one render (REA round 139): the first file is `output`, the others the
+    // same name with their extension
+    peak = 0.0f;
+    for (const auto f : formatsOf (options))
     {
-        Dither dither (fileBits (options), options.dither == DitherMode::shaped);
-        constexpr int block = 512; // the same block order as a streamed render
-        for (int done = 0; done < frames; done += block)
+        auto o = options;
+        o.format = f;
+        const auto file = f == options.format ? output : output.withFileExtension (extension (f));
+        std::vector<float> dl, dr;
+        float* l = left.data();
+        float* r = right.data();
+        if (usesDither (o))
         {
-            const auto n = juce::jmin (block, frames - done);
-            dither.process (left.data() + done, n, 0);
-            if (channels == 2)
-                dither.process (right.data() + done, n, 1);
+            dl = left;
+            dr = right;
+            l = dl.data();
+            r = dr.data();
+            Dither dither (fileBits (o), o.dither == DitherMode::shaped);
+            constexpr int block = 512; // the same block order as a streamed render
+            for (int done = 0; done < frames; done += block)
+            {
+                const auto n = juce::jmin (block, frames - done);
+                dither.process (l + done, n, 0);
+                if (channels == 2)
+                    dither.process (r + done, n, 1);
+            }
         }
+
+        for (int i = 0; i < frames; ++i)
+            peak = juce::jmax (peak, std::abs (l[i]), channels == 2 ? std::abs (r[i]) : 0.0f);
+
+        if (! writeFile (o, file, l, r, frames, channels, error))
+            return false;
     }
+    return true;
+}
 
-    float kept = 0.0f;
-    for (int i = 0; i < frames; ++i)
-        kept = juce::jmax (kept, std::abs (left[(std::size_t) i]), channels == 2 ? std::abs (right[(std::size_t) i]) : 0.0f);
-    peak = kept;
+bool ExportJob::writeFile (const Options& o, const juce::File& file, float* left, float* right, int frames, int channels, juce::String& error)
+{
+    file.deleteFile();
 
-    output.deleteFile();
-
-    if (options.format == exportopts::Format::mp3)
+    if (o.format == exportopts::Format::mp3)
     {
         Mp3Encoder encoder;
         std::string message;
-        if (! encoder.open ((int) options.sampleRate, (int) mp3SampleRate (options.sampleRate), channels, options.mp3Kbps, message, title, artist))
+        if (! encoder.open ((int) o.sampleRate, (int) mp3SampleRate (o.sampleRate), channels, o.mp3Kbps, message, title, artist))
         {
             error = utf8 (message.c_str());
             return false;
         }
 
         std::vector<std::uint8_t> bytes;
-        bytes.reserve ((std::size_t) (frames / options.sampleRate * options.mp3Kbps * 125.0) + 65536);
+        bytes.reserve ((std::size_t) (frames / o.sampleRate * o.mp3Kbps * 125.0) + 65536);
         constexpr int block = 8192;
         for (int done = 0; done < frames; done += block)
-            encoder.encode (left.data() + done, right.data() + done, juce::jmin (block, frames - done), bytes);
+            encoder.encode (left + done, right + done, juce::jmin (block, frames - done), bytes);
         encoder.finish (bytes);
 
-        if (! output.replaceWithData (bytes.data(), bytes.size()))
+        if (! file.replaceWithData (bytes.data(), bytes.size()))
         {
-            error = utf8 ("could not create ") + output.getFullPathName();
+            error = utf8 ("could not create ") + file.getFullPathName();
             return false;
         }
         return true;
@@ -248,28 +269,28 @@ bool ExportJob::writeBuffered (std::vector<float>& left, std::vector<float>& rig
 
     std::unique_ptr<juce::AudioFormat> format;
     int quality = 0;
-    if (options.format == exportopts::Format::flac)
+    if (o.format == exportopts::Format::flac)
     {
         format = std::make_unique<juce::FlacAudioFormat>();
-        quality = options.flacLevel;
+        quality = o.flacLevel;
     }
-    else if (options.format == exportopts::Format::ogg)
+    else if (o.format == exportopts::Format::ogg)
     {
         format = std::make_unique<juce::OggVorbisAudioFormat>();
-        quality = oggQualityIndex (*format, options.oggKbps);
+        quality = oggQualityIndex (*format, o.oggKbps);
     }
     else
         format = std::make_unique<juce::WavAudioFormat>();
 
-    auto stream = output.createOutputStream();
+    auto stream = file.createOutputStream();
     if (stream == nullptr)
     {
-        error = utf8 ("could not create ") + output.getFullPathName();
+        error = utf8 ("could not create ") + file.getFullPathName();
         return false;
     }
 
     std::unique_ptr<juce::AudioFormatWriter> writer (
-        format->createWriterFor (stream.get(), options.sampleRate, (unsigned int) channels, fileBits (options), {}, quality));
+        format->createWriterFor (stream.get(), o.sampleRate, (unsigned int) channels, fileBits (o), {}, quality));
     if (writer == nullptr)
     {
         error = utf8 ("the format does not accept these settings");
@@ -277,15 +298,15 @@ bool ExportJob::writeBuffered (std::vector<float>& left, std::vector<float>& rig
     }
     stream.release();
 
-    float* data[2] = { left.data(), right.data() };
+    float* data[2] = { left, right };
     juce::AudioBuffer<float> view (data, channels, frames);
     const auto ok = writer->writeFromAudioSampleBuffer (view, 0, frames);
     writer.reset();
 
     if (! ok)
     {
-        output.deleteFile();
-        error = utf8 ("could not write ") + output.getFullPathName();
+        file.deleteFile();
+        error = utf8 ("could not write ") + file.getFullPathName();
         return false;
     }
     return true;

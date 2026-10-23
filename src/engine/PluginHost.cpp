@@ -1600,10 +1600,13 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const Plu
 
     loadedAny.store (true); // (even a failed load may leave the module mapped)
     juce::String message;
+    // the block size the plugin is told (FL's wrapper, REA rounds 134/139): with fixed size buffers it is only ever
+    // called with that block, so it is prepared for it — unless "Use maximum buffer size from host" is on
+    const auto preparedBlock = ref.fixedBuffers && ! ref.hostMaxBuffer ? fixedPluginBlock (ref.maxSizeBuffers) : maxBlockSize;
     if (pluginSandboxEnabled() || ref.separateProcess)
     {
         // separate process (for every plugin, or this one only — FL's "Make bridged"): the child prepares the plugin and applies the state
-        if (auto remote = createSandboxedPlugin (*description, sampleRate, maxBlockSize, ref.state, message))
+        if (auto remote = createSandboxedPlugin (*description, sampleRate, preparedBlock, ref.state, message))
             return remote;
         if (error != nullptr)
             *error = juce::String::fromUTF8 (ref.name.c_str()) + ": " + message;
@@ -1622,7 +1625,7 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const Plu
         return nullptr;
     }
 
-    preparePlugin (*instance, sampleRate, maxBlockSize);
+    preparePlugin (*instance, sampleRate, preparedBlock);
 
     if (! ref.state.empty())
     {

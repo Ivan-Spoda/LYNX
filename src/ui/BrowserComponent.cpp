@@ -1623,6 +1623,78 @@ bool BrowserComponent::isPreviewPlaying() const
     return strip != nullptr && strip->isPlaying();
 }
 
+// FL's Browser details box (REA round 134/139): what is selected — a column of labels (Date, Size, Version for a
+// project FL saved, Path) and their values, the path wrapping over the last lines. Hidden while nothing is selected.
+class BrowserComponent::DetailsBox final : public juce::Component,
+                                           public ui::HintSource
+{
+public:
+    static constexpr int preferredHeight = 70;
+
+    void show (const juce::File& f)
+    {
+        file = f;
+        rows.clear();
+        if (file != juce::File())
+        {
+            rows.push_back ({ tr ("Date"), file.getLastModificationTime().formatted ("%Y-%m-%d %H:%M:%S") });
+            if (file.existsAsFile())
+            {
+                rows.push_back ({ tr ("Size"), juce::File::descriptionOfSizeInBytes (file.getSize()) });
+                if (file.hasFileExtension (".flp"))
+                {
+                    juce::MemoryBlock head;
+                    if (juce::FileInputStream in (file); in.openedOk())
+                        in.readIntoMemoryBlock (head, 4096);
+                    const auto version = flp::readSavedVersion ({ (const std::uint8_t*) head.getData(), head.getSize() });
+                    if (! version.empty())
+                        rows.push_back ({ tr ("Version"), juce::String (version) });
+                }
+            }
+            rows.push_back ({ tr ("Path"), file.getFullPathName() });
+        }
+        repaint();
+    }
+
+    bool hasFile() const noexcept { return file != juce::File(); }
+
+    ui::Hint hintAt (juce::Point<int>) override
+    {
+        ui::Hint h;
+        if (file != juce::File())
+            h.text = tr ("Selected: {0}", { file.getFullPathName() });
+        return h;
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        using namespace theme::colour;
+        g.fillAll (bg1);
+        g.setColour (border);
+        g.fillRect (0, 0, getWidth(), 1);
+        auto area = getLocalBounds().reduced (6, 3).withTrimmedTop (1);
+        g.setFont (theme::font (theme::type::caption));
+        constexpr int line = 13, labelWidth = 48;
+        for (std::size_t i = 0; i < rows.size() && area.getHeight() >= line; ++i)
+        {
+            const auto last = i + 1 == rows.size();
+            // the path (last row) takes the lines left and wraps, as FL's box does
+            auto r = last ? area : area.removeFromTop (line);
+            g.setColour (textDisabled);
+            g.drawText (rows[i].first, r.removeFromLeft (labelWidth).withHeight (line), juce::Justification::centredLeft, false);
+            g.setColour (textSecondary);
+            if (last)
+                g.drawFittedText (rows[i].second, r, juce::Justification::topLeft, juce::jmax (1, r.getHeight() / line), 1.0f);
+            else
+                g.drawText (rows[i].second, r, juce::Justification::centredLeft, true);
+        }
+    }
+
+private:
+    juce::File file;
+    std::vector<std::pair<juce::String, juce::String>> rows;
+};
+
 BrowserComponent::BrowserComponent (AudioEngine& e)
     : engine (e)
 {
@@ -1677,6 +1749,8 @@ BrowserComponent::BrowserComponent (AudioEngine& e)
 
     strip = std::make_unique<PreviewStrip> (*this);
     addAndMakeVisible (*strip);
+    details = std::make_unique<DetailsBox>();
+    addChildComponent (*details);
 
     rebuildRoots();
     engine.addChangeListener (this);
@@ -1864,6 +1938,10 @@ void BrowserComponent::resized()
     area.removeFromTop (4);
     strip->setBounds (getLocalBounds().removeFromBottom (juce::jmin (64, getHeight() / 4)));
     area.setBottom (strip->getY() - 2);
+    // FL's details box (date, size / version, folder) just above the preview strip, while something is selected
+    details->setVisible (details->hasFile() && area.getHeight() > 120);
+    if (details->isVisible())
+        details->setBounds (area.removeFromBottom (DetailsBox::preferredHeight).withX (0).withWidth (getWidth()));
     treeView->setBounds (area);
     resultsView->setBounds (area);
 
@@ -1894,6 +1972,14 @@ void BrowserComponent::showPreviewForSnapshot (const juce::File& file)
 
 void BrowserComponent::fileSelected (const juce::File& file, bool preview)
 {
+    if (details != nullptr && file != juce::File())
+    {
+        const auto wasVisible = details->hasFile();
+        details->show (file);
+        if (! wasVisible)
+            resized();
+    }
+
     if (! isAudio (file))
         return;
 

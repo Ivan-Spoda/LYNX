@@ -15528,6 +15528,7 @@ TEST (flp_pattern_events_import)
 #include "core/SearchIndex.h"
 #include "SafetyTests118.inc"
 #include "Rea134Tests.inc"
+#include "Rea139Tests.inc"
 #include "AudioEditTests.inc"
 #include "InputTests.inc"
 #include "../asio/InputDrift.h"

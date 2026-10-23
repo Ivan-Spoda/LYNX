@@ -28,7 +28,8 @@ namespace
 // a hosted plugin is created again when its processing options change (fixed blocks, own process)
 bool samePluginProcessing (const PluginRef& a, const PluginRef& b) noexcept
 {
-    return a.fixedBuffers == b.fixedBuffers && a.separateProcess == b.separateProcess && a.maxSizeBuffers == b.maxSizeBuffers;
+    return a.fixedBuffers == b.fixedBuffers && a.separateProcess == b.separateProcess && a.maxSizeBuffers == b.maxSizeBuffers
+           && a.hostMaxBuffer == b.hostMaxBuffer;
 }
 
 // Silent instrument: plugin channel that could not be loaded.
@@ -1102,6 +1103,10 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
                 held[(std::size_t) (e.key >> 6)] |= bit;
             if (! c.muted)
             {
+                // Max polyphony: the oldest note is released first
+                if (const auto limit = voiceLimitFor (c.maxPolyphony, c.synth.mono); limit > 0)
+                    if (const auto victim = voiceOrders[(std::size_t) i].noteOn (e.key, limit); victim >= 0)
+                        instrument.noteOff (victim);
                 instrument.setNextNoteExpression (e.pan, e.cents + state.song.masterPitch, e.porta);
 
                 if (e.fadeIn > 0.0f || e.fadeOut > 0.0f)
@@ -1118,10 +1123,12 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         {
             instrument.allNotesOff(); // short fade, like FL's "cut"
             held = {};
+            voiceOrders[(std::size_t) i].clear();
         }
         else
         {
             instrument.noteOff (e.key);
+            voiceOrders[(std::size_t) i].noteOff (e.key);
             if (e.key >= 0 && e.key < 128)
                 held[(std::size_t) (e.key >> 6)] &= ~bit;
         }
@@ -1252,7 +1259,9 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
 
         // (not Gross Beat: its buffer must keep recording the silence it may play back later, as in FL)
         // (nor Newtone / Newtime: in slave mode they play their sample whatever the input)
-        if (key < smartDisable.size() && slots[i].kind != EffectKind::grossBeat && slots[i].kind != EffectKind::newtone
+        // (nor a slot whose "Smart disable" is off, or a plugin that does not allow it — FL's per-plugin options, REA round 139)
+        if (key < smartDisable.size() && slots[i].smartDisable && ! (isPlugin && ! slots[i].plugin.allowSmartDisable)
+            && slots[i].kind != EffectKind::grossBeat && slots[i].kind != EffectKind::newtone
             && slots[i].kind != EffectKind::newtime)
         {
             auto& sd = smartDisable[key];
@@ -1505,6 +1514,8 @@ void RackRenderer::process (const RackState* state,
                     if (instrument != nullptr)
                         instrument->allNotesOff();
                 heldNotes.fill ({});
+                for (auto& order : voiceOrders)
+                    order.clear();
                 continue;
             }
 
@@ -1528,14 +1539,21 @@ void RackRenderer::process (const RackState* state,
                         else if (e.type == NoteEvent::Type::off)
                             target.noteOffMidi (e.key, midiChannel);
                     }
+            auto& order = voiceOrders[(std::size_t) std::min (e.channel, maxChannels - 1)];
             if (e.type == NoteEvent::Type::on)
             {
+                const auto& def = state->song.channels;
+                if ((std::size_t) e.channel < def.size())
+                    if (const auto limit = voiceLimitFor (def[(std::size_t) e.channel].maxPolyphony, def[(std::size_t) e.channel].synth.mono); limit > 0)
+                        if (const auto victim = order.noteOn (e.key, limit); victim >= 0)
+                            instrument.noteOff (victim);
                 instrument.noteOn (e.key, e.velocity);
                 if (inRange)
                     held[(std::size_t) (e.key >> 6)] |= bit;
             }
             else
             {
+                order.noteOff (e.key);
                 instrument.noteOff (e.key);
                 if (inRange)
                     held[(std::size_t) (e.key >> 6)] &= ~bit;

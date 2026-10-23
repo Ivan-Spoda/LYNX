@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace lynx
 {
@@ -40,6 +41,98 @@ void commitTake (Pattern& pattern, std::vector<Note> notes, RecordMode mode, std
 
     pattern.notes.insert (pattern.notes.end(), notes.begin(), notes.end());
     pattern.sortNotes();
+}
+
+void quantizeTake (std::vector<Note>& notes, const TakeQuantize& q)
+{
+    const auto nearest = [] (std::int64_t t, std::int64_t g) { return std::max<std::int64_t> (0, (t + g / 2) / g * g); };
+
+    for (auto& n : notes)
+    {
+        const auto end = n.start + std::max<std::int64_t> (1, n.length);
+
+        if (q.stepSequencer)
+        {
+            n.start = nearest (n.start, ticksPerStep);
+            n.length = ticksPerStep;
+            continue;
+        }
+
+        if (q.grid <= 1)
+            continue;
+
+        if (q.starts)
+            n.start = nearest (n.start, q.grid);
+
+        if (q.end == NoteEnd::quantize)
+            n.length = std::max (q.grid, nearest (end, q.grid) - n.start);
+        else if (q.end == NoteEnd::keepEnd)
+            n.length = std::max<std::int64_t> (1, end - n.start);
+        // keepLength: the length as played
+    }
+}
+
+void commitTake (Pattern& pattern, std::vector<Note> notes, RecordMode mode, const TakeQuantize& q, std::vector<int>& clearedChannels)
+{
+    quantizeTake (notes, q);
+    commitTake (pattern, std::move (notes), mode, 0, clearedChannels);
+}
+
+std::vector<PunchRange> punchRanges (const std::vector<Marker>& markers)
+{
+    std::vector<const Marker*> sorted;
+    for (const auto& m : markers)
+        if (m.action == Marker::punchIn || m.action == Marker::punchOut)
+            sorted.push_back (&m);
+    std::stable_sort (sorted.begin(), sorted.end(), [] (const Marker* a, const Marker* b) { return a->tick < b->tick; });
+
+    std::vector<PunchRange> out;
+    std::int64_t openAt = -1;
+    bool any = false;
+    for (const auto* m : sorted)
+    {
+        if (m->action == Marker::punchIn)
+        {
+            if (openAt < 0)
+                openAt = m->tick;
+        }
+        else if (openAt >= 0 || ! any) // a stop with no start before it: from the song start
+        {
+            const auto from = openAt >= 0 ? openAt : 0;
+            if (m->tick > from)
+                out.push_back ({ from, m->tick });
+            openAt = -1;
+        }
+        any = true;
+    }
+    if (openAt >= 0)
+        out.push_back ({ openAt, std::numeric_limits<std::int64_t>::max() / 4 });
+    if (out.empty() && any) // only markers that open and close nothing: an empty range (nothing recorded)
+        out.push_back ({ 0, 0 });
+    return out;
+}
+
+bool inPunchRanges (const std::vector<PunchRange>& ranges, double tick) noexcept
+{
+    if (ranges.empty())
+        return true;
+    return std::any_of (ranges.begin(), ranges.end(), [tick] (const PunchRange& r) { return tick >= (double) r.in && tick < (double) r.out; });
+}
+
+std::vector<ClipPart> punchParts (const std::vector<PunchRange>& ranges, std::int64_t start, std::int64_t length, std::int64_t offset)
+{
+    if (ranges.empty())
+        return { { start, length, offset } };
+
+    std::vector<ClipPart> out;
+    const auto end = start + length;
+    for (const auto& r : ranges)
+    {
+        const auto from = std::max (start, r.in), to = std::min (end, r.out);
+        if (to > from)
+            out.push_back ({ from, to - from, offset + (from - start) });
+    }
+    return out;
 }
 
 bool placePatternClipAt (Song& song, int pattern, std::int64_t tick)

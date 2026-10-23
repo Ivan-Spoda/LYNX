@@ -3475,6 +3475,23 @@ void EffectsPanel::showSlotMenu (int slot)
             engine.editSong ([] (Song& song) { song.substitutesBypassed = ! song.substitutesBypassed; });
             repaint();
         });
+    // FL's slot menu "CPU" section (REA round 139): Allow threaded processing (plugins), Smart disable
+    menu.addSectionHeader (tr ("CPU"));
+    if ((*slots())[(std::size_t) slot].kind == EffectKind::plugin)
+        menu.addItem (tr ("Allow threaded processing"), true, (*slots())[(std::size_t) slot].plugin.threaded, [this, slot] {
+            engine.editSong ([t = track, slot] (Song& song) {
+                if (t < (int) song.mixer.size() && slot < (int) song.mixer[(std::size_t) t].effects.size())
+                    song.mixer[(std::size_t) t].effects[(std::size_t) slot].plugin.threaded = ! song.mixer[(std::size_t) t].effects[(std::size_t) slot].plugin.threaded;
+            });
+        });
+    // FL's per-plugin "Smart disable": skipped while its input and output are silent
+    menu.addItem (tr ("Smart disable"), true, (*slots())[(std::size_t) slot].smartDisable, [this, slot] {
+        engine.editSong ([t = track, slot] (Song& song) {
+            if (t < (int) song.mixer.size() && slot < (int) song.mixer[(std::size_t) t].effects.size())
+                song.mixer[(std::size_t) t].effects[(std::size_t) slot].smartDisable = ! song.mixer[(std::size_t) t].effects[(std::size_t) slot].smartDisable;
+        });
+    });
+    menu.addSeparator();
     menu.addItem (tr ("Move up"), slot > 0, false, [this, slot] {
         engine.editSong ([t = track, slot] (Song& song) { song.swapEffectSlots (t, slot, slot - 1); });
         selectedSlot = slot - 1;

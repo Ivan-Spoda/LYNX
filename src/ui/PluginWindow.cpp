@@ -158,6 +158,10 @@ juce::PopupMenu pluginProcessingMenu (AudioEngine& engine, const PluginRef& curr
     // FL's options of fixed buffers (REA round 134): 2 ms blocks, or the whole device buffer
     menu.addItem (tr ("Process maximum size buffers (more latency, only when necessary)"), current.fixedBuffers, current.fixedBuffers && current.maxSizeBuffers,
                   [toggle] { toggle (&PluginRef::maxSizeBuffers); });
+    // FL's "Use maximum buffer size from host" (REA round 139): the plugin is prepared for the host's largest block
+    // instead of the fixed block (for plugins that need it to size their buffers)
+    menu.addItem (tr ("Use maximum buffer size from host"), current.fixedBuffers, current.fixedBuffers && current.hostMaxBuffer,
+                  [toggle] { toggle (&PluginRef::hostMaxBuffer); });
     // with Options › "Run plugins in a separate process" on, every plugin already runs in one
     const auto all = pluginSandboxEnabled();
     menu.addItem (all ? tr ("Run in a separate process (on for all plugins in Options)") : tr ("Run in a separate process"), ! all,
@@ -168,6 +172,15 @@ juce::PopupMenu pluginProcessingMenu (AudioEngine& engine, const PluginRef& curr
         engine.editSong ([find] (Song& song) {
             if (auto* ref = find (song))
                 ref->threaded = ! ref->threaded;
+        });
+    });
+
+    // FL's wrapper "Allow smart disable" (on by default): off = never skipped in silence, even with the slot's
+    // "Smart disable" on (for plugins that misbehave when they are not called)
+    menu.addItem (tr ("Allow smart disable"), true, current.allowSmartDisable, [&engine, find] {
+        engine.editSong ([find] (Song& song) {
+            if (auto* ref = find (song))
+                ref->allowSmartDisable = ! ref->allowSmartDisable;
         });
     });
 

@@ -211,7 +211,8 @@ private:
 class ExportPanel final : public juce::Component
 {
 public:
-    ExportPanel (AudioEngine& e, juce::File folder, juce::String name, bool remember)
+    // initialFormat: −1 = the formats of the last export (FL's "Last exported format(s)"), else that one format only
+    ExportPanel (AudioEngine& e, juce::File folder, juce::String name, bool remember, int initialFormat = -1)
         : engine (e),
           suggestedFolder (std::move (folder)),
           suggestedName (std::move (name)),
@@ -220,6 +221,8 @@ public:
         using namespace exportopts;
         if (persistent)
             options = fromText (exportSettingsFile().loadFileAsString().toStdString());
+        if (initialFormat >= 0 && initialFormat <= 3)
+            options = withSingleFormat (options, (Format) initialFormat);
         const auto& song = engine.getSong();
         // the range follows what is playing unless a selection was the last choice and still exists
         if (options.range != Range::selection || ! hasSelection (song))
@@ -258,6 +261,17 @@ public:
 
         formatButtons.onChange = [this] (int) { readControls(); };
         addAndMakeVisible (formatButtons);
+        // FL ticks several format boxes at once (REA round 139): the other formats written from the same render
+        settingsui::styleLabel (alsoLabel, tr ("Also save"));
+        addAndMakeVisible (alsoLabel);
+        for (int i = 0; i < 4; ++i)
+        {
+            static const char* names[] = { "WAV", "MP3", "OGG", "FLAC" };
+            alsoToggles[(std::size_t) i].setButtonText (names[i]);
+            alsoToggles[(std::size_t) i].setTooltip (tr ("Also write the {0} file from the same render (same name, its own extension)", { juce::String (names[i]) }));
+            alsoToggles[(std::size_t) i].onClick = [this] { readControls(); };
+            addAndMakeVisible (alsoToggles[(std::size_t) i]);
+        }
         combo (depthLabel, tr ("Bit depth"), depthBox, { tr ("16 bits (integer)"), tr ("24 bits (integer)"), tr ("32 bits (float)") });
         juce::StringArray mp3Items, oggItems;
         for (auto k : mp3Bitrates())
@@ -279,7 +293,7 @@ public:
         combo (ditherLabel, tr ("Dither"), ditherBox, { tr ("Off"), tr ("TPDF"), tr ("TPDF + noise shaping") },
                tr ("Hides the rounding noise of 16 and 24 bit files (noise shaping moves it where the ear is least sensitive)"));
 
-        for (auto* t : { &normalizeToggle, &masterFxToggle, &trimToggle, &hqToggle, &showToggle })
+        for (auto* t : { &normalizeToggle, &masterFxToggle, &trimToggle, &hqToggle, &showToggle, &polyToggle })
         {
             t->onClick = [this] { readControls(); };
             addAndMakeVisible (t);
@@ -292,6 +306,8 @@ public:
         trimToggle.setTooltip (tr ("Removes the silence plugin latency compensation adds at the start"));
         hqToggle.setButtonText (tr ("HQ for all plugins"));
         showToggle.setButtonText (tr ("Show the file(s) when complete"));
+        polyToggle.setButtonText (tr ("Disable maximum polyphony"));
+        polyToggle.setTooltip (tr ("The channels' Max polyphony is lifted for the export, so no note is cut by the voice limit"));
         showToggle.setTooltip (tr ("Opens the file manager on the exported file when the export is done"));
         hqToggle.setTooltip (tr ("Plugins with a separate render quality use it, and HQ switches are turned on for the export. "
                                  "Off: the export uses the playback quality, so it sounds exactly like what you heard"));
@@ -311,7 +327,7 @@ public:
         cancelButton.onClick = [this] { close(); };
 
         writeControls();
-        setSize (620, 430);
+        setSize (620, 460);
     }
 
     // --snapshot: the window with this format chosen (0 WAV, 1 MP3, 2 OGG, 3 FLAC) and a few options set
@@ -350,8 +366,9 @@ public:
         mix.removeFromTop (2);
         {
             auto row2 = mix.removeFromTop (24);
-            hqToggle.setBounds (row2.removeFromLeft (200));
-            showToggle.setBounds (row2.removeFromLeft (260));
+            hqToggle.setBounds (row2.removeFromLeft (170));
+            polyToggle.setBounds (row2.removeFromLeft (200));
+            showToggle.setBounds (row2);
         }
         area.removeFromBottom (6);
 
@@ -379,7 +396,15 @@ public:
         formatTitle.setBounds (right.removeFromTop (26));
         right.removeFromTop (8);
         formatButtons.setBounds (right.removeFromTop (28));
-        right.removeFromTop (gap + 2);
+        right.removeFromTop (4);
+        {
+            auto also = right.removeFromTop (22);
+            alsoLabel.setBounds (also.removeFromLeft (labelWidth));
+            const auto w = also.getWidth() / 4;
+            for (auto& t : alsoToggles)
+                t.setBounds (also.removeFromLeft (w));
+        }
+        right.removeFromTop (gap);
         // the format's own settings: two rows, the others hidden
         using exportopts::Format;
         const auto f = options.format;
@@ -452,6 +477,9 @@ private:
         trimToggle.setToggleState (options.trimPdc, n);
         hqToggle.setToggleState (options.hqAllPlugins, n);
         showToggle.setToggleState (options.showWhenDone, n);
+        polyToggle.setToggleState (options.disableMaxPolyphony, n);
+        for (int i = 0; i < 4; ++i)
+            alsoToggles[(std::size_t) i].setToggleState (i == (int) options.format || (options.moreFormats & (1u << i)) != 0, n);
         refresh();
     }
 
@@ -486,7 +514,12 @@ private:
         options.trimPdc = trimToggle.getToggleState();
         options.hqAllPlugins = hqToggle.getToggleState();
         options.showWhenDone = showToggle.getToggleState();
-        options = clamped (options);
+        options.disableMaxPolyphony = polyToggle.getToggleState();
+        options.moreFormats = 0;
+        for (int i = 0; i < 4; ++i) // (the previous main format's box was only shown ticked)
+            if (i != (int) previousFormat && alsoToggles[(std::size_t) i].getToggleState())
+                options.moreFormats |= 1u << i;
+        options = clamped (options); // (the main format is not "more")
 
         if (options.format != previousFormat)
             writeControls(); // the bit depth list changes with the format
@@ -506,6 +539,8 @@ private:
         ditherBox.setEnabled (ditherable);
         ditherLabel.setEnabled (ditherable);
         const auto f = options.format;
+        for (int i = 0; i < 4; ++i)
+            alsoToggles[(std::size_t) i].setEnabled (i != (int) f);
         depthLabel.setVisible (f == Format::wav || f == Format::flac);
         depthBox.setVisible (f == Format::wav || f == Format::flac);
         bitrateLabel.setVisible (f == Format::mp3 || f == Format::ogg);
@@ -598,7 +633,9 @@ private:
     Segmented formatButtons { { "WAV", "MP3", "OGG", "FLAC" } };
     juce::Label depthLabel, bitrateLabel, compressionLabel, rateLabel, channelsLabel, ditherLabel;
     juce::ComboBox depthBox, mp3Box, oggBox, flacLevelBox, rateBox, channelsBox, ditherBox;
-    juce::ToggleButton normalizeToggle, masterFxToggle, trimToggle, hqToggle, showToggle;
+    juce::ToggleButton normalizeToggle, masterFxToggle, trimToggle, hqToggle, showToggle, polyToggle;
+    juce::Label alsoLabel;
+    std::array<juce::ToggleButton, 4> alsoToggles;
     juce::Label infoLabel, warningLabel;
     juce::TextButton exportButton { tr ("Export...") }, cancelButton { tr ("Cancel") };
     std::unique_ptr<juce::FileChooser> chooser;
@@ -647,10 +684,10 @@ std::unique_ptr<juce::Component> makeExportPanel (AudioEngine& engine, int forma
     return panel;
 }
 
-void showExportDialog (AudioEngine& engine, const juce::File& suggestedFolder, const juce::String& suggestedName)
+void showExportDialog (AudioEngine& engine, const juce::File& suggestedFolder, const juce::String& suggestedName, int format)
 {
     juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned (new ExportPanel (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX", true));
+    options.content.setOwned (new ExportPanel (engine, suggestedFolder, suggestedName.isNotEmpty() ? suggestedName : "LYNX", true, format));
     options.dialogTitle = tr ("Export audio");
     options.dialogBackgroundColour = theme::colour::bg2;
     options.useNativeTitleBar = true;
