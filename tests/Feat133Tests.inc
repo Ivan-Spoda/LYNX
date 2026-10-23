@@ -19,6 +19,8 @@ struct Recorder final : lynx::Instrument
     void allNotesOff() noexcept override {}
     void render (float*, float*, int, float, float) noexcept override {}
     void setParameter (int index, float value) noexcept override { params.push_back ({ index, value }); }
+    void midiMessage (const std::uint8_t* b, int n) noexcept override { messages.emplace_back (b, b + n); }
+    std::vector<std::vector<std::uint8_t>> messages;
 };
 } // namespace feat133
 
@@ -214,6 +216,7 @@ TEST (midi_out_routes_notes_and_controls_to_the_plugin_on_its_port)
     lynx::midictl::MidiOutSettings settings;
     settings.channel = 4;
     settings.port = 2;
+    settings.program = 5;
     lynx::midictl::writeMidiOut (out.pluginState, settings);
     CHECK (lynx::midictl::parseMidiOut (out.pluginState).channel == 4 && lynx::midictl::parseMidiOut (out.pluginState).port == 2);
     s.channels.push_back (out);
@@ -263,6 +266,8 @@ TEST (midi_out_routes_notes_and_controls_to_the_plugin_on_its_port)
     const auto cc = std::any_of (made[0]->params.begin(), made[0]->params.end(),
                                  [] (const auto& p) { return p.first == lynx::midictl::ccBase + 1; });
     CHECK (cc && made[1]->params.empty());
+    // the program, on the MIDI Out's channel, when playback started
+    CHECK (made[0]->messages.size() == 1 && made[0]->messages[0] == std::vector<std::uint8_t> { 0xC4, 4 } && made[1]->messages.empty());
 
     // a pattern note of the MIDI Out channel, scheduled while playing
     s.mode = lynx::PlayMode::pattern;

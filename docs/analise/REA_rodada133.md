@@ -79,7 +79,9 @@ Evidence markers: **[DECOMP]** FL's code read in Ghidra (headless, own project),
   same plugins.
 - UI: Channel Rack › + › MIDI Out (new ones take the next MIDI channel, skipping 10 as FL), its editor (channel, port,
   program, "Send to a plugin...", "Automate MIDI controller..."), and the plugin's Processing › MIDI input port.
-- Not yet: sending program/bank on start (stored only), FL's 72 MIDI Out knobs/pages, MIDI Out to effect slots.
+- Program and bank (when set) are sent to the plugins on its port when playback starts **[HYP: FL sends them on
+  reset/start, REA_rodada16 §1.3]**.
+- Not yet: FL's 72 MIDI Out knobs/pages, MIDI Out to effect slots.
 
 ## 5. Patcher audio + MIDI I/O
 
@@ -92,6 +94,6 @@ containers (REA_rodada14/20); a user-editable Patcher with audio and MIDI pins i
 
 - Landed: MIDI CC/aftertouch/pitch bend targets, Formula Controller, editable Envelope Controller, controller links
   from any knob, MIDI Out routing and the MIDI input port (see the commit list in the round report).
-- Next: Patcher with audio/MIDI I/O; MIDI Out program/bank on start and its knob pages; MIDI input port on mixer
+- Next: Patcher with audio/MIDI I/O; MIDI Out's knob pages; MIDI input port on mixer
   effects (Pitcher's own port, p33); FL's Envelope Controller LFO and maps; measuring FL's Formula Controller update
   rate (per tick vs per block).

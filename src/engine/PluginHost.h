@@ -76,6 +76,7 @@ public:
     float midiControlValue (int index) const noexcept { return midiControls.value (index); }
     void noteOnMidi (int key, float velocity, int midiChannel) noexcept override;
     void noteOffMidi (int key, int midiChannel) noexcept override;
+    void midiMessage (const std::uint8_t* bytes, int size) noexcept override { midi.addEvent (bytes, size, 0); }
 
 private:
     void failed (std::uint32_t code) noexcept;
