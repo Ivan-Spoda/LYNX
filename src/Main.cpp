@@ -1970,6 +1970,7 @@ private:
                        << "approximated=" << joined (importReport.approximated) << "\n"
                        << "unsupported=" << joined (importReport.unsupported) << "\n"
                        << "dropped_effects=" << joined (importReport.droppedEffects) << "\n"
+                       << "partial_effects=" << joined (importReport.partialEffects) << "\n"
                        << "missing_samples=" << importReport.missingSamples << "\n";
                 // third-party plugins: how each was found, or what plays in its place (diagnostics for level differences)
                 for (const auto& line : loader.getMatchedPlugins())

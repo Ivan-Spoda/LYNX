@@ -1,6 +1,7 @@
 #include "ui/MixerComponent.h"
 
 #include "core/FlEffects.h"
+#include "core/ProjectContents.h"
 #include "core/FruityVocoder.h"
 #include "core/LiveInput.h"
 #include "core/MixerOps.h"
@@ -2230,7 +2231,7 @@ void EffectsPanel::paint (juce::Graphics& g)
             const auto substitute = slot.isSubstitute();
             auto name = slot.kind == EffectKind::plugin ? juce::String::fromUTF8 (slot.plugin.name.c_str())
                         : substitute                    ? juce::String::fromUTF8 (substituteOriginalName (slot).c_str())
-                                                        : juce::String::fromUTF8 (effectInfo (slot.kind).name);
+                                                        : juce::String::fromUTF8 (projectcontents::effectSlotName (slot).c_str());
             if (slot.sidechain > 0 && slot.sidechain < (int) engine.getSong().mixer.size())
                 name << juce::String::fromUTF8 (" \xe2\x86\x90 ") << juce::String::fromUTF8 (engine.getSong().mixer[(std::size_t) slot.sidechain].name.c_str());
             auto text = textArea;
@@ -2312,6 +2313,17 @@ void EffectsPanel::paint (juce::Graphics& g)
         drawButton (button, tr ("Open parametric EQ"), Icon::settings);
         const auto curve = juce::Rectangle<int> (button.getX(), button.getBottom() + 10, button.getWidth(), 120).toFloat();
         drawParametricEqCurve (g, curve, slot.params, juce::jmax (8000.0, engine.getTransport().sampleRate.load()), slot.enabled);
+        return;
+    }
+
+    if (isSoundgoodizerApprox (slot)) // approximated without FL's preset files: its page edits Preset and Amount
+    {
+        const auto button = pluginButtonBounds();
+        drawButton (button, tr ("Open Soundgoodizer"), Icon::settings);
+        g.setColour (colour::textSecondary);
+        g.setFont (font (type::caption));
+        g.drawFittedText (tr ("Approximation (FL Studio's Soundgoodizer presets were not found on this computer)"),
+                          button.translated (0, 34).withHeight (40), juce::Justification::centredTop, 2);
         return;
     }
 
@@ -2610,6 +2622,13 @@ void EffectsPanel::mouseDown (const juce::MouseEvent& e)
         && pluginButtonBounds().withHeight (170).contains (e.getPosition()))
     {
         ParametricEqWindows::open (engine, track, selectedSlot);
+        return;
+    }
+
+    if (selectedSlot >= 0 && selectedSlot < (int) s->size() && isSoundgoodizerApprox ((*s)[(std::size_t) selectedSlot])
+        && pluginButtonBounds().contains (e.getPosition()))
+    {
+        NativeEffectWindows::open (engine, track, selectedSlot);
         return;
     }
 
@@ -3225,7 +3244,7 @@ void EffectsPanel::openEditor (int slot)
         openPluginWindow (slot);
     else if (kind == EffectKind::parametricEq)
         ParametricEqWindows::open (engine, track, slot);
-    else if (NativeEffectWindows::canOpen (kind))
+    else if (NativeEffectWindows::canOpen ((*s)[(std::size_t) slot]))
         NativeEffectWindows::open (engine, track, slot);
 }
 

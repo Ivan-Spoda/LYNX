@@ -15,6 +15,8 @@ namespace NativeEffectWindows
 {
 // can the slot's effect be edited in a native editor window? (not external plugins nor the Patcher container)
 bool canOpen (EffectKind kind);
+// the same for a slot (a Soundgoodizer approximation container opens the Soundgoodizer page)
+bool canOpen (const EffectSlot& slot);
 void open (AudioEngine& engine, int track, int slot);
 void closeAll();
 } // namespace NativeEffectWindows

@@ -902,6 +902,24 @@ std::optional<EffectSlot> maximusExact (const std::vector<std::uint8_t>& state)
     return slot;
 }
 
+EffectSlot soundgoodizerApproxSlot (int preset, int amount)
+{
+    preset = std::clamp (preset, 0, 3);
+    amount = std::clamp (amount, 0, 1000);
+    auto slot = makeEffectSlot (EffectKind::parallel);
+    slot.branches.push_back ({ soundgoodizerApproximation (preset, amount), 1.0f });
+    slot.state.resize (12);
+    const std::int32_t words[3] { 1, preset, amount };
+    std::memcpy (slot.state.data(), words, sizeof (words));
+    return slot;
+}
+
+bool isSoundgoodizerApprox (const EffectSlot& slot)
+{
+    return slot.kind == EffectKind::parallel && slot.state.size() == 12 && slot.branches.size() == 1
+           && maximusfx::parseSoundgoodizer (slot.state).has_value();
+}
+
 std::optional<EffectSlot> soundgoodizerExact (const std::vector<std::uint8_t>& state, const std::vector<std::uint8_t>& presetFile)
 {
     // FUN_00836ac0 (Soundgoodizer_x64.dll): the preset file is loaded through the plugin's own Maximus copy, then
@@ -1372,11 +1390,8 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
     {
         // the compressor approximation followed by its presets' master limiter (REA_rodada8 §2; FL's own SG DLL checked in REA_rodada35),
         // as one serial branch
-        if (state.size() >= 12)
-        {
-            slot = makeEffectSlot (EffectKind::parallel);
-            slot.branches.push_back ({ soundgoodizerApproximation (i32At (state, 4), i32At (state, 8)), 1.0f });
-        }
+        if (const auto sg = maximusfx::parseSoundgoodizer (state))
+            slot = soundgoodizerApproxSlot (sg->preset, sg->amount);
     }
     else if (is ("Fruity Fast Dist"))
         fastDist (state, slot);

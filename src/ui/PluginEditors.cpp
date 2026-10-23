@@ -79,9 +79,14 @@ public:
             if (kind == EffectKind::maximus) // Soundgoodizer runs on the Maximus engine: its own page
                 if (const auto blob = maximusfx::unpack (fx->state); blob && blob->build == hlfx::MaximusBuild::soundgoodizer)
                     layout = &plugui::soundgoodizerLayout();
+            if (isSoundgoodizerApprox (*fx)) // without FL's preset files: the same page drives the approximation
+            {
+                sgApprox = true;
+                layout = &plugui::soundgoodizerLayout();
+            }
         }
 
-        accent = skin::accentFor (kind);
+        accent = skin::accentFor (sgApprox ? EffectKind::maximus : kind);
         anim.onFrame = [this] { repaint(); };
         page = initialPage;
         if (kind == EffectKind::equo && initialPage == 0)
@@ -2208,8 +2213,29 @@ public:
         return fx != nullptr ? maximusfx::unpack (fx->state) : std::nullopt;
     }
 
+    // the approximation keeps the plugin's own state (version, preset, amount); edits rebuild its chain
+    std::optional<maximusfx::SoundgoodizerState> soundgoodizerApproxState() const
+    {
+        const auto* fx = current();
+        return fx != nullptr && sgApprox ? maximusfx::parseSoundgoodizer (fx->state) : std::nullopt;
+    }
+
+    void writeSoundgoodizerApprox (int preset, int amount)
+    {
+        engine.editSong ([t = track, sl = slot, rebuilt = soundgoodizerApproxSlot (preset, amount)] (Song& song) {
+            auto& fx = song.mixer[(std::size_t) t].effects[(std::size_t) sl];
+            fx.branches = rebuilt.branches;
+            fx.state = rebuilt.state;
+        });
+    }
+
     float soundgoodizerAmount() const
     {
+        if (sgApprox)
+        {
+            const auto sg = soundgoodizerApproxState();
+            return sg ? (float) sg->amount / 1000.0f : 0.6f;
+        }
         const auto blob = soundgoodizerBlob();
         return blob && blob->mix >= 0 ? (float) blob->mix / 1000.0f : 0.6f;
     }
@@ -2223,6 +2249,12 @@ public:
 
     void setSoundgoodizerAmount (float v)
     {
+        if (sgApprox)
+        {
+            if (const auto sg = soundgoodizerApproxState())
+                writeSoundgoodizerApprox (sg->preset, juce::roundToInt (v * 1000.0f));
+            return;
+        }
         if (auto blob = soundgoodizerBlob())
         {
             blob->mix = juce::roundToInt (v * 1000.0f);
@@ -2252,6 +2284,11 @@ public:
 
     int soundgoodizerPreset()
     {
+        if (sgApprox)
+        {
+            const auto sg = soundgoodizerApproxState();
+            return sg ? sg->preset : -1;
+        }
         const auto blob = soundgoodizerBlob();
         for (int p = 0; blob && p < 4; ++p)
             if (const auto& bytes = soundgoodizerPresetBytes (p); ! bytes.empty() && bytes == blob->state)
@@ -2261,6 +2298,12 @@ public:
 
     void setSoundgoodizerPreset (int preset)
     {
+        if (sgApprox)
+        {
+            if (const auto sg = soundgoodizerApproxState())
+                writeSoundgoodizerApprox (preset, sg->amount);
+            return;
+        }
         auto blob = soundgoodizerBlob();
         const auto& bytes = soundgoodizerPresetBytes (preset);
         if (! blob || bytes.empty())
@@ -2795,7 +2838,8 @@ public:
         if (item.type == Item::display && juce::String (item.display) == "sgamount")
             return { tr ("Amount: drag up or down (Ctrl: fine)"), juce::String (soundgoodizerAmount() * 100.0f, 0) + "%", false, false };
         if (item.type == Item::display && juce::String (item.display) == "sgpresets")
-            return { tr ("Soundgoodizer preset A to D (read from your FL installation)"), {}, false, false };
+            return { sgApprox ? tr ("Soundgoodizer preset A to D (approximated: FL Studio's preset files were not found)")
+                              : tr ("Soundgoodizer preset A to D (read from your FL installation)"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "vumeter")
             return { tr ("VU meter: click to show the gain reduction, the output or the input level"), vuMode == 2 ? tr ("Output") : vuMode == 1 ? tr ("Input") : tr ("Gain reduction"), false, false };
         if (item.type == Item::display && juce::String (item.display) == "taptempo")
@@ -3044,6 +3088,7 @@ private:
     float displayCentre = 0.0f;
     float sgStart = 0.0f;
     std::array<std::vector<std::uint8_t>, 4> sgPresets {}; // the installation's preset files A–D (read on demand)
+    bool sgApprox = false; // a Soundgoodizer approximation container (no FL preset files) shown on the Soundgoodizer page
     juce::Point<float> eqDragOffset;
     dynui::History dynHistory; // the dynamics suite's scrolling gain-reduction graph
     int crossoverDrag = -1;    // the crossover parameter being dragged on a band display
@@ -3118,14 +3163,20 @@ bool canOpen (EffectKind kind)
     return kind != EffectKind::plugin && kind != EffectKind::parallel;
 }
 
+bool canOpen (const EffectSlot& slot)
+{
+    return canOpen (slot.kind) || isSoundgoodizerApprox (slot);
+}
+
 void open (AudioEngine& engine, int track, int slot)
 {
     const auto& mixer = engine.getSong().mixer;
     if (track < 0 || track >= (int) mixer.size() || slot < 0 || slot >= (int) mixer[(std::size_t) track].effects.size())
         return;
 
-    const auto kind = mixer[(std::size_t) track].effects[(std::size_t) slot].kind;
-    if (! canOpen (kind))
+    const auto& fxSlot = mixer[(std::size_t) track].effects[(std::size_t) slot];
+    const auto kind = fxSlot.kind;
+    if (! canOpen (fxSlot))
         return;
     if (kind == EffectKind::parametricEq) // its own editor (response curve with handles)
     {
@@ -3157,7 +3208,7 @@ void open (AudioEngine& engine, int track, int slot)
     }
 
     const auto name = track == 0 ? tr ("Master") : juce::String::fromUTF8 (mixer[(std::size_t) track].name.c_str());
-    const auto title = utf8 (effectInfo (kind).name) + " - " + (name.isNotEmpty() ? name : tr ("Insert {0}", { juce::String (track) })) + " ("
+    const auto title = utf8 (isSoundgoodizerApprox (fxSlot) ? "Soundgoodizer" : effectInfo (kind).name) + " - " + (name.isNotEmpty() ? name : tr ("Insert {0}", { juce::String (track) })) + " ("
                        + tr ("slot {0}", { juce::String (slot + 1) }) + ")";
     open[key] = std::make_unique<NativeEffectWindow> (engine, track, slot, title);
 }

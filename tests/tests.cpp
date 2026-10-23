@@ -35,6 +35,7 @@
 #include "core/Denormals.h"
 #include "core/FlpImport.h"
 #include "core/FlEffects.h"
+#include "core/ProjectContents.h"
 #include "core/FlPatcher.h"
 #include "core/FlSamplers.h"
 #include "core/FlSynths.h"
@@ -10424,6 +10425,16 @@ TEST (maximus_engine)
     CHECK (sg && sg->preset == 2 && sg->amount == 632 && std::string (lynx::maximusfx::soundgoodizerPresetFile (2)) == "c.dat");
     CHECK (lynx::soundgoodizerPresetPath (sgState) == "Plugins\\Fruity\\Effects\\Soundgoodizer\\Data\\Presets\\c.dat");
     CHECK (lynx::soundgoodizerExact (sgState, v4).has_value() && ! lynx::soundgoodizerExact (sgState, {}).has_value());
+    // without the preset files (no FL installation) the approximation keeps the plugin's state and its name
+    {
+        const auto approx = lynx::effectFromFl ("Soundgoodizer", sgState);
+        CHECK (approx && lynx::isSoundgoodizerApprox (*approx) && lynx::projectcontents::effectSlotName (*approx) == "Soundgoodizer");
+        const auto st = approx ? lynx::maximusfx::parseSoundgoodizer (approx->state) : std::nullopt;
+        CHECK (st && st->preset == 2 && st->amount == 632 && approx->branches.size() == 1 && approx->branches[0].chain.size() == 2);
+        CHECK (! lynx::isSoundgoodizerApprox (lynx::makeEffectSlot (lynx::EffectKind::parallel))); // a Patcher container stays one
+        const auto edited = lynx::soundgoodizerApproxSlot (0, 1000);
+        CHECK (lynx::isSoundgoodizerApprox (edited) && lynx::maximusfx::parseSoundgoodizer (edited.state)->preset == 0);
+    }
     // Vocodex's appended installation data survives a round trip and leaves FL's state untouched
     const std::vector<std::uint8_t> flState { 8, 0, 0, 0, 1, 2, 3 };
     lynx::vocodex::InstallData data;

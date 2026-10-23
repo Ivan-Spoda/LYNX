@@ -3282,7 +3282,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         menu.addItem (tr ("Missing files..."), [this] { showMissingFiles (false); });
         menu.addItem (tr ("Last FL Studio import report"), [this] {
             const auto& r = engine.getImportReport();
-            if (r.converted.empty() && r.approximated.empty() && r.unsupported.empty() && r.droppedEffects.empty() && r.missingSamples == 0
+            if (r.converted.empty() && r.approximated.empty() && r.unsupported.empty() && r.droppedEffects.empty() && r.partialEffects.empty() && r.missingSamples == 0
                 && engine.getMissingPlugins().isEmpty() && engine.getMatchedPlugins().isEmpty() && engine.getPluginsWithoutState().isEmpty()
                 && engine.getPluginHost().getLoadFailures().isEmpty())
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("FL Studio import"),
@@ -3537,6 +3537,8 @@ void MainComponent::showImportReport()
         text << tr ("Plugins installed but not loaded (silent):") << "\n  " << failed.joinIntoString ("\n  ") << "\n\n";
     if (! r.droppedEffects.empty())
         text << tr ("Effects with no equivalent (left out):") << "\n" << list (r.droppedEffects) << "\n\n";
+    if (! r.partialEffects.empty())
+        text << tr ("Effects kept but approximated or partly reproduced:") << "\n" << list (r.partialEffects) << "\n\n";
     if (r.missingSamples > 0)
         text << tr ("Samples missing on this machine: {0}", { juce::String (r.missingSamples) }) << "\n";
     if (r.relocatedSamples > 0)

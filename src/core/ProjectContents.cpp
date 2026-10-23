@@ -4,6 +4,7 @@
 
 #include "core/Effects.h"
 #include "core/PluginSubstitutes.h"
+#include "core/FlEffects.h"
 
 namespace lynx::projectcontents
 {
@@ -25,6 +26,8 @@ std::string effectSlotName (const EffectSlot& slot)
         return slot.plugin.name;
     if (slot.isSubstitute())
         return substituteOriginalName (slot);
+    if (isSoundgoodizerApprox (slot)) // (approximated without FL's preset files)
+        return "Soundgoodizer";
     return effectInfo (slot.kind).name;
 }
 

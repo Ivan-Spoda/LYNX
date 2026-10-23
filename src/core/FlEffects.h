@@ -99,6 +99,11 @@ std::optional<VocodexConversion> vocodexEffect (const std::vector<std::uint8_t>&
 // LYNX's Soundgoodizer approximation (REA_rodada8; preset 0…3 = A…D, amount 0…1000): the compressor followed by
 // the presets' −0.2 dB master limiter
 std::vector<EffectSlot> soundgoodizerApproximation (int preset, int amount);
+// Soundgoodizer when its preset files are not available (no FL installation): the approximation in a container that
+// keeps the plugin's state (version, preset 0…3, amount 0…1000), so the slot shows as Soundgoodizer and its page
+// (Preset A–D, Amount) can still edit it
+EffectSlot soundgoodizerApproxSlot (int preset, int amount);
+bool isSoundgoodizerApprox (const EffectSlot& slot);
 
 std::optional<LovePhilterConversion> lovePhilterEffects (const std::vector<std::uint8_t>& state);
 

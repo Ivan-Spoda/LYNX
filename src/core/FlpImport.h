@@ -32,6 +32,7 @@ struct FlpImportReport
     std::map<std::string, int> approximated; // approximated by the internal synth (MiniSynth, DX10...)
     std::map<std::string, int> unsupported;  // no equivalent: play with a synth preset chosen by name
     std::map<std::string, int> droppedEffects; // effects with no equivalent (removed from the mixer)
+    std::map<std::string, int> partialEffects; // effects kept but approximated or partly reproduced (still in the mixer)
     int missingSamples = 0;
     int relocatedSamples = 0; // found on this PC at another place than the project saved (core/FlPluginDb.h)
     std::vector<MissingFile> missingFiles; // the samples not found, with the channels/effects that use them (core/MissingFiles.h)

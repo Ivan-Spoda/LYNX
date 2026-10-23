@@ -140,6 +140,7 @@ countries: br
 "No equivalent (played with a synth preset):" = "Sem equivalente (tocados com um preset de synth):"
 "Plugins not found (Options > Scan for plugins):" = "Plugins não encontrados (Opções > Procurar plugins):"
 "Effects with no equivalent (left out):" = "Efeitos sem equivalente (deixados de fora):"
+"Effects kept but approximated or partly reproduced:" = "Efeitos mantidos, mas aproximados ou reproduzidos em parte:"
 "Samples missing on this machine: {0}" = "Samples ausentes nesta máquina: {0}"
 
 # --- Channel Rack and Piano Roll
@@ -2157,6 +2158,7 @@ countries: br
 "Invert wet" = "Inverter molhado"
 "Amount: drag up or down (Ctrl: fine)" = "Quantidade: arraste para cima ou para baixo (Ctrl: fino)"
 "Soundgoodizer preset A to D (read from your FL installation)" = "Preset A a D do Soundgoodizer (lido da sua instalação do FL)"
+"Soundgoodizer preset A to D (approximated: FL Studio's preset files were not found)" = "Preset A a D do Soundgoodizer (aproximado: os arquivos de preset do FL Studio não foram encontrados)"
 "Drag the point: both values at once" = "Arraste o ponto: os dois valores de uma vez"
 "Balance" = "Balanço"
 "Draft" = "Rascunho"
@@ -2454,6 +2456,8 @@ countries: br
 "ATTACK" = "ATAQUE"
 "RELEASE" = "RELEASE"
 "Open Facet EQ" = "Abrir o Facet EQ"
+"Open Soundgoodizer" = "Abrir o Soundgoodizer"
+"Approximation (FL Studio's Soundgoodizer presets were not found on this computer)" = "Aproximação (os presets do Soundgoodizer do FL Studio não foram encontrados neste computador)"
 "Target" = "Alvo"
 "Correction" = "Correção"
 "Play a voice or an instrument through the insert to see its pitch" = "Toque uma voz ou um instrumento por este insert para ver a afinação"

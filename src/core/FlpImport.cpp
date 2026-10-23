@@ -1226,7 +1226,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                                 def.modelParams.push_back ((float) byte);
                         }
                         else if (options.report != nullptr)
-                            ++options.report->droppedEffects["Harmless compressor (preset not found)"];
+                            ++options.report->partialEffects["Harmless compressor (preset not found)"];
                     }
                 }
                 else if (synthFromHarmless (c.pluginState, song.bpm, fromPlugin, pluginGain))
@@ -1253,7 +1253,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     adoptedFromPlugin = true;
                     if (options.report != nullptr)
                         for (const auto& f : fruitKickFallbacks (def.pluginState))
-                            ++options.report->droppedEffects["Fruit Kick: " + f];
+                            ++options.report->partialEffects["Fruit Kick: " + f];
                 }
                 else if (synthFromFruitKick (c.pluginState, fromPlugin))
                     adopt();
@@ -1329,7 +1329,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                                 def.modelParams.push_back ((float) byte);
                         }
                         else if (options.report != nullptr)
-                            ++options.report->droppedEffects["Harmor compressor (preset not found)"];
+                            ++options.report->partialEffects["Harmor compressor (preset not found)"];
                     }
                 }
                 else if (synthFromHarmor (c.pluginState, fromPlugin, pluginGain))
@@ -1376,7 +1376,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     if (! sg.empty() && (! options.fileExists || options.fileExists (sg)))
                         def.samplePath = sg;
                     else if (options.report != nullptr && ogunParam (c.pluginState, 63).value_or (0) > 0)
-                        ++options.report->droppedEffects["Autogun: Magic Dust (SG.dat not found)"];
+                        ++options.report->partialEffects["Autogun: Magic Dust (SG.dat not found)"];
                     adoptedFromPlugin = true;
                 }
                 else if (synthFromOgun (c.pluginState, fromPlugin, pluginGain))
@@ -1556,7 +1556,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     adoptedFromPlugin = true;
                     if (const auto noise = bassDrumNoiseName (c.pluginState); ! noise.empty() && options.report != nullptr
                         && ! options.fileExists (folder + "\\Noise Samples\\" + noise))
-                        ++options.report->droppedEffects["BassDrum noise sample (not found)"];
+                        ++options.report->partialEffects["BassDrum noise sample (not found)"];
                 }
                 else if (synthFromBassDrum (c.pluginState, fromPlugin, pluginGain))
                     adopt();
@@ -1597,7 +1597,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                         if (! path.empty() && options.fileExists && options.fileExists (path))
                             def.samplePath = path;
                         else if (options.report != nullptr)
-                            ++options.report->droppedEffects["Morphine noise sample (not found)"];
+                            ++options.report->partialEffects["Morphine noise sample (not found)"];
                     }
                 }
                 else if (synthFromMorphine (c.pluginState, fromPlugin, pluginGain))
@@ -1818,11 +1818,11 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         if (options.report == nullptr || fx.kind == EffectKind::maximus || fx.kind == EffectKind::grossBeat)
             return;
         if (plugin == "Gross Beat")
-            ++options.report->droppedEffects["Gross Beat (state not read: volume gate only)"];
+            ++options.report->partialEffects["Gross Beat (state not read: volume gate only)"];
         if (plugin == "Maximus")
-            ++options.report->droppedEffects["Maximus (option not decoded: approximated)"];
+            ++options.report->partialEffects["Maximus (option not decoded: approximated)"];
         else if (plugin == "Soundgoodizer")
-            ++options.report->droppedEffects["Soundgoodizer (preset file not found: approximated)"];
+            ++options.report->partialEffects["Soundgoodizer (preset file not found: approximated)"];
         else if ((plugin == "Fruity Limiter" && fx.kind != EffectKind::fruityLimiter)
                  || (plugin == "Fruity Compressor" && fx.kind != EffectKind::fruityCompressor)
                  || (plugin == "Fruity Delay 2" && fx.kind != EffectKind::fruityDelay2)
@@ -1836,33 +1836,33 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                  || (plugin == "Frequency Splitter" && fx.kind != EffectKind::frequencySplitter)
                  || (plugin == "Distructor" && fx.kind != EffectKind::distructor)
                  || (plugin == "Multiband Delay" && fx.kind != EffectKind::multibandDelay))
-            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
+            ++options.report->partialEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity WaveShaper" && fx.kind != EffectKind::fruityWaveShaper)
                  || (plugin == "Fruity Soft Clipper" && fx.kind != EffectKind::fruitySoftClipper)
                  || (plugin == "Fruity Delay Bank" && fx.kind != EffectKind::fruityDelayBank)
                  || (plugin == "Fruity Multiband Compressor" && fx.kind != EffectKind::fruityMultiband))
-            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
+            ++options.report->partialEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity PanOMatic" && fx.kind != EffectKind::fruityPanOMatic)
                  || (plugin == "Fruity Balance" && fx.kind != EffectKind::fruityBalance)
                  || (plugin == "Fruity Send" && fx.kind != EffectKind::fruitySend)
                  || (plugin == "Fruity Blood Overdrive" && fx.kind != EffectKind::fruityBloodOverdrive))
-            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
+            ++options.report->partialEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity Fast LP" && fx.kind != EffectKind::fruityFastLP)
                  || (plugin == "Fruity Free Filter" && fx.kind != EffectKind::fruityFreeFilter)
                  || (plugin == "Fruity Filter" && fx.kind != EffectKind::fruityFilter))
-            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
+            ++options.report->partialEffects[plugin + " (state not readable: approximated)"];
         else if (chorusControls (plugin) > 0 && fx.kind == EffectKind::chorus)
-            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
+            ++options.report->partialEffects[plugin + " (state not readable: approximated)"];
         else if ((plugin == "Fruity Fast Dist" && fx.kind != EffectKind::fruityFastDist)
                  || (plugin == "Fruity Flangus" && fx.kind != EffectKind::fruityFlangus)
                  || (plugin == "Fruity Flanger" && fx.kind != EffectKind::fruityFlanger)
                  || (plugin == "Fruity Phaser" && fx.kind != EffectKind::fruityPhaser))
-            ++options.report->droppedEffects[plugin + " (state not readable: approximated)"];
+            ++options.report->partialEffects[plugin + " (state not readable: approximated)"];
         else if (plugin == "Hardcore" && fx.kind == EffectKind::hardcore
                  && ! hardcore::hasCabinet (fx, (int) hardcore::fromSlot (hardcore::pCabinet, fx.params[(std::size_t) hardcore::pCabinet])))
         {
             if (hardcore::fromSlot (hardcore::pCabinet, fx.params[(std::size_t) hardcore::pCabinet]) > 0.0f)
-                ++options.report->droppedEffects["Hardcore (cabinet impulse not found: cabinet off)"];
+                ++options.report->partialEffects["Hardcore (cabinet impulse not found: cabinet off)"];
         }
     };
 
@@ -1904,7 +1904,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     {
                         ++options.report->converted["Fruity Love Philter"];
                         for (const auto& note : conversion->notes)
-                            ++options.report->droppedEffects[note];
+                            ++options.report->partialEffects[note];
                     }
                     continue;
                 }
@@ -1936,7 +1936,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                                     if (head.slot)
                                         chain.push_back (*head.slot);
                                     if (! head.note.empty() && options.report != nullptr)
-                                        ++options.report->droppedEffects[head.note];
+                                        ++options.report->partialEffects[head.note];
                                 }
                                 else if (auto fx = effectFromFl (node.plugin, node.state, song.bpm, flData); fx && fx->kind != EffectKind::plugin)
                                 {
@@ -2088,7 +2088,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                         fx.sidechain2 = sidechainSource (insert.index, v->carIn);
                         if (options.report != nullptr)
                             for (const auto& note : v->notes)
-                                ++options.report->droppedEffects[note];
+                                ++options.report->partialEffects[note];
                     }
                 }
                 else if (fx.kind == EffectKind::newtone || fx.kind == EffectKind::newtime)
@@ -2123,9 +2123,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                             // Newtone's note edits are rendered by LYNX's engine (REA_rodada95, close, not exact); Newtime's
                             // warping is not reproduced. Only slave mode plays them (otherwise FL passes the input through).
                             if (parsed->edited() && parsed->slave() && fx.kind == EffectKind::newtime)
-                                ++options.report->droppedEffects[slot.plugin + " (edits not reproduced: plays the original sample)"];
+                                ++options.report->partialEffects[slot.plugin + " (edits not reproduced: plays the original sample)"];
                             else if (fx.kind == EffectKind::newtime)
-                                ++options.report->droppedEffects["Newtime (time warping engine not reproduced: plays the original sample)"];
+                                ++options.report->partialEffects["Newtime (time warping engine not reproduced: plays the original sample)"];
                             else
                                 ++options.report->converted[slot.plugin];
                         }
