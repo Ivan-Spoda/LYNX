@@ -308,3 +308,25 @@ TEST (soundtoys_known_states_round135s)
         }
     }
 }
+
+TEST (autopan_panel_places_every_parameter_round135s)
+{
+    using namespace lynx;
+    // the panel shows every parameter on at least one control (some swap in place with the source) and stays inside
+    const auto& l = plugui::layoutFor (EffectKind::autoPan);
+    std::vector<int> placed (effectInfo (EffectKind::autoPan).params.size(), 0);
+    for (const auto& item : l.items)
+    {
+        CHECK (item.x >= 0.0f && item.y >= 0.0f && item.x + item.w <= (float) l.width + 0.5f && item.y + item.h <= (float) l.height + 0.5f);
+        if (item.param != nullptr && item.type != plugui::Item::display && item.type != plugui::Item::value)
+        {
+            const auto p = plugui::paramIndex (EffectKind::autoPan, item.param);
+            CHECK (p >= 0);
+            if (p >= 0) ++placed[(std::size_t) p];
+        }
+    }
+    for (std::size_t p = 0; p < placed.size(); ++p)
+        CHECK (placed[p] >= 1);
+    // the Voice Shift panel is one of LYNX's own panels
+    CHECK (std::find (plugui::ownLayoutKinds().begin(), plugui::ownLayoutKinds().end(), EffectKind::voiceShift) != plugui::ownLayoutKinds().end());
+}

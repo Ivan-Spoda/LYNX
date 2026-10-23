@@ -1995,12 +1995,12 @@ private:
             const auto hot = std::abs (mouse.x - x) < 5.0f && d.contains (mouse);
             g.setColour (hot || dragEdge == i ? colour::textPrimary : colour::textSecondary.withAlpha (0.6f));
             g.drawVerticalLine ((int) x, d.getY(), d.getBottom());
-            const auto knobR = juce::Rectangle<float> (16.0f, 16.0f).withCentre ({ x, d.getY() + 16.0f });
+            const auto knobR = juce::Rectangle<float> (16.0f, 16.0f).withCentre ({ x, d.getY() + 44.0f }); // round 135: under the strip
             g.setColour (colour::bg5);
             g.fillRoundedRectangle (knobR, 3.0f);
             g.setColour (colour::textSecondary);
             g.setFont (font (type::caption));
-            g.drawText (text (xover1 + i - 1), juce::Rectangle<float> (x + 10.0f, d.getY() + 9.0f, 70.0f, 14.0f), juce::Justification::centredLeft, false);
+            g.drawText (text (xover1 + i - 1), juce::Rectangle<float> (x + 10.0f, d.getY() + 37.0f, 70.0f, 14.0f), juce::Justification::centredLeft, false);
         }
         if (selected < n)
         {

@@ -2653,7 +2653,7 @@ const std::vector<EffectKind>& ownLayoutKinds()
                                                  EffectKind::echoform, EffectKind::spiralEcho, EffectKind::orbit, EffectKind::latticeMod,
                                                  EffectKind::crestCompressor, EffectKind::prismMultiband, EffectKind::sentryGate,
                                                  EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::compressor,
-                                                 EffectKind::voiceShift };
+                                                 EffectKind::voiceShift, EffectKind::autoPan };
     return kinds;
 }
 
