@@ -21,6 +21,47 @@ Scores are 0–10 (10 = a user of the original finds every control and every pie
 Round 128 covers the FabFilter / Slate / Antares roles (below). Round 129 covers the Waves / SSL / Valhalla roles
 (its own section).
 
+## Round 135: summary (all pairs, config / design)
+
+Round 135 (`docs/analise/REA_rodada135{f,s,v,w}.md`) implemented the ❌ / ⚠️ items, biggest user-visible gaps first
+(149 ❌ rows before, 36 after). The Soundtoys trials were activated by the user and are now measured black-box (their
+tables are no longer "manual only"); Auto-Tune Pro was re-activated and hosted black-box. **Waves has no licence on
+this PC: every Waves plugin runs in demo mode** (the UI is complete, the audio mutes periodically), so Waves rows were
+re-checked for controls and layout only, never for sound. "Before" = the scores after rounds 128 / 129.
+
+| LYNX engine | Original | Config before → 135 | Design before → 135 | Main round-135 changes |
+|---|---|---|---|---|
+| Facet EQ | Pro-Q 4 | 8 → 9 | 8 → 8 | Flat Tilt / All Pass shapes, Character menu |
+| Apex Limiter | Pro-L 2 | 7 → 9 | 8 → 9 | loudness meter (M / S / I / LRA / true peak), peak-type switch, display modes, oversampling, side-chain trigger |
+| Crest Compressor | Pro-C 3 | 8 → 8 | 8 → 8 | wet / dry pan |
+| Prism Multiband | Pro-MB | 5 → 7 | 6 → 7 | up to six bands (double-click splits), band pan, external side chain |
+| Sentry Gate | Pro-G | 8 → 9 | 8 → 8 | oversampling |
+| Hush De-esser | Pro-DS | 7 → 8 | 8 → 8 | oversampling |
+| LYNX Tune | Auto-Tune Pro | 7 → 8 | 7 → 7 | Learn scale (MIDI), Classic (low-latency path, same retune — measured) |
+| Compressor | Renaissance Compressor | 5 → 8 | 5 → 7 | ARC / Manual, Electro / Opto, Warm / Smooth, 0 dBFS limiter + pill |
+| Hush De-esser | DeEsser | 8 → 9 | 5 → 6 | output meter + clip lamp, "Classic split" presets |
+| Gemini Doubler | Doubler2 / Doubler4 | 8 / 5 → 9 / 8 | 7 → 7 | voices 3–4, modulation reset, clip lamp |
+| Echoform | H-Delay | 7 → 9 | 5 → 7 | own BPM, ping-pong start side, Link EQ, output meter + clip lamp |
+| LYNX Tune | Waves Tune Real-Time | 5 → 8 | 5 → 6 | Real-time page: Speed + Link, Tolerance cents / time, Vibrato, Correction, meters |
+| Echoform | ValhallaDelay | 7 → 8 | 7 → 7 | Quad taps A–D, Repeat / Swell, description line |
+| Echoform | EchoBoy / PrimalTap | 5 → 7 | 5 → 6 | Groove / Feel (measured), Accent, Prime numbers, cross feedback / balance, Freeze |
+| Epoch Verb | ValhallaVintageVerb | 9 → 9 | 8 → 9 | description line, MIX-label lock, original preset names |
+| Atrium | ValhallaRoom | 9 → 9 | 8 → 8 | (same) |
+| Foil Plate | ValhallaPlate | 9 → 9 | 9 → 10 | (same) |
+| Nebula | Supermassive | 9 → 9 | 9 → 9 | (same) |
+| Halo | ValhallaShimmer | 7 → 8 | 8 → 9 | the four reference modes (Mono / small / medium / big stereo) |
+| Horizon | ValhallaFutureVerb | 7 → 8 | 7 → 9 | mode-dependent controls |
+| Orbit | ValhallaSpaceModulator | 8 → 8 | 7 → 9 | description line |
+| Lattice Mod | ValhallaUberMod | 7 → 7 | 7 → 9 | the nine named modes |
+| Ember Saturator | Decapitator | 5 → 8 | 4 → 7 | Punish, Thump, Steep, five one-click voicings, wide cuts, 0–10 drive, IN / OUT meters, her states translated |
+| Auto-pan | PanMan | 3 → 7 | 2 → 6 | free LFO 0.01–10 Hz, rhythm steps, direction, smoothing, in / out, analog stage, pan-position strip, her states |
+| Foil Plate | Little Plate | 6 → 8 | 5 → 6 | Infinite, low cut 20 Hz–1 kHz |
+| Voice Shift (new) | Little AlterBoy | 0 → 9 | 0 → 8 | new engine: Pitch / Formant ±12 st, Link, Transpose / Quantize / Robot, Drive, Mix; her 52 states translated |
+
+Shared by every LYNX engine editor (round 135): the per-control description line at the bottom of the window
+(Valhalla's strip; ~330 sentences, pt-BR), the mix lock by clicking the MIX caption, and the name of the original's
+preset (Valhalla / Waves states) instead of "(no preset)".
+
 ---
 
 # FabFilter / Slate / Antares roles (round 128)
@@ -363,7 +404,7 @@ range buttons — see its table). Our host still shows their demo banner.
 | Orbit | ValhallaSpaceModulator | 7 | 7 | 8 | 7 → 9 (r135) |
 | Lattice Mod | ValhallaUberMod | 6 | 7 | 7 | 7 → 9 (r135) |
 | Ember Saturator | Decapitator (Soundtoys; trial measured in round 135) | 4 | 4 | 5 → **8** (r135) | 4 → **7** (r135) |
-| Fruity Delay 3 (stand-in) | EchoBoy / PrimalTap (Soundtoys) | 2 | 2 | 5 (Echoform) | 5 (Echoform) |
+| Fruity Delay 3 (stand-in) | EchoBoy / PrimalTap (Soundtoys; trial measured in round 135) | 2 | 2 | 5 → **7** (Echoform, r135) | 5 → **6** (Echoform, r135) |
 | Auto-pan (stand-in) | PanMan (Soundtoys; trial measured in round 135) | 2 | 2 | 3 → **7** (r135) | 2 → **6** (r135) |
 | Reeverb 2 (stand-in) | Little Plate (Soundtoys; trial measured in round 135) | 4 | 3 | 6 → **8** (Foil Plate, r135) | 5 → **6** (Foil Plate, r135) |
 | Voice Shift (round 135) | Little AlterBoy (Soundtoys; trial measured in round 135) | 0 | 0 | 0 → **9** (r135) | 0 → **8** (r135) |
