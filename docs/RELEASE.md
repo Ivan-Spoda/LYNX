@@ -8,7 +8,17 @@ a tag push builds `LYNX.exe` from the tagged source, runs the self-test on Windo
   "Open with LYNX" for `.flp` (FL Studio stays the default program), uninstaller in *Apps & features*. The workflow
   also installs and uninstalls it silently as a check.
 - `LYNX-x.y.z-windows-x64.zip` — portable build (extract and run), with `Demo.lynx`.
-- `LYNX.exe` and `SHA256SUMS.txt`.
+- `LYNX-x.y.z-x86_64.AppImage` — Linux, one file (no "linux" in the name: AppImage naming rule; the AppImage
+  catalog warns otherwise). Built in an Ubuntu 22.04 container, so it needs only glibc 2.35; the job fails when
+  `scripts/check-linux-compat.sh` finds a newer glibc symbol or a dependency on the system's libstdc++, or when
+  `scripts/check-appimage-start.sh` sees it quit within 12 s offline. Carries AppStream metadata
+  (`resources/linux/com.lynx_share.LYNX.appdata.xml`).
+- `LYNX-x.y.z-linux-x86_64.tar.gz` — Linux folder with `install.sh` (per-user install).
+- `LYNX-x.y.z-macos-universal.dmg` — macOS, ad-hoc signed.
+- `LYNX.exe` and `SHA256SUMS.txt` (SHA-256 of every file above).
+
+`workflow_dispatch` (Actions → Release → Run workflow, or `gh workflow run release.yml --ref <branch>`) builds and
+checks everything without a tag and keeps the files as workflow artifacts only.
 
 Steps:
 1. Bump the version in `CMakeLists.txt` (`project(LYNX VERSION x.y.z)`, the single source) and the download badge in

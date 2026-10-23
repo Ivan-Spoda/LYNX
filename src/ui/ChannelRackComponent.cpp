@@ -434,7 +434,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
             continue;
         }
 
-        if (showsNotePreview (pattern, row)) // piano-roll notes: a miniature instead of the step buttons
+        if (showsNotePreview (pattern, row, pianoRollView)) // piano-roll notes: a miniature instead of the step buttons
         {
             paintNotePreview (g, row, pattern, channel.colour);
             continue;
@@ -1117,6 +1117,17 @@ void ChannelRackComponent::applyLane (const juce::MouseEvent& e)
     setLaneValue (step, value);
 }
 
+void ChannelRackComponent::setPianoRollView (bool on)
+{
+    if (pianoRollView == on)
+        return;
+    pianoRollView = on;
+    repaint();
+
+    if (onFilterChanged) // the title's switches follow
+        onFilterChanged();
+}
+
 void ChannelRackComponent::toggleGraphLanes()
 {
     graphLanes = ! graphLanes;
@@ -1503,7 +1514,7 @@ void ChannelRackComponent::mouseDown (const juce::MouseEvent& e)
             const auto step = (e.x - gridLeft()) / stepWidth;
             const auto& pattern = song.patterns[(std::size_t) song.currentPattern];
 
-            if (showsNotePreview (pattern, row)) // the miniature opens the Piano Roll (steps would break the melody)
+            if (showsNotePreview (pattern, row, pianoRollView)) // the miniature opens the Piano Roll (steps would break the melody)
             {
                 if (! e.mods.isPopupMenu())
                 {
@@ -1707,7 +1718,7 @@ ui::Hint ChannelRackComponent::hintAt (juce::Point<int> p)
             h.text = name + " - " + tr ("Select: [LMB] one  [Ctrl]+[LMB] or [RMB] add/remove  [Shift]+[LMB] range  [LMB] drag range  [RMB] drag adds  [2xLMB] all  [Alt]+[Up]/[Down] moves the selection");
             break;
         case Area::grid:
-            if (! song.patterns.empty() && showsNotePreview (song.patterns[(std::size_t) song.currentPattern], row))
+            if (! song.patterns.empty() && showsNotePreview (song.patterns[(std::size_t) song.currentPattern], row, pianoRollView))
                 h.text = name + " - " + tr ("Piano Roll notes: [LMB] opens them in the Piano Roll");
             else
                 h.text = name + " - " + tr ("Steps: [LMB] drag draws (starting on a lit step erases)  [RMB] drag erases");
@@ -1739,7 +1750,7 @@ void ChannelRackComponent::applyPaint (const juce::MouseEvent& e)
 
     if (row < 0 || row >= (int) song.channels.size() || step < 0 || step >= numSteps() || e.x < stickyX + gridLeft()
         || song.channels[(std::size_t) row].instrument == InstrumentKind::audioClip
-        || showsNotePreview (song.patterns[(std::size_t) song.currentPattern], row)) // drag-paint skips note rows
+        || showsNotePreview (song.patterns[(std::size_t) song.currentPattern], row, pianoRollView)) // drag-paint skips note rows
         return;
 
     if (row == lastPaintedRow && step == lastPaintedStep)

@@ -223,6 +223,11 @@ bool showsNotePreview (const Pattern& pattern, int channel) noexcept
     });
 }
 
+bool showsNotePreview (const Pattern& pattern, int channel, bool pianoRollView) noexcept
+{
+    return pianoRollView || showsNotePreview (pattern, channel);
+}
+
 std::pair<int, int> channelKeyRange (const Pattern& pattern, int channel) noexcept
 {
     auto low = 128, high = -1;

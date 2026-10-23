@@ -100,6 +100,9 @@ struct HostTimeline
 HostTimeline& hostTimeline() noexcept;
 
 // `sample` is only used by the sampler; without a sample the sampler is silent.
+// The Sampler's Gain knob (SamplerSettings::gainDb) as a factor: dB clamped to -24..+24, exactly 1 at 0 dB.
+float samplerGain (float db) noexcept;
+
 std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr<const SampleData> sample = nullptr);
 
 // Multi-sample sampler: each zone with its sample already loaded (nullptr = missing file).

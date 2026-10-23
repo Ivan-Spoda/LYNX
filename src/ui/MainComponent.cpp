@@ -38,6 +38,7 @@
 #include "ui/Dialogs.h"
 #include "ui/EditorTools.h"
 #include "ui/AudioEditor.h"
+#include "ui/TempoTapper.h"
 #include "ui/ExportDialog.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/PluginWindow.h"
@@ -117,6 +118,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         mixer.selectTrack (track);
     };
     browser.onOpenAutomation = [this] (int automation) { openAutomationEditor (engine, automation); };
+    browser.onPreviewVolumeChanged = [this] { saveUiSettings(); };
     browser.onSendToPlaylist = [this] (const juce::File& file) {
         playlist.addAudioClipAtPlayhead (file);
         showPanel (Panel::playlist);
@@ -194,6 +196,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     metronomeButton.setIconColourWhenOn (theme::colour::accent);
     metronomeButton.setTooltip (tr ("Metronome"));
     metronomeButton.onClick = [this] { engine.getTransport().metronome.store (metronomeButton.getToggleState()); };
+    metronomeButton.onRightClick = [this] { showMetronomeMenu(); };
 
     typingPianoButton.setOnColour (theme::colour::bg6);
     typingPianoButton.setIconColourWhenOn (theme::colour::accent);
@@ -285,9 +288,18 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         rackFilterBox.text = rack.filterName();
         rackFilterBox.repaint();
         rackGraphButton.setToggleState (rack.areGraphLanesShown(), juce::dontSendNotification);
+        rackPianoRollButton.setToggleState (rack.isPianoRollView(), juce::dontSendNotification);
     };
     rackGraphButton.setClickingTogglesState (false);
     rackGraphButton.onClick = [this] { rack.toggleGraphLanes(); };
+    // the step sequencer / piano-roll view switch (FL keeps it in the rack's title bar too)
+    rackPianoRollButton.setClickingTogglesState (false);
+    rackPianoRollButton.setOnColour (theme::colour::bg6);
+    rackPianoRollButton.setIconColourWhenOn (theme::colour::accent);
+    rackPianoRollButton.onClick = [this] { runAction ("rack.pianoRollView"); };
+    ui::setHint (rackPianoRollButton, tr ("Piano-roll view: every channel shows its notes as a miniature piano roll (click one to edit it) "
+                                          "instead of the step buttons; click again for the steps"));
+    rackTitleTools.addAndMakeVisible (rackPianoRollButton);
     rackTitleTools.addAndMakeVisible (rackFilterBox);
     rackTitleTools.addAndMakeVisible (swingSlider);
     rackTitleTools.addAndMakeVisible (rackGraphButton);
@@ -298,6 +310,8 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         swingSlider.setBounds (r.removeFromLeft (26));
         r.removeFromLeft (4);
         rackGraphButton.setBounds (r.removeFromLeft (24).reduced (0, 1));
+        r.removeFromLeft (4);
+        rackPianoRollButton.setBounds (r.removeFromLeft (24).reduced (0, 1));
     };
     workspace.setTitleAccessory (Panel::channelRack, &rackTitleTools, rackTitleToolsWidth);
     workspace.onPanelMenu = [this] (Panel panel, juce::PopupMenu& menu) { addPanelMenuItems (panel, menu); };
@@ -1031,6 +1045,13 @@ bool MainComponent::runAction (const std::string& id)
         refreshRecordOptionButtons();
     }
     else if (is ("rack.graphEditor")) rack.toggleGraphLanes();
+    else if (is ("rack.pianoRollView"))
+    {
+        rack.setPianoRollView (! rack.isPianoRollView());
+        saveUiSettings();
+    }
+    else if (is ("view.audioEditor")) openAudioEditorForSelection();
+    else if (is ("view.tempoTapper")) openTempoTapper (engine);
     else if (is ("rack.groupSelected")) rack.groupSelected();
     else if (is ("rack.rotateLeft")) rack.rotateSelected (-1);
     else if (is ("rack.rotateRight")) rack.rotateSelected (1);
@@ -1180,6 +1201,12 @@ void MainComponent::loadUiSettings()
             askUnusedRecordings = on;
         else if (key == "autosaveKeep")
             autosaveKeep = prefs::clampAutosaveKeep (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
+        else if (key == "metronomeVolume")
+            engine.getTransport().metronomeVolume.store ((float) controls::clampUtilityVolume (line.fromFirstOccurrenceOf ("=", false, false).trim().getDoubleValue()));
+        else if (key == "previewVolume")
+            engine.setPreviewVolume (line.fromFirstOccurrenceOf ("=", false, false).trim().getDoubleValue());
+        else if (key == "rackPianoRollView")
+            rack.setPianoRollView (on);
         else if (key == "undoLevels")
             engine.setUndoLevels (line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
         else if (key == "askWhatToRecord" || key == "recordNotes" || key == "recordAudio" || key == "recordStartsPlayback" || key == "disarmOnStop")
@@ -1192,6 +1219,7 @@ void MainComponent::loadUiSettings()
     }
 
     startup = StartupOptions::load();
+    browser.refreshPreviewVolume();
 }
 
 void MainComponent::saveUiSettings()
@@ -1218,6 +1246,9 @@ void MainComponent::saveUiSettings()
                                       + "\nautosaveMinutes=" + juce::String (autosaveMinutes) + "\nautosaveKeep=" + juce::String (autosaveKeep)
                                       + "\naskUnusedRecordings=" + juce::String (askUnusedRecordings ? 1 : 0)
                                       + "\nundoLevels=" + juce::String (engine.getUndoLevels())
+                                      + "\nmetronomeVolume=" + juce::String (engine.getTransport().metronomeVolume.load(), 2)
+                                      + "\npreviewVolume=" + juce::String (engine.getPreviewVolume(), 2)
+                                      + "\nrackPianoRollView=" + juce::String (rack.isPianoRollView() ? 1 : 0)
                                       + "\naskWhatToRecord=" + juce::String (engine.getRecordOptions().askWhatToRecord ? 1 : 0)
                                       + "\nrecordNotes=" + juce::String (engine.getRecordOptions().recordNotes ? 1 : 0)
                                       + "\nrecordAudio=" + juce::String (engine.getRecordOptions().recordAudio ? 1 : 0)
@@ -1468,6 +1499,7 @@ void MainComponent::addPanelMenuItems (Panel panel, juce::PopupMenu& menu)
             menu.addSubMenu (tr ("Pattern"), makePatternMenu());
             menu.addSeparator();
             action (menu, "rack.graphEditor", tr ("Graph lanes (velocity, pan, pitch...)"), true, rack.areGraphLanesShown());
+            action (menu, "rack.pianoRollView", tr ("Piano-roll view of all channels"), true, rack.isPianoRollView());
             action (menu, "rack.rotateLeft", tr ("Rotate the selected channels' steps left"));
             action (menu, "rack.rotateRight", tr ("Rotate the selected channels' steps right"));
             juce::PopupMenu sort;
@@ -1676,6 +1708,85 @@ void MainComponent::armSelectedInsertForAudio()
     this->mixer.selectTrack (target);
     if (! engine.isInsertArmed (target))
         mixerinput::toggleArm (engine, target, &this->mixer);
+}
+
+void MainComponent::showMetronomeMenu()
+{
+    auto& transport = engine.getTransport();
+    juce::PopupMenu menu;
+    menu.addSectionHeader (tr ("Metronome"));
+    menu.addItem (tr ("Metronome") + shortcutText ("transport.metronome"), true, transport.metronome.load(), [this] {
+        metronomeButton.setToggleState (! metronomeButton.getToggleState(), juce::sendNotification);
+    });
+    menu.addItem (tr ("Volume: {0}...", { ui::utilityVolumeText (transport.metronomeVolume.load()) }), [this] { showMetronomeVolume(); });
+    {
+        juce::PopupMenu levels;
+        for (const auto v : { 0.25, 0.5, 0.71, 1.0, 1.25 })
+            levels.addItem (ui::utilityVolumeText (v), true, std::abs (transport.metronomeVolume.load() - v) < 0.005, [this, v] {
+                engine.getTransport().metronomeVolume.store ((float) v);
+                saveUiSettings();
+            });
+        menu.addSubMenu (tr ("Volume"), levels);
+    }
+    menu.addSeparator();
+    menu.addItem (tr ("Count-in before recording") + shortcutText ("record.countIn"), true, engine.getRecordOptions().countInBars > 0,
+                  [this] { runAction ("record.countIn"); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&metronomeButton));
+}
+
+void MainComponent::showMetronomeVolume()
+{
+    // a callout with the volume knob; the click plays at the new level at once (Transport::metronomeVolume)
+    struct VolumePanel final : public juce::Component
+    {
+        VolumePanel (MainComponent& m) : owner (m)
+        {
+            title.setText (tr ("Metronome volume"), juce::dontSendNotification);
+            title.setJustificationType (juce::Justification::centred);
+            addAndMakeVisible (title);
+            knob.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+            knob.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 120, 18);
+            knob.setRange (0.0, controls::maxUtilityVolume, 0.01);
+            knob.setDoubleClickReturnValue (true, 1.0);
+            knob.textFromValueFunction = [] (double v) { return ui::utilityVolumeText (v); };
+            knob.valueFromTextFunction = [] (const juce::String& t) { return t.retainCharacters ("0123456789.").getDoubleValue() / 100.0; };
+            knob.setValue (owner.engine.getTransport().metronomeVolume.load(), juce::dontSendNotification);
+            knob.onValueChange = [this] { owner.engine.getTransport().metronomeVolume.store ((float) knob.getValue()); };
+            knob.onDragEnd = [this] { owner.saveUiSettings(); };
+            ui::setHint (knob, tr ("Metronome volume: 100% is the default click level, up to 125%  [2xLMB] 100%"));
+            addAndMakeVisible (knob);
+            setSize (170, 150);
+        }
+        ~VolumePanel() override { owner.saveUiSettings(); }
+        void resized() override
+        {
+            auto r = getLocalBounds().reduced (8);
+            title.setBounds (r.removeFromTop (20));
+            knob.setBounds (r);
+        }
+        MainComponent& owner;
+        juce::Label title;
+        juce::Slider knob;
+    };
+    juce::CallOutBox::launchAsynchronously (std::make_unique<VolumePanel> (*this), metronomeButton.getScreenBounds(), nullptr);
+}
+
+void MainComponent::openAudioEditorForSelection()
+{
+    const auto& song = engine.getSong();
+    const auto channel = engine.getSelectedChannel();
+
+    if (juce::isPositiveAndBelow (channel, (int) song.channels.size()))
+    {
+        const auto& c = song.channels[(std::size_t) channel];
+        if ((c.instrument == InstrumentKind::sampler || c.instrument == InstrumentKind::audioClip) && ! c.samplePath.empty())
+        {
+            openAudioEditorForChannel (engine, channel);
+            return;
+        }
+    }
+
+    openAudioEditor (engine);
 }
 
 void MainComponent::showRecordMenu()
@@ -2030,7 +2141,7 @@ void MainComponent::TempoDisplay::showMenu()
     juce::PopupMenu menu;
     menu.addSectionHeader (tr ("Tempo") + ": " + juce::String (bpm, 3) + " BPM");
     menu.addItem (tr ("Type value..."), [this, bpm] { ui::typeValue (*this, spec(), bpm, [this] (double v) { setBpm (v); }); });
-    menu.addItem (tr ("Tap tempo..."), [this] { showTap(); });
+    menu.addItem (tr ("Tempo tapper..."), [this] { showTap(); });
     menu.addItem (tr ("Half ({0} BPM)", { juce::String (controls::halfTempo (bpm), 2) }), [this, bpm] { setBpm (controls::halfTempo (bpm)); });
     menu.addItem (tr ("Double ({0} BPM)", { juce::String (controls::doubleTempo (bpm), 2) }), [this, bpm] { setBpm (controls::doubleTempo (bpm)); });
     menu.addItem (tr ("Reset ({0})", { "130 BPM" }), [this] { setBpm (130.0); });
@@ -2041,72 +2152,7 @@ void MainComponent::TempoDisplay::showMenu()
 
 void MainComponent::TempoDisplay::showTap()
 {
-    // a callout with a big Tap pad: the tempo follows from the second tap on
-    struct TapPad final : juce::Component
-    {
-        explicit TapPad (TempoDisplay& d) : display (d)
-        {
-            setSize (220, 120);
-            setWantsKeyboardFocus (true);
-        }
-
-        void paint (juce::Graphics& g) override
-        {
-            using namespace theme;
-            auto r = getLocalBounds().reduced (10);
-            const auto pad = r.removeFromTop (70).toFloat();
-            g.setColour (flash > 0 ? colour::accent : colour::bg4);
-            g.fillRoundedRectangle (pad, radius::lg);
-            icons::draw (g, Icon::tap, pad.withSizeKeepingCentre (26.0f, 26.0f).translated (-34.0f, 0.0f), colour::textPrimary);
-            g.setColour (colour::textPrimary);
-            g.setFont (font (type::title, true));
-            g.drawText (tr ("Tap"), pad.withTrimmedLeft (40.0f), juce::Justification::centred);
-            g.setColour (colour::textSecondary);
-            g.setFont (font (type::small));
-            g.drawFittedText (taps.count() < 2 ? tr ("Click (or press T) on each beat")
-                                               : tr ("{0} taps: {1} BPM", { juce::String (taps.count()), juce::String (lastBpm, 2) }),
-                              r, juce::Justification::centred, 2);
-        }
-
-        void tap()
-        {
-            if (const auto bpm = taps.tap (juce::Time::getMillisecondCounterHiRes()))
-            {
-                lastBpm = *bpm;
-                display.setBpm (*bpm);
-            }
-            flash = 1;
-            repaint();
-            juce::Timer::callAfterDelay (90, [safe = juce::Component::SafePointer<TapPad> (this)] {
-                if (safe != nullptr)
-                {
-                    safe->flash = 0;
-                    safe->repaint();
-                }
-            });
-        }
-
-        void mouseDown (const juce::MouseEvent&) override { tap(); }
-        bool keyPressed (const juce::KeyPress& key) override
-        {
-            if (key.getKeyCode() == 'T' || key.getKeyCode() == 't' || key == juce::KeyPress::spaceKey)
-            {
-                tap();
-                return true;
-            }
-            return false;
-        }
-
-        TempoDisplay& display;
-        controls::TapTempo taps;
-        double lastBpm = 0.0;
-        int flash = 0;
-    };
-
-    auto pad = std::make_unique<TapPad> (*this);
-    auto* raw = pad.get();
-    juce::CallOutBox::launchAsynchronously (std::move (pad), getScreenBounds(), nullptr);
-    raw->grabKeyboardFocus();
+    openTempoTapper (engine); // FL's tempo menu opens its tempo tapper too
 }
 
 // --- hint bar ------------------------------------------------------------------------------------
@@ -2172,7 +2218,7 @@ void MainComponent::setControlHints()
     ui::setHint (recordMenuButton, tr ("What to record: notes, input audio, count-in, overdub or replace, quantise  [LMB] menu"), true);
     ui::setHint (patternModeButton, with (tr ("Pattern mode: plays the current pattern in a loop  [RMB] show the Channel Rack"), "transport.toggleMode"));
     ui::setHint (songModeButton, with (tr ("Song mode: plays the Playlist arrangement  [RMB] show the Playlist"), "transport.toggleMode"));
-    ui::setHint (metronomeButton, with (tr ("Metronome: clicks on every beat while playing"), "transport.metronome"));
+    ui::setHint (metronomeButton, with (tr ("Metronome: clicks on every beat while playing  [RMB] volume and options"), "transport.metronome"), true);
     ui::setHint (countInButton, with (tr ("Count-in: one bar of clicks before recording starts (the menu has more lengths)"), "record.countIn"));
     ui::setHint (waitInputButton, with (tr ("Wait for input: recording starts with the first note you play"), "record.waitForInput"));
     ui::setHint (typingPianoButton, with (tr ("Typing keyboard as a piano: Z..M and Q..P play the selected channels; letter shortcuts pause"),
@@ -2253,6 +2299,7 @@ void MainComponent::setQuickTips()
     tip (swingSlider, tr ("Swing"));
     tip (rackFilterBox, tr ("Channel filter group"));
     tip (rackGraphButton, tr ("Graph editor"));
+    tip (rackPianoRollButton, tr ("Piano-roll view"), "rack.pianoRollView");
 
     for (int i = 0; i < workspace::panelCount; ++i)
         tip (panelButtons[(std::size_t) i], tr (panelName ((Panel) i)), panelAction ((Panel) i));
@@ -3428,6 +3475,9 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         menu.addSubMenu (tr ("Load layout"), layoutsMenu());
         menu.addItem (tr ("Bring back off-screen panels"), [this] { workspace.bringBackOffscreen(); });
         menu.addSeparator();
+        menu.addItem (tr ("Audio editor") + shortcutText ("view.audioEditor"), [this] { openAudioEditorForSelection(); });
+        menu.addItem (tr ("Tempo tapper") + shortcutText ("view.tempoTapper"), [this] { openTempoTapper (engine); });
+        menu.addSeparator();
         menu.addItem (tr ("Typing keyboard as a piano") + shortcutText ("view.typingPiano"), true, typingPiano, [this] { setTypingPiano (! typingPiano); });
         menu.addItem (tr ("Touch keyboard"), true, isTouchKeyboardOpen(), [this] { toggleTouchKeyboard (engine); });
     }
@@ -3462,6 +3512,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         menu.addItem (tr ("Metronome") + shortcutText ("transport.metronome"), true, engine.getTransport().metronome.load(), [this] {
             metronomeButton.setToggleState (! metronomeButton.getToggleState(), juce::sendNotification);
         });
+        menu.addItem (tr ("Metronome volume ({0})...", { ui::utilityVolumeText (engine.getTransport().metronomeVolume.load()) }),
+                      [this] { showMetronomeVolume(); });
         {
             juce::PopupMenu recording;
             addRecordOptions (recording);

@@ -41,6 +41,9 @@ ValueSpec percentSpec (const juce::String& name, double defaultValue);          
 ValueSpec panSpec (const juce::String& name);                                   // -1..1 shown as L50 / C / R50
 ValueSpec faderSpec (const juce::String& name, double defaultValue);            // 0..1 fader shown in dB
 
+// A utility volume (metronome, Browser preview; core/ValueMath.h utilityGain) as "71% (-6.0 dB)".
+juce::String utilityVolumeText (double volume);
+
 // A type-in parser for any display function: finds the value whose shown number is closest to the
 // typed one (searches the range in fine steps, so it also works for non-linear curves).
 std::function<std::optional<double> (const juce::String&)> inverseOf (std::function<juce::String (double)> toText, double minimum,
