@@ -3616,3 +3616,4 @@ countries: br
 "Step note" = "Nota do passo"
 "Voice Shift" = "Voice Shift"
 "Voicing" = "Timbre"
+"Holds the plate's tail for ever (the decay at its top): play into it to layer, switch off to let it fade" = "Segura a cauda da placa para sempre (o decaimento no máximo): toque por cima para sobrepor, desligue para deixar sumir"

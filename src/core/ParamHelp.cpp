@@ -181,6 +181,7 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::foilPlate, "type" }, TR_NOOP ("The plate's metal: each one has its own brightness, density and decay") },
         { { K::foilPlate, "size" }, TR_NOOP ("Size of the plate: larger plates sound deeper") },
         { { K::foilPlate, "width" }, TR_NOOP ("Stereo width of the plate: 0 = mono, above 100 % = wider than the speakers") },
+        { { K::foilPlate, "infinite" }, TR_NOOP ("Holds the plate's tail for ever (the decay at its top): play into it to layer, switch off to let it fade") },
         // Nebula
         { { K::nebula, "mode" }, TR_NOOP ("The delay network: from clean echoes to huge, slowly building reverbs") },
         { { K::nebula, "delay" }, TR_NOOP ("Base time of the delay network; long times give echoes, short ones a reverb") },
