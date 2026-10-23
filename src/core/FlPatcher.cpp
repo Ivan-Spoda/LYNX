@@ -182,7 +182,12 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
     std::uint64_t inputPin = 0, outputPin = 0;
     bool hasInput = false, hasOutput = false;
 
+    std::vector<std::pair<std::uint64_t, std::pair<float, float>>> positions;
     const auto ok = forEachChunk (state.data() + 4, state.size() - 4, [&] (std::uint32_t id, const std::uint8_t* d, std::size_t n) {
+        if (id == 1100 && n >= 12) // an exposed parameter
+            graph.exposed.push_back ({ at<std::uint64_t> (d, 0), at<std::int32_t> (d, 8) });
+        if (id == 1600 && n >= 16) // (positions may also come as plain records)
+            positions.push_back ({ at<std::uint64_t> (d, 0), { at<float> (d, 8), at<float> (d, 12) } });
         if (id != 0)
             return;
         std::vector<std::pair<std::uint32_t, std::pair<const std::uint8_t*, std::size_t>>> sub;
@@ -195,15 +200,27 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
         {
             PatcherNode node;
             node.generator = at<std::uint32_t> (sub.front().second.first, 0) == 3;
+            if (sub.front().second.second >= 16)
+            {
+                node.id = at<std::uint64_t> (sub.front().second.first, 4);
+                node.flags = at<std::uint32_t> (sub.front().second.first, 12);
+            }
             const auto index = (int) graph.nodes.size();
             for (const auto& [k, x] : sub)
                 if (k == 5008)
                     node.plugin = text (x.first, x.second, wide);
+                else if (k == 5010)
+                    node.label = text (x.first, x.second, wide);
                 else if (k == 5005)
                     node.state.assign (x.first, x.first + x.second);
                 else if (k == 5009 && x.second >= 20)
+                {
                     ports[at<std::uint64_t> (x.first, 8)] = { index, (at<std::uint32_t> (x.first, 16) & 1) != 0, (int) at<std::uint32_t> (x.first, 4),
                                                              (int) at<std::uint32_t> (x.first, 0) };
+                    graph.ports.push_back ({ at<std::uint64_t> (x.first, 8),
+                                             { index, (at<std::uint32_t> (x.first, 16) & 1) != 0, (int) at<std::uint32_t> (x.first, 4),
+                                               (int) at<std::uint32_t> (x.first, 0), {} } });
+                }
             graph.nodes.push_back (std::move (node));
         }
         else if (first == 1400 && sub.front().second.second >= 21) // I/O pin
@@ -214,6 +231,11 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
             const auto fromOutside = (at<std::uint32_t> (x, 12) & 1) != 0;
             const auto bus = at<std::int32_t> (x, 17);
             ports[portId] = { -1, ! fromOutside, bus, kind };
+            std::string name;
+            for (const auto& [k, x2] : sub)
+                if (k == 1402)
+                    name = text (x2.first, x2.second, wide);
+            graph.ports.push_back ({ portId, { -1, ! fromOutside, bus, kind, name } });
             if (kind == 0 && bus == 0 && fromOutside)
                 inputPin = portId, hasInput = true;
             if (kind == 0 && bus == 0 && ! fromOutside)
@@ -227,9 +249,52 @@ std::optional<PatcherGraph> parsePatcher (const std::vector<std::uint8_t>& state
             connections.push_back ({ at<std::uint64_t> (x, 0), at<std::uint64_t> (x, 8), at<float> (x, 16), (flags & 2) != 0 ? (int) x[24] : -1,
                                      (flags & 1) != 0 });
         }
+        else if (first == 1600 && sub.front().second.second >= 16) // a node's position
+            positions.push_back ({ at<std::uint64_t> (sub.front().second.first, 0),
+                                   { at<float> (sub.front().second.first, 8), at<float> (sub.front().second.first, 12) } });
     });
     if (! ok)
         return std::nullopt;
+
+    // positions: the nodes by id; the first two others are the I/O nodes (input, then output)
+    {
+        int io = 0;
+        for (const auto& [nodeId, xy] : positions)
+        {
+            auto node = std::find_if (graph.nodes.begin(), graph.nodes.end(), [nodeId = nodeId] (const PatcherNode& n) { return n.id == nodeId; });
+            if (node != graph.nodes.end() && nodeId != 0)
+            {
+                node->x = xy.first;
+                node->y = xy.second;
+                node->placed = true;
+            }
+            else if (io == 0)
+            {
+                graph.inputX = xy.first;
+                graph.inputY = xy.second;
+                ++io;
+            }
+            else if (io == 1)
+            {
+                graph.outputX = xy.first;
+                graph.outputY = xy.second;
+                graph.ioPlaced = true;
+                ++io;
+            }
+        }
+    }
+
+    // every cable, resolved (class from byte 24 if valid, else the destination port's)
+    for (const auto& c : connections)
+    {
+        auto kind = c.kind;
+        if (kind < 0)
+        {
+            const auto dst = ports.find (c.destination);
+            kind = dst != ports.end() ? dst->second.kind : 2;
+        }
+        graph.cables.push_back ({ c.destination, c.source, c.gain, kind, c.disabled });
+    }
 
     // cable class: byte 24's if valid; otherwise, the destination port's. Disabled cables are dropped.
     std::erase_if (connections, [] (const Connection& c) { return c.disabled; });

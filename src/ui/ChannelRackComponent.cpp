@@ -68,6 +68,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::fruitydance: return "Fruity Dance";
         case InstrumentKind::directwave: return "DirectWave";
         case InstrumentKind::midiOut: return "MIDI Out";
+        case InstrumentKind::patcher: return "Patcher";
     }
     return "?";
 }

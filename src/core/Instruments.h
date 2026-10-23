@@ -55,6 +55,13 @@ public:
     virtual void setSongPosition (double /*ticks*/) noexcept {}
     // No voice sounding: render would only produce silence (the mixer skips the channel until a note arrives).
     virtual bool idle() const noexcept { return false; }
+    // Extra outputs to other mixer inserts (a generator Patcher's extra "To LYNX" outputs, REA_rodada141): the rack
+    // calls beginChunk (n) before a chunk's render() calls, which then also add each extra output's audio (gains
+    // applied) into auxOutputData (k, side) from the chunk's start; auxOutputTrack (k) = the insert it feeds.
+    virtual void beginChunk (int /*n*/) noexcept {}
+    virtual int auxOutputCount() const noexcept { return 0; }
+    virtual int auxOutputTrack (int /*k*/) const noexcept { return -1; }
+    virtual const float* auxOutputData (int /*k*/, int /*side*/) const noexcept { return nullptr; }
 };
 
 // Audio of an already-decoded sample (loaded off the audio thread). Short samples

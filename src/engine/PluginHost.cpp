@@ -1395,6 +1395,43 @@ int PluginHost::adoptFlPlugins (Song& song, juce::StringArray* missing, juce::St
                 });
         }
 
+    // the plugins inside Patchers (REA_rodada141), nested ones too: found, a substitute, or a silent / pass-through node
+    std::function<void (PatcherDoc&)> adoptGraph = [&] (PatcherDoc& doc) {
+        for (auto& node : doc.nodes)
+            if (node.generator)
+            {
+                if (node.channel.plugin.foreign.format != ForeignPlugin::Format::none && adopt (node.channel.plugin, true))
+                    node.channel.instrument = InstrumentKind::plugin;
+                if (node.channel.instrument == InstrumentKind::patcher)
+                    adoptGraph (node.channel.patcher);
+            }
+            else
+            {
+                auto& fx = node.effect;
+                if (fx.kind == EffectKind::plugin && fx.plugin.foreign.format != ForeignPlugin::Format::none)
+                {
+                    const auto foreign = fx.plugin.foreign;
+                    if (pluginSubstitutesEnabled() && ! findForeign (foreign, false) && substituteEffectSlot (fx, pluginIdentity (foreign), context))
+                    {
+                        if (substituted != nullptr)
+                            substituted->addIfNotAlreadyThere (juce::String::fromUTF8 (substituteOriginalName (fx).c_str()) + " -> "
+                                                               + juce::String::fromUTF8 (effectInfo (fx.kind).name));
+                    }
+                    else
+                        adopt (fx.plugin, false);
+                }
+                if (fx.kind == EffectKind::patcher)
+                    adoptGraph (fx.patcher);
+            }
+    };
+    for (auto& channel : song.channels)
+        if (channel.instrument == InstrumentKind::patcher)
+            adoptGraph (channel.patcher);
+    for (auto& track : song.mixer)
+        for (auto& fx : track.effects)
+            if (fx.kind == EffectKind::patcher)
+                adoptGraph (fx.patcher);
+
     return found;
 }
 

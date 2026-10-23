@@ -38,6 +38,7 @@
 #include "core/FlEffects.h"
 #include "core/ProjectContents.h"
 #include "core/FlPatcher.h"
+#include "core/Patcher.h"
 #include "core/FlSamplers.h"
 #include "core/FlSynths.h"
 #include "core/Inflate.h"
@@ -15777,3 +15778,4 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Bugs131Tests.inc"
 #include "Feat133Tests.inc"
 #include "Feat132Tests.inc"
+#include "Patcher141Tests.inc"
