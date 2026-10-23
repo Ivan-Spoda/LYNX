@@ -43,7 +43,7 @@ TEST (parity128a_apex_new_controls)
     using namespace parity128a;
     const double sr = 48000.0;
     // 8 styles; the old 4-step values keep their style
-    CHECK (styleCount == 8 && info().params.size() == (std::size_t) paramCount && paramCount == 15);
+    CHECK (styleCount == 8 && info().params.size() == (std::size_t) paramCount && pMeterScale == 14 && paramCount >= 15); // round 135 appended more
     CHECK (std::string (styleName (style (0.0f))) == "Clean" && std::string (styleName (style (0.3333f))) == "Punch");
     CHECK (std::string (styleName (style (0.6667f))) == "Loud" && std::string (styleName (style (1.0f))) == "Safe");
     CHECK (paramText (pAttack, 0.0f) == "0 ms" && paramText (pAttack, 0.5f) == "625 ms" && paramText (pAttack, 1.0f) == "10.00 s");
@@ -149,7 +149,7 @@ TEST (parity128a_hush_new_controls)
     using lynx::EffectKind;
     const double sr = 44100.0;
     const int n = 44100;
-    CHECK (lynx::mixsuite::hushInfo().params.size() == (std::size_t) count && count == 18);
+    CHECK (lynx::mixsuite::hushInfo().params.size() == (std::size_t) count && display == 17 && count >= 18); // round 135 appended Oversampling
     auto p = defaults (EffectKind::hushDeEsser);
     CHECK (p[allround] == 0.0f && p[lowPass] == 1.0f && std::abs (lookaheadTimeMs (p[lookaheadTime]) - 2.0) < 1e-6 && p[stereoLink] == 1.0f && p[input] == 0.5f);
     p[threshold] = (float) (20.0 / 60.0); // −40 dBFS

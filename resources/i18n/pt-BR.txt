@@ -3064,3 +3064,8 @@ countries: br
 "Split the band" = "Dividir a banda"
 "Remove the band" = "Remover a banda"
 "Click a band to open its panel; double-click = a new band here (up to six); right-click = band menu" = "Clique numa banda para abrir o painel; clique duplo = uma nova banda aqui (até seis); clique direito = menu da banda"
+"Band 5" = "Banda 5"
+"Band 6" = "Banda 6"
+"Band 1|Band 2|Band 3|Band 4|Band 5|Band 6" = "Banda 1|Banda 2|Banda 3|Banda 4|Banda 5|Banda 6"
+"Crossover 4" = "Crossover 4"
+"Crossover 5" = "Crossover 5"

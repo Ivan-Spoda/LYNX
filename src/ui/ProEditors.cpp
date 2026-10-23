@@ -201,7 +201,7 @@ private:
                                tr ("Output ceiling: drag up or down (the bottom bar's Out does the same)")));
         out.push_back (button ({ d.getRight() - 46.0f, d.getBottom() - 26.0f, 40.0f, 20.0f }, idTp, "TP", v (5) >= 0.5f,
                                tr ("True peak: the ceiling also holds between the samples (4x interpolation)")));
-        out.push_back (button ({ d.getRight() - 88.0f, d.getY() + 18.0f, 82.0f, 20.0f }, idLoudness, tr ("Loudness"), loudnessShown(),
+        out.push_back (button ({ d.getRight() - 300.0f, d.getBottom() - 26.0f, 84.0f, 20.0f }, idLoudness, tr ("Loudness"), loudnessShown(),
                                tr ("Loudness meter: momentary, short term and integrated LUFS, loudness range, peak")));
         {
             auto dm = menu ({ d.getRight() - 210.0f, d.getBottom() - 26.0f, 86.0f, 20.0f }, apex::pDisplayMode, {}, "Fast|Slow|Slow down|Infinite|Off");
@@ -471,10 +471,16 @@ private:
             }
         }
         // latency (constant: the maximum look-ahead, + the oversampler)
-        g.setColour (colour::textDisabled);
-        g.setFont (font (type::caption));
-        g.drawText (tr ("latency {0} samples", { juce::String (apex::latencyFor (48000.0, apex::oversamplingFactor (v (apex::pOversampling)))) }),
-                    juce::Rectangle<float> (p.getX() + 70.0f, p.getY() + 2.0f, 140.0f, 14.0f), juce::Justification::centredLeft, true);
+        {
+            // on a dark plate at the top left of the display, right of the GAIN slider
+            const auto lr = juce::Rectangle<float> (p.getX() + 64.0f, p.getY() + 2.0f, 132.0f, 15.0f);
+            g.setColour (colour::bg0.withAlpha (0.7f));
+            g.fillRoundedRectangle (lr, 3.0f);
+            g.setColour (colour::textSecondary);
+            g.setFont (font (type::caption));
+            g.drawText (tr ("latency {0} samples", { juce::String (apex::latencyFor (48000.0, apex::oversamplingFactor (v (apex::pOversampling)))) }),
+                        lr.reduced (5.0f, 0.0f), juce::Justification::centredLeft, true);
+        }
         if (loudnessShown()) paintLoudness (g);
     }
 
