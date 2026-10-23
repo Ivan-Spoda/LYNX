@@ -178,7 +178,7 @@ std::optional<EffectKind> effectForFlPlugin (const std::string& name)
         { "Fruity Phaser", EffectKind::chorus },      { "Fruity Bass Boost", EffectKind::eq },      { "Fruity Free Filter", EffectKind::filter },
         { "Fruity Love Philter", EffectKind::filter }, { "Fruity Filter", EffectKind::filter },      { "Fruity Fast LP", EffectKind::filter },
         { "Gross Beat", EffectKind::volumeGate },     { "Frequency Splitter", EffectKind::parametricEq },
-        { "Fruity Peak Controller", EffectKind::peakController },
+        { "Fruity Peak Controller", EffectKind::peakController }, { "Fruity Formula Controller", EffectKind::formulaController },
         { "Pitch Shifter", EffectKind::pitchShift },  { "Frequency Shifter", EffectKind::freqShift },
         { "Emphasis", EffectKind::limiter },          { "Low Lifter", EffectKind::parametricEq },
         { "Fruity Send", EffectKind::utility },       { "Transporter", EffectKind::utility },
@@ -1139,7 +1139,17 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             }
 
         if (c.pluginName == "Fruity Wrapper" && parseFlWrapper (c.pluginState, def.plugin.foreign))
+        {
             def.plugin.name = def.plugin.foreign.name;
+            def.plugin.midiInPort = def.plugin.foreign.midiInPort; // the MIDI Out channels on that port play it
+        }
+
+        // MIDI Out (REA_rodada16 §1): a silent channel whose notes the renderer sends to the plugins on its port
+        if (lowercase (c.pluginName) == "midi out" && c.pluginState.size() >= 28)
+        {
+            def.instrument = InstrumentKind::midiOut;
+            def.pluginState = c.pluginState;
+        }
 
         // Fruit Kick, MiniSynth, ... (REA_rodada10): approximated by the internal synth; the channel LFOs are kept
         bool adoptedFromPlugin = false;
@@ -1724,6 +1734,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 ++r.converted[c.pluginName];
             else if (plugin == "fruity wrapper" && def.plugin.foreign.format == ForeignPlugin::Format::none)
                 ++r.unsupported["Fruity Wrapper (plugin state not readable)"]; // e.g. a wrapper version newer than 12
+            else if (plugin == "midi out" && def.instrument == InstrumentKind::midiOut)
+                ++r.converted[c.pluginName];
             else if (plugin != "fruity wrapper" && plugin != "fruity keyboard controller" && plugin != "midi out"
                      && def.instrument == InstrumentKind::synth)
                 ++r.unsupported[c.pluginName]; // (Keyboard Controller only sends notes to other channels)
@@ -2529,8 +2541,10 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
         const auto found = effectSlotMap.find ({ link.source.track(), link.source.slot() });
         if (found == effectSlotMap.end()
-            || song.mixer[(std::size_t) link.source.track()].effects[(std::size_t) found->second.first].kind != EffectKind::peakController)
+            || (song.mixer[(std::size_t) link.source.track()].effects[(std::size_t) found->second.first].kind != EffectKind::peakController
+                && song.mixer[(std::size_t) link.source.track()].effects[(std::size_t) found->second.first].kind != EffectKind::formulaController))
             continue;
+        const auto formulaSource = song.mixer[(std::size_t) link.source.track()].effects[(std::size_t) found->second.first].kind == EffectKind::formulaController;
 
         Automation a;
         std::function<float (float)> valueMap;
@@ -2538,14 +2552,14 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         if (a.target.kind == AutomationTargetKind::none || a.target.kind == AutomationTargetKind::tempo)
             continue;
 
-        a.name = "Peak Controller (" + song.mixer[(std::size_t) link.source.track()].name + ")";
+        a.name = std::string (formulaSource ? "Formula Controller (" : "Peak Controller (") + song.mixer[(std::size_t) link.source.track()].name + ")";
         a.source = { link.source.track(), found->second.first, link.source.param() - flp::ControlId::pluginParamBase };
         if (valueMap)
             for (int i = 0; i <= 32; ++i)
                 a.curve.push_back (std::clamp (valueMap ((float) i / 32.0f), 0.0f, 1.0f));
         song.automations.push_back (std::move (a));
         if (options.report != nullptr)
-            ++options.report->converted["Peak Controller (link)"];
+            ++options.report->converted[formulaSource ? "Formula Controller (link)" : "Peak Controller (link)"];
     }
 
     // Playlist: all arrangements (the first stays open); pattern, audio and automation clips.
@@ -2737,38 +2751,6 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     for (int i = 0; i < (int) song.patterns.size(); ++i)
         if (song.patterns[(std::size_t) i].notes.size() > song.patterns[(std::size_t) song.currentPattern].notes.size())
             song.currentPattern = i;
-
-    // MIDI Out (REA_rodada16 §1): the channel makes no sound; its notes go to the plugins (Fruity
-    // Wrapper) listening on the same MIDI port
-    for (const auto& c : project.channels)
-    {
-        if (lowercase (c.pluginName) != "midi out" || c.pluginState.size() < 28)
-            continue;
-        const auto from = channelMap.find (c.index);
-        if (from == channelMap.end())
-            continue;
-        std::int32_t port = -1;
-        std::memcpy (&port, c.pluginState.data() + 24, 4);
-        auto& source = song.channels[(std::size_t) from->second];
-        source.muted = true;
-        for (int target = 0; target < (int) song.channels.size(); ++target)
-        {
-            const auto& t = song.channels[(std::size_t) target];
-            if (target == from->second || port < 0 || t.plugin.foreign.midiInPort != port)
-                continue;
-            for (auto& pattern : song.patterns)
-            {
-                const auto count = pattern.notes.size();
-                for (std::size_t n = 0; n < count; ++n)
-                    if (pattern.notes[n].channel == from->second)
-                    {
-                        auto copy = pattern.notes[n];
-                        copy.channel = target;
-                        pattern.notes.push_back (copy);
-                    }
-            }
-        }
-    }
 
     // FPC kits: one channel per pad (last to first, so indices don't shift)
     for (auto it = drumKits.rbegin(); it != drumKits.rend(); ++it)

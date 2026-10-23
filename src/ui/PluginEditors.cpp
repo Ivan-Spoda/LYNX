@@ -1,3 +1,4 @@
+#include "ui/ControllerEditors.h"
 #include "ui/PluginEditors.h"
 
 #include <cstring>
@@ -3263,6 +3264,11 @@ void open (AudioEngine& engine, int track, int slot)
     const auto kind = fxSlot.kind;
     if (! canOpen (fxSlot))
         return;
+    if (kind == EffectKind::formulaController) // the formula, its knobs and a monitor (REA round 133)
+    {
+        FormulaControllerWindows::open (engine, track, slot);
+        return;
+    }
     if (kind == EffectKind::parametricEq) // its own editor (response curve with handles)
     {
         ParametricEqWindows::open (engine, track, slot);
@@ -3301,6 +3307,7 @@ void open (AudioEngine& engine, int track, int slot)
 void closeAll()
 {
     windows().clear();
+    FormulaControllerWindows::closeAll();
     FacetEqWindows::closeAll();
     ProEditorWindows::closeAll();
 }

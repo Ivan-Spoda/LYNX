@@ -30,6 +30,7 @@
 #include "core/SynthPresets.h"
 #include "core/PluginLayout.h"
 #include "engine/Text.h"
+#include "ui/ControllerEditors.h"
 #include "ui/I18n.h"
 #include "ui/PluginSkin.h"
 #include "ui/Theme.h"
@@ -1503,6 +1504,11 @@ public:
           channel (c)
     {
         setup (pitch, pitchLabel, TR_NOOP ("Pitch"), -24.0, 24.0, 0.01, " st");
+        setup (gain, gainLabel, TR_NOOP ("Gain"), -24.0, 24.0, 0.1, " dB");
+        gain.textFromValueFunction = [] (double v) { return (v > 0.04 ? "+" : "") + juce::String (std::abs (v) < 0.05 ? 0.0 : v, 1) + " dB"; };
+        gain.valueFromTextFunction = [] (const juce::String& t) { return t.retainCharacters ("+-0123456789.,").replaceCharacter (',', '.').getDoubleValue(); };
+        gain.setTooltip (tr ("Sample gain: boosts or cuts the sample's level before the channel volume (-24 to +24 dB, double-click = 0 dB)"));
+        gain.setValue (0.0, juce::dontSendNotification);
         setup (attack, attackLabel, TR_NOOP ("Attack"), 0.0, 2.0, 0.001, " s");
         setup (release, releaseLabel, TR_NOOP ("Release"), 0.0, 4.0, 0.001, " s");
         setup (decay, decayLabel, TR_NOOP ("Decay"), 0.0, 10.0, 0.001, " s");
@@ -1575,8 +1581,17 @@ public:
         };
 
         auto top = area.removeFromTop (110);
-        keepPitch.setBounds (top.removeFromRight (top.getWidth() / 3).withSizeKeepingCentre (130, 40));
-        place (top, { { &pitch, &pitchLabel }, { &stretch, &stretchLabel } });
+        {
+            // Gain, Pitch, Stretch and the keep-pitch switch in four columns
+            const auto w4 = top.getWidth() / 4;
+            for (auto [slider, label] : { std::pair { &gain, &gainLabel }, { &pitch, &pitchLabel }, { &stretch, &stretchLabel } })
+            {
+                auto column = top.removeFromLeft (w4);
+                label->setBounds (column.removeFromTop (18));
+                slider->setBounds (column);
+            }
+            keepPitch.setBounds (top.withSizeKeepingCentre (juce::jmin (top.getWidth(), 130), 40));
+        }
         area.removeFromTop (6);
         auto envelope = area.removeFromTop (110);
         const auto w = envelope.getWidth() / 4;
@@ -1633,6 +1648,7 @@ private:
         {
             updating = true;
             pitch.setValue (c->sampler.pitch, juce::dontSendNotification);
+            gain.setValue (c->sampler.gainDb, juce::dontSendNotification);
             attack.setValue (c->sampler.attack, juce::dontSendNotification);
             decay.setValue (c->sampler.decay, juce::dontSendNotification);
             sustain.setValue (c->sampler.sustain, juce::dontSendNotification);
@@ -1667,6 +1683,7 @@ private:
 
         auto s = current()->sampler; // keeps what the panel does not show (slices)
         s.pitch = (float) pitch.getValue();
+        s.gainDb = std::abs (gain.getValue()) < 0.05 ? 0.0f : (float) gain.getValue();
         s.attack = (float) attack.getValue();
         s.decay = (float) decay.getValue();
         s.sustain = (float) sustain.getValue();
@@ -1716,8 +1733,8 @@ private:
     AudioEngine& engine;
     int channel;
     bool updating = false;
-    juce::Slider pitch, attack, release, decay, sustain, stretch, regionStart, regionEnd, cutoff, resonance;
-    juce::Label pitchLabel, attackLabel, releaseLabel, decayLabel, sustainLabel, stretchLabel, regionStartLabel, regionEndLabel,
+    juce::Slider pitch, gain, attack, release, decay, sustain, stretch, regionStart, regionEnd, cutoff, resonance;
+    juce::Label pitchLabel, gainLabel, attackLabel, releaseLabel, decayLabel, sustainLabel, stretchLabel, regionStartLabel, regionEndLabel,
         cutoffLabel, resonanceLabel;
     juce::ToggleButton reverse, cut, keepPitch, porta;
     juce::ComboBox filterType;
@@ -2139,7 +2156,14 @@ public:
         else if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::synth)
             setContentOwned (new SynthPanel (engine, channel), true);
         else if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::controller)
-            setContentOwned (new ControllerPanel (engine, channel), true);
+        {
+            if (parseKeyboardController (engine.getSong().channels[(std::size_t) channel].controllerState))
+                setContentOwned (new ControllerPanel (engine, channel), true);
+            else
+                setContentOwned (makeEnvelopeControllerEditor (engine, channel).release(), true); // editable (round 133)
+        }
+        else if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::midiOut)
+            setContentOwned (makeMidiOutEditor (engine, channel).release(), true);
         else if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
                  kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
@@ -2224,6 +2248,7 @@ bool hasChannelSettings (InstrumentKind kind) noexcept
         case InstrumentKind::synth:
         case InstrumentKind::sampler:
         case InstrumentKind::controller:
+        case InstrumentKind::midiOut:
         case InstrumentKind::sakura:
         case InstrumentKind::drumpad:
         case InstrumentKind::boobass:
@@ -2282,7 +2307,13 @@ std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, 
     if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::synth)
         return std::make_unique<SynthPanel> (engine, channel);
     if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::controller)
-        return std::make_unique<ControllerPanel> (engine, channel);
+    {
+        if (parseKeyboardController (engine.getSong().channels[(std::size_t) channel].controllerState))
+            return std::make_unique<ControllerPanel> (engine, channel);
+        return makeEnvelopeControllerEditor (engine, channel);
+    }
+    if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::midiOut)
+        return makeMidiOutEditor (engine, channel);
     if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
         kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
                  || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
