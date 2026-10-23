@@ -172,8 +172,16 @@ Not done: the Dual state (1 slot) keeps round 129's preset; her style's hiss; th
 structure (−21 dB) and its saturation shape.
 
 ## Where I stopped
-- Batch 1 (this commit): the state read-back + hash tables, Decapitator → Ember Classic (style A), PanMan → Auto-pan
-  Rhythm, editor routing (Ember in Classic opens the layout editor with the Classic controls), tests
-  `tests/VoiceMatch136Tests.inc`.
-- Batch 1 also: Little AlterBoy → LYNX Tune (§3).
-- Next: style A at high drive and the other styles; EchoBoy; FL renders of her projects vs LYNX; RComp / CLA-2A / NS1 residue.
+- Landed: the state read-back + hash tables (§0); Decapitator → Ember Classic voicing, style A (§1); PanMan → Auto-pan
+  Rhythm voicing (§2); Little AlterBoy → LYNX Tune (new substitute, §3); EchoBoy → Echoform Tape voicing (§4); the
+  editors' minimal hooks (Ember in Classic opens the layout editor with the Classic controls; LYNX Tune's Advanced page
+  and Echoform's bar show the new controls); tests `tests/VoiceMatch136Tests.inc`.
+- FL end-to-end: an FL render of the "game over" copy (`FL64 /R`) stopped at FL's "Problems loading the project"
+  dialog (WaveShell 16.0 / 15.5 missing on this PC, six beat stems missing from the copy) — the dialog is modal on the
+  user's desktop, so it was closed at once; with Waves in demo mode a whole-mix null would not be meaningful anyway.
+  The per-plug-in comparisons above (the official plug-in with her saved state vs LYNX through the real substitute
+  lookup, her own takes) are this round's evidence.
+- Not done, in order: Decapitator at drive ≥ 5 (her 5.9 states, ~70 slots) and the styles E / N / T / P (curves not
+  fitted; data on D:); Punish's curve; EchoBoy's Dual state and the ping-pong kernel's last −21 dB; PanMan's first
+  ~200 ms after a reset; LYNX Tune's own LF excess at neutral (158–200 Hz); the RComp / CLA-2A / NS1 residue (Waves is in
+  demo mode here: those need mute-masked measurements).
