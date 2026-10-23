@@ -94,7 +94,67 @@ public:
     int count() const noexcept { return (int) taps.size(); }
     void reset() { taps.clear(); }
 
+    // What the tempo tapper shows: waiting for the second tap, tapping (the tempo still moves), or stable (at least
+    // four taps whose intervals all stay within 4% of their mean).
+    enum class State
+    {
+        waiting,
+        tapping,
+        stable
+    };
+
+    State state() const noexcept
+    {
+        if (taps.size() < 2)
+            return State::waiting;
+        if (taps.size() < 4)
+            return State::tapping;
+
+        const auto mean = (taps.back() - taps.front()) / (double) (taps.size() - 1);
+        for (std::size_t i = 1; i < taps.size(); ++i)
+            if (std::abs ((taps[i] - taps[i - 1]) - mean) > 0.04 * mean)
+                return State::tapping;
+        return State::stable;
+    }
+
+    // The time of the last tap (ms), or a negative value before the first.
+    double lastTap() const noexcept { return taps.empty() ? -1.0 : taps.back(); }
+
 private:
     std::vector<double> taps;
 };
+
+// The tempo tapper's "Sync": a tap during playback puts the playhead on the nearest beat (ticks, core PPQ).
+inline double nearestBeatTicks (double ticks) noexcept
+{
+    return std::max (0.0, std::round (ticks / (double) ppq) * (double) ppq);
+}
+
+// The tempo tapper's nudge buttons: while one is held the tempo runs `percent` faster or slower to drift the beat.
+inline double nudgedTempo (double bpm, bool faster, double percent = 4.0) noexcept
+{
+    return clampTempo (bpm * (1.0 + (faster ? percent : -percent) / 100.0));
+}
+
+// --- utility volumes (metronome, Browser preview) ----------------------------------------------
+
+// A utility volume knob: 0..125%, 100% = the default level. The gain follows the square of the knob (−6 dB at
+// about 71%, −12 dB at 50%), so the knob's travel feels even to the ear.
+constexpr double maxUtilityVolume = 1.25;
+
+inline float utilityGain (double volume) noexcept
+{
+    if (! std::isfinite (volume))
+        return 1.0f;
+    const auto v = std::clamp (volume, 0.0, maxUtilityVolume);
+    return (float) (v * v);
+}
+
+inline float metronomeGain (double volume) noexcept { return utilityGain (volume); }
+inline float previewGain (double volume) noexcept { return utilityGain (volume); }
+
+inline double clampUtilityVolume (double volume) noexcept
+{
+    return std::isfinite (volume) ? std::clamp (volume, 0.0, maxUtilityVolume) : 1.0;
+}
 } // namespace lynx::controls

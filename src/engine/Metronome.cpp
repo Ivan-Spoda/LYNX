@@ -1,5 +1,7 @@
 #include "engine/Metronome.h"
 
+#include "core/ValueMath.h"
+
 namespace lynx
 {
 namespace
@@ -81,6 +83,7 @@ void Metronome::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
     const auto startTick = transport.positionTicks.load (std::memory_order_relaxed) - (counting ? countIn : 0.0);
     const auto tps = transport.ticksPerSample();
     const auto clickLength = (int) (clickLengthSeconds * currentSampleRate);
+    const auto level = clickGain * controls::metronomeGain (transport.metronomeVolume.load (std::memory_order_relaxed));
 
     for (int i = 0; i < buffer.getNumSamples(); ++i)
     {
@@ -98,7 +101,7 @@ void Metronome::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
         if (clickSamplesLeft > 0)
         {
             const auto envelope = (float) clickSamplesLeft / (float) clickLength;
-            const auto sample = clickGain * envelope * (float) std::sin (clickPhase);
+            const auto sample = level * envelope * (float) std::sin (clickPhase);
             clickPhase += clickPhaseDelta;
             --clickSamplesLeft;
 

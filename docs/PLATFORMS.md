@@ -8,7 +8,7 @@ JUCE and builds anywhere; the app uses JUCE 8.0.4. Everything that differs per O
 |---|---|---|---|
 | Builds | Zig cross build from Linux/WSL (`scripts/build-windows-zig.sh`, used for releases) or CMake + MSVC | CMake + Apple clang, universal arm64 + x86_64 | CMake + GCC or Clang |
 | Package | per-user installer (NSIS) + portable .zip | .dmg (ad-hoc signed, **not notarized**) | AppImage + .tar.gz (`install.sh`) |
-| Minimum | Windows 10 x64 | macOS 11 Big Sur | x86_64, glibc 2.39 (Ubuntu 24.04, Debian 13, Fedora 40), X11 or XWayland |
+| Minimum | Windows 10 x64 | macOS 11 Big Sur | x86_64, glibc 2.35 (Ubuntu 22.04, Debian 12, Fedora 36), X11 or XWayland |
 | Audio drivers | Windows Audio (WASAPI shared / low-latency / exclusive), DirectSound, ASIO, built-in LYNX ASIO | Core Audio | ALSA, JACK (PipeWire through `pipewire-jack`) |
 | Plugin formats | VST3, CLAP, VST2 | VST3, CLAP, Audio Units | VST3, CLAP, LV2, VST2 |
 | Plugin sandbox (separate process) | yes (opt-in) | no | no |
@@ -54,7 +54,10 @@ round 117 notes (`docs/analise/REA_rodada117.md`) list the measured differences.
 ## Building
 
 - Windows (release): `scripts/build-windows-zig.sh` from Linux/WSL.
-- Linux: see README ("Build from source"); `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build --target LYNX`,
+- Linux: see README ("Build from source"). Release builds run in an Ubuntu 22.04 container with GCC 13
+  (toolchain PPA) and a static libstdc++/libgcc, so they need only glibc 2.35; `scripts/check-linux-compat.sh <binary>`
+  checks that (highest GLIBC_ symbol version, no system libstdc++) and `scripts/check-appimage-start.sh <AppImage>`
+  starts the AppImage offline on Xvfb like the AppImage catalog test does; `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build --target LYNX`,
   then `scripts/package-linux.sh build/LYNX_artefacts/Release/LYNX <label> dist`.
 - macOS: `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" && cmake --build build --target LYNX`,
   then `scripts/package-macos.sh build/LYNX_artefacts/Release/LYNX.app <label> dist`.
