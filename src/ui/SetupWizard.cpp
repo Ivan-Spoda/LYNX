@@ -7,7 +7,6 @@
 #include "ui/I18n.h"
 #include "ui/Theme.h"
 #include "platform/Paths.h"
-#include "ui/WindowOwner.h"
 
 namespace lynx
 {
@@ -36,6 +35,8 @@ public:
 
 class SetupWizard final : public juce::Component,
                           private juce::ListBoxModel,
+                          private juce::ComponentListener,
+                          private juce::AsyncUpdater,
                           private juce::Timer
 {
 public:
@@ -53,11 +54,19 @@ public:
         intro.setText (tr ("A few things to get started. Everything here can be changed later (Options > Setup wizard)."),
                        juce::dontSendNotification);
         intro.setColour (juce::Label::textColourId, theme::colour::textSecondary);
+        intro.setJustificationType (juce::Justification::topLeft);
+        intro.setMinimumHorizontalScale (1.0f);
         for (auto* c : std::initializer_list<juce::Component*> { &title, &intro, &languageLabel, &languageBox, &audioLabel, &devices, &flLabel,
                                                                  &flStatus, &foldersLabel, &folders, &addFolder, &removeFolder, &resetFolders,
-                                                                 &scanNow, &progressBar, &scanStatus, &scanAtStart, &skip, &finish })
-            addAndMakeVisible (c);
-
+                                                                 &scanNow, &progressBar, &scanStatus, &scanAtStart })
+            body.addAndMakeVisible (c);
+        viewport.setViewedComponent (&body, false);
+        viewport.setScrollBarsShown (true, false);
+        viewport.setScrollBarThickness (10);
+        addAndMakeVisible (viewport);
+        addAndMakeVisible (skip);
+        addAndMakeVisible (finish);
+        devices.addComponentListener (this);
         // language
         int id = 1;
         for (const auto& l : i18n::languages())
@@ -123,49 +132,121 @@ public:
         };
         scanAtStart.setToggleState (backgroundScanAtStart(), juce::dontSendNotification);
         scanStatus.setColour (juce::Label::textColourId, theme::colour::textSecondary);
+        scanStatus.setJustificationType (juce::Justification::topLeft);
+        scanStatus.setMinimumHorizontalScale (1.0f);
         progressBar.setColour (juce::ProgressBar::foregroundColourId, theme::colour::accent);
         progressBar.setPercentageDisplay (false);
 
-        skip.onClick = [this] {
-            markSetupWizardDone();
-            if (onClose)
-                onClose();
-        };
+        skip.onClick = [this] { skipSetup(); };
         finish.onClick = [this] { finishSetup(); };
         finish.setColour (juce::TextButton::buttonColourId, theme::colour::accent);
 
         updateScanStatus();
         startTimerHz (10);
-        setSize (680, 660);
+        setSize (680, getIdealHeight (680));
     }
 
-    ~SetupWizard() override { folders.setModel (nullptr); }
+    ~SetupWizard() override
+    {
+        cancelPendingUpdate();
+        devices.removeComponentListener (this);
+        folders.setModel (nullptr);
+    }
 
-    void paint (juce::Graphics& g) override { g.fillAll (theme::colour::bg2); }
+    // Runs when the content's natural height changed by itself (the device selector grew or shrank).
+    std::function<void()> onIdealHeightChanged;
+
+    // The height that shows everything without scrolling at this width.
+    int getIdealHeight (int width)
+    {
+        return layoutBody (width) + footerHeight;
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (theme::colour::bg2);
+        g.setColour (theme::colour::bg0);
+        g.fillRect (0, getHeight() - footerHeight, getWidth(), 1);
+    }
 
     void resized() override
     {
-        auto r = getLocalBounds().reduced (20, 16);
+        auto r = getLocalBounds();
+        auto footer = r.removeFromBottom (footerHeight).reduced (20, 10);
+        finish.setBounds (footer.removeFromRight (120));
+        footer.removeFromRight (10);
+        skip.setBounds (footer.removeFromRight (120));
+
+        viewport.setBounds (r);
+        auto width = r.getWidth();
+        auto height = layoutBody (width);
+        if (height > r.getHeight()) // a scroll bar: lay out again beside it
+        {
+            width -= viewport.getScrollBarThickness();
+            height = layoutBody (width);
+        }
+        body.setSize (width, height);
+    }
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (key == juce::KeyPress::escapeKey)
+        {
+            skipSetup();
+            return true;
+        }
+        return false;
+    }
+
+    void skipSetup()
+    {
+        markSetupWizardDone(); // the wizard doesn't come back by itself
+        if (onClose)
+            onClose();
+    }
+
+private:
+    static constexpr int footerHeight = 50;
+
+    // A wrapping label's height for `width` (the intro and the status texts are longer in pt-BR).
+    static int textHeight (const juce::Label& label, int width, int minimum)
+    {
+        juce::AttributedString text;
+        text.append (label.getText(), label.getFont());
+        juce::TextLayout layout;
+        layout.createLayout (text, (float) juce::jmax (1, width - label.getBorderSize().getLeftAndRight()));
+        return juce::jmax (minimum, (int) std::ceil (layout.getHeight()) + label.getBorderSize().getTopAndBottom() + 2);
+    }
+
+    // Places the content for `width` and returns its height. The device selector is given the width first and then
+    // keeps the height it chose for itself, so nothing below it can overlap it.
+    int layoutBody (int width)
+    {
+        const juce::ScopedValueSetter<bool> busy (layingOut, true);
+        auto r = juce::Rectangle<int> (0, 0, width, 100000).reduced (20, 0);
+        r.removeFromTop (16);
+        const auto w = r.getWidth();
         title.setBounds (r.removeFromTop (30));
-        intro.setBounds (r.removeFromTop (22));
+        intro.setBounds (r.removeFromTop (textHeight (intro, w, 22)));
         r.removeFromTop (8);
 
         auto row = r.removeFromTop (26);
         languageLabel.setBounds (row.removeFromLeft (150));
-        languageBox.setBounds (row.removeFromLeft (220));
+        languageBox.setBounds (row.removeFromLeft (juce::jmin (220, row.getWidth())));
         r.removeFromTop (10);
 
         audioLabel.setBounds (r.removeFromTop (24));
-        devices.setBounds (r.removeFromTop (110));
+        devices.setBounds (r.getX(), r.getY(), w, 200); // its resized() sets its own height
+        r.removeFromTop (devices.getHeight());
         r.removeFromTop (6);
 
         flLabel.setBounds (r.removeFromTop (24));
-        flStatus.setBounds (r.removeFromTop (44));
-        r.removeFromTop (6);
+        flStatus.setBounds (r.removeFromTop (textHeight (flStatus, w, 22)));
+        r.removeFromTop (10);
 
         foldersLabel.setBounds (r.removeFromTop (24));
         auto list = r.removeFromTop (118);
-        auto buttons = list.removeFromRight (150);
+        auto buttons = list.removeFromRight (juce::jmin (150, w / 3));
         folders.setBounds (list.withTrimmedRight (8));
         addFolder.setBounds (buttons.removeFromTop (26));
         buttons.removeFromTop (6);
@@ -178,13 +259,25 @@ public:
         scanNow.setBounds (row.removeFromLeft (150));
         row.removeFromLeft (10);
         progressBar.setBounds (row);
-        scanStatus.setBounds (r.removeFromTop (22));
+        r.removeFromTop (4);
+        scanStatus.setBounds (r.removeFromTop (textHeight (scanStatus, w, 22)));
         scanAtStart.setBounds (r.removeFromTop (24));
+        r.removeFromTop (12);
+        return r.getY();
+    }
 
-        auto bottom = getLocalBounds().reduced (20, 14).removeFromBottom (30);
-        finish.setBounds (bottom.removeFromRight (120));
-        bottom.removeFromRight (10);
-        skip.setBounds (bottom.removeFromRight (120));
+    void componentMovedOrResized (juce::Component&, bool, bool wasResized) override
+    {
+        if (wasResized && ! layingOut)
+            triggerAsyncUpdate();
+    }
+
+    void handleAsyncUpdate() override
+    {
+        if (onIdealHeightChanged)
+            onIdealHeightChanged(); // the owner resizes this (which lays it out again)
+        else
+            resized();
     }
 
 private:
@@ -260,6 +353,9 @@ private:
     std::function<void (const juce::String&)> onLanguage;
     std::function<void()> onClose;
 
+    juce::Component body; // the scrolling content
+    juce::Viewport viewport;
+    bool layingOut = false;
     juce::Label title, intro, flStatus, scanStatus;
     SectionLabel languageLabel { tr ("Language") }, audioLabel { tr ("Audio output") }, flLabel { "FL Studio" },
         foldersLabel { tr ("Plugin folders ({0})", { platform::pluginFormatNames() }) };
@@ -276,25 +372,62 @@ private:
     bool scanStarted = false;
 };
 
-class WizardWindow final : public juce::DialogWindow
+// The wizard on top of the main window (round 140; it was a separate window before, so the first start showed
+// only the wizard and not the DAW): the DAW stays visible, dimmed, behind a centred panel. Escape = Skip.
+class WizardOverlay final : public juce::Component
 {
 public:
-    WizardWindow (AudioEngine& engine, std::function<void (const juce::String&)> onLanguage)
-        : juce::DialogWindow (tr ("LYNX setup"), theme::colour::bg2, true, true)
+    WizardOverlay (AudioEngine& engine, std::function<void (const juce::String&)> onLanguage, std::function<void()> close)
+        : wizard (engine, std::move (onLanguage), std::move (close))
     {
-        setUsingNativeTitleBar (true);
-        setContentOwned (new SetupWizard (engine, std::move (onLanguage), [this] { closeButtonPressed(); }), true);
-        centreWithSize (getWidth(), getHeight());
-        setResizable (false, false);
+        setWantsKeyboardFocus (true);
+        wizard.onIdealHeightChanged = [this] { resized(); };
+        addAndMakeVisible (wizard);
     }
 
-    void closeButtonPressed() override
+    void paint (juce::Graphics& g) override
     {
-        // closing the window counts as "skip": the wizard doesn't come back by itself
-        markSetupWizardDone();
-        juce::MessageManager::callAsync ([w = juce::Component::SafePointer<juce::Component> (this)] { delete w.getComponent(); });
-        setVisible (false);
+        g.fillAll (juce::Colours::black.withAlpha (0.55f));
+        const auto panel = wizard.getBounds().toFloat();
+        for (int i = 1; i <= 6; ++i) // a soft shadow
+        {
+            g.setColour (juce::Colours::black.withAlpha (0.08f));
+            g.drawRoundedRectangle (panel.expanded ((float) i), 4.0f + (float) i, 2.0f);
+        }
+        g.setColour (theme::colour::accent.withAlpha (0.6f));
+        g.drawRect (wizard.getBounds().expanded (1), 1);
     }
+
+    void resized() override
+    {
+        const auto area = getLocalBounds().reduced (16);
+        const auto width = juce::jmin (680, area.getWidth());
+        const auto height = juce::jmin (wizard.getIdealHeight (width), area.getHeight());
+        wizard.setBounds (area.withSizeKeepingCentre (width, height));
+        wizard.resized(); // getIdealHeight laid it out without a scroll bar
+        repaint();
+    }
+
+    void visibilityChanged() override
+    {
+        if (isShowing())
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<juce::Component> (this)] {
+                if (safe != nullptr && safe->isShowing())
+                    safe->grabKeyboardFocus();
+            });
+    }
+
+    // modal for the window behind it: its keys (the typing piano, shortcuts) don't reach the DAW
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (key == juce::KeyPress::escapeKey)
+            wizard.skipSetup();
+        return true;
+    }
+    bool keyStateChanged (bool) override { return true; }
+
+private:
+    SetupWizard wizard;
 };
 } // namespace
 
@@ -304,11 +437,10 @@ std::unique_ptr<juce::Component> makeSetupWizardContent (AudioEngine& engine, st
     return std::make_unique<SetupWizard> (engine, std::move (onLanguage), std::move (onClose));
 }
 
-void showSetupWizard (AudioEngine& engine, std::function<void (const juce::String&)> onLanguage)
+std::unique_ptr<juce::Component> makeSetupWizardOverlay (AudioEngine& engine, std::function<void (const juce::String&)> onLanguage,
+                                                         std::function<void()> onClose)
 {
-    auto* window = new WizardWindow (engine, std::move (onLanguage)); // deletes itself when closed
-    window->setVisible (true);
-    keepAboveMainWindow (*window);
+    return std::make_unique<WizardOverlay> (engine, std::move (onLanguage), std::move (onClose));
 }
 
 bool setupWizardDone()

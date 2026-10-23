@@ -2689,6 +2689,20 @@ private:
             offline.dispatchPendingMessages();
             saveSnapshot (ui, prefix + "-desktop.png");
 
+            // the first start: the setup wizard over the main window (round 140), also on a small screen (it scrolls)
+            {
+                const auto size = ui.getBounds();
+                ui.showSetupWizard();
+                offline.dispatchPendingMessages();
+                saveSnapshot (ui, prefix + "-desktop-setup.png");
+                ui.setSize (1024, 600);
+                offline.dispatchPendingMessages();
+                saveSnapshot (ui, prefix + "-desktop-setup-small.png");
+                ui.closeSetupWizardForSnapshot();
+                ui.setBounds (size);
+                offline.dispatchPendingMessages();
+            }
+
             // the start-up desktop and the toolbar at the usual window sizes: the untouched default layout
             // follows the window (default rects, not scaled ones); panels drop from the toolbar by priority
             {
