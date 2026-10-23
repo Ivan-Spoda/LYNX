@@ -1424,6 +1424,35 @@ void RackRenderer::process (const RackState* state,
                 arp->reset();
     }
 
+    // FL's MIDI Out sends its bank and program when playback starts (REA_rodada16 §1.3)
+    if (playing && ! wasPlaying && state->hasMidiRoutes)
+        for (std::size_t c = 0; c < state->midiTargets.size(); ++c)
+        {
+            if (state->midiTargets[c].empty())
+                continue;
+            const auto s = midictl::parseMidiOut (state->song.channels[c].pluginState);
+            const auto status = (std::uint8_t) (s.channel & 15);
+            for (const auto t : state->midiTargets[c])
+            {
+                auto& target = *state->instruments[(std::size_t) t];
+                if (s.bankMsb >= 0)
+                {
+                    const std::uint8_t m[3] { (std::uint8_t) (0xB0 | status), 0, (std::uint8_t) s.bankMsb };
+                    target.midiMessage (m, 3);
+                }
+                if (s.bankLsb >= 0)
+                {
+                    const std::uint8_t m[3] { (std::uint8_t) (0xB0 | status), 32, (std::uint8_t) s.bankLsb };
+                    target.midiMessage (m, 3);
+                }
+                if (s.program > 0)
+                {
+                    const std::uint8_t m[2] { (std::uint8_t) (0xC0 | status), (std::uint8_t) (s.program - 1) };
+                    target.midiMessage (m, 2);
+                }
+            }
+        }
+
     // started playing or jumped: audio clips in progress must start mid-way
     resumeAudio = playing && (! wasPlaying || jumped);
     wasPlaying = playing;
