@@ -1945,7 +1945,7 @@ Layout prismMultiband()
         auto add = [&] (LayoutItem i) { i.colour = b; v.push_back (onPage (std::move (i), b)); };
         add (toggle (16, 384, 56, 22, names[b][8], TR_NOOP ("On")));
         add (toggle (78, 384, 60, 22, names[b][9], TR_NOOP ("Solo")));
-        add (tabs (16, 414, 232, 22, names[b][3], TR_NOOP ("Compress|Expand")));
+        add (tabs (16, 414, 160, 22, names[b][3], TR_NOOP ("Compress|Expand")));
         add (dial (312, 398, 46, names[b][0], TR_NOOP ("Threshold"), big));
         add (dial (402, 398, 46, names[b][2], TR_NOOP ("Range"), big | bipolar));
         add (dial (484, 398, 36, names[b][1], TR_NOOP ("Ratio")));
