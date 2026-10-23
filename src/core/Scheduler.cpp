@@ -125,6 +125,26 @@ ScheduleIndex makeScheduleIndex (const Song& song)
     return index;
 }
 
+PlaybackLoop playbackLoop (bool songMode, double loopStart, double loopEnd, double songLength) noexcept
+{
+    if (! songMode)
+        return {};
+    if (loopEnd > loopStart)
+        return { loopStart, loopEnd };
+    return { 0.0, std::max (0.0, songLength) };
+}
+
+double hostPositionTick (const Song& song, double tick, std::int64_t songLength) noexcept
+{
+    tick = std::max (0.0, tick);
+    if (song.mode == PlayMode::song)
+        return song.hasLoop() ? tick : std::fmod (tick, (double) std::max<std::int64_t> (1, songLength));
+    if (song.patterns.empty())
+        return tick;
+    const auto& pattern = song.patterns[(std::size_t) std::clamp (song.currentPattern, 0, (int) song.patterns.size() - 1)];
+    return std::fmod (tick, (double) std::max<std::int64_t> (1, pattern.effectiveLength (song.beatsPerBar)));
+}
+
 void scheduleSong (const Song& song, double startTick, int numSamples, double tps, EventBuffer& out, bool resume,
                    const ScheduleIndex* index) noexcept
 {

@@ -196,6 +196,10 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     metronomeButton.setIconColourWhenOn (theme::colour::accent);
     metronomeButton.setTooltip (tr ("Metronome"));
     metronomeButton.onClick = [this] { engine.getTransport().metronome.store (metronomeButton.getToggleState()); };
+    midiLight.onReconnect = [this] {
+        engine.reconnectMidiInputs();
+        midiInputTicks = 0; // shows the reopened inputs at the next tick
+    };
     metronomeButton.onRightClick = [this] { showMetronomeMenu(); };
 
     typingPianoButton.setOnColour (theme::colour::bg6);
@@ -366,7 +370,7 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     for (auto* c : std::initializer_list<juce::Component*> { &newButton, &openButton, &saveButton, &exportButton, &undoButton, &redoButton, &playButton, &stopButton,
                                                              &recordButton, &recordMenuButton, &patternModeButton, &songModeButton, &metronomeButton, &typingPianoButton, &countInButton, &waitInputButton,
                                                              &tempoDisplay, &patternBox, &newPatternButton, &patternMenuButton, &pluginPickerButton, &timeDisplay,
-                                                             &songPosition, &masterVolume, &masterPitch, &perfMeter, &output, &hintBar, &workspace })
+                                                             &songPosition, &masterVolume, &masterPitch, &perfMeter, &output, &hintBar, &workspace, &midiLight })
     {
         addAndMakeVisible (c);
         c->setMouseClickGrabsKeyboardFocus (false); // the PC keyboard stays with the main window
@@ -617,7 +621,7 @@ void MainComponent::resized()
                     hide ({ &patternModeButton, &songModeButton, &playButton, &stopButton, &recordButton, &tempoDisplay, &timeDisplay, &songPosition });
                     break;
                 case Group::master: hide ({ &masterVolume, &masterPitch }); break;
-                case Group::record: hide ({ &metronomeButton, &typingPianoButton, &recordMenuButton, &countInButton, &waitInputButton }); break;
+                case Group::record: hide ({ &metronomeButton, &typingPianoButton, &recordMenuButton, &countInButton, &waitInputButton, &midiLight }); break;
                 case Group::snap: hide ({ &gridBox, &patternBox, &newPatternButton, &patternMenuButton }); break;
                 case Group::windows:
                     for (auto& b : panelButtons)
@@ -671,8 +675,8 @@ void MainComponent::resized()
                 put (masterVolume, panel.withY (row1).withHeight (h).reduced (0, 1));
                 put (masterPitch, panel.withY (row2).withHeight (h).reduced (0, 1));
                 break;
-            case Group::record: // metronome, count-in and wait for input over "what to record" and typing piano
-                grid (panel, { &metronomeButton, &countInButton, &waitInputButton, &recordMenuButton, &typingPianoButton });
+            case Group::record: // metronome, count-in and wait for input over "what to record", typing piano and the MIDI light
+                grid (panel, { &metronomeButton, &countInButton, &waitInputButton, &recordMenuButton, &typingPianoButton, &midiLight });
                 break;
             case Group::snap: // global snap over the pattern selector, each with its name
             {
@@ -2411,10 +2415,23 @@ void MainComponent::timerCallback()
                                device != nullptr ? device->getXRunCount() : -1);
     }
 
-    // If a dialog stole focus, give it back so the PC keyboard keeps playing (unless a detached panel has it).
-    if (! hasKeyboardFocus (true) && isShowing() && juce::Process::isForegroundProcess()
-        && juce::Component::getCurrentlyModalComponent() == nullptr && ! workspace.isDetachedWindowActive())
+    if (++midiInputTicks % 30 == 1) // the open MIDI inputs, once a second
+        midiLightInputs = engine.getActiveMidiInputs();
+    midiLight.update (engine.getMidiActivity(), midiLightInputs);
+
+    // If a closed dialog left the main window without a focused component, take it back so the PC keyboard
+    // keeps playing. Only while the main window itself is the active one: another LYNX window (Audio editor,
+    // Quick-add palette, a plugin's editor, a detached panel) keeps its focus (issue #4: grabbing it here, 30
+    // times a second, pulled the main window to the front and closed the plugins' drop-down menus).
+    if (shouldReclaimKeyboardFocus())
         grabKeyboardFocus();
+}
+
+bool MainComponent::shouldReclaimKeyboardFocus()
+{
+    auto* peer = getPeer();
+    return ! hasKeyboardFocus (true) && isShowing() && peer != nullptr && peer->isFocused() && juce::Process::isForegroundProcess()
+           && juce::Component::getCurrentlyModalComponent() == nullptr && ! workspace.isDetachedWindowActive();
 }
 
 void MainComponent::updateTitle()

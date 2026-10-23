@@ -491,6 +491,59 @@ void PerformanceMeter::paint (juce::Graphics& g)
     g.drawText (juce::String (voices), row2, juce::Justification::centredRight, false);
 }
 
+// --- MIDI activity light ---------------------------------------------------------------------------
+
+void MidiActivityLight::update (std::uint32_t count, const juce::StringArray& activeInputs)
+{
+    const auto wasLit = litFrames > 0;
+    if (seenCount && count != lastCount)
+        litFrames = 6; // ~0.2 s after the last message
+    else if (litFrames > 0)
+        --litFrames;
+    seenCount = true;
+    lastCount = count;
+
+    if (activeInputs != inputs)
+    {
+        inputs = activeInputs;
+        setTooltip (hintAt ({}).text);
+    }
+
+    if (wasLit != (litFrames > 0))
+        repaint();
+}
+
+void MidiActivityLight::paint (juce::Graphics& g)
+{
+    const auto size = juce::jmin ((float) getWidth(), (float) getHeight()) * 0.36f;
+    const auto led = getLocalBounds().toFloat().withSizeKeepingCentre (size, size);
+    const auto lit = litFrames > 0;
+
+    if (lit) // a soft glow around the lit light
+    {
+        g.setColour (theme::colour::ledOn.withAlpha (0.25f));
+        g.fillEllipse (led.expanded (size * 0.35f));
+    }
+    g.setColour (lit ? theme::colour::ledOn : (inputs.isEmpty() ? theme::colour::bg4 : theme::colour::ledOff));
+    g.fillEllipse (led);
+    g.setColour (theme::colour::borderStrong);
+    g.drawEllipse (led, 1.0f);
+}
+
+void MidiActivityLight::mouseUp (const juce::MouseEvent& e)
+{
+    if (e.mouseWasClicked() && onReconnect != nullptr)
+        onReconnect();
+}
+
+ui::Hint MidiActivityLight::hintAt (juce::Point<int>)
+{
+    ui::Hint h;
+    h.text = tr ("MIDI input: blinks when a connected device sends MIDI. Click to reconnect the MIDI inputs.");
+    h.text << "  " << (inputs.isEmpty() ? tr ("No MIDI input is open.") : tr ("Open: {0}", { inputs.joinIntoString (", ") }));
+    return h;
+}
+
 ui::Hint PerformanceMeter::hintAt (juce::Point<int> p)
 {
     ui::Hint h;

@@ -62,6 +62,7 @@
 #include "ui/Theme.h"
 #include "ui/WaveformView.h"
 #include "ui/WindowOwner.h"
+#include "ui/ToolWindow.h"
 #include "platform/CrashGuard.h"
 
 #include <chrono>
@@ -498,6 +499,15 @@ public:
             const auto i = args.indexOf ("--editortest");
             const auto only = i + 3 < args.size() && ! args[i + 3].startsWith ("--") ? args[i + 3].unquoted() : juce::String();
             runEditorTest (args[i + 1].unquoted(), args[i + 2].unquoted(), only);
+            return;
+        }
+
+        if (args.contains ("--windowtest"))
+        {
+            // LYNX.exe --windowtest report.txt: opens the Quick-add palette, the Audio editor and a plugin-like window
+            // over the main window and checks that each one stays in front, owned by the main window, with the
+            // keyboard focus (issue #4). The windows appear on screen for a few seconds.
+            runWindowTest (args[args.indexOf ("--windowtest") + 1].unquoted());
             return;
         }
 
@@ -1246,6 +1256,137 @@ private:
         test->window->setVisible (true);
         test->step ("step=shown");
         test->startTimer (4000);
+    }
+
+    void runWindowTest (const juce::String& reportPath)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+
+        struct WindowTest final : juce::Timer
+        {
+            juce::String reportPath, report;
+            bool ok = true;
+            int stepIndex = 0;
+            std::unique_ptr<lynx::AudioEngine> engine;
+            lynx::MainComponent* ui = nullptr;
+            std::unique_ptr<juce::DocumentWindow> main, pluginLike;
+            juce::TextEditor* pluginField = nullptr;
+            std::function<void()> done;
+
+            void line (const juce::String& text)
+            {
+                report << text << "\n";
+                juce::File (reportPath).replaceWithText (report);
+            }
+
+            void check (const juce::String& what, bool passed)
+            {
+                line ((passed ? "ok   " : "FAIL ") + what);
+                ok = ok && passed;
+            }
+
+            bool isAbove (juce::Component* w) { return w != nullptr && lynx::isAboveMainWindow (*w); }
+
+            bool focusIn (juce::Component* w)
+            {
+                auto* f = juce::Component::getCurrentlyFocusedComponent();
+                return w != nullptr && f != nullptr && (f == w || w->isParentOf (f));
+            }
+
+            void timerCallback() override
+            {
+                switch (stepIndex++)
+                {
+                    case 0:
+                        line ("foreground=" + juce::String (juce::Process::isForegroundProcess() ? 1 : 0));
+                        ui->openQuickAddForTest();
+                        break;
+                    case 1:
+                    {
+                        auto* w = lynx::findToolWindow ("quickadd");
+                        check ("quick-add palette open", w != nullptr);
+                        check ("quick-add palette active", w != nullptr && w->isActiveWindow());
+                        check ("quick-add palette owned by the main window", w != nullptr && lynx::isOwnedByMainWindow (*w));
+                        check ("quick-add palette above the main window", isAbove (w));
+                        auto* f = juce::Component::getCurrentlyFocusedComponent();
+                        check ("quick-add search box has the keyboard focus", focusIn (w) && dynamic_cast<juce::TextEditor*> (f) != nullptr && f->hasKeyboardFocus (false) && w->isActiveWindow());
+                        lynx::closeAllToolWindows();
+                        lynx::openAudioEditor (*engine);
+                        break;
+                    }
+                    case 2:
+                    {
+                        auto* w = lynx::findToolWindow ("audioeditor");
+                        check ("audio editor open", w != nullptr);
+                        check ("audio editor active", w != nullptr && w->isActiveWindow());
+                        check ("audio editor owned by the main window", w != nullptr && lynx::isOwnedByMainWindow (*w));
+                        check ("audio editor above the main window", isAbove (w));
+                        lynx::forceForegroundForTest (*main); // the user clicks the main window
+                        break;
+                    }
+                    case 3:
+                    {
+                        auto* w = lynx::findToolWindow ("audioeditor");
+                        check ("audio editor stays above the main window after clicking it", isAbove (w));
+                        lynx::closeAllToolWindows();
+                        // a plugin editor's window: its own controls keep the keyboard focus
+                        pluginLike = std::make_unique<juce::DocumentWindow> ("Plugin", juce::Colours::black, juce::DocumentWindow::closeButton);
+                        pluginLike->setUsingNativeTitleBar (true);
+                        auto* field = new juce::TextEditor();
+                        field->setSize (300, 120);
+                        pluginLike->setContentOwned (field, true);
+                        pluginLike->centreWithSize (300, 120);
+                        pluginLike->setVisible (true);
+                        lynx::keepAboveMainWindow (*pluginLike);
+                        pluginLike->toFront (true);
+                        field->grabKeyboardFocus();
+                        pluginField = field;
+                        break;
+                    }
+                    case 4:
+                        check ("plugin window active", pluginLike->isActiveWindow());
+                        check ("plugin window keeps the keyboard focus", pluginField->hasKeyboardFocus (false) && pluginLike->isActiveWindow());
+                        check ("plugin window above the main window", isAbove (pluginLike.get()));
+                        pluginLike = nullptr;
+                        lynx::forceForegroundForTest (*main);
+                        juce::Component::unfocusAllComponents();
+                        break;
+                    case 5:
+                        check ("main window takes the keyboard focus back when it is active", ui->hasKeyboardFocus (true));
+                        line (ok ? "result=OK" : "result=FAILED");
+                        stopTimer();
+                        done();
+                        break;
+                    default:
+                        break;
+                }
+            }
+        };
+
+        auto* test = new WindowTest();
+        test->reportPath = reportPath;
+        test->engine = std::make_unique<lynx::AudioEngine> (false);
+        test->main = std::make_unique<juce::DocumentWindow> ("LYNX window test", lynx::theme::window, juce::DocumentWindow::allButtons);
+        test->main->setUsingNativeTitleBar (true);
+        test->ui = new lynx::MainComponent (*test->engine, false);
+        test->main->setContentOwned (test->ui, true);
+        test->main->setResizable (true, true);
+        test->main->centreWithSize (1280, 760);
+        test->main->setVisible (true);
+        lynx::setMainWindowForOwnership (test->main.get());
+        lynx::forceForegroundForTest (*test->main);
+        test->main->toFront (true);
+        test->done = [this, test] {
+            setApplicationReturnValue (test->ok ? 0 : 1);
+            juce::MessageManager::callAsync ([this, test] {
+                lynx::closeAllToolWindows();
+                lynx::setMainWindowForOwnership (nullptr);
+                test->main = nullptr;
+                delete test;
+                quit();
+            });
+        };
+        test->startTimer (1500);
     }
 
     // LYNX.exe --plugintest plugin.vst3 report.txt ["name"]: loads the plugin (or the one named in a shell), plays notes if it is an
