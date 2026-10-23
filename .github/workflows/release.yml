@@ -9,7 +9,8 @@
 #   sign     (ubuntu)   SignPath signing request; skipped until the repository variable SIGNPATH_ENABLED is 'true'
 #   package  (windows)  runs the self-test on the (signed) exe, builds Demo.lynx, the portable zip and the per-user
 #                       installer (NSIS, resources/installer/LYNX.nsi)
-#   linux    (ubuntu)   CMake + GCC build, self-test, AppImage and .tar.gz (scripts/package-linux.sh)
+#   linux    (ubuntu)   CMake + GCC 13 build in an Ubuntu 22.04 container (glibc 2.35), glibc check, self-test,
+#                       AppImage and .tar.gz (scripts/package-linux.sh), offline start check of the AppImage
 #   macos    (macos)    CMake universal (arm64 + x86_64) build, self-test, ad-hoc signature (no Apple Developer ID,
 #                       not notarized), .dmg (scripts/package-macos.sh)
 #   publish  (ubuntu)   SHA256SUMS.txt over every file; on a tag push attaches everything to the (draft) GitHub release
@@ -218,32 +219,52 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  # Built inside an Ubuntu 22.04 container (glibc 2.35, the oldest Ubuntu LTS in standard support, which the
+  # AppImage catalog tests on): a binary only runs on systems whose glibc is at least as new as the one it was
+  # built against. GCC 13 comes from the toolchain PPA; libstdc++/libgcc are linked statically (CMakeLists.txt),
+  # so no newer C++ runtime is needed either. scripts/check-linux-compat.sh fails the job otherwise.
   linux:
     name: Linux (AppImage, tar.gz)
     needs: version
     runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:22.04
+      options: --cap-add=SYS_ADMIN   # lets check-appimage-start.sh run the AppImage in a network namespace (offline)
     env:
       LABEL: ${{ needs.version.outputs.label }}
+      DEBIAN_FRONTEND: noninteractive
+      MAX_GLIBC: '2.35'
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Build dependencies
+      - name: Build dependencies (Ubuntu 22.04 + GCC 13 from ppa:ubuntu-toolchain-r/test)
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q ninja-build pkg-config xvfb libasound2-dev libjack-jackd2-dev libx11-dev libxrandr-dev \
-            libxinerama-dev libxcursor-dev libxext-dev libxcomposite-dev libfreetype-dev libfontconfig1-dev libgl-dev
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends ca-certificates curl git gnupg software-properties-common
+          add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          apt-get update -q
+          apt-get install -y -q gcc-13 g++-13 cmake ninja-build pkg-config file binutils xvfb xauth x11-utils \
+            fonts-dejavu-core libasound2-dev libjack-jackd2-dev libx11-dev libxrandr-dev libxinerama-dev \
+            libxcursor-dev libxext-dev libxcomposite-dev libfreetype-dev libfontconfig1-dev libgl-dev desktop-file-utils
+          ldd --version | head -1
+          g++-13 --version | head -1
+
+      - uses: actions/checkout@v5
 
       - name: JUCE (checksum verified)
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           curl -fsSL -o juce.tar.gz "https://github.com/juce-framework/JUCE/archive/refs/tags/$JUCE_VERSION.tar.gz"
           echo "$JUCE_SHA256  juce.tar.gz" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/juce" && tar xzf juce.tar.gz -C "$RUNNER_TEMP/juce" --strip-components 1 && rm juce.tar.gz
 
       - name: Build
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_SOURCE_DIR_JUCE="$RUNNER_TEMP/juce"
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_SOURCE_DIR_JUCE="$RUNNER_TEMP/juce" \
+            -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13
           cmake --build build --target LYNX -- -k 0
           sha256sum build/LYNX_artefacts/Release/LYNX
+
+      - name: Runs on glibc ${{ env.MAX_GLIBC }} without the system's libstdc++
+        run: ./scripts/check-linux-compat.sh build/LYNX_artefacts/Release/LYNX "$MAX_GLIBC"
 
       - name: Self-test and demo project
         run: |
@@ -255,9 +276,12 @@ jobs:
           test -s Demo.lynx
 
       - name: Package
-        run: |
-          sudo apt-get install -y -q desktop-file-utils libfuse2t64
-          ./scripts/package-linux.sh build/LYNX_artefacts/Release/LYNX "$LABEL" dist Demo.lynx
+        run: ./scripts/package-linux.sh build/LYNX_artefacts/Release/LYNX "$LABEL" dist Demo.lynx
+
+      # The catalog runs the AppImage offline for ~11 s and expects a window: start it without network (when the
+      # container allows a network namespace), check that it is still running and shows a top-level window.
+      - name: AppImage starts offline and shows its window
+        run: REQUIRE_OFFLINE=1 ./scripts/check-appimage-start.sh "dist/LYNX-$LABEL-x86_64.AppImage"
 
       - name: Upload package
         uses: actions/upload-artifact@v7
