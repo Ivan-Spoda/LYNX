@@ -3379,3 +3379,6 @@ countries: br
 "MIX label: click to keep the Mix while presets change (mix lock)" = "Rótulo MIX: clique para manter o Mix ao trocar de preset (trava do mix)"
 "locked" = "travado"
 "unlocked" = "destravado"
+"a wide stereo reverb" = "um reverb estéreo largo"
+"a dense, close reverb" = "um reverb denso e próximo"
+"a bright reverb" = "um reverb brilhante"

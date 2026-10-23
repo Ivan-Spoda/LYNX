@@ -74,6 +74,8 @@ struct Settings
     double feedback = -1.0;        // ≥ 0: gain per pass instead of rt60 (delay-network style)
     double crossFeed = 1.0;        // 0..1: how much the two halves of the tank exchange energy
     bool parallelLines = false;    // no mixing at all: eight parallel feedback delays (plain echoes)
+    bool splitSides = false;       // with crossFeed 0: the left output reads only the left half of the tank, the right
+                                   // only the right (two separate mono reverbs: ValhallaShimmer's stereo modes, round 135)
     double modRateHz = 0.5;
     double modDepthMs = 0.0;       // peak excursion of the line taps
     double lateLevel = 1.0;

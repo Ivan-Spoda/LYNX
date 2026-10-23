@@ -440,6 +440,13 @@ TEST (mixsuite_panels_place_every_parameter)
         const auto count = (int) effectInfo (kind).params.size();
         std::vector<int> placed ((std::size_t) count, 0);
         std::vector<const plugui::LayoutItem*> controls;
+        // round 135: two items shown under disjoint ranges of one mode parameter never show together (Horizon's
+        // Drive / Detune and Early-late / Attack swap in place by mode, like the reference)
+        auto exclusive = [] (const plugui::LayoutItem& a, const plugui::LayoutItem& b) {
+            return a.whenParam != nullptr && b.whenParam != nullptr && std::strcmp (a.whenParam, b.whenParam) == 0
+                   && (a.whenMax <= b.whenMin || b.whenMax <= a.whenMin);
+        };
+        std::vector<std::vector<const plugui::LayoutItem*>> byParam ((std::size_t) count);
         int meters = 0;
         for (const auto& item : l.items)
         {
@@ -449,7 +456,14 @@ TEST (mixsuite_panels_place_every_parameter)
                 const auto p = plugui::paramIndex (kind, item.param);
                 CHECK (p >= 0);
                 if (p >= 0)
-                    ++placed[(std::size_t) p];
+                {
+                    bool variant = false; // another variant of a control already counted
+                    for (const auto* other : byParam[(std::size_t) p])
+                        variant = variant || exclusive (*other, item);
+                    if (! variant)
+                        ++placed[(std::size_t) p];
+                    byParam[(std::size_t) p].push_back (&item);
+                }
             }
             if (item.type == plugui::Item::tabs || item.type == plugui::Item::radio)
                 CHECK (item.values.empty() || item.values.size() == plugui::optionLabels (item).size());
@@ -470,6 +484,8 @@ TEST (mixsuite_panels_place_every_parameter)
                 const auto& i = *controls[a];
                 const auto& j = *controls[b];
                 if (i.page >= 0 && j.page >= 0 && i.page != j.page) // different pages never show together
+                    continue;
+                if (exclusive (i, j))
                     continue;
                 const auto overlap = i.x + 0.5f < j.x + j.w && j.x + 0.5f < i.x + i.w && i.y + 0.5f < j.y + j.h && j.y + 0.5f < i.y + i.h;
                 if (overlap)

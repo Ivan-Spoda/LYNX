@@ -494,6 +494,9 @@ Summary fromName (K kind, const std::string& name)
         else if (contains (name, "deep") || contains (name, "vast") || contains (name, "distant")) s.detail = TR_NOOP ("very large and far away");
         else if (contains (name, "dense")) s.detail = TR_NOOP ("denser than the plain version");
         else if (contains (name, "mirror")) s.detail = TR_NOOP ("with strong, mirror-like early reflections");
+        if (s.text == nullptr && contains (name, "wide")) s.text = TR_NOOP ("a wide stereo reverb");
+        else if (s.text == nullptr && contains (name, "dense")) s.text = TR_NOOP ("a dense, close reverb"), s.detail = nullptr;
+        else if (s.text == nullptr && contains (name, "bright")) s.text = TR_NOOP ("a bright reverb"), s.detail = nullptr;
         if (kind == K::foilPlate && s.text == nullptr)
             s.text = TR_NOOP ("a plate of this metal: each has its own brightness, density and decay");
         return s;

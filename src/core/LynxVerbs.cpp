@@ -545,6 +545,11 @@ struct Engine::Impl
             // (neither pattern sums to zero, so low frequencies, where the lines move together, are kept)
             float lateL = (sOut[0] + sOut[1] + sOut[2] - sOut[3] + sOut[4] + sOut[5] - sOut[6] + sOut[7]) * norm;
             float lateR = (sOut[0] - sOut[1] + sOut[2] + sOut[3] + sOut[4] - sOut[5] + sOut[6] + sOut[7]) * norm;
+            if (s.splitSides) // two separate halves (round 135): each side hears only its own four lines
+            {
+                lateL = (sOut[0] + sOut[1] + sOut[2] - sOut[3]) * norm * 1.41421356f;
+                lateR = (sOut[4] - sOut[5] + sOut[6] + sOut[7]) * norm * 1.41421356f;
+            }
 
             const float in[2] = { d[0] + send * e[0], d[1] + send * e[1] };
             if (gated)
@@ -1161,7 +1166,7 @@ protected:
         s.modDepthMs = 1.2 * p[8] / std::sqrt (std::max (0.3, s.modRateHz));
         s.gain = dark ? 0.75 : 0.95;
         if (m.stereo == 2)
-            s.crossFeed = 0.0; // the two sides stay apart
+            s.crossFeed = 0.0, s.splitSides = true; // the two sides stay apart
     }
 
     // the reference's Mono mode sums the input (mono in, a stereo tail)

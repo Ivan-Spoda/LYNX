@@ -99,11 +99,12 @@ TEST (halo_four_reference_modes_round135)
         for (int i = 0; i < 48000; ++i)
             left += (double) l[(std::size_t) i] * l[(std::size_t) i], right += (double) r[(std::size_t) i] * r[(std::size_t) i];
     };
-    double l = 0, r = 0;
-    run (0.125f, l, r);
-    CHECK (l > 0.0 && r > 0.1 * l);
-    run (0.25f, l, r);
-    CHECK (l > 0.0 && r < 0.01 * l);
+    double el = 0, er = 0;
+    run (0.125f, el, er);
+    CHECK (el > 0.0 && er > 0.1 * el);
+    run (0.25f, el, er);
+    if (! (er < 0.01 * el)) std::printf ("  halo small stereo: left %g right %g\n", el, er);
+    CHECK (el > 0.0 && er < 0.01 * el);
     // the reference's state: parameter9 below 0.25 = Mono, then a step every 0.25
     auto translate = [] (const char* attrs) {
         lynx::ForeignPlugin fp;

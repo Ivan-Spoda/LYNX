@@ -346,16 +346,16 @@ range buttons — see its table). Our host still shows their demo banner.
 | Gemini Doubler | Doubler2 / Doubler4 (Waves) | 7 / 4 | 6 | 8 / 5 | 7 |
 | Echoform | H-Delay (Waves) | 5 | 4 | 7 | 5 |
 | LYNX Tune | Waves Tune Real-Time | 4 | 5 | 5 | 5 |
-| Epoch Verb | ValhallaVintageVerb | 7 | 8 | 9 | 8 |
+| Epoch Verb | ValhallaVintageVerb | 7 | 8 | 9 | 8 → 9 (r135) |
 | Atrium | ValhallaRoom | 7 | 6 | 9 | 8 |
-| Foil Plate | ValhallaPlate | 8 | 9 | 9 | 9 |
+| Foil Plate | ValhallaPlate | 8 | 9 | 9 | 9 → 10 (r135) |
 | Nebula | Valhalla Supermassive | 7 | 8 | 9 | 9 |
-| Halo | ValhallaShimmer | 6 | 8 | 7 | 8 |
-| Horizon | ValhallaFutureVerb | 6 | 7 | 7 | 7 |
+| Halo | ValhallaShimmer | 6 | 8 | 7 → 8 (r135) | 8 → 9 (r135) |
+| Horizon | ValhallaFutureVerb | 6 | 7 | 7 → 8 (r135) | 7 → 9 (r135) |
 | Echoform | ValhallaDelay | 6 | 6 | 7 | 7 |
 | Spiral Echo | ValhallaFreqEcho | 9 | 9 | 9 | 9 |
-| Orbit | ValhallaSpaceModulator | 7 | 7 | 8 | 7 |
-| Lattice Mod | ValhallaUberMod | 6 | 7 | 7 | 7 |
+| Orbit | ValhallaSpaceModulator | 7 | 7 | 8 | 7 → 9 (r135) |
+| Lattice Mod | ValhallaUberMod | 6 | 7 | 7 | 7 → 9 (r135) |
 | Ember Saturator | Decapitator (Soundtoys, manual only) | 4 | 4 | 5 | 4 |
 | Fruity Delay 3 (stand-in) | EchoBoy / PrimalTap (Soundtoys, manual only) | 2 | 2 | 5 (Echoform) | 5 (Echoform) |
 | Auto-pan (stand-in) | PanMan (Soundtoys, manual only) | 2 | 2 | 3 | 2 |
@@ -404,9 +404,9 @@ activation; the Waves shell hangs in our host since this round).
 | A/B compare (Setup A / B) + copy A→B | Waves bar; Soundtoys strip | ❌ → ✅ | round 129: A, B and A→B / B→A, saved with the project |
 | Preset name, ◀ ▶, menu of factory presets | Waves bar; Valhalla "PRESET: Default ◀ ▶" row; Soundtoys strip | ❌ → ✅ | round 129: LYNX factory presets in folders (FL presets stay listed for FL effects) |
 | Save / load the user's own presets | Waves Save / Load; Valhalla preset menu (save, copy); Soundtoys | ❌ → ✅ | round 129: .lynxpreset files per engine |
-| Name of the preset a project was saved with | Waves / Valhalla show it | ❌ → ⚠️ | LYNX presets' names are saved; a translated original's preset name is not read yet |
-| Per-control description line inside the window | Valhalla (bottom strip) | ⚠️ | LYNX shows the hint in the main window's hint bar |
-| Mix lock (Mix stays while presets change) | Valhalla (click the MIX label) | ❌ → ✅ | round 129: in the preset menu, per engine |
+| Name of the preset a project was saved with | Waves / Valhalla show it | ❌ → ✅ | LYNX presets' names are saved; round 135: a translated original's preset name is read too (Valhalla `presetName`, Waves `<Preset Name>`) and shown in the header |
+| Per-control description line inside the window | Valhalla (bottom strip) | ⚠️ → ✅ | round 135: a strip at the bottom of every LYNX engine editor (generic panels and display-first editors): one sentence about the control under the mouse in LYNX's own words (core/ParamHelp, every control of every LYNX engine, pt-BR), or the current mode / type and what it is while nothing is hovered |
+| Mix lock (Mix stays while presets change) | Valhalla (click the MIX label) | ❌ → ✅ | round 129: in the preset menu, per engine; round 135: also a click on the MIX caption (boxed in the accent colour while locked) |
 | Typed values, reset, fine drag, wheel | all | ✅ | right-click value entry, double-click / Alt-click reset, Ctrl fine, wheel |
 | MIDI learn | Waves (right-click) | ✅ | right-click → automation / controller link |
 | Resizable window | Waves ≡ menu, Valhalla corner | ✅ | the generic panels resize at a fixed aspect ratio |
@@ -1031,10 +1031,10 @@ Sources: docs/specs/valhalla-vintageverb.md; REA_rodada100.md §1/§7b; product 
 | EQ HighCut / LowCut | 100–20000 Hz 8 kHz / 10–1500 Hz 10 Hz, 6 dB/oct | same | ✅ | |
 | MODE menu | 22 algorithms, Concert Hall; bottom left | 22 entries in the same order, own names (Nave, Grit…, Drift…, Gated, Grand Hall, Vintage Chamber/Hall); ◀ ▶ on the menu | ⚠️ | Positions match, so translation is exact. Users won't recognise the names (renaming is deliberate). Gated envelope and per-mode early patterns are approximate. |
 | COLOR menu | 1970s / 1980s / Now, 1970s | same names/default | ⚠️ | DSP is only a band limit: no reduced internal rate, no "dark and noisy" quantised modulation (spec §7.4, §7.8). |
-| PRESETS row | "PRESETS: Default ◀ ▶" bottom right; click name = menu (factory folders, select/copy/save) | header box lists FL presets only → "(no preset)"; ◀ ▶ do nothing for this engine | ❌ | Her corpus is 89 % two factory presets (spec §1). |
-| Preset name of the loaded state | shown in the preset field | translated states show "(no preset)" (presetName dropped) | ❌ | |
-| Mix lock | click the MIX label to lock Mix while browsing presets (state `mixLock`) | none; `mixLock` not read | ❌ | Only matters once presets exist. |
-| Per-control description line | one sentence at the bottom of the window for the hovered control (the "manual") | hint bar shows name + value + gestures only | ❌ | |
+| PRESETS row | "PRESETS: Default ◀ ▶" bottom right; click name = menu (factory folders, select/copy/save) | header preset bar: LYNX factory presets in folders, ◀ ▶, user presets (save / delete) | ✅ | Rounds 129 / 135. Her corpus is 89 % two factory presets (spec §1). |
+| Preset name of the loaded state | shown in the preset field | the original's `presetName` in the header ("Detuned & Big") | ✅ | round 135 |
+| Mix lock | click the MIX label to lock Mix while browsing presets (state `mixLock`) | click the MIX caption (or the preset menu entry); per engine | ✅ | round 135; the saved `mixLock` is not read (LYNX's lock is per engine, not per slot). |
+| Per-control description line | one sentence at the bottom of the window for the hovered control (the "manual") | bottom strip: the hovered control's sentence, else "Mode: Plate — a plate: dense from the first moment…" | ✅ | round 135 |
 | Header info | version / format / demo note top right | title + insert name | ➕/n/a | |
 | Resizable UI | yes (state stores uiWidth/uiHeight) | resizable, fixed aspect | ✅ | |
 | Value text entry / reset / fine drag | not documented on the product page | right-click entry, double-/Alt-click reset, Ctrl fine, wheel | ➕ | |
@@ -1044,10 +1044,10 @@ Sources: docs/specs/valhalla-vintageverb.md; REA_rodada100.md §1/§7b; product 
 | Bypass parameter | Bypass (VST param) | slot on/off + options menu Bypass | ✅ | |
 | Value readout under each knob, caption above | yes | yes (round 114 `captionsAbove`) | ✅ | |
 | Box grouping and order | Mix/Pre · Decay · DAMPING 2×2 · SHAPE · DIFF · MOD · EQ | identical order and grouping | ✅ | |
-| Translation of saved state | — | every parameter (class ID + names, `steps` for Mode/Color) | ✅ | mixLock, presetName and ui size are dropped. |
+| Translation of saved state | — | every parameter (class ID + names, `steps` for Mode/Color) and the preset name | ✅ | mixLock and ui size are dropped. |
 
-**Scores** — configuration: 7/10, design: 8/10.
-**Top gaps**
+**Scores** — configuration: 7/10, design: 8/10. **After round 135**: configuration 9/10, design 9/10 (left: the 1970s / 1980s colour character).
+**Top gaps** (1–3 and 5 done in rounds 129 / 135)
 1. **Factory/user preset browser for LYNX engines.** LYNX would need its own named starting points plus save/copy, and the existing ◀ ▶ should step through them. Code: src/ui/PluginEditors.cpp (`presetFiles()`, header items 2–4), presets stored per EffectKind. UI + data only; shared by all six engines. **M–L**
 2. **Show the translated state's preset name.** Keep `presetName` from the XML in the substitute and show it in the header box. Code: PluginSubstitutes.cpp + PluginEditors.cpp `presetName`. UI/data only. **S**
 3. **Per-control description line.** Add a `help` text to EffectParamInfo (LynxVerbs.cpp `info`) and show it in the hint bar, or in a footer line inside the panel the way the reference does. Code: PluginEditors.cpp `hintAt`. UI only. **M** (writing about 100 texts across the six engines)
@@ -1064,9 +1064,9 @@ Sources: REA_rodada100.md §2/§7b; product page (valhalladsp.com/shop/reverb/va
 | DECAY fader | 0.1–100 s (param linear), 2.00 s at ~35 % height | LYNX's own law, 2 s at the centre | ⚠️ | Translation uses a `curve`, but automation recorded on the original won't line up 1:1. |
 | LO CUT fader | 0–1000 Hz, 0 Hz | same | ✅ | |
 | HI CUT fader | 100–15000 Hz, 8000 Hz, 2nd order | same | ✅ | |
-| DEPTH fader (early/late) | 0–100 %, 50 %; caption "DEPTH" | same value, caption "Late mix" | ⚠️ | Wording differs. |
+| DEPTH fader (early/late) | 0–100 %, 50 %; caption "DEPTH" | same value, caption "Depth" | ✅ | round 129 |
 | Fader captions | above the faders | below the faders (values under them) | ⚠️ | Minor. |
-| EARLY / LATE tabs | two tabs switch the knob grid (state `earlyLateTabState`) | both groups shown side by side, no tabs | ⚠️ | All controls are visible, but the window is wider (900 px). The `pageTabs` mechanism already exists in PluginLayout. |
+| EARLY / LATE tabs | two tabs switch the knob grid (state `earlyLateTabState`) | Early / Late page tabs | ✅ | round 129; `earlyLateTabState` is not read |
 | Early Size | 1–1000 ms, 30.0 ms | same | ✅ | |
 | Early Cross | 0–1, 0.10 | same | ✅ | |
 | Early Mod Rate / Depth | 0.05–5 Hz 0.50 Hz / 0–1 0.00 | same | ✅ | |
@@ -1078,17 +1078,17 @@ Sources: REA_rodada100.md §2/§7b; product page (valhalladsp.com/shop/reverb/va
 | Bass Mult / Xover | 0.5–2 X @ 100–10000 Hz, 1 X @ 1 kHz | same | ✅ | |
 | High Mult / Xover | 0.1–1 X @ 100–15000 Hz, 0.5 X @ 8 kHz | same | ✅ | |
 | REVERB MODE menu | 12 types, Large Room | 12 in the same order; last four renamed (Deep/Mirror/Vast/Distant Space) | ⚠️ | Dark types are band-limited only to −20 dB at 16 kHz (reference −60) and there is a 250 Hz dip (round 100 residuals). |
-| PRESET row | "PRESET: Default ◀ ▶" (factory folders incl. "Space" folder, save/copy) | none for LYNX engines | ❌ | |
+| PRESET row | "PRESET: Default ◀ ▶" (factory folders incl. "Space" folder, save/copy) | header preset bar (LYNX factory + user presets, ◀ ▶) and the original's preset name | ✅ | rounds 129 / 135 |
 | GUI Mode (colour schemes Electric Blue / Old School) | top-right selector | LYNX theme only | n/a | Trade dress; do not copy. |
-| Description line | bottom of the window | hint bar name/value only | ❌ | |
-| Mix lock | state `mixLock` (MIX label is highlighted) | none | ❌ | |
+| Description line | bottom of the window | bottom strip (hovered control, else the type) | ✅ | round 135 |
+| Mix lock | state `mixLock` (MIX label is highlighted) | click the MIX caption: boxed while locked | ✅ | round 135 |
 | Resizable | "Resizable GUI" | yes, fixed aspect | ✅ | |
 | Gestures / text entry | not documented | LYNX's full set | ➕ | |
 | True-stereo routing | stereo in/out | stereo | ✅ | |
-| Translation | — | every parameter; decay through `curve` | ✅ | earlyLateTabState, mixLock and presetName are dropped. |
+| Translation | — | every parameter; decay through `curve`; the preset name (round 135) | ✅ | earlyLateTabState and mixLock are dropped. |
 
-**Scores** — configuration: 7/10, design: 6/10.
-**Top gaps**
+**Scores** — configuration: 7/10, design: 6/10. **After round 135**: configuration 9/10, design 8/10 (left: fader tapers, the dark types' band limit).
+**Top gaps** (1, 2, 4, 5 done in rounds 129 / 135)
 1. **Early/Late page tabs.** Put the two groups on `page` 0/1 with `pageTabs`, and optionally restore the page from `earlyLateTabState`. Code: PluginLayout.cpp `atriumLayout()`. UI only. **S**
 2. **Preset browser and translated preset name.** Same work as Epoch gaps 1–2. **M–L / S**
 3. **Display taper on the Predelay/Decay faders**, so the default and small values sit where they do on the original. Use a slider skew in the layout item while keeping the parameter law. Code: PluginLayout.cpp / PluginEditors.cpp slider mapping. UI only. **S**
@@ -1106,23 +1106,23 @@ Sources: REA_rodada100.md §3/§7b; product page (valhalladsp.com/shop/reverb/va
 | DECAY (very large knob) | 0.5–30 s piecewise, 3.0 s | same law, big knob | ✅ | |
 | SIZE | 0–200 %, 100 % | same | ✅ | |
 | WIDTH | 0–200 % (0 = mono, 200 = anti-correlated), 100 % | same | ✅ | |
-| EQ LowFreq | 20–2000 Hz, **700 Hz** | default 0.348774 → **711 Hz** | ⚠️ | Default is off by about 1.5 %. Should be 0.3434. |
-| EQ HighFreq | 200–20000 Hz, **10000 Hz** | default 0.5 → **10.10 kHz** | ⚠️ | Should be 0.4949. |
+| EQ LowFreq | 20–2000 Hz, **700 Hz** | 700 Hz | ✅ | round 129 |
+| EQ HighFreq | 200–20000 Hz, **10000 Hz** | 10 kHz | ✅ | round 129 |
 | EQ LowGain / HighGain | ±12 dB, 0 dB | same | ✅ | |
 | MOD Rate | 0.05–5 Hz skew 2.38, 0.50 Hz | same | ✅ | |
 | MOD Depth | 0–100 %, 0 % | same | ✅ | |
 | MODE menu | 12 plate types, Chrome | 12 in the same order, own metal names; ◀ ▶ | ⚠️ | Positions match. Per-type onsets were fitted. Mono-in types (Adamantium/Titanium/Osmium) are not modelled as mono-in. |
-| PRESETS row | "PRESETS: Default ◀ ▶" | none | ❌ | |
-| Description line | bottom | hint bar name/value | ❌ | |
-| Mix lock | state `mixLock` | none | ❌ | |
+| PRESETS row | "PRESETS: Default ◀ ▶" | header preset bar + the original's preset name | ✅ | rounds 129 / 135 |
+| Description line | bottom | bottom strip (hovered control, else the plate type) | ✅ | round 135 |
+| Mix lock | state `mixLock` | click the MIX caption | ✅ | round 135 |
 | Resizable | yes (uiWidth/uiHeight in state) | yes | ✅ | |
 | Layout order | Mix/Pre · Decay · Size/Width · EQ 2×2 · MOD · Mode | identical | ✅ | |
 | Value readouts / captions | above/below | same | ✅ | |
 | Gestures | not documented | full set | ➕ | |
 | Translation | — | every parameter (Type `steps`) | ✅ | |
 
-**Scores** — configuration: 8/10, design: 9/10.
-**Top gaps**
+**Scores** — configuration: 8/10, design: 9/10. **After round 135**: configuration 9/10, design 10/10 (left: the mono-in types).
+**Top gaps** (1–3 done in rounds 129 / 135)
 1. **Preset browser and preset name.** Same work as Epoch. **M–L / S**
 2. **Fix the EQ frequency defaults** to 700 Hz and 10 kHz (0.343434 / 0.494949). Code: LynxVerbs.cpp `foilInfo`. Data only. **S**
 3. **Description line.** **M**
@@ -1134,26 +1134,26 @@ Sources: REA_rodada100.md §4/§7b; product page with its control tooltips (valh
 | Original feature | Original (range / default / where) | LYNX now | Status | Note |
 |---|---|---|---|---|
 | MIX | 0–100 %, 50 % | same | ✅ | |
-| MIX lock | click the boxed MIX label = lock/unlock (documented) | none | ❌ | Visible affordance on the reference. |
+| MIX lock | click the boxed MIX label = lock/unlock (documented) | click the MIX caption: boxed in the accent colour while locked | ✅ | round 135 |
 | WIDTH | −100…+100 % (negative swaps L/R), 100 % | same | ✅ | |
 | DELAY (big) | 0–2000 ms piecewise, 300.0 ms | same | ✅ | |
 | Delay sync combo | Msec / Note / Dotted / Triplet as a combo under Delay; note values 1/64…4/4 (7) | 4 tabs + a separate always-visible note menu (1/64…1/1) | ⚠️ | Same options. In the original the sync setting changes what the Delay knob sets; LYNX shows both controls at once. |
 | WARP (big) | 0–100 %, 0 % | same | ✅ | |
-| CLEAR button | under Warp; flushes the delay network | missing | ❌ | The parameter is not translated either (it is a button). |
+| CLEAR button | under Warp; flushes the delay network | CLEAR push button under Warp | ✅ | round 129; not translated (it is a button). |
 | FEEDBACK | 0–100 %, 50 % (gain per pass = √fb) | same | ✅ | |
 | DENSITY | 0–100 %, 0 % | same | ✅ | |
 | MOD Rate / Depth | 0.01–10 Hz skew 2.33, 0.50 Hz / 50 % | same | ✅ | |
 | EQ High / Low | 200–20000 Hz 20 kHz / 10–2000 Hz 10 Hz, 6 dB/oct output | same | ✅ | |
 | MODE menu + ◀ ▶ (5.0) | 22 modes, Gemini | 22 in the same order, own names; ◀ ▶ | ⚠️ | Density-50 % decay and ×8 shapes at long delays are approximate. |
-| PRESET row | "PRESET: Default ◀ ▶"; click = select/copy/save | none | ❌ | |
-| Description line | bottom left | hint bar name/value | ❌ | |
+| PRESET row | "PRESET: Default ◀ ▶"; click = select/copy/save | header preset bar + the original's preset name | ✅ | rounds 129 / 135 |
+| Description line | bottom left | bottom strip (hovered control, else the mode) | ✅ | round 135 |
 | Resizable | yes (uiWidth/uiHeight) | yes | ✅ | |
 | Layout | Mix/Width · Delay+Warp box with sync/Clear · Fb/Density · MOD · EQ | same order | ✅ | Clear is missing. |
 | Gestures | not documented | full set | ➕ | |
 | Translation | — | every parameter except Clear; Sync/Note/Mode `steps` | ✅ | |
 
-**Scores** — configuration: 7/10, design: 8/10.
-**Top gaps**
+**Scores** — configuration: 7/10, design: 8/10. **After round 135**: configuration 9/10, design 9/10 (left: sync as one combo).
+**Top gaps** (1–3 and 5 done in rounds 129 / 135)
 1. **Clear button.** A momentary button in `nebulaLayout()` that calls the effect's buffer flush (`VerbEffect` already has reset/clear). Code: PluginLayout.cpp + PluginEditors.cpp action + LynxVerbs.cpp. Small engine hook. **S**
 2. **Mix lock on the MIX caption.** **S**
 3. **Preset browser and preset name.** **M–L / S**
@@ -1171,21 +1171,21 @@ Sources: REA_rodada100.md §5/§7b; product page with mode descriptions (valhall
 | feedback | 0–1, 0.000 | 0 % | ✅ | |
 | diffusion | 0–1, 0.910 | 92 % (0.919) | ⚠️ | Tiny default difference. |
 | size | 0–1, 0.50 (sets decay, about 1.5 + 12.5·size s) | 50 % | ✅ | No seconds readout in either. |
-| low cut | starts at 10 Hz, default 10 | display 10–1000 Hz, but the **DSP uses 250·v Hz** | ⚠️ | **Display and DSP disagree** (bug: v = 1 reads 1000 Hz, filters at 250 Hz). |
+| low cut | starts at 10 Hz, default 10 | the display shows what the engine applies (0–250 Hz) | ⚠️ | round 129 fixed the mismatch; the range still differs from the reference's |
 | high cut | 100–15000 Hz, 8000 | same | ✅ | |
 | mod rate | default shown 0.59 | 0.55 Hz (law not confirmed) | ⚠️ | |
 | mod depth | 0.30 | 30 % | ✅ | |
-| reverb mode | **4: Mono / Small Stereo / Medium Stereo / Big Stereo**, default mono (mono-in for Mono) | **3: Wide / Dense / Bright**, default Wide; flat button (no ◀ ▶) | ❌ | The translation collapses 4 states into 3 groups. |
-| pitch mode | **Single (up or down by Shift) / Dual / SingleReverse / DualReverse / Bypass**, default single | Up / Up + down / Up, bright / Up + down, bright / No shift | ⚠️ | "Up" is misleading: Single follows the Shift sign. The reverse-grain modes are approximated by a +4 dB shelf. Bypass ✅ (feedback still lengthens the decay). The caption is "Shift mode" where the original says "pitch mode". |
+| reverb mode | **4: Mono / Small Stereo / Medium Stereo / Big Stereo**, default mono (mono-in for Mono) | round 135: Mono (mono in), Small / Medium / Big stereo (two separate sides) first, LYNX's Wide / Dense / Bright after them; menu with ◀ ▶ | ✅ | [EXEC] the trial with a left-only impulse: below 0.25 the input is summed and the tail leaves both sides, from 0.25 up the left input stays left; steps at 0.25 / 0.5 / 0.75; translated 1:1. The default stays Wide (older projects unchanged). |
+| pitch mode | **Single (up or down by Shift) / Dual / SingleReverse / DualReverse / Bypass**, default single | round 135: caption "Pitch mode", Single / Dual / Single, bright / Dual, bright / No shift | ⚠️ | The reverse-grain modes are still approximated by a +4 dB shelf (engine). |
 | color mode | Bright / Dark (Dark = steep loss above ~10 kHz) | Bright / Dark (5 kHz loop band limit) | ✅/⚠️ | Dark is darker than described. |
 | Programs | 8 host programs (Program param, `currentProgram`) | none | ❌ | |
 | Description line | none visible in 1.2.2's UI (the page says tooltips) | hint bar | ✅ | |
 | Resizable | not in 1.2.2 (fixed small UI) | resizable | ➕ | |
 | Gestures | not documented | full set | ➕ | |
-| Translation | — | parameter0–11; modes through `steps` (Reverb mode 3 groups, Shift mode 5, Color 2) | ⚠️ | Mode lists were "not confirmed" in round 100. The product page now confirms 4 reverb modes and 5 pitch modes. |
+| Translation | — | parameter0–11; modes through `steps` (Reverb mode 4, Shift mode 5, Color 2) | ✅ | round 135: the four reverb modes measured and kept apart. Program (`currentProgram`) is not read. |
 
-**Scores** — configuration: 6/10, design: 8/10.
-**Top gaps**
+**Scores** — configuration: 6/10, design: 8/10. **After round 135**: configuration 8/10, design 9/10 (left: reverse-grain pitch modes, programs).
+**Top gaps** (1, 3, 4 done in rounds 129 / 135)
 1. **Four reverb modes in the original's order** (mono-in, then three stereo sizes; LYNX's own names, e.g. "Mono / Small / Medium / Large"). Re-measure the breakpoints (likely k/4) and update the `steps` map. Code: LynxVerbs.cpp `haloModes`, `haloLayout()`, PluginSubstitutes.cpp `[valhalla-shimmer]`. Engine + data. **M**
 2. **Pitch modes that match the original's behaviour.** Single (sign of Shift), Dual, reversed-grain Single/Dual (reverse each grain before shifting in the two-head shifter), Bypass. Code: HaloFx `configure` + shifter. Engine/DSP. **M**
 3. **Fix the low-cut display/DSP mismatch** so both use the same law. Code: HaloFx `configure` line `s.outLowCut = 250.0 * p[5]` vs `paramText` case 5. **S**
@@ -1198,33 +1198,33 @@ Sources: REA_rodada100.md §6/§7b; product page and mode descriptions (valhalla
 | Original feature | Original (range / default / where) | LYNX now | Status | Note |
 |---|---|---|---|---|
 | MIX / WIDTH | 0–100 % 50 % / width 100 % | same | ✅ | |
-| Mix lock | boxed MIX label (lock) | none | ❌ | |
+| Mix lock | boxed MIX label (lock) | click the MIX caption: boxed while locked | ✅ | round 135 |
 | ECHO Delay (big) | 0–2000 ms piecewise, 30.0 ms | same | ✅ | |
 | Echo sync | "Msec ⇕" combo under Delay (ms / note / dotted / triplet) | tabs + note menu (1/64…1/2, 6 values) | ⚠️ | Note list not confirmed against the original. |
 | Feedback / Level | 0–100 %, 0 % / 0 % | same | ✅ | |
 | Drive | 0–24 dB, 3.0 dB | same | ✅ | |
 | Spread | 0–100 %, 0 % | same | ✅ | |
-| Detune | ±30 ct; **shown only in echo modes that use it** | always shown (small knob, +4.0 ct) | ⚠️ | |
-| Mode-dependent visibility | "Only the parameters that are active in a given ECHO MODE will be visible" | all always visible | ❌ | Layout has `page` but no parameter-conditional visibility. |
+| Detune | ±30 ct; **shown only in echo modes that use it** | round 135: in Drive's place in the pitch modes (Detune … Swarm), as on the reference | ✅ | [EXEC] the trial's editor in every echo mode: Drive in Modern / Tape / Digital / Analog (/ LoFi), Detune in Detune, Reverse, the three ReverseOct modes, Sparkle and Swarm |
+| Mode-dependent visibility | "Only the parameters that are active in a given ECHO MODE will be visible" | round 135: Drive ↔ Detune by echo mode, Early / late ↔ Attack by reverb mode | ✅ | `LayoutItem::whenParam` conditions |
 | REVERB Decay (big) | 0.2–70 s piecewise, 3.00 s | same | ✅ | |
 | Echo→Rev routing | toggle button under Decay | 2 tabs under Decay | ✅ | |
 | Size / Level | 50 % / 100 % | same | ✅ | |
 | Early/Late / Density | 50 % / 100 % | same | ✅ | |
-| Attack | exists; not visible in Chamber (mode-dependent) | always shown, small | ⚠️ | |
+| Attack | exists; not visible in Chamber (mode-dependent) | round 135: in Early / late's place in Space and Freeze, as on the reference | ✅ | [EXEC] the trial's editor in every reverb mode (Nonlin not captured; it keeps Early / late) |
 | MOD Rate / Depth | 0.01–10 Hz 0.10 Hz / 40 % | same | ✅ | |
 | EQ HighCut / LowCut | 1000–20000 Hz 4500 Hz / 20–1000 Hz 100 Hz; they also set the high/low **decay** (loop) | same ranges/defaults; output filters only | ⚠️ | Missing the in-loop RT part (measured in round 100; the vendor says Low Freq EQ controls the bass decay of Chamber/Plate/Cathedral). |
 | ECHO MODE | 12: Modern, Tape, Digital, Analog, Detune, Reverse, ReverseOctUp/Down/UpDown, Sparkle, Swarm, LoFi; default Tape | 12 in the same order (Clean…Lo-fi), default Tape, ◀ ▶ | ⚠️ | Behaviour is LYNX's interpretation (not measured): Digital 12-bit companding, Reverse 2–8 grains by Spread, Sparkle long grains. |
 | REVERB MODE | 8: Room, Chamber, Plate, Hall, Cathedral, Space, Frozen, Nonlin; default Chamber | 8 in the same order (Freeze, Gated), default Chamber | ✅ | |
 | COLOR | Bright / Neutral (HF RT capped 1–1.5 s) / Dark (steep 8 kHz) / Studio (steep 10 kHz + steep 600 Hz low cut); default Neutral | Bright / Neutral (16 kHz cut) / Dark (11 kHz) / "Vintage" (9 kHz + 250 Hz, gentle) | ⚠️ | The cut frequencies and slopes differ from the documented ones. |
-| Preset bar | top centre "◀ Default Preset ▶" | none | ❌ | |
-| Description line | bottom | hint bar name/value | ❌ | |
+| Preset bar | top centre "◀ Default Preset ▶" | header preset bar + the original's preset name | ✅ | rounds 129 / 135 |
+| Description line | bottom | bottom strip (hovered control, else the reverb mode; [EXEC] the reference's strip reads e.g. "Modern: a clean predelay") | ✅ | round 135 |
 | Resizable | yes (uiWidth/uiHeight) | yes | ✅ | |
 | Gestures | not documented | full set | ➕ | |
 | Layout | Mix/Width · ECHO box · REVERB box · MOD · EQ · mode row | same order | ✅ | |
 | Translation | — | every parameter (modes `steps`, routing) | ✅ | |
 
-**Scores** — configuration: 6/10, design: 7/10.
-**Top gaps**
+**Scores** — configuration: 6/10, design: 7/10. **After round 135**: configuration 8/10, design 9/10 (left: colour definitions, EQ in the loop).
+**Top gaps** (1, 4, 5 done in rounds 129 / 135)
 1. **Preset bar.** Same as the shared preset work. **M–L**
 2. **Colour modes to the documented values**: Dark = steep 8 kHz; the 4th colour = steep 10 kHz plus steep 600 Hz high-pass; Neutral = an HF RT cap (≈ 1–1.5 s) instead of an output cut. Code: LynxVerbs.cpp `horizonColourCut` / HorizonFx `configure`. Engine. **S**
 3. **EQ in the loop.** Low/High EQ should also scale the low- and high-band RT. Code: HorizonFx `configure` (the absorption bands already exist). Engine. **S–M**
@@ -1343,15 +1343,15 @@ Sources: [VintageVerb](https://valhalladsp.com/shop/reverb/valhalla-vintage-verb
 | Five knobs in a row, each its own colour | Mix, Rate, Depth, Feedback, Manual | Same order, each knob its own LYNX colour | ✅ | |
 | Mode | 11 modes (Up, Up/Down, TZFlange±, TriFlange, Ocho, Doubler, VariUp, VariUpDown, Ensemble360, Symphonic), clickable text "Mode: Up" bottom left | 11 modes renamed (Rise …), menu with ◀ ▶ bottom left | ✅ | |
 | Mode voices | Measured tap ranges per mode | Own designs within the measured ranges | ⚠️ | Round 101 marks finer captures as still to do |
-| Preset browser | "PRESETS: Default ◀▶" bottom middle / right | "(no preset)" | ❌ | |
-| Description line | Bottom strip, e.g. a one-line summary of the current mode | — | ❌ | UI only |
+| Preset browser | "PRESETS: Default ◀▶" bottom middle / right | header preset bar (LYNX factory + user presets, ◀ ▶) | ✅ | rounds 129 / 135 |
+| Description line | Bottom strip, e.g. a one-line summary of the current mode | bottom strip: the hovered control, else "Mode: Through-zero + — a through-zero flanger…" | ✅ | round 135 |
 | Resizable | Fixed size | Resizable | ➕ | |
 | Gestures / text entry | Not confirmed | Full LYNX set | ✅ | |
 | Saved-state translation | — | All 6 settings | ✅ | |
 
-**Scores:** configuration 7/10, design 7/10.
+**Scores:** configuration 7/10, design 7/10. **After round 135**: configuration 8/10, design 9/10 (left: the per-mode voices).
 
-**Top gaps:**
+**Top gaps** (1–2 done in rounds 129 / 135):
 1. **Mode description line** under the mode row, one sentence per mode. Same info-line item as Echoform. UI only, S.
 2. **Factory presets** with ◀ ▶ next to the mode. Needs the shared preset system, L.
 3. **Voice shapes per mode** checked against finer captures (the round 101 follow-up), in `orbit::Orbit::process`. Engine change, M.
@@ -1364,7 +1364,7 @@ Sources: [VintageVerb](https://valhalladsp.com/shop/reverb/valhalla-vintage-verb
 | Original feature | Original (range / default / where) | LYNX now | Status | Note |
 |---|---|---|---|---|
 | Faders Mix / Depth / Width / Delay / Feedback, values under them | 50 % / 50 % / 100 % (0–200) / 10 ms (0–1000) / 0 % | Same faders, values and defaults | ✅ | |
-| **MODE** menu (under the faders) | Named algorithms: 2TapChorus (default), 4TapEnsemble, SuperSix, 6TapRandom, DualEnsemble, 8Tap, 16Phase, 16Tap, 32Tap; each has its own LFO design (antiphase triangle, 3-phase, randomised triangle, 16-phase) | "Taps" menu with 1 / 2 / 3 / 4 / 8 / 16 (taps per channel); default **4** (= 8Tap) | ❌ | Wrong default; SuperSix, 6TapRandom and DualEnsemble all collapse to "3"; 16Phase and 16Tap collapse to "8"; one random-detune plus one vibrato LFO for every mode |
+| **MODE** menu (under the faders) | Named algorithms: 2TapChorus (default), 4TapEnsemble, SuperSix, 6TapRandom, DualEnsemble, 8Tap, 16Phase, 16Tap, 32Tap; each has its own LFO design (antiphase triangle, 3-phase, randomised triangle, 16-phase) | round 135: a "Mode" menu with the nine algorithms under LYNX's own names (2-tap chorus … 32-tap) on the reference's type index, default 2-tap chorus (round 129), ◀ ▶ | ⚠️ | The three 6-tap modes and the two 16-tap modes still play alike (one random-detune plus one vibrato LFO for every mode — vox136 / engine) |
 | Sync | Free plus 17 note values, next to the mode | 18-entry list (Free, 1/64 … 1/1), next to Taps | ⚠️ | List order is a guess; the substitute doesn't translate `DelaySync` |
 | Page tabs | MOD / TAPS / DIFF / EQ / DRIVE / WARP, top right | Same 6 tabs, same order | ✅ | |
 | MOD page | SlowRate 0.50 Hz, SlowDepth 50 %, VibRate 6.00 Hz, VibDepth 0 %, OverMod 1.0× | Same 5 knobs and defaults | ✅ | |
@@ -1375,16 +1375,16 @@ Sources: [VintageVerb](https://valhalladsp.com/shop/reverb/valhalla-vintage-verb
 | WARP page: Speed, fbMix, Smoothing | 1X / ½X, 50 %, 100 ms | Same | ✅ | |
 | WARP page: InputPan | 0–8 steps, shows "Stereo" | — | ❌ | Not in the engine; substitute drops it |
 | 16-tap alternating polarity / type ≥ 10 | Measured | Not modelled | ⚠️ | |
-| Preset browser | "PRESET: Default ◀▶" next to the page area | "(no preset)" | ❌ | |
-| Description / tooltip line | Bottom strip shows hover help (e.g. the OverMod warning) | Main-window hint bar | ❌ | UI only |
+| Preset browser | "PRESET: Default ◀▶" next to the page area | header preset bar + the original's preset name | ✅ | rounds 129 / 135 |
+| Description / tooltip line | Bottom strip shows hover help (e.g. the OverMod warning) | bottom strip: every control described ("Over-mod — pushes the modulation past its normal range (can sound unstable)") | ✅ | round 135 |
 | Tap display | — | Tap graph under the pages | ➕ | |
 | Resizable | Fixed size | Resizable | ➕ | |
 | Gestures / text entry | Not confirmed | Full LYNX set | ✅ | |
 | Saved-state translation | — | Everything except DelaySync and InputPan | ⚠️ | `PluginSubstitutes.cpp [valhalla-ubermod]` |
 
-**Scores:** configuration 6/10, design 7/10.
+**Scores:** configuration 6/10, design 7/10. **After round 135**: configuration 7/10, design 9/10 (left: per-mode LFO designs, InputPan, Sync translation).
 
-**Top gaps:**
+**Top gaps** (1 and 5 done in round 135, except the per-mode sound):
 1. **Named Mode menu with the correct default**: replace "Taps" with 9 LYNX-named algorithms using the measured `type` index (2TapChorus = index 1), and set the default to index 1 (1.5/24) instead of 6.5/24. Changes `latticeLayout()`, `latticeInfo()` and `tapCount()`. UI plus default, S.
 2. **LFO structure per mode** (antiphase triangle, 3-phase, randomised triangle, 16-phase) in `LatticeMod::process`, so SuperSix, 6TapRandom, DualEnsemble and 16Phase sound different from each other. Engine change, M–L.
 3. **Sync translation**: measure the 18 sync steps, confirm the list, then add `map = xml:DelaySync -> Sync`. Engine plus map, S.
