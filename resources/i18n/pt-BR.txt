@@ -3086,7 +3086,7 @@ countries: br
 "Not linked yet. Right-click a knob > Link to internal controller > this output." = "Ainda sem vínculo. Clique direito num knob > Vincular a controlador interno > esta saída."
 "Drives:" = "Controla:"
 "Port" = "Porta"
-"Program (not sent yet)" = "Programa (ainda não enviado)"
+"Program (sent on play)" = "Programa (enviado ao tocar)"
 "Send to a plugin..." = "Enviar para um plugin..."
 "Sets a plugin channel's MIDI input port to this port, so it plays this channel's notes" = "Define a porta de entrada MIDI de um canal de plugin como esta porta, para ele tocar as notas deste canal"
 "Automate MIDI controller..." = "Automatizar controlador MIDI..."
