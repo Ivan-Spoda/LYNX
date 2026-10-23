@@ -15774,5 +15774,6 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "ParityTests129.inc"
 #include "Parity135vTests.inc"
 #include "Bugs131Tests.inc"
+#include "Parity135wTests.inc"
 #include "Feat133Tests.inc"
 #include "Feat132Tests.inc"

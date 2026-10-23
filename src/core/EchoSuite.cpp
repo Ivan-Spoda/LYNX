@@ -1,5 +1,6 @@
 #include "core/EchoSuite.h"
 
+#include <atomic>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -383,8 +384,48 @@ double sideMs (const EffectParams& p, bool right, double bpm) noexcept
     const auto kind = syncKind (p[right ? syncR : syncL]);
     if (kind == 0)
         return timeMs (p[right ? timeR : timeL]);
-    bpm = bpm > 1.0 ? bpm : 120.0;
+    bpm = tempoFor (p, bpm);
     return std::min (20000.0, noteBeats (noteIndex (p[right ? noteR : noteL]), kind) * 60000.0 / bpm);
+}
+
+double bpmOf (float v) noexcept { return 30.0 + 270.0 * (double) clamp01 (v); }
+float bpmValue (double bpm) noexcept { return (float) std::clamp ((bpm - 30.0) / 270.0, 0.0, 1.0); }
+double tempoFor (const EffectParams& p, double projectBpm) noexcept
+{
+    if (p[tempoSource] >= 0.5f)
+        return bpmOf (p[ownBpm]);
+    return projectBpm > 1.0 ? projectBpm : 120.0;
+}
+
+std::vector<std::pair<int, float>> linkedEdit (const EffectParams& p, int param, float value)
+{
+    std::vector<std::pair<int, float>> out { { param, value } };
+    if (p[filterLink] < 0.5f || (param != lowCut && param != highCut))
+        return out;
+    const auto hzOf = [] (int which, float v) { return which == lowCut ? lowCutHz (v) : highCutHz (v); };
+    const auto ratio = hzOf (param, value) / std::max (1.0, hzOf (param, p[(std::size_t) param]));
+    const auto other = param == lowCut ? highCut : lowCut;
+    const auto hz = hzOf (other, p[(std::size_t) other]) * ratio;
+    const auto v = other == lowCut ? (hz - 10.0) / 1990.0 : (hz - 200.0) / 19800.0;
+    out.push_back ({ other, (float) std::clamp (v, 0.0, 1.0) });
+    return out;
+}
+
+int nearestPrime (int samples) noexcept
+{
+    const auto isPrime = [] (int n) {
+        if (n < 2) return false;
+        if (n % 2 == 0) return n == 2;
+        for (int k = 3; k * k <= n; k += 2)
+            if (n % k == 0) return false;
+        return true;
+    };
+    samples = std::max (2, samples);
+    for (int d = 0;; ++d)
+    {
+        if (isPrime (samples - d)) return samples - d;
+        if (isPrime (samples + d)) return samples + d;
+    }
 }
 
 double feedbackGain (float v) noexcept { return 2.0 * clamp01 (v); }
@@ -464,16 +505,38 @@ public:
         hyb.dirty = true;
     }
 
+    // round 135w: 2 = input peak, 3 = output peak of the last block (linear, the editor's output meter and clip lamp)
+    float controlOutput (int output) const noexcept override
+    {
+        return output == 2 ? meterIn.load (std::memory_order_relaxed) : output == 3 ? meterOut.load (std::memory_order_relaxed) : 0.0f;
+    }
+
     void process (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept override
     {
         if (ch[0].line.buf.empty())
             prepare (sr);
+        float inPeak = 0.0f;
+        for (int i = 0; i < n; ++i)
+            inPeak = std::max (inPeak, std::max (std::abs (l[i]), std::abs (r[i])));
+        meterIn.store (inPeak, std::memory_order_relaxed);
         if (hybridOf (p[hybrid]) != 0)
-        {
             hybridProcess (l, r, n, p, bpm);
-            return;
+        else
+        {
+            hyb.dirty = true;
+            echoProcess (l, r, n, p, bpm);
         }
-        hyb.dirty = true;
+        float outPeak = 0.0f;
+        for (int i = 0; i < n; ++i)
+            outPeak = std::max (outPeak, std::max (std::abs (l[i]), std::abs (r[i])));
+        meterOut.store (outPeak, std::memory_order_relaxed);
+    }
+
+private:
+    std::atomic<float> meterIn { 0.0f }, meterOut { 0.0f };
+
+    void echoProcess (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept
+    {
 
         const auto md = modeOf (p[mode]);
         const auto st = styleOf (p[style]);
@@ -529,6 +592,25 @@ public:
         const auto envRelease = (float) (1.0 - std::exp (-1.0 / (0.25 * sr)));
         static constexpr double diffMs[4] = { 4.3, 6.7, 9.1, 12.7 };
 
+        // round 135w: quad taps / swell, groove / feel / accent, prime numbers, cross feedback, balance, freeze, start side
+        const bool tapOn[4] = { p[tapA] >= 0.5f, p[tapB] >= 0.5f, p[tapC] >= 0.5f, p[tapD] >= 0.5f };
+        const bool swellOn = p[swell] >= 0.5f;
+        const auto grooveV = 0.25 * bipolar (p[groove]), feelV = 0.25 * bipolar (p[feel]);
+        const auto accentV = (float) bipolar (p[accent]);
+        const bool primesOn = p[primes] >= 0.5f, freezeOn = p[freeze] >= 0.5f;
+        const auto crossV = clamp01 (p[crossFeedback]);
+        const auto balanceV = (float) bipolar (p[balance]);
+        const int first = (st == Style::pingPong && p[startSide] >= 0.5f) ? 1 : 0, second = 1 - first;
+        // the plain read path (no shifter / pitch / reverse / phaser on the echoes) can read the echoes from their own
+        // taps: Feel moves the heard taps, Groove / Accent use a loop of two echo times (odd and even repeats apart)
+        const bool plainRead = (int) md < (int) Mode::phaser && st != Style::quad;
+        const auto longest = std::max (tL, tR) * 0.001 * sr * (1.0 + std::abs (feelV) + std::abs (grooveV)) + 0.02 * sr;
+        const bool twoTap = plainRead && st != Style::pingPong && (std::abs (grooveV) > 1e-6 || std::abs (accentV) > 1e-6)
+                            && 2.0 * longest < ch[0].line.maxDelay();
+        const bool feelTap = plainRead && std::abs (feelV) > 1e-6;
+        const auto maxRead = ch[0].line.maxDelay() - 2.0;
+        const auto loopG = freezeOn ? 1.0 : (twoTap ? g * g : g);
+
         for (int i = 0; i < n; ++i)
         {
             const float in[2] = { l[i], r[i] };
@@ -558,7 +640,10 @@ public:
             }
 
             // targets in samples (tape glide when the time changes)
-            const double target[2] = { tL * 0.001 * sr, tR * 0.001 * sr };
+            double target[2] = { tL * 0.001 * sr, tR * 0.001 * sr };
+            if (primesOn)
+                for (auto& t : target)
+                    t = (double) nearestPrime ((int) std::lround (t));
             double d[2];
             for (int c = 0; c < 2; ++c)
             {
@@ -575,19 +660,38 @@ public:
                 if (st == Style::quad)
                 {
                     const auto e = c == 0 ? quadEl : quadEr;
-                    float last = 0.0f;
+                    float last = 0.0f, heard = 0.0f;
+                    int count = 0;
                     for (int k = 1; k <= 4; ++k)
                     {
                         const auto v = s.line.at (std::max (2.0, d[c] * std::pow ((double) k / 4.0, e)));
-                        y += 0.5f * v;
+                        if (tapOn[k - 1])
+                        {
+                            y += 0.5f * v;
+                            heard += v;
+                            ++count;
+                        }
                         last = v;
                     }
-                    fbSig[c] = last;
+                    // Repeat: the last tap feeds back (heard or not); Swell: the mean of the taps heard
+                    fbSig[c] = swellOn ? (count > 0 ? heard / (float) count : 0.0f) : last;
                 }
                 else if (md == Mode::reverse)
                 {
                     y = reverseRead (s, d[c], std::pow (2.0, semis / 12.0));
                     fbSig[c] = y;
+                }
+                else if (twoTap)
+                {
+                    // a loop of two echo times: odd repeats at T (1 + feel + groove), even ones at T (2 + feel)
+                    fbSig[c] = s.line.at (std::min (maxRead, 2.0 * d[c]));
+                    y = (1.0f + accentV) * s.line.at (std::clamp (d[c] * (1.0 + feelV + grooveV), 2.0, maxRead))
+                        + (1.0f - accentV) * (float) g * s.line.at (std::clamp (d[c] * (2.0 + feelV), 2.0, maxRead));
+                }
+                else if (feelTap)
+                {
+                    fbSig[c] = s.line.at (d[c]);
+                    y = s.line.at (std::clamp (d[c] * (1.0 + feelV), 2.0, maxRead));
                 }
                 else
                 {
@@ -625,30 +729,32 @@ public:
                     }
                     default: break;
                 }
-                if (st != Style::quad) // the quad style feeds back its last tap as read
+                if (st != Style::quad && ! twoTap && ! feelTap) // the quad style feeds back its last tap as read
                     fbSig[c] = y;
                 echo[c] = y;
             }
 
             // loop inputs per style
             const auto mono = 0.5f * (in[0] + in[1]);
+            const auto feed = freezeOn ? 0.0f : 1.0f; // frozen: the input stays out of the loop
             float loopIn[2];
             if (st == Style::pingPong && pairsOn)
             {
-                // in pairs: left → right at full level, the loop gain once per pair
-                loopIn[0] = mono + (float) g * fbSig[1];
-                loopIn[1] = fbSig[0];
+                // in pairs: the start side → the other one at full level, the loop gain once per pair
+                loopIn[first] = feed * mono + (float) loopG * fbSig[second];
+                loopIn[second] = fbSig[first];
             }
             else if (st == Style::pingPong)
             {
-                const auto half = (float) std::sqrt (g);
-                loopIn[0] = mono + half * fbSig[1];
-                loopIn[1] = half * fbSig[0];
+                const auto half = (float) std::sqrt (loopG);
+                loopIn[first] = feed * mono + half * fbSig[second];
+                loopIn[second] = half * fbSig[first];
             }
             else
             {
-                loopIn[0] = in[0] + (float) g * fbSig[0];
-                loopIn[1] = in[1] + (float) g * fbSig[1];
+                const auto mine = 1.0f - crossV;
+                loopIn[0] = feed * in[0] + (float) loopG * (mine * fbSig[0] + crossV * fbSig[1]);
+                loopIn[1] = feed * in[1] + (float) loopG * (mine * fbSig[1] + crossV * fbSig[0]);
             }
 
             // write path: diffusion, character, cuts, a soft limit (feedback above 100 % stays bounded)
@@ -656,6 +762,11 @@ public:
             {
                 auto& s = ch[(std::size_t) c];
                 auto u = loopIn[c];
+                if (freezeOn) // the loop as it is: no diffusion, colour, cuts or limiter
+                {
+                    s.line.push (u);
+                    continue;
+                }
                 if (diffAmount > 0.0f)
                     for (std::size_t k = 0; k < 4; ++k)
                         u = s.diff[k].process (u, diffMs[k] * diffScale * 0.001 * sr * (c == 1 ? 1.07 : 1.0), 0.65f * diffAmount);
@@ -673,14 +784,15 @@ public:
                 duckGain = 1.0f / (1.0f + 8.0f * duck * envelope);
             }
 
-            // width (M / S of the echoes) and the equal-power mix
+            // balance of the echoes, width (M / S of the echoes) and the equal-power mix
+            echo[0] *= 1.0f - std::max (0.0f, balanceV);
+            echo[1] *= 1.0f + std::min (0.0f, balanceV);
             const auto m = 0.5f * (echo[0] + echo[1]), sd = 0.5f * (echo[0] - echo[1]) * widthV;
             l[i] = dryGain * in[0] + wetGain * duckGain * (m + sd) * polarityL;
             r[i] = dryGain * in[1] + wetGain * duckGain * (m - sd) * polarityR;
         }
     }
 
-private:
     enum class ModSource { none, tape, sine, random };
 
     struct Channel
@@ -877,6 +989,7 @@ private:
         }
         const bool analog = hybridOf (p[hybrid]) == 2;
         const bool pp = styleOf (p[style]) == Style::pingPong;
+        const bool startRight = p[startSide] >= 0.5f;
         const auto t = std::clamp ((int) std::lround (sideMs (p, false, bpm) * sr / 1000.0), 1, (int) hyb.a.maxDelay());
         const auto fb = feedbackGain (p[feedback]); // H-Delay's feedback / 100 (0 … 2)
         const auto fbPair = fb * fb;
@@ -906,6 +1019,8 @@ private:
             hyb.aPrev = aOut;
             hyb.bPrev = bOut;
             float el = (float) (aOut * outGain), er = (float) (bOut * outGain);
+            if (pp && startRight) // round 135w: the first echo on the right
+                std::swap (el, er);
             if (analog)
             {
                 el = hyb.tilt.process (el, 0);
@@ -1438,7 +1553,12 @@ const EffectInfo& echoformInfo()
                                      { "Shift", 0.5f }, { "Shift detune", 0.58f }, { "Pitch", 0.5f }, { "Pitch detune", 0.5f },
                                      { "Mode", 0.5f / 12.0f }, { "Ducking", 0.0f }, { "Output", 0.5f }, { "Pairs", 0.0f },
                                      { "Phase L", 0.0f }, { "Phase R", 0.0f },
-                                     { "Hybrid", 0.0f } } };
+                                     { "Hybrid", 0.0f },
+                                     // round 135w (appended; the defaults keep the old sound)
+                                     { "Tempo source", 0.0f }, { "BPM", 1.0f / 3.0f }, { "Start side", 0.0f }, { "Filter link", 0.0f },
+                                     { "Tap A", 1.0f }, { "Tap B", 1.0f }, { "Tap C", 1.0f }, { "Tap D", 1.0f }, { "Swell", 0.0f },
+                                     { "Groove", 0.5f }, { "Feel", 0.5f }, { "Accent", 0.5f }, { "Prime numbers", 0.0f },
+                                     { "Cross feedback", 0.0f }, { "Balance", 0.5f }, { "Freeze", 0.0f } } };
     return info;
 }
 
@@ -1524,6 +1644,14 @@ std::string paramText (EffectKind kind, int param, float v)
             case pairs: return v >= 0.5f ? "pairs" : "alternate";
             case phaseL: case phaseR: return v >= 0.5f ? "inverted" : "normal";
             case hybrid: return hybridOf (v) == 0 ? "off" : (hybridOf (v) == 1 ? "clean" : "analog");
+            case tempoSource: return v >= 0.5f ? "own BPM" : "project";
+            case ownBpm: return fmt ("%.1f BPM", bpmOf (v));
+            case startSide: return v >= 0.5f ? "right" : "left";
+            case filterLink: case tapA: case tapB: case tapC: case tapD: case primes: case freeze: return v >= 0.5f ? "on" : "off";
+            case swell: return v >= 0.5f ? "swell" : "repeat";
+            case groove: case feel: return fmt ("%+.1f%%", 25.0 * bipolar (v));
+            case accent: case balance: return fmt ("%+.0f%%", 100.0 * bipolar (v));
+            case crossFeedback: return pct (v * 100.0);
             default: return fmt ("%.2f", v);
         }
     }

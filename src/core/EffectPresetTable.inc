@@ -39,6 +39,12 @@ Male vocal         | Frequency = 5.7 kHz; Threshold = -30 dB; Range = 8 dB; Rele
 Gentle, wide band  | Frequency = 6 kHz; Threshold = -28 dB; Range = 5 dB; Wideband = wideband
 Harsh esses        | Frequency = 6.5 kHz; Threshold = -38 dB; Range = 14 dB; Band detector = band
 Cymbal tamer       | Frequency = 9.5 kHz; Threshold = -30 dB; Range = 6 dB; Release = 112 ms
+folder Classic split (band detector)
+Classic default    | Voicing = classic split; Frequency = 5.5 kHz; Band detector = band; Wideband = split; Threshold =#0.75
+Male S             | Voicing = classic split; Frequency = 4.5 kHz; Band detector = band; Wideband = split; Threshold =#0.75
+Male SH            | Voicing = classic split; Frequency = 3.4 kHz; Band detector = band; Wideband = split; Threshold =#0.75
+Female S           | Voicing = classic split; Frequency = 6.8 kHz; Band detector = band; Wideband = split; Threshold =#0.75
+Female SH          | Voicing = classic split; Frequency = 5.1 kHz; Band detector = band; Wideband = split; Threshold =#0.75
 
 [Quell Denoiser]
 Light hiss    | Amount = 15 %

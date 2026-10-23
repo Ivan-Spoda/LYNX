@@ -52,6 +52,26 @@ int vibratoShapeIndex (float v) noexcept { return stepped (v, vibratoShapes); }
 double vibratoRateHz (float v) noexcept { return 0.1 + 9.9 * (double) std::clamp (v, 0.0f, 1.0f); }
 double vibratoDepthCents (float v) noexcept { return 100.0 * (double) std::clamp (v, 0.0f, 1.0f); }
 double vibratoOnsetMs (float v) noexcept { return 1500.0 * (double) std::clamp (v, 0.0f, 1.0f); }
+// [EXEC] the trial's taper (round 120, docs/specs/waves-tune-real-time.md): 0 … 0.5 → 0.1 … 50 ms, 0.5 … 2/3 → 50 …
+// 120 ms, 2/3 … 1 → 120 … 800 ms
+double speedMs (float v) noexcept
+{
+    const auto x = (double) std::clamp (v, 0.0f, 1.0f);
+    if (x <= 0.5) return 0.1 + 49.9 * x / 0.5;
+    if (x <= 2.0 / 3.0) return 50.0 + 70.0 * (x - 0.5) / (2.0 / 3.0 - 0.5);
+    return 120.0 + 680.0 * (x - 2.0 / 3.0) / (1.0 / 3.0);
+}
+float speedValue (double ms) noexcept
+{
+    ms = std::clamp (ms, 0.1, 800.0);
+    if (ms <= 50.0) return (float) (0.5 * (ms - 0.1) / 49.9);
+    if (ms <= 120.0) return (float) (0.5 + (2.0 / 3.0 - 0.5) * (ms - 50.0) / 70.0);
+    return (float) (2.0 / 3.0 + (ms - 120.0) / 680.0 / 3.0);
+}
+double toleranceCentsOf (float v) noexcept { return 40.0 * (double) std::clamp (v, 0.0f, 1.0f); }
+double toleranceTimeMs (float v) noexcept { return 300.0 * (double) std::clamp (v, 0.0f, 1.0f); }
+double vibratoAmountOf (float v) noexcept { return 2.0 * (double) std::clamp (v, 0.0f, 1.0f); }
+
 int effectiveScale (float scaleValue, float moreScalesValue) noexcept
 {
     switch (stepped (moreScalesValue, 3))
@@ -101,6 +121,14 @@ const EffectInfo& info()
         e.params.push_back ({ "Onset delay", 1.0f / 3.0f });                    // 500 ms
         e.params.push_back ({ "Onset rate", 1.0f / 3.0f });                     // 500 ms
         e.params.push_back ({ "More scales", 0.0f });
+        // round 135w (the real-time corrector's controls)
+        e.params.push_back ({ "Speed link", 1.0f });
+        e.params.push_back ({ "Speed", speedValue (15.0) });
+        e.params.push_back ({ "Tolerance cents", 0.0f });
+        e.params.push_back ({ "Tolerance time", 0.0f });
+        e.params.push_back ({ "Keep vibrato", 1.0f });
+        e.params.push_back ({ "Vibrato amount", 0.5f });
+        e.params.push_back ({ "Correction", 1.0f });
         return e;
     }();
     return i;
@@ -122,6 +150,11 @@ std::string paramText (int param, float v)
         case vibratoDelay:
         case vibratoOnset: std::snprintf (t, sizeof t, "%.0f ms", vibratoOnsetMs (v)); return t;
         case moreScales: { static const char* n[3] { "Off", "Whole tone", "Diminished" }; return n[stepped (v, 3)]; }
+        case speedLink: case keepVibrato: return onOff();
+        case speed: std::snprintf (t, sizeof t, speedMs (v) < 10.0 ? "%.1f ms" : "%.0f ms", speedMs (v)); return t;
+        case toleranceCents: if (v <= 0.0f) return "Off"; std::snprintf (t, sizeof t, "%.0f c", toleranceCentsOf (v)); return t;
+        case toleranceTime: if (v <= 0.0f) return "Off"; std::snprintf (t, sizeof t, "%.0f ms", toleranceTimeMs (v)); return t;
+        case vibratoAmount: case correction: std::snprintf (t, sizeof t, "%.0f%%", 100.0 * (param == vibratoAmount ? vibratoAmountOf (v) : (double) v)); return t;
         case retune: std::snprintf (t, sizeof t, "%.0f ms", retuneMs (v)); return t;
         case humanize:
         case flexTune:
@@ -178,6 +211,8 @@ public:
         extraWanted = extra = 0.0;
         noteTime = 0.0;
         lfoPhase = 0.0;
+        candidateTime = 0.0;
+        candidate = -1;
     }
 
     void setHeldNotes (const NoteMask* channels, int count) noexcept override
@@ -206,8 +241,16 @@ public:
             if (p[(std::size_t) (bypassC + k)] >= 0.5f)
                 bypass = (std::uint16_t) (bypass | (1u << k));
         // round 128: natural vibrato (gain on the vibrato already sung), ignore vibrato, created vibrato
-        const auto natGain = std::pow (10.0, naturalVibratoDb (p[naturalVibrato]) / 20.0);
-        const auto natural = std::abs (natGain - 1.0) > 1e-9;
+        // round 135w: Keep vibrato / Vibrato amount multiply the natural-vibrato gain; Speed (unlinked) corrects the
+        // in-note deviations on its own time; the tolerances widen and delay the note changes; Correction scales it all
+        const auto natGain = std::pow (10.0, naturalVibratoDb (p[naturalVibrato]) / 20.0)
+                             * (p[keepVibrato] >= 0.5f ? vibratoAmountOf (p[vibratoAmount]) : 0.0);
+        const auto linked = p[speedLink] >= 0.5f;
+        const auto speedTau = speedMs (p[speed]) * 0.001;
+        const auto hysteresis = hysteresisSt + toleranceCentsOf (p[toleranceCents]) / 100.0;
+        const auto holdTime = toleranceTimeMs (p[toleranceTime]) * 0.001;
+        const auto amount = (double) std::clamp (p[correction], 0.0f, 1.0f);
+        const auto natural = std::abs (natGain - 1.0) > 1e-9 || ! linked;
         const auto ignoreVib = p[ignoreVibrato] >= 0.5f;
         const auto vibShape = vibratoShapeIndex (p[vibratoShape]);
         const auto vibInc = vibratoRateHz (p[vibratoRate]) / sr;
@@ -238,6 +281,7 @@ public:
         const auto wet = std::clamp (p[mix], 0.0f, 1.0f);
         const auto dt = 1.0 / sr;
         const auto stereo = r != nullptr && r != l;
+        float peakIn = 0.0f, peakOut = 0.0f; // round 135w: the input / output meters
 
         for (int i = 0; i < n; ++i)
         {
@@ -268,7 +312,12 @@ public:
                         center1 += a * (sung - center1);
                         center2 += a * (center1 - center2);
                     }
-                    extraWanted = natural ? (natGain - 1.0) * (sung - center2) : 0.0;
+                    // round 135w: Speed (unlinked) flattens a share of the in-note deviation (drift, vibrato) on top of
+                    // the note transition: all of it at ≤ 1 ms, 20 % at 5 ms, 7 % at the 15 ms default, ~0 above 100 ms
+                    // ([EXEC] round 120 §4.1: on the trial Speed only shows below ~5 ms, slightly less vibrato)
+                    const auto resid = sung - center2;
+                    const auto flatten = linked ? 0.0 : std::min (1.0, 0.001 / std::max (1e-4, speedTau));
+                    extraWanted = natural ? (natGain - 1.0) * (1.0 - flatten) * resid - flatten * resid : 0.0;
                     const auto heard = sung + extraWanted; // the sung pitch with the natural-vibrato gain
                     if (newPhrase)
                     {
@@ -296,15 +345,32 @@ public:
                         // the first notes of the next one, by up to half a semitone the wrong way)
                         shift = 0.0;
                     }
-                    const auto t = vocal::nearestNote (ignoreVib ? center2 : sung, mask, target, hysteresisSt);
-                    if (t != target)
+                    const auto t = vocal::nearestNote (ignoreVib ? center2 : sung, mask, target, hysteresis);
+                    // round 135w: Tolerance time — a new note must last that long before the target moves to it
+                    if (t != target && holdTime > 0.0 && target >= 0)
+                    {
+                        if (t == candidate)
+                            candidateTime += hop;
+                        else
+                        {
+                            candidate = t;
+                            candidateTime = hop;
+                        }
+                    }
+                    if (t != target && (holdTime <= 0.0 || target < 0 || candidateTime >= holdTime))
                     {
                         target = t;
                         noteAge = 0.0;
                         noteTime = 0.0;
+                        candidate = -1;
+                        candidateTime = 0.0;
                     }
                     else
+                    {
                         noteTime += hop;
+                        if (t == target)
+                            candidate = -1;
+                    }
                     if (newPhrase)
                         noteTime = 0.0;
                     wanted = (double) target - heard;
@@ -354,6 +420,8 @@ public:
                 extra += (1.0 - std::exp (-dt / 0.003)) * (extraWanted - extra);
                 semis += extra;
             }
+            if (amount < 1.0)
+                semis = (semis - trans) * amount + trans; // round 135w: Correction % (the transpose stays whole)
             if (vibShape > 0)
             {
                 lfoPhase += vibInc;
@@ -385,7 +453,11 @@ public:
             l[i] = d0 + wet * (y[0] - d0);
             if (stereo)
                 r[i] = d1 + wet * (y[1] - d1);
+            peakIn = std::max (peakIn, std::max (std::abs (xin[0]), std::abs (xin[1])));
+            peakOut = std::max (peakOut, std::max (std::abs (l[i]), stereo ? std::abs (r[i]) : 0.0f));
         }
+        meterIn.store (std::min (peakIn, 1.0f), std::memory_order_relaxed);
+        meterOut.store (std::min (peakOut, 1.0f), std::memory_order_relaxed);
 
         meterSung.store ((float) sung, std::memory_order_relaxed);
         meterTarget.store ((float) target, std::memory_order_relaxed);
@@ -400,6 +472,8 @@ public:
             case 0: return std::max (0.0f, meterSung.load (std::memory_order_relaxed)) / 127.0f;
             case 1: return std::max (0.0f, meterTarget.load (std::memory_order_relaxed)) / 127.0f;
             case 2: return std::clamp (0.5f + meterShift.load (std::memory_order_relaxed) / 4.0f, 0.0f, 1.0f);
+            case 3: return meterIn.load (std::memory_order_relaxed);  // round 135w: input peak
+            case 4: return meterOut.load (std::memory_order_relaxed); // round 135w: output peak
             default: return 0.0f;
         }
     }
@@ -436,6 +510,9 @@ private:
     int heldCount = 0;
     std::atomic<int> latencyNow { 1200 };
     std::atomic<float> meterSung { -1.0f }, meterTarget { -1.0f }, meterShift { 0.0f };
+    std::atomic<float> meterIn { 0.0f }, meterOut { 0.0f };
+    double candidateTime = 0.0; // round 135w: Tolerance time
+    int candidate = -1;
 };
 } // namespace
 
