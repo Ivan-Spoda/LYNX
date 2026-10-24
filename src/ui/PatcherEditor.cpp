@@ -8,6 +8,7 @@
 #include "engine/PluginHost.h"
 #include "ui/I18n.h"
 #include "ui/MixerComponent.h"
+#include "ui/ChannelRackComponent.h"
 #include "ui/PluginWindow.h"
 #include "ui/Theme.h"
 #include "ui/ToolWindow.h"
@@ -720,9 +721,12 @@ private:
         juce::PopupMenu effects, instruments, pluginEffects, pluginInstruments;
         for (const auto kind : addableEffects())
             if (kind != EffectKind::patcher)
-                effects.addItem (juce::String::fromUTF8 (effectInfo (kind).name), [this, kind, at] {
+                effects.addItem (addableEffectName (kind), addableEffectAvailable (kind), false, [this, kind, at] {
+                    const auto fx = newAddableEffect (kind, engine.getSong().bpm);
+                    if (! fx)
+                        return;
                     PatchNode n;
-                    n.effect = makeEffectSlot (kind);
+                    n.effect = *fx;
                     addNode (n, at);
                 });
         for (const auto kind : { InstrumentKind::synth, InstrumentKind::kick, InstrumentKind::snare, InstrumentKind::hat, InstrumentKind::clap })
@@ -735,6 +739,18 @@ private:
                                      n.channel.name = effectNameOf (kind);
                                      addNode (n, at);
                                  });
+        {
+            // FL's own instrument engines (round 142)
+            juce::PopupMenu engines;
+            addFlEngineItems (engines, [this, at] (ChannelDef c) {
+                PatchNode n;
+                n.generator = true;
+                n.channel = c;
+                addNode (n, at);
+            });
+            instruments.addSeparator();
+            instruments.addSubMenu (tr ("FL engines"), engines);
+        }
         addPluginItems (pluginEffects, engine, false, [this, at] (PluginRef ref) {
             PatchNode n;
             n.effect.kind = EffectKind::plugin;
