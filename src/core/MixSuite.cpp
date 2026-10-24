@@ -10,6 +10,7 @@
 #include "core/EmberClassic.h"
 #include "core/LrCrossover.h"
 #include "core/VoiceMatch.h"
+#include "core/VoxStrip.h"
 
 // REA_rodada96. Every formula below is textbook material, cited where it matters:
 //  - biquads: R. Bristow-Johnson, "Cookbook formulae for audio EQ biquad filter coefficients";
@@ -296,6 +297,30 @@ double eCompThresholdDb (float v) noexcept { return lin (v, -20.0, 10.0); }
 double eGateRangeDb (float v) noexcept { return lin (v, 0.0, 40.0); }
 double eGateThresholdDb (float v) noexcept { return lin (v, -30.0, 10.0); }
 bool eVoicing (const EffectParams& p) noexcept { return on (p[voicing]); }
+bool vocalVoicing (const EffectParams& p) noexcept { return on (p[vocal]); }
+
+// round 145: the Vocal strip voicing's settings (the reference's own laws, core/VoxStrip.h)
+voxstrip::Settings vocalSettings (const EffectParams& p) noexcept
+{
+    namespace vs = voxstrip;
+    vs::Settings s;
+    s.inputDb = vs::gainDb (p[vInput]);
+    s.outputDb = vs::gainDb (p[vOutput]);
+    s.order = vs::orderOf (p[vOrder]);
+    s.dsOn = on (p[vDsOn]); s.dsSplit = on (p[vDsSplit]); s.dsLookahead = on (p[vDsLookahead]); s.dsListen = on (p[vDsListen]);
+    s.dsHz = vs::dsFreqHz (p[vDsFreq]); s.dsThresholdDb = vs::thresholdDb (p[vDsThreshold]);
+    s.dpOn = on (p[vDpOn]); s.dpSplit = on (p[vDpSplit]); s.dpLookahead = on (p[vDpLookahead]); s.dpListen = on (p[vDpListen]);
+    s.dpHz = vs::dpFreqHz (p[vDpFreq]); s.dpThresholdDb = vs::thresholdDb (p[vDpThreshold]);
+    s.eqOn = on (p[vEqOn]); s.hpfOn = on (p[vHpfOn]); s.notchOn = on (p[vNotchOn]); s.highOn = on (p[vHighOn]);
+    s.hpfHz = vs::hpfHz (p[vHpfFreq]); s.notchHz = vs::notchHz (p[vNotchFreq]); s.notchDb = vs::notchGainDb (p[vNotchGain]);
+    s.highHz = vs::highHz (p[vHighFreq]); s.highDb = vs::highGainDb (p[vHighGain]);
+    s.compOn = on (p[vCompOn]); s.softKnee = on (p[vKnee]); s.drive = on (p[vDrive]);
+    s.expThresholdDb = vs::expThresholdDb (p[vExpThreshold]); s.compThresholdDb = vs::thresholdDb (p[vCompThreshold]);
+    s.ratio = vs::ratio (p[vRatio]); s.attackMs = vs::attackMs (p[vAttack]); s.releaseMs = vs::releaseMs (p[vRelease]);
+    s.makeupDb = vs::makeupDb (p[vMakeup]);
+    return s;
+}
+
 
 namespace
 {
@@ -386,12 +411,17 @@ public:
     {
         sr = rate;
         console.prepare (rate);
+        vocalEngine.prepare (rate);
         reset();
     }
+
+    // round 145: only the Vocal strip voicing's look-ahead adds latency (known from the last block's settings)
+    int latencySamples() const noexcept override { return vocalLatency; }
 
     void reset() noexcept override
     {
         console.reset();
+        vocalEngine.reset();
         for (auto* d : { &audio, &side })
         {
             d->hp1.reset(); d->hp2.reset(); d->lp.reset(); d->lf.reset(); d->lmf.reset(); d->hmf.reset(); d->hf.reset();
@@ -406,6 +436,17 @@ public:
 
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
+        if (vocalVoicing (p))
+        {
+            const auto inPeak = Meters::peak (l, r, n);
+            vocalEngine.set (vocalSettings (p));
+            vocalLatency = vocalEngine.latencySamples();
+            vocalEngine.process (l, r, n);
+            meters.set (vocalEngine.compReductionDb(), std::max (vocalEngine.deEssReductionDb(), vocalEngine.dePlosReductionDb()),
+                        inPeak, Meters::peak (l, r, n));
+            return;
+        }
+        vocalLatency = 0;
         if (eVoicing (p))
         {
             const auto inPeak = Meters::peak (l, r, n);
@@ -540,6 +581,8 @@ private:
     }
 
     vmatch::echannel::Channel console;
+    voxstrip::Engine vocalEngine;
+    int vocalLatency = 0;
 
     static void filters (EqDesign& d, float& a, float& b) noexcept
     {
@@ -1987,7 +2030,19 @@ const EffectInfo& ridgeInfo()
                                      { "Gate range", 0.0f }, { "Gate threshold", 0.25f }, { "Gate release", 0.29f }, { "Gate fast", 0.0f },
                                      { "Expander", 0.0f }, { "Dynamics on", 1.0f },
                                      { "Order", 1.0f }, { "Filters to SC", 0.0f }, { "Output", 0.5f }, { "Phase", 0.0f }, { "Comp. mix", 1.0f },
-                                     { "Voicing", 0.0f }, { "Filter split", 0.0f } } };
+                                     { "Voicing", 0.0f }, { "Filter split", 0.0f },
+                                     // round 145: the Vocal strip voicing (core/VoxStrip.h); defaults = the reference's
+                                     { "Vocal strip", 0.0f }, { "Vocal input", 0.75f }, { "Vocal output", 0.75f }, { "Process order", 0.0f },
+                                     { "De-esser", 0.0f }, { "De-ess freq.", 0.672591f }, { "De-ess threshold", 0.5f },
+                                     { "De-ess split", 1.0f }, { "De-ess lookahead", 0.0f }, { "De-ess listen", 0.0f },
+                                     { "De-ploser", 0.0f }, { "De-plos freq.", 0.709403f }, { "De-plos threshold", 0.5f },
+                                     { "De-plos split", 1.0f }, { "De-plos lookahead", 0.0f }, { "De-plos listen", 0.0f },
+                                     { "Vocal EQ", 0.0f }, { "Vocal HPF", 1.0f }, { "Vocal HPF freq.", 0.0f },
+                                     { "Notch", 1.0f }, { "Notch freq.", 0.0f }, { "Notch gain", 0.75f },
+                                     { "High band", 1.0f }, { "High freq.", 0.0f }, { "High gain", 0.5f },
+                                     { "Compander", 0.0f }, { "Expander threshold", 0.0f }, { "Compander threshold", 1.0f },
+                                     { "Compander ratio", 0.504899f }, { "Compander attack", 0.0f }, { "Compander release", 0.049762f },
+                                     { "Make-up", 0.0f }, { "Soft knee", 0.0f }, { "Drive", 0.0f } } };
     return info;
 }
 
@@ -2142,6 +2197,33 @@ std::string eParamText (int param, float v)
         default: return paramText (EffectKind::ridgeStrip, param, v);
     }
 }
+
+std::string vocalParamText (int param, float v)
+{
+    namespace vs = voxstrip;
+    switch (param)
+    {
+        case vocal: return on (v) ? "vocal strip" : "off";
+        case vInput: case vOutput: return fmt ("%+.1f dB", vs::gainDb (v));
+        case vOrder: return vs::orderName (vs::orderOf (v));
+        case vDsFreq: return hzText (vs::dsFreqHz (v));
+        case vDpFreq: return hzText (vs::dpFreqHz (v));
+        case vDsThreshold: case vDpThreshold: case vCompThreshold: return fmt ("%.1f dB", vs::thresholdDb (v));
+        case vDsSplit: case vDpSplit: return on (v) ? "split" : "broadband";
+        case vHpfFreq: return hzText (vs::hpfHz (v));
+        case vNotchFreq: return hzText (vs::notchHz (v));
+        case vNotchGain: return fmt ("%+.1f dB", vs::notchGainDb (v));
+        case vHighFreq: return hzText (vs::highHz (v));
+        case vHighGain: return fmt ("%+.1f dB", vs::highGainDb (v));
+        case vExpThreshold: return v <= 0.0f ? "off" : fmt ("%.1f dB", vs::expThresholdDb (v));
+        case vRatio: return fmt ("%.1f : 1", vs::ratio (v));
+        case vAttack: return fmt ("%.1f ms", vs::attackMs (v));
+        case vRelease: return fmt ("%.0f ms", vs::releaseMs (v));
+        case vMakeup: return fmt ("%+.1f dB", vs::makeupDb (v));
+        case vKnee: return on (v) ? "soft" : "hard";
+        default: return onOff (v);
+    }
+}
 } // namespace ridge
 
 std::string paramText (EffectKind kind, int param, float v)
@@ -2171,6 +2253,11 @@ std::string paramText (EffectKind kind, int param, float v)
             case order: return on (v) ? "dyn > EQ" : "EQ > dyn";
             case voicing: return on (v) ? "E console" : "classic";
             case filterSplit: return on (v) ? "split" : "with EQ";
+            case vocal: case vInput: case vOutput: case vOrder: case vDsFreq: case vDsThreshold: case vDsSplit:
+            case vDpFreq: case vDpThreshold: case vDpSplit: case vHpfFreq: case vNotchFreq: case vNotchGain: case vHighFreq:
+            case vHighGain: case vExpThreshold: case vCompThreshold: case vRatio: case vAttack: case vRelease: case vMakeup:
+            case vKnee:
+                return vocalParamText (param, v);
             case phase: return on (v) ? "inverted" : "normal";
             case compMix: return fmt ("%.0f%%", v * 100.0);
             default: return onOff (v);

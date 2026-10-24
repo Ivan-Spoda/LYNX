@@ -496,7 +496,7 @@ TEST (mixsuite_panels_place_every_parameter)
                     CHECK (false);
                 }
             }
-        CHECK (meters == (kind == EffectKind::ridgeStrip ? 2
+        CHECK (meters == (kind == EffectKind::ridgeStrip ? 4 // round 145: + the Vocal strip voicing's two
                           : (kind == EffectKind::glowLeveler || kind == EffectKind::hushDeEsser || kind == EffectKind::crestCompressor
                              || kind == EffectKind::sentryGate || kind == EffectKind::quellDenoiser || kind == EffectKind::compressor) ? 1 : 0));
     }

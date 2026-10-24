@@ -107,6 +107,13 @@ enum Param
     // round 123: "E" voicing (0 = Ridge's own engine, 1 = the measured E-type console channel, core/VoiceMatch.h) and
     // that console's filter split (filters before the dynamics); appended, so older projects load Ridge's own sound
     voicing, filterSplit,
+    // round 145 (appended): the "Vocal strip" voicing (core/VoxStrip.h), measured on a reference vocal channel strip
+    // (de-esser, de-ploser, 3-band EQ, compander, 24 orders); off = the two engines above
+    vocal, vInput, vOutput, vOrder,
+    vDsOn, vDsFreq, vDsThreshold, vDsSplit, vDsLookahead, vDsListen,
+    vDpOn, vDpFreq, vDpThreshold, vDpSplit, vDpLookahead, vDpListen,
+    vEqOn, vHpfOn, vHpfFreq, vNotchOn, vNotchFreq, vNotchGain, vHighOn, vHighFreq, vHighGain,
+    vCompOn, vExpThreshold, vCompThreshold, vRatio, vAttack, vRelease, vMakeup, vKnee, vDrive,
     count
 };
 
@@ -136,6 +143,8 @@ double eGateRangeDb (float v) noexcept;     // 0 .. 40 dB
 double eGateThresholdDb (float v) noexcept; // -30 .. +10 dB (console scale)
 bool eVoicing (const EffectParams& p) noexcept;
 std::string eParamText (int param, float v);
+bool vocalVoicing (const EffectParams& p) noexcept; // round 145
+std::string vocalParamText (int param, float v);
 } // namespace ridge
 
 // ---- Glow Leveler (optical leveler) ----

@@ -21,6 +21,15 @@ Scores are 0–10 (10 = a user of the original finds every control and every pie
 Round 128 covers the FabFilter / Slate / Antares roles (below). Round 129 covers the Waves / SSL / Valhalla roles
 (its own section).
 
+## Round 145: SSL Native Vocalstrip 2 (Ridge Strip's Vocal strip voicing)
+
+Round 145 (`docs/analise/REA_rodada145.md`) measured the official Vocalstrip 2 trial (Complete Access) black-box and
+gave Ridge Strip a **Vocal strip voicing** with every control of the reference: config **2 → 9** (no FFT
+analyser), design **1 → 7** (the reference's modules and reading order in
+LYNX's style; the transfer-curve and GR-history displays are bars). Her Vocalstrip 2 state now plays the measured
+model (−60 … −67 dB null on her takes). The other Complete Access plugins (Slate, SSL, LiquidSonics, sonible,
+Harrison) map to LYNX effects by role only.
+
 ## Round 144: what changed (config / design, after 137 → after 144)
 
 Round 144 (`docs/analise/REA_rodada144.md`, sub-rounds `REA_rodada144a.md` / `REA_rodada144b.md`).
@@ -572,7 +581,7 @@ Analog, the 3-way VU selector, the 0–100 Gain scale and CLA's defaults (Gain 4
 
 ---
 
-## Ridge Strip ← SSL E-Channel (Waves); also SSL Native Vocalstrip 2 (role only)
+## Ridge Strip ← SSL E-Channel (Waves); also SSL Native Vocalstrip 2 (round 145: the Vocal strip voicing)
 Sources:
 - `docs/specs/ssl-e-channel.md`, `docs/specs/ssl-native-vocalstrip-2.md`;
 - Waves "SSL E-Channel & G-Channel User Manual" (assets.wavescdn.com/pdf/plugins/ssl-e-channel.pdf);
@@ -618,7 +627,7 @@ Trial on this PC: yes (older capture used).
 | Level meter | stereo bar meter −50…0 dBFS with an INPUT / OUTPUT selector and a numeric peak readout ("−7.2") | none | ✅ | UI (the engine already exports in/out peaks via meters.set); round 129: the GAIN block's input / output meter with peak read-outs |
 | EQ response display | — | "Equalizer" curve | ➕ | |
 | Latency | 1 sample | 0 | ✅ | irrelevant |
-| Vocalstrip 2 (SSL Native) role | de-esser, de-ploser, 3-band EQ, compander with knee/makeup/drive, process order | Ridge at neutral defaults, no translation | ❌ | spec: translate the compander, better to LYNX Compressor/Crest |
+| Vocalstrip 2 (SSL Native) role | de-esser, de-ploser, 3-band EQ, compander with knee/makeup/drive, process order | round 145: Ridge's **Vocal strip voicing** — every control of the reference (34 parameters, its own laws), its own panel (level, compander, de-esser / de-ploser, equaliser, order menu, GR meters), measured on the official trial; her state translated (−60 … −67 dB null on her takes) | ✅ | REA_rodada145 §2; the broadband de-esser / de-ploser on bursts is the least exact part (−13 … −25 dB) |
 | Saved-state translation | — | filters, 4 bands, comp (threshold, ratio, release, fast), output, dyn/EQ bypass translated; Split, Dyn S.C., Ch Out, expander, Analog, Input, Phase not translated (order forced to Dyn>EQ) | ⚠️ | round 113 §3c |
 
 **Scores:** configuration 6/10, design 6/10. An SSL user finds every knob in the expected column. What is missing
