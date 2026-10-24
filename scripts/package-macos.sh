@@ -50,6 +50,12 @@ LYNX para macOS (Apple Silicon e Intel, macOS 11 ou mais novo)
 EOF
 
 rm -f "$OUTDIR/$NAME.dmg"
-hdiutil create -volname "LYNX $LABEL" -srcfolder "$STAGE" -fs HFS+ -format UDZO -imagekey zlib-level=9 -ov "$OUTDIR/$NAME.dmg"
+# hdiutil sometimes fails with "Resource busy" on CI runners (a transient lock on the image); retry a few times
+for attempt in 1 2 3 4 5; do
+    hdiutil create -volname "LYNX $LABEL" -srcfolder "$STAGE" -fs HFS+ -format UDZO -imagekey zlib-level=9 -ov \
+        "$OUTDIR/$NAME.dmg" && break
+    [[ $attempt -lt 5 ]] || exit 1
+    echo "hdiutil create failed (attempt $attempt), retrying"; sleep $((attempt * 10))
+done
 hdiutil verify "$OUTDIR/$NAME.dmg"
 ls -la "$OUTDIR/$NAME.dmg"
