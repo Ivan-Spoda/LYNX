@@ -210,15 +210,18 @@ TEST (rea146a_consolidate_track)
 
 TEST (rea146a_wrapper_settings_page_options)
 {
-    // FL's wrapper settings page: the Processing options first, then Bridging; the buffer sub-options need fixed buffers
+    // FL's wrapper settings (round 149: in its form's order): Processing options, then Compatibility; the buffer
+    // sub-options need fixed buffers
     const auto& o = lynx::wrapperOptions();
-    CHECK (o.size() == 6);
-    if (o.size() == 6)
+    CHECK (o.size() == 7);
+    if (o.size() == 7)
     {
-        CHECK (std::string (o[0].label) == "Use fixed size buffers" && o[0].member == &lynx::PluginRef::fixedBuffers && o[0].recreates);
-        CHECK (o[1].needsFixed && o[2].needsFixed && ! o[0].needsFixed && ! o[3].needsFixed);
-        CHECK (! o[3].recreates && ! o[4].recreates && o[5].recreates && std::string (o[5].section) == "Bridging");
+        CHECK (std::string (o[0].label) == "Notify about rendering mode" && o[0].member == &lynx::PluginRef::notifyRender && ! o[0].recreates);
+        CHECK (std::string (o[4].label) == "Use fixed size buffers" && o[4].member == &lynx::PluginRef::fixedBuffers && o[4].recreates);
+        CHECK (o[5].needsFixed && o[6].needsFixed && ! o[4].needsFixed && ! o[1].needsFixed);
+        CHECK (! o[1].recreates && ! o[3].recreates && o[2].recreates && std::string (o[2].section) == "Processing"
+               && std::string (o[4].section) == "Compatibility");
         lynx::PluginRef ref;
-        CHECK (ref.*(o[3].member) && ref.*(o[4].member) && ! (ref.*(o[0].member))); // FL's defaults
+        CHECK (ref.*(o[0].member) && ref.*(o[1].member) && ref.*(o[3].member) && ! (ref.*(o[4].member))); // FL's defaults
     }
 }

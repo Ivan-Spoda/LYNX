@@ -422,6 +422,12 @@ void createGroup (Song& song, const std::vector<int>& tracks, int current)
         for (auto t : tracks)
             if (t > 0 && t < (int) song.mixer.size() && song.mixer[(std::size_t) t].colour == 0)
                 song.mixer[(std::size_t) t].colour = song.mixer[(std::size_t) current].colour;
+    // the group's name (REA round 149 [DECOMP FLEngine FUN_012aa200 → FUN_012be6f0, the track's name at +0xc]): the
+    // selected tracks without a name take the current track's
+    if (current >= 0 && current < (int) song.mixer.size() && ! song.mixer[(std::size_t) current].name.empty())
+        for (auto t : tracks)
+            if (t > 0 && t != current && t < (int) song.mixer.size() && song.mixer[(std::size_t) t].name.empty())
+                song.mixer[(std::size_t) t].name = song.mixer[(std::size_t) current].name;
 }
 
 int autoColorGroup (Song& song, int track)

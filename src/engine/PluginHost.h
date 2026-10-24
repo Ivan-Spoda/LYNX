@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <functional>
 #include <map>
@@ -78,10 +79,15 @@ public:
     void noteOnMidi (int key, float velocity, int midiChannel) noexcept override;
     void noteOffMidi (int key, int midiChannel) noexcept override;
     void midiMessage (const std::uint8_t* bytes, int size) noexcept override { midi.addEvent (bytes, size, 0); }
+    int takeMidiOutput (MidiOutNote* out, int max) noexcept override;
 
 private:
     void failed (std::uint32_t code) noexcept;
     void flushMidiControls() noexcept;
+    void collectMidiOutput (const juce::MidiBuffer& buffer) noexcept; // the plugin's MIDI output (wrapper Output port)
+    bool producesMidi = false;
+    std::array<MidiOutNote, 256> midiOut {};
+    int midiOutCount = 0;
 
     std::unique_ptr<juce::AudioPluginInstance> plugin;
     juce::AudioBuffer<float> buffer;

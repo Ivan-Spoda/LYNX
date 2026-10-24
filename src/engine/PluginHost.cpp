@@ -222,6 +222,27 @@ PluginInstrument::PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> i
         scratch.assign ((std::size_t) blockSize * 2, 0.0f);
     }
     plugin->setPlayHead (&timelinePlayHead());
+    producesMidi = plugin->producesMidi(); // only then is what the buffer holds after processing the plugin's output
+}
+
+void PluginInstrument::collectMidiOutput (const juce::MidiBuffer& buffer) noexcept
+{
+    if (! producesMidi)
+        return;
+    for (const auto event : buffer)
+    {
+        const auto m = event.getMessage();
+        if ((m.isNoteOn() || m.isNoteOff()) && midiOutCount < (int) midiOut.size())
+            midiOut[(std::size_t) midiOutCount++] = { m.getNoteNumber(), m.isNoteOn() ? m.getFloatVelocity() : 0.0f };
+    }
+}
+
+int PluginInstrument::takeMidiOutput (MidiOutNote* out, int max) noexcept
+{
+    const auto count = juce::jmin (max, midiOutCount);
+    std::copy (midiOut.begin(), midiOut.begin() + count, out);
+    midiOutCount = 0;
+    return count;
 }
 
 PluginInstrument::~PluginInstrument()
@@ -316,6 +337,8 @@ void PluginInstrument::render (float* left, float* right, int n, float gl, float
                     failed (code);
                     view.clear(); // silent from here on
                 }
+                else
+                    collectMidiOutput (pending);
             pending.clear();
             std::memcpy (ch[0], view.getReadPointer (0), sizeof (float) * (size_t) count);
             std::memcpy (ch[1], view.getReadPointer (view.getNumChannels() > 1 ? 1 : 0), sizeof (float) * (size_t) count);
@@ -348,6 +371,7 @@ void PluginInstrument::render (float* left, float* right, int n, float gl, float
             failed (code);
             return;
         }
+        collectMidiOutput (midi);
         midi.clear();
 
         const auto* l = view.getReadPointer (0);
