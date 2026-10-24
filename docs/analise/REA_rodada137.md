@@ -114,6 +114,22 @@ Length, and the Channel Rack channel whose held notes key it; pulses follow the 
 - Rows found already done and re-marked: ValhallaDelay "Delay L" caption, the Mod / Freq / Pitch section title, the
   description line (rounds 129 / 135); Halo's host programs are the vendor's presets — deliberately left out.
 
+## Tests and builds
+
+`tests/Parity137Tests.inc` (rhythm law and impulses, era, ducking against the measured table, LoFi, Lattice input
+pan routes, Voice Shift MIDI, Crest host-sync / MIDI trigger); build-local with the FL Data dir 1 482 044 checks,
+0 failures; Windows build OK; `--plugui` screenshots in `D:\lynx-work\parity137\ui\shots` (Echoform-rhythm.png is
+new). Desktop page: `LYNX-paridade/Round-137.html`.
+
 ## Where I stopped
 
-See the end of this file (updated at the end of the round).
+- Not done (biggest first): EchoBoy's Pattern presets and drawn custom-time taps; UberMod DelaySync translation (the
+  map above, boundaries still to read); Pro-Q 4 linear-phase resolution (needs buffers sized per instance);
+  Prism oversampling and processing modes; Saturn-style M/S and drive pan in Ember (left alone: vox136 appends
+  Ember parameters at the same indices as round 135 — see the note below); PanMan Feel / Groove and the Tweak page;
+  Waves Tune RT keyboard navigation / reference tone; Glow ANALOG hum; Ridge auto make-up / ANALOG.
+- Note for the vox136 / vox138 landing: `feature/vox136` appends `tapeVoicing` to Echoform at index 35, where
+  round 135w already put `tempoSource` (after this round: 35 … 50 = round 135w, 51 … 74 = round 137); and its
+  Ember / LYNX Tune / Auto-pan appends also start at the indices round 135 used. They must be re-appended after the
+  current last parameter when vox136 merges main (its translators then follow the new indices).
+
