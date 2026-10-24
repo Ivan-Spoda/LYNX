@@ -15,7 +15,7 @@ namespace lynx
 {
 namespace
 {
-class PluginWindow final : public juce::DocumentWindow
+class PluginWindow final : public juce::DocumentWindow, private juce::AudioProcessorListener
 {
 public:
     PluginWindow (std::shared_ptr<void> keepAlive, juce::AudioPluginInstance& p, const juce::String& title)
@@ -37,11 +37,13 @@ public:
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
         keepAboveMainWindow (*this);
+        plugin.addListener (this); // the editor's gestures: Last tweaked, automation recording (REA round 143)
     }
 
     ~PluginWindow() override
     {
         crashguard::note (("closing the editor of " + plugin.getName()).toStdString());
+        plugin.removeListener (this);
         // the UI must be destroyed before the plugin (which may die together with `owner`)
         clearContentComponent();
     }
@@ -51,10 +53,29 @@ public:
     juce::AudioPluginInstance* key() const noexcept { return &plugin; }
 
 private:
+    void audioProcessorParameterChanged (juce::AudioProcessor*, int, float) override {}
+    void audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails&) override {}
+    void audioProcessorParameterChangeGestureBegin (juce::AudioProcessor*, int index) override { gesture (index, true); }
+    void audioProcessorParameterChangeGestureEnd (juce::AudioProcessor*, int index) override { gesture (index, false); }
+    void gesture (int index, bool starting)
+    {
+        auto* p = &plugin;
+        juce::MessageManager::callAsync ([p, index, starting] {
+            if (PluginWindows::onGesture)
+                PluginWindows::onGesture (*p, index, starting);
+        });
+    }
+
     std::shared_ptr<void> owner;
     juce::AudioPluginInstance& plugin;
 };
 
+} // namespace
+
+std::function<void (const juce::AudioPluginInstance&, int, bool)> PluginWindows::onGesture;
+
+namespace
+{
 std::map<juce::AudioPluginInstance*, std::unique_ptr<PluginWindow>>& windows()
 {
     static std::map<juce::AudioPluginInstance*, std::unique_ptr<PluginWindow>> open;

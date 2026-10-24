@@ -81,6 +81,40 @@ bool placePatternClipAt (Song& song, int pattern, std::int64_t tick);
 // Length of a count-in of `bars` bars at the song position `tick` (bars follow the time signature there).
 std::int64_t countInLength (const Song& song, int bars, std::int64_t tick = 0);
 
+// --- automation recording (REA round 143) ---------------------------------------------------------------
+// FL's recording filter "Automation" (FLEngine RecMenu: Recfilter1Menu, bit 1 of the setting RecordingFilter2; bits 2
+// notes, 4 audio, 8 clips): while recording, the parameters that are moved are written as automation. Song mode: into
+// the automation clip of that parameter playing there (a new automation clip when none plays); pattern mode: into the
+// current pattern's events (the event editor's lanes). The record menu's Quantize › "Automations"
+// (RecQuantizeAutomationsMenu, setting QuantizeAutomations; FUN_012ca680) puts the points on the snap.
+struct RecordedValue
+{
+    double tick = 0.0; // absolute transport position, as RecordedEvent
+    float value = 0.0f; // 0..1
+};
+
+// The song position of a recorded transport position (song mode loops over the loop region or the whole song).
+std::int64_t songTickForRecorded (const Song& song, double tick);
+
+// One parameter's part of a take. `continuing` = the points follow the previous batch of the same gesture (what lies
+// between them is replaced too). Returns the automation written (or -1); `automation` is a hint: the automation this
+// take created for the target (its clip grows with the take).
+struct AutomationWrite
+{
+    AutomationTarget target;
+    std::string name;           // for a new automation
+    int automation = -1;        // in/out: the automation this take writes (song mode)
+    std::int64_t lastLocal = -1; // in/out: the last point written (the automation's or the pattern's ticks)
+    bool createdByTake = false; // in/out
+};
+// Song mode.
+void commitAutomationPoints (Song& song, AutomationWrite& w, std::vector<RecordedValue> points, std::int64_t grid);
+// Pattern mode: into `pattern`'s event lane for the target (one event per tick; held until the next one).
+void commitEventPoints (Song& song, int pattern, AutomationWrite& w, std::vector<RecordedValue> points, std::int64_t loopLength,
+                        std::int64_t grid);
+// Removes the points between two of the same value (no change of the curve) in [from, to].
+void thinAutomation (std::vector<AutomationPoint>& points, std::int64_t from, std::int64_t to);
+
 class NoteRecorder
 {
 public:

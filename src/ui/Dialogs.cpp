@@ -1,6 +1,7 @@
 #include "ui/Dialogs.h"
 
 #include "core/RackOps.h"
+#include "engine/MidiFileIo.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
 #include "ui/WindowOwner.h"
@@ -163,8 +164,8 @@ public:
 private:
     RecordChoiceButton audio { tr ("Audio, into the Playlist as an audio clip"),
                                tr ("Arms the selected mixer insert; choose its audio input (microphone) if it has none") },
-        notes { tr ("Notes, into the current pattern"), tr ("Notes played on a MIDI keyboard or the PC keyboard") },
-        everything { tr ("Everything"), tr ("Notes, and audio from the armed inserts") },
+        notes { tr ("Notes and automation"), tr ("Notes played on a MIDI keyboard or the PC keyboard, and the controls you move") },
+        everything { tr ("Everything"), tr ("Notes, automation, and audio from the armed inserts") },
         editor { tr ("Audio, into the audio editor"), tr ("Records the audio input into a new audio editor while the song plays") };
     juce::ToggleButton dontAsk;
 };
@@ -173,6 +174,67 @@ private:
 std::unique_ptr<juce::AlertWindow> makeRecordChoiceDialog()
 {
     return std::make_unique<RecordChoiceWindow>();
+}
+
+namespace
+{
+// FL's "Import MIDI data" window (REA round 143, TMIDIImportForm): its options as LYNX can apply them
+class MidiImportWindow final : public juce::AlertWindow
+{
+public:
+    MidiImportWindow (const juce::String& fileName, const MidiFileIo::ImportOptions& o)
+        : juce::AlertWindow (tr ("Import MIDI data"), fileName, juce::MessageBoxIconType::NoIcon)
+    {
+        auto add = [this] (juce::ToggleButton& b, const juce::String& text, const juce::String& hint, bool on) {
+            b.setButtonText (text);
+            b.setTooltip (hint);
+            b.setToggleState (on, juce::dontSendNotification);
+            b.setSize (360, 24);
+            addCustomComponent (&b);
+        };
+        add (newProject, tr ("Start new project"), tr ("Start a blank project, or add to the open one"), o.newProject);
+        add (perTrack, tr ("Create one channel per track"), tr ("One channel per track, or per MIDI channel"), o.perTrack);
+        add (realign, tr ("Realign events"), tr ("Removes any silent part at the beginning"), o.realign);
+        add (timeSignatures, tr ("Import time signatures"), tr ("The file's time signature becomes the new project's"), o.timeSignatures);
+        add (mixerTracks, tr ("Set mixer tracks for new channels"), tr ("Route new channels to consecutive mixer tracks"), o.mixerTracks);
+        add (midiOut, tr ("Channel type: MIDI Out (else LYNX's synth)"), tr ("MIDI Out channels play the plugins on their MIDI port, on the note's MIDI channel"),
+             o.midiOut);
+        addButton (tr ("Accept"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+        addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    }
+
+    MidiFileIo::ImportOptions options() const
+    {
+        MidiFileIo::ImportOptions o;
+        o.newProject = newProject.getToggleState();
+        o.perTrack = perTrack.getToggleState();
+        o.realign = realign.getToggleState();
+        o.timeSignatures = timeSignatures.getToggleState();
+        o.mixerTracks = mixerTracks.getToggleState();
+        o.midiOut = midiOut.getToggleState();
+        return o;
+    }
+
+private:
+    juce::ToggleButton newProject, perTrack, realign, timeSignatures, mixerTracks, midiOut;
+};
+} // namespace
+
+void showMidiImportDialog (const juce::String& fileName, const MidiFileIo::ImportOptions& current,
+                           std::function<void (const MidiFileIo::ImportOptions&)> onAccept)
+{
+    auto* window = new MidiImportWindow (fileName, current);
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([window, onAccept] (int result) {
+                                 if (result == 1)
+                                     onAccept (window->options());
+                             }),
+                             true);
+    keepAboveMainWindow (*window);
+}
+
+std::unique_ptr<juce::AlertWindow> makeMidiImportDialog()
+{
+    return std::make_unique<MidiImportWindow> ("song.mid", MidiFileIo::ImportOptions {});
 }
 
 void showRecordChoiceDialog (std::function<void (int, bool)> onChoice)

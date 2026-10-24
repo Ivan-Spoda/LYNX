@@ -11,6 +11,7 @@
 #include "engine/Text.h"
 #include "ui/BrowserComponent.h"
 #include "ui/AutomationUi.h"
+#include "ui/ChannelSettings.h"
 #include "ui/Dialogs.h"
 #include "ui/HintBar.h"
 #include "ui/I18n.h"
@@ -2333,6 +2334,11 @@ void PlaylistComponent::editTrack (int track, std::function<void (PlaylistTrack&
 // consolidate) are left out.
 void PlaylistComponent::showTrackMenu (int track)
 {
+    buildTrackMenu (track).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+}
+
+juce::PopupMenu PlaylistComponent::buildTrackMenu (int track)
+{
     const auto& song = engine.getSong();
     const auto count = numTracks();
     const auto info = track < (int) song.playlistTracks.size() ? song.playlistTracks[(std::size_t) track] : PlaylistTrack {};
@@ -2462,6 +2468,11 @@ void PlaylistComponent::showTrackMenu (int track)
             });
         };
         const auto hasClips = ! seen.empty();
+        menu.addItem (tr ("Merge clips"), hasClips, false, [this, track] {
+            setSelection ({});
+            engine.editSong ([track] (Song& s) { clipops::mergeTrackClips (s, track); });
+            sortClips();
+        });
         menu.addItem (tr ("Mute all clips"), hasClips, false, [muteAll] { muteAll (true); });
         menu.addItem (tr ("Unmute all clips"), hasClips, false, [muteAll] { muteAll (false); });
     }
@@ -2501,7 +2512,7 @@ void PlaylistComponent::showTrackMenu (int track)
     menu.addSeparator();
     menu.addItem (tr ("Move up"), track > 0, false, [this, track] { engine.editSong ([track] (Song& s) { noteedit::swapTracks (s, track, track - 1); }); });
     menu.addItem (tr ("Move down"), track + 1 < count, false, [this, track] { engine.editSong ([track] (Song& s) { noteedit::swapTracks (s, track, track + 1); }); });
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    return menu;
 }
 
 void PlaylistComponent::renameTrack (int track)
@@ -2707,6 +2718,64 @@ juce::PopupMenu PlaylistComponent::buildClipMenu (int index, int mouseX)
                                      });
         });
 
+    // FL's "Change color..." / "Random color" (the clip's source: its pattern, or its audio channel)
+    if (clip.kind != ClipKind::automation)
+    {
+        auto setColour = [this, kind = clip.kind, src = clip.kind == ClipKind::pattern ? clip.pattern : clip.channel] (std::uint32_t colour) {
+            engine.editSong ([kind, src, colour] (Song& s) {
+                if (kind == ClipKind::pattern && src >= 0 && src < (int) s.patterns.size())
+                    s.patterns[(std::size_t) src].colour = colour;
+                else if (kind == ClipKind::audio && src >= 0 && src < (int) s.channels.size())
+                    s.channels[(std::size_t) src].colour = colour;
+            });
+        };
+        const auto current = clip.kind == ClipKind::pattern ? (clip.pattern >= 0 && clip.pattern < (int) song.patterns.size() ? song.patterns[(std::size_t) clip.pattern].colour : 0u)
+                                                            : (clip.channel >= 0 && clip.channel < (int) song.channels.size() ? song.channels[(std::size_t) clip.channel].colour : 0u);
+        juce::PopupMenu colours;
+        colours.addItem (tr ("Default"), true, current == 0, [setColour] { setColour (0); });
+        colours.addSeparator();
+        for (auto c : lynxPalette())
+        {
+            juce::Image swatch (juce::Image::ARGB, 16, 16, true);
+            juce::Graphics (swatch).fillAll (juce::Colour (c));
+            juce::PopupMenu::Item item;
+            item.text = "#" + juce::String::toHexString ((juce::int64) (c & 0xFFFFFF)).paddedLeft ('0', 6).toUpperCase();
+            item.image = std::make_unique<juce::DrawableImage> (swatch);
+            item.isTicked = current == c;
+            item.action = [setColour, c] { setColour (c); };
+            colours.addItem (std::move (item));
+        }
+        menu.addSubMenu (tr ("Change color"), colours);
+        menu.addItem (tr ("Random color"), [setColour] {
+            const auto& palette = lynxPalette();
+            setColour (palette[(std::size_t) juce::Random::getSystemRandom().nextInt ((int) palette.size())]);
+        });
+    }
+    menu.addSeparator();
+
+    // FL's "Select source pattern / channel": the clip plays another source (patterns; audio clip channels; automations)
+    {
+        juce::PopupMenu sources;
+        if (clip.kind == ClipKind::pattern)
+            for (int p = 0; p < (int) song.patterns.size(); ++p)
+                sources.addItem (juce::String::fromUTF8 (song.patterns[(std::size_t) p].name.c_str()), true, p == clip.pattern,
+                                 [this, targets, p] { engine.editSong ([targets, p] (Song& s) { clipops::setClipSource (s, targets, ClipKind::pattern, p); }); });
+        else if (clip.kind == ClipKind::audio)
+        {
+            for (int ch = 0; ch < (int) song.channels.size(); ++ch)
+                if (song.channels[(std::size_t) ch].instrument == InstrumentKind::audioClip)
+                    sources.addItem (juce::String::fromUTF8 (song.channels[(std::size_t) ch].name.c_str()), true, ch == clip.channel,
+                                     [this, targets, ch] { engine.editSong ([targets, ch] (Song& s) { clipops::setClipSource (s, targets, ClipKind::audio, ch); }); });
+        }
+        else
+            for (int a = 0; a < (int) song.automations.size(); ++a)
+                sources.addItem (juce::String::fromUTF8 (song.automations[(std::size_t) a].name.c_str()), true, a == clip.automation,
+                                 [this, targets, a] { engine.editSong ([targets, a] (Song& s) { clipops::setClipSource (s, targets, ClipKind::automation, a); }); });
+        menu.addSubMenu (clip.kind == ClipKind::pattern ? tr ("Select source pattern") : tr ("Select source channel"), sources, sources.getNumItems() > 1);
+    }
+    if (clip.kind == ClipKind::audio && clip.channel >= 0 && clip.channel < (int) song.channels.size())
+        menu.addItem (tr ("Channel settings"), [this, ch = clip.channel] { openChannelSettings (engine, ch); });
+
     if (clip.kind == ClipKind::pattern)
         menu.addItem (tr ("Make unique") + "\tShift+V+drag", [this, targets] {
             engine.editSong ([targets] (Song& s) { polish::makeClipsUnique (s, targets); });
@@ -2739,15 +2808,29 @@ juce::PopupMenu PlaylistComponent::buildClipMenu (int index, int mouseX)
         });
         sortClips();
     });
-    menu.addItem (tr ("Chop to grid"), [this, targets, grid = gridTicks()] {
-        setSelection ({});
-        engine.editSong ([targets, grid] (Song& s) {
-            auto sorted = targets; // chopping adds clips at the end: indices below stay valid
-            for (auto i : sorted)
-                noteedit::chopClip (s.playlist, i, grid);
-        });
-        sortClips();
-    });
+    {
+        // FL's "Chop" submenu: to the grid, or in bars / beats / parts of a beat
+        juce::PopupMenu chop;
+        auto chopBy = [this, targets] (std::int64_t grid) {
+            setSelection ({});
+            engine.editSong ([targets, grid] (Song& s) {
+                for (auto i : targets) // chopping adds clips at the end: indices below stay valid
+                    noteedit::chopClip (s.playlist, i, grid);
+            });
+            sortClips();
+        };
+        chop.addItem (tr ("Chop to grid"), [chopBy, grid = gridTicks()] { chopBy (grid); });
+        chop.addSeparator();
+        const auto bar = (std::int64_t) ppq * juce::jmax (1, song.beatsPerBar);
+        const std::pair<const char*, std::int64_t> sizes[] = { { TR_NOOP ("Chop in bars"), bar },
+                                                               { TR_NOOP ("Chop in beats"), (std::int64_t) ppq },
+                                                               { TR_NOOP ("Chop in half beats"), (std::int64_t) ppq / 2 },
+                                                               { TR_NOOP ("Chop in quarter beats"), (std::int64_t) ppq / 4 },
+                                                               { TR_NOOP ("Chop in 8th beats"), (std::int64_t) ppq / 8 } };
+        for (const auto& [label, ticks] : sizes)
+            chop.addItem (tr (label), [chopBy, t = ticks] { chopBy (t); });
+        menu.addSubMenu (tr ("Chop"), chop);
+    }
     menu.addItem (tr ("Merge clips"), clipops::canMerge (song, targets), false, [this, targets] {
         setSelection ({});
         engine.editSong ([targets] (Song& s) { clipops::mergeClips (s, targets); });

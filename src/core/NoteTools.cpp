@@ -407,4 +407,133 @@ void limit (Pattern& pattern, const std::vector<int>& indices, const LimitOption
         n.velocity = std::clamp (n.velocity, minV, maxV);
     }
 }
+
+// --- LYNX's script-like tools (REA round 143) --------------------------------------------------------
+
+bool euclideanHit (int steps, int pulses, int rotation, int step) noexcept
+{
+    if (steps <= 0 || pulses <= 0)
+        return false;
+    pulses = std::min (pulses, steps);
+    const auto s = (((step + rotation) % steps) + steps) % steps;
+    // Bresenham form of the Euclidean (Bjorklund) rhythm: a hit where the running multiple wraps
+    return (s * pulses) % steps < pulses;
+}
+
+std::vector<int> euclidean (Pattern& pattern, const std::vector<int>& replace, const EuclideanOptions& o)
+{
+    auto doomed = validSorted (pattern, replace);
+    for (auto it = doomed.rbegin(); it != doomed.rend(); ++it)
+        pattern.notes.erase (pattern.notes.begin() + *it);
+
+    const auto stepTicks = std::max<std::int64_t> (1, o.stepTicks);
+    const auto count = (int) (std::max<std::int64_t> (0, o.length) / stepTicks);
+    std::vector<Note> added;
+    bool first = true;
+    for (int step = 0; step < count; ++step)
+    {
+        if (step % std::max (1, o.steps) == 0)
+            first = true;
+        if (! euclideanHit (o.steps, o.pulses, o.rotation, step))
+            continue;
+        Note n;
+        n.start = o.start + step * stepTicks;
+        n.length = std::max<std::int64_t> (1, (std::int64_t) std::llround ((double) stepTicks * std::clamp (o.gate, 0.05f, 1.0f)));
+        n.channel = o.channel;
+        n.key = std::clamp (o.key, 0, 127);
+        n.velocity = std::clamp (o.velocity + (first ? o.accent : 0.0f), 0.0f, 1.0f);
+        first = false;
+        added.push_back (n);
+    }
+
+    const auto base = (int) pattern.notes.size();
+    pattern.notes.insert (pattern.notes.end(), added.begin(), added.end());
+    std::vector<int> out;
+    for (int k = 0; k < (int) added.size(); ++k)
+        out.push_back (base + k);
+    return out;
+}
+
+void humanize (Pattern& pattern, const std::vector<int>& indices, const HumanizeOptions& o)
+{
+    Random random (o.seed);
+    std::map<std::int64_t, std::int64_t> chordShift; // notes starting together move together
+    for (auto i : validSorted (pattern, indices))
+    {
+        auto& n = pattern.notes[(std::size_t) i];
+        // a softer, triangular spread (two draws) instead of a flat one: most notes move a little
+        const auto rt = (random.bipolar (true) + random.bipolar (true)) * 0.5f;
+        const auto rv = (random.bipolar (true) + random.bipolar (true)) * 0.5f;
+        const auto rl = random.bipolar (true);
+        if (o.timing > 0)
+        {
+            auto found = chordShift.find (n.start);
+            const auto shift = found != chordShift.end() ? found->second : (std::int64_t) std::llround ((double) o.timing * rt);
+            chordShift.emplace (n.start, shift);
+            n.start = std::max<std::int64_t> (0, n.start + shift);
+        }
+        auto v = n.velocity + o.velocity * rv;
+        if (o.softerOffbeats && (n.start % ppq) != 0)
+            v -= o.velocity * 0.5f;
+        n.velocity = std::clamp (v, 0.0f, 1.0f);
+        if (o.length > 0.0f)
+            n.length = std::max<std::int64_t> (1, (std::int64_t) std::llround ((double) n.length * (1.0 + (double) o.length * rl)));
+    }
+}
+
+std::vector<int> repeatNotes (Pattern& pattern, const std::vector<int>& indices, const RepeatOptions& o)
+{
+    const auto rate = std::max<std::int64_t> (1, o.rate);
+    const auto targets = validSorted (pattern, indices);
+    std::vector<Note> added;
+    for (auto i : targets)
+    {
+        auto& n = pattern.notes[(std::size_t) i];
+        const auto end = n.start + n.length;
+        const auto gate = std::max<std::int64_t> (1, (std::int64_t) std::llround ((double) rate * std::clamp (o.gate, 0.05f, 1.0f)));
+        auto velocity = n.velocity;
+        int k = 1;
+        for (auto t = n.start + rate; t < end; t += rate, ++k)
+        {
+            velocity *= std::clamp (o.decay, 0.0f, 1.5f);
+            auto copy = n;
+            copy.start = t;
+            copy.length = std::min (gate, end - t);
+            copy.velocity = std::clamp (velocity, 0.0f, 1.0f);
+            copy.key = std::clamp (n.key + k * o.pitchStep, 0, 127);
+            added.push_back (copy);
+        }
+        n.length = std::min (gate, n.length);
+    }
+    std::vector<int> out = targets;
+    const auto base = (int) pattern.notes.size();
+    pattern.notes.insert (pattern.notes.end(), added.begin(), added.end());
+    for (int k = 0; k < (int) added.size(); ++k)
+        out.push_back (base + k);
+    return out;
+}
+
+std::vector<int> selectByVelocity (const Pattern& pattern, const std::vector<int>& indices, float low, float high)
+{
+    std::vector<int> out;
+    for (auto i : validSorted (pattern, indices))
+        if (pattern.notes[(std::size_t) i].velocity >= low - 1.0e-6f && pattern.notes[(std::size_t) i].velocity <= high + 1.0e-6f)
+            out.push_back (i);
+    return out;
+}
+
+std::vector<int> selectLoudest (const Pattern& pattern, const std::vector<int>& indices, float fraction, bool loudest)
+{
+    auto list = validSorted (pattern, indices);
+    if (list.empty())
+        return list;
+    std::stable_sort (list.begin(), list.end(), [&pattern, loudest] (int a, int b) {
+        const auto va = pattern.notes[(std::size_t) a].velocity, vb = pattern.notes[(std::size_t) b].velocity;
+        return loudest ? va > vb : va < vb;
+    });
+    const auto keep = std::max<std::size_t> (1, (std::size_t) std::llround ((double) list.size() * std::clamp (fraction, 0.0f, 1.0f)));
+    list.resize (std::min (keep, list.size()));
+    std::sort (list.begin(), list.end());
+    return list;
+}
 } // namespace lynx::notetools

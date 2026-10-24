@@ -21,6 +21,11 @@ bool addableEffectAvailable (EffectKind kind);
 juce::String addableEffectName (EffectKind kind);
 std::optional<EffectSlot> newAddableEffect (EffectKind kind, double bpm = 120.0);
 
+// FL's mixer track state (Mixer track menu › File, REA round 143), in LYNX's .lynxtrack format: load onto `track`
+// (or, with `asNewInsert`, onto a new insert after it, named after the state), save `track`'s state.
+bool loadMixerTrackState (AudioEngine& engine, int track, const juce::File& file, bool asNewInsert);
+bool saveMixerTrackState (AudioEngine& engine, int track, const juce::File& file);
+
 // External audio input of the inserts (REA_rodada88): FL's "Audio input source" of a mixer track.
 namespace mixerinput
 {
@@ -80,6 +85,8 @@ public:
     bool moveSelected (int delta);           // Alt+Left/Right
     void linkSelectedChannels (bool startingHere); // Ctrl+L / Ctrl+Shift+L
     void selectLinkedChannels();             // Alt+L
+    // The insert's right-click menu (FL's mixer track menu, REA rounds 115/134/143); public for --snapshot and tests.
+    juce::PopupMenu buildMenu (int track);
 
     static constexpr int stripWidth = 60;
     static constexpr int masterWidth = 76;

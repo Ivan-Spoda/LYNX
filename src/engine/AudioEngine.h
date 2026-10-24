@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <deque>
 #include <map>
 #include <tuple>
@@ -103,6 +104,10 @@ public:
         // FL's "Enable recording markers": the Playlist's "Start recording" / "Stop recording" markers limit what a
         // take keeps in song mode (notes started outside are dropped, audio clips are cut to the ranges)
         bool recordingMarkers = false;
+        // FL's recording filter "Automation" (REA round 143): moved parameters become automation (song mode: automation
+        // clips; pattern mode: the pattern's events); Quantize › "Automations" puts their points on the snap
+        bool recordAutomation = true;
+        bool quantiseAutomation = false;
     };
     const RecordOptions& getRecordOptions() const noexcept { return recordOptions; }
     void setRecordOptions (const RecordOptions& options);
@@ -209,6 +214,24 @@ public:
     // MIDI learn: the next CC received becomes a controller linked to `target`.
     void learnMidiController (const AutomationTarget& target);
     bool isLearningMidi() const noexcept { return learning.kind != AutomationTargetKind::none; }
+
+    // FL's "Last tweaked" (REA round 143: FLEngine keeps the last two moved parameters, Tools › Last tweaked /
+    // Next to last tweaked, Add › Automation for last tweaked parameter). Every control that can be automated reports
+    // its moves here (UI thread); `held` = the touch lasts until tweakReleased (a plugin's own editor's gesture),
+    // otherwise while the control keeps moving. While recording with the "Automation" filter, touched parameters are
+    // written as automation.
+    void noteTweaked (const AutomationTarget& target, bool held = false);
+    void tweakReleased (const AutomationTarget& target);
+    // 0 = the last tweaked parameter, 1 = the one before it.
+    std::optional<AutomationTarget> getLastTweaked (int which = 0) const;
+    // The target's current value 0..1 (a hosted plugin's parameter and MIDI controls included); < 0 when it is gone.
+    float currentTargetValue (const AutomationTarget& target) const;
+    // Parameter `param` of a hosted plugin (a channel's instrument or a slot's effect) as an automation target.
+    std::optional<AutomationTarget> targetOfPlugin (const juce::AudioPluginInstance& plugin, int param) const;
+    // Number of points recorded as automation since recording started (tests, hint bar).
+    int getRecordedAutomationPoints() const noexcept { return recordedAutomationPoints; }
+    // Names a new recorded automation (the UI sets it to its readable target names).
+    std::function<std::string (const AutomationTarget&)> nameAutomation;
 
     // MIDI inputs: every device is enabled and plays the selected channels unless the MIDI settings say otherwise
     // (Settings › MIDI: device off, one MIDI channel only, a fixed Channel Rack channel; velocity curve; pickup).
@@ -389,6 +412,7 @@ private:
     void saveAudioDeviceState();
     void updateRecording();
     void updateAudioRecording();
+    void updateAutomationRecording (bool active);
     void startAudioTake();
     void finishAudioTake();
     double estimatedPositionNow() const noexcept;
@@ -432,6 +456,22 @@ private:
     void applyControllers();
     std::vector<RecordedEvent> uiRecorded;           // PC keyboard -> recording
     NoteRecorder recorder;
+    // last tweaked parameters and automation recording (REA round 143)
+    std::array<AutomationTarget, 2> lastTweaked {};
+    struct Touch
+    {
+        AutomationTarget target;
+        double lastMs = 0.0;
+        bool held = false;
+        std::vector<RecordedValue> pending; // sampled, not yet written
+    };
+    std::vector<Touch> touches;
+    int automationCommitCountdown = 0;
+    bool automationTakeHasUndoStep = false;
+    std::int64_t automationLoopLength = 0;
+    int automationPattern = 0;
+    int recordedAutomationPoints = 0;
+    std::vector<AutomationWrite> takeWrites; // per target: where this take writes (its own clip grows)
     bool takeHasUndoStep = false;
     RecordOptions recordOptions;
     std::vector<int> takeClearedChannels; // replace mode: channels already cleared in this take
