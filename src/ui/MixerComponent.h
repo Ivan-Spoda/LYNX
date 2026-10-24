@@ -90,6 +90,8 @@ public:
 
     static constexpr int stripWidth = 60;
     static constexpr int masterWidth = 76;
+    // x of a strip (`track` == the number of tracks: the "+" button), after the docks and separators (round 146a)
+    int stripLeft (int track) const noexcept { return stripX (track); }
 
     void mouseMove (const juce::MouseEvent& e) override;
     void mouseExit (const juce::MouseEvent& e) override;
@@ -101,6 +103,13 @@ private:
     void timerCallback() override;
 
     int stripX (int track) const noexcept;
+    // FL's docks and separators (REA round 146a): the strips' x in display order (left block, middle, right), the
+    // x of each gap between two dock blocks and of each separator line
+    void layoutStrips();
+    std::vector<int> stripXs;
+    std::vector<int> dockGaps, separatorLines;
+    int contentWidth = 0;
+    static constexpr int dockGap = 14, separatorGap = 8;
     int stripWidthOf (int track) const noexcept { return track == 0 ? masterWidth : stripWidth; }
     int trackAt (int x) const noexcept;
     Part partAt (int track, juce::Point<int> p) const;

@@ -1845,6 +1845,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         track.invertPhase = (insert.flags & 0x01) != 0;
         track.swapChannels = (insert.flags & 0x02) != 0;
         track.solo = insert.index > 0 && (insert.flags & 0x1000) != 0;
+        // REA round 146a (FL's insert writer FUN_00f3d620): bits 6-7 = dock (0 left, 1 middle, 2 right), 0x400 separator
+        track.separator = insert.index > 0 && (insert.flags & 0x400) != 0;
+        // (FL's last insert, the "Current" track, is saved with dock 0 too; LYNX keeps it in the middle)
+        const auto dockBits = insert.flags >> 6 & 3;
+        const auto isCurrentTrack = insert.index > 0 && insert.index + 1 == (int) project.mixer.size();
+        track.dock = dockBits == 2 ? MixerDock::right : (dockBits == 0 && ! isCurrentTrack) ? MixerDock::left : MixerDock::middle;
 
         if (insert.index > 0 && insert.hasRoutes)
         {
@@ -3101,7 +3107,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
 
                 const auto sized = std::abs (t.heightScale - 1.0f) > 0.01f;
 
-                if (t.index >= 0 && t.index < 500 && (! t.name.empty() || ! t.enabled || coloured || t.grouped || ! t.expanded || sized))
+                if (t.index >= 0 && t.index < 500 && (! t.name.empty() || ! t.enabled || coloured || t.grouped || ! t.expanded || sized || t.mode != 0))
                 {
                     if ((int) song.playlistTracks.size() <= t.index)
                         song.playlistTracks.resize ((std::size_t) t.index + 1);
@@ -3113,6 +3119,20 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                         track.height = polish::clampTrackHeight ((int) std::lround (polish::defaultTrackHeight * t.heightScale));
                     track.grouped = t.index > 0 && t.grouped;
                     track.collapsed = ! t.expanded;
+                    // track modes (REA round 146a): an audio track's mixer track, an instrument track's channel
+                    const auto mixerOk = t.mixerTrack > 0 && t.mixerTrack < (int) song.mixer.size();
+                    if (t.mode == 1 && mixerOk)
+                    {
+                        track.mode = PlaylistTrackMode::audio;
+                        track.mixerTrack = t.mixerTrack;
+                    }
+                    else if (t.mode == 3)
+                        if (const auto it = channelMap.find (t.channel); it != channelMap.end() && it->second < (int) song.channels.size())
+                        {
+                            track.mode = PlaylistTrackMode::instrument;
+                            track.channel = it->second;
+                            track.mixerTrack = mixerOk ? t.mixerTrack : song.channels[(std::size_t) it->second].mixerTrack;
+                        }
                 }
             }
     }

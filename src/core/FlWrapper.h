@@ -56,4 +56,19 @@ struct FlVst2State
 bool parseFlVst2State (const std::vector<std::uint8_t>& state, FlVst2State& out);
 // Writes the current (−9) layout; parseFlVst2State reads it back.
 std::vector<std::uint8_t> writeFlVst2State (const FlVst2State& state);
+
+// FL's plugin wrapper settings page (the wrapper's gear tab; REA round 146a: option names and hints from FLEngine's
+// string pool, e.g. "Use fixed size buffers", "|Allow plugin to be multi-threaded by FL Studio",
+// "|Load plugin in separate process (bridged)", "|MIDI input port number"): the options LYNX applies, in FL's
+// sections. `recreates`: changing it re-creates the plugin (its state kept); `needsFixed`: only with fixed buffers.
+struct WrapperOption
+{
+    const char* section;
+    const char* label;
+    const char* hint;
+    bool PluginRef::* member;
+    bool recreates;
+    bool needsFixed;
+};
+const std::vector<WrapperOption>& wrapperOptions();
 } // namespace lynx
