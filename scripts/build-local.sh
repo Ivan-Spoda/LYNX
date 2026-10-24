@@ -28,6 +28,8 @@ CORE="$CORE src/core/ThreeOsc.cpp"
 CORE="$CORE src/core/FlPluginDb.cpp"
 # missing files of an opened project: search and relocation (round 81)
 CORE="$CORE src/core/MissingFiles.cpp"
+# the plugin picker's catalog (round 151)
+CORE="$CORE src/core/PluginCatalog.cpp"
 # project safety: backups, versions, packages (REA round 118)
 CORE="$CORE src/core/ProjectSafety.cpp"
 # LYNX substitutes for missing third-party plugins (round 98)

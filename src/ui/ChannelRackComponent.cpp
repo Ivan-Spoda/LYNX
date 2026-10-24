@@ -1823,7 +1823,7 @@ void ChannelRackComponent::showChannelMenu (int channel)
             c.name = ref.name;
         });
         openPluginWindow (channel);
-    });
+    }, this);
     instruments.addSubMenu (tr ("Plugin (VST/VST3/CLAP)"), plugins);
 
     // FL's layout (REA round 104): two columns, the channel on the left (editors, name and colour, sample,
@@ -2139,7 +2139,7 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
         const auto added = add (c);
         openPluginWindow (added); // the plugin opens when added
         openEditorRow = added;
-    });
+    }, this);
     menu.addSubMenu (tr ("Plugin (VST/VST3/CLAP)"), plugins);
 }
 

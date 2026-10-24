@@ -70,10 +70,14 @@ void setPluginParameter (juce::AudioPluginInstance& plugin, int index, float val
             p->setValue (value);
 }
 
-// The song's transport as hosted plugins see it (tempo, position, play state), from the renderer's timeline.
+// The song's transport as hosted plugins see it (tempo, position, play state, the loop when `reportLoop`: FL's wrapper
+// "Send loop position", on by default), from the renderer's timeline.
 class TimelinePlayHead final : public juce::AudioPlayHead
 {
 public:
+    explicit TimelinePlayHead (bool loop) : reportLoop (loop) {}
+    const bool reportLoop;
+
     juce::Optional<PositionInfo> getPosition() const override
     {
         const auto& t = hostTimeline();
@@ -89,14 +93,19 @@ public:
         info.setTimeInSeconds (quarters * 60.0 / juce::jmax (1.0, bpm));
         info.setTimeInSamples ((juce::int64) std::llround (quarters * 60.0 / juce::jmax (1.0, bpm) * rate));
         info.setIsPlaying (t.playing.load (std::memory_order_relaxed));
+        if (reportLoop && t.looping.load (std::memory_order_relaxed))
+        {
+            info.setIsLooping (true);
+            info.setLoopPoints (LoopPoints { t.loopStart.load (std::memory_order_relaxed) / (double) ppq, t.loopEnd.load (std::memory_order_relaxed) / (double) ppq });
+        }
         return info;
     }
 };
 
-juce::AudioPlayHead& timelinePlayHead()
+juce::AudioPlayHead& timelinePlayHead (bool reportLoop = true)
 {
-    static TimelinePlayHead head;
-    return head;
+    static TimelinePlayHead withLoop (true), withoutLoop (false);
+    return reportLoop ? withLoop : withoutLoop;
 }
 
 int bufferChannels (const juce::AudioPluginInstance& plugin)
@@ -208,8 +217,9 @@ void guardedUiParameter (juce::AudioPluginInstance& plugin, std::atomic<bool>& c
 }
 } // namespace
 
-PluginInstrument::PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize, int fixedBlock)
-    : plugin (std::move (instance)),
+PluginInstrument::PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize, int fixedBlock, HostedOptions o)
+    : options (o),
+      plugin (std::move (instance)),
       blockSize (maxBlockSize),
       name (plugin->getName().toStdString())
 {
@@ -221,8 +231,54 @@ PluginInstrument::PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> i
         pending.ensureSize (8192);
         scratch.assign ((std::size_t) blockSize * 2, 0.0f);
     }
-    plugin->setPlayHead (&timelinePlayHead());
+    plugin->setPlayHead (&timelinePlayHead (options.sendLoopPosition));
     producesMidi = plugin->producesMidi(); // only then is what the buffer holds after processing the plugin's output
+}
+
+void PluginInstrument::hold (int channel, int key, bool on) noexcept
+{
+    if (channel < 0 || channel > 15 || key < 0 || key > 127)
+        return;
+    auto& word = heldKeys[(std::size_t) channel][(std::size_t) (key >> 6)];
+    const auto bit = std::uint64_t { 1 } << (key & 63);
+    word = on ? (word | bit) : (word & ~bit);
+}
+
+void PluginInstrument::transportStopped() noexcept
+{
+    // FL's "Send All Notes Off when playback stops" (on by default); off: each note still held gets its note off
+    if (options.allNotesOffOnStop)
+    {
+        allNotesOff();
+        return;
+    }
+    for (int ch = 0; ch < 16; ++ch)
+        for (int key = 0; key < 128; ++key)
+            if ((heldKeys[(std::size_t) ch][(std::size_t) (key >> 6)] >> (key & 63)) & 1u)
+                midi.addEvent (juce::MidiMessage::noteOff (ch + 1, key), 0);
+    heldKeys = {};
+}
+
+void PluginInstrument::panic() noexcept
+{
+    allNotesOff();
+    if (options.resetOnFlush) // FL's "Reset plugin when FL Studio resets": cleared before the next block
+        resetPending.store (true, std::memory_order_relaxed);
+}
+
+void PluginInstrument::setRenderMode (bool offline)
+{
+    if (! hasCrashed())
+        setPluginRenderMode (*plugin, offline, plugin->getBlockSize() > 0 ? plugin->getBlockSize() : blockSize);
+}
+
+void PluginInstrument::resetForExport()
+{
+    // FL's "Reset plugin when FL Studio resets" (on by default): an export starts without what the plugin still holds
+    // (tails, notes)
+    if (! hasCrashed() && options.resetOnFlush)
+        if (const auto code = crashguard::run ([this] { plugin->reset(); }); code != 0)
+            failed (code);
 }
 
 void PluginInstrument::collectMidiOutput (const juce::MidiBuffer& buffer) noexcept
@@ -275,11 +331,13 @@ void PluginInstrument::setParameterFromUi (int index, float value)
 void PluginInstrument::noteOnMidi (int key, float velocity, int midiChannel) noexcept
 {
     midi.addEvent (juce::MidiMessage::noteOn (juce::jlimit (0, 15, midiChannel) + 1, juce::jlimit (0, 127, key), juce::jlimit (0.0f, 1.0f, velocity)), 0);
+    hold (juce::jlimit (0, 15, midiChannel), key, true);
 }
 
 void PluginInstrument::noteOffMidi (int key, int midiChannel) noexcept
 {
     midi.addEvent (juce::MidiMessage::noteOff (juce::jlimit (0, 15, midiChannel) + 1, juce::jlimit (0, 127, key)), 0);
+    hold (juce::jlimit (0, 15, midiChannel), key, false);
 }
 
 void PluginInstrument::flushMidiControls() noexcept
@@ -289,18 +347,32 @@ void PluginInstrument::flushMidiControls() noexcept
 
 void PluginInstrument::noteOn (int key, float velocity) noexcept
 {
-    midi.addEvent (juce::MidiMessage::noteOn (1, juce::jlimit (0, 127, key), juce::jlimit (0.0f, 1.0f, velocity)), 0);
+    const auto k = juce::jlimit (0, 127, key);
+    midi.addEvent (juce::MidiMessage::noteOn (1, k, juce::jlimit (0.0f, 1.0f, velocity)), 0);
+    hold (0, k, true);
+    // FL's "Send MOD X as polyphonic aftertouch": the note's Mod X right after its note on
+    if (options.modXAftertouch)
+        midi.addEvent (juce::MidiMessage::aftertouchChange (1, k, juce::jlimit (0, 127, juce::roundToInt (nextModX * 127.0f))), 0);
+    nextModX = 0.5f;
 }
 
 void PluginInstrument::noteOff (int key) noexcept
 {
-    midi.addEvent (juce::MidiMessage::noteOff (1, juce::jlimit (0, 127, key)), 0);
+    const auto k = juce::jlimit (0, 127, key);
+    // FL's "Send note release velocity" (on by default): the note's release velocity, else 0
+    if (options.releaseVelocity)
+        midi.addEvent (juce::MidiMessage::noteOff (1, k, juce::jlimit (0.0f, 1.0f, nextRelease)), 0);
+    else
+        midi.addEvent (juce::MidiMessage::noteOff (1, k), 0);
+    nextRelease = 0.5f;
+    hold (0, k, false);
 }
 
 void PluginInstrument::allNotesOff() noexcept
 {
     midi.addEvent (juce::MidiMessage::allNotesOff (1), 0);
     midi.addEvent (juce::MidiMessage::allSoundOff (1), 0);
+    heldKeys = {};
 }
 
 void PluginInstrument::setParameter (int index, float value) noexcept
@@ -317,6 +389,23 @@ void PluginInstrument::render (float* left, float* right, int n, float gl, float
     {
         midi.clear();
         return; // silent
+    }
+    if (resetPending.exchange (false, std::memory_order_relaxed))
+        if (const auto code = crashguard::run ([this] { plugin->reset(); }); code != 0)
+        {
+            failed (code);
+            midi.clear();
+            return;
+        }
+    // FL's "Send pitch bend range": the pitch-bend-sensitivity RPN (0, 0) once, before the first notes
+    if (options.sendBendRange && ! bendRangeSent)
+    {
+        bendRangeSent = true;
+        const auto range = juce::jlimit (1, 48, options.bendRange);
+        for (const auto& m : { juce::MidiMessage::controllerEvent (1, 101, 0), juce::MidiMessage::controllerEvent (1, 100, 0),
+                               juce::MidiMessage::controllerEvent (1, 6, range), juce::MidiMessage::controllerEvent (1, 38, 0),
+                               juce::MidiMessage::controllerEvent (1, 101, 127), juce::MidiMessage::controllerEvent (1, 100, 127) })
+            midi.addEvent (m, 0); // (the first render comes before any note: the plugin is new)
     }
     flushMidiControls();
 
@@ -389,7 +478,7 @@ void PluginInstrument::render (float* left, float* right, int n, float gl, float
 
 // ---------------------------------------------------------------------------
 
-PluginEffect::PluginEffect (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize, int fixedBlock)
+PluginEffect::PluginEffect (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize, int fixedBlock, HostedOptions o)
     : plugin (std::move (instance)),
       blockSize (maxBlockSize),
       name (plugin->getName().toStdString())
@@ -398,7 +487,23 @@ PluginEffect::PluginEffect (std::unique_ptr<juce::AudioPluginInstance> instance,
     midi.ensureSize (2048); // MIDI CC "parameters" (core/MidiControls.h)
     if (fixedBlock > 0)
         fixed = std::make_unique<FixedBlock> (juce::jmin (fixedBlock, blockSize), 2);
-    plugin->setPlayHead (&timelinePlayHead());
+    options = o;
+    plugin->setPlayHead (&timelinePlayHead (options.sendLoopPosition));
+}
+
+void PluginEffect::setRenderMode (bool offline)
+{
+    if (! hasCrashed())
+        setPluginRenderMode (*plugin, offline, plugin->getBlockSize() > 0 ? plugin->getBlockSize() : blockSize);
+}
+
+void PluginEffect::resetForExport()
+{
+    // FL's "Reset plugin when FL Studio resets" (on by default): an export starts without what the plugin still holds
+    // (tails, notes)
+    if (! hasCrashed() && options.resetOnFlush)
+        if (const auto code = crashguard::run ([this] { plugin->reset(); }); code != 0)
+            failed (code);
 }
 
 PluginEffect::~PluginEffect()
@@ -1835,7 +1940,8 @@ std::shared_ptr<Instrument> PluginHost::makeInstrument (const PluginRef& ref, do
 {
     juce::String why;
     if (auto instance = instantiate (ref, sampleRate, &why))
-        return std::make_shared<PluginInstrument> (std::move (instance), maxBlockSize, ref.fixedBuffers ? fixedPluginBlock (ref.maxSizeBuffers) : 0);
+        return std::make_shared<PluginInstrument> (std::move (instance), maxBlockSize, ref.fixedBuffers ? fixedPluginBlock (ref.maxSizeBuffers) : 0,
+                                                   HostedOptions::of (ref));
 
     {
         const std::scoped_lock lock (failuresLock);
@@ -1850,7 +1956,8 @@ std::shared_ptr<Effect> PluginHost::makeEffect (const PluginRef& ref, double sam
 {
     juce::String why;
     if (auto instance = instantiate (ref, sampleRate, &why))
-        return std::make_shared<PluginEffect> (std::move (instance), maxBlockSize, ref.fixedBuffers ? fixedPluginBlock (ref.maxSizeBuffers) : 0);
+        return std::make_shared<PluginEffect> (std::move (instance), maxBlockSize, ref.fixedBuffers ? fixedPluginBlock (ref.maxSizeBuffers) : 0,
+                                               HostedOptions::of (ref));
 
     {
         const std::scoped_lock lock (failuresLock);

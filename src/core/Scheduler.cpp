@@ -121,6 +121,9 @@ void schedulePatternLoop (const Pattern& pattern,
         on.pan = note.pan;
         on.cents = note.finePitch;
         on.porta = note.porta;
+        on.modX = note.modX;
+        on.modY = note.modY;
+        on.release = note.release;
         const auto timing = noteTiming (note, swing, channelOf (channels, note.channel));
         const auto start = timing.start;
 
@@ -284,6 +287,9 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
             e.pan = note.pan;
             e.cents = note.finePitch;
             e.porta = note.porta;
+            e.modX = note.modX;
+            e.modY = note.modY;
+            e.release = note.release;
 
             if (note.slide)
             {

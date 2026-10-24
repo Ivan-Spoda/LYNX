@@ -3656,7 +3656,7 @@ void EffectsPanel::showAddMenu (int)
         selectedSlot = (int) slots()->size() - 1;
         openPluginWindow (selectedSlot);
         repaint();
-    });
+    }, this);
     menu.addSeparator();
     menu.addSubMenu (tr ("Plugin (VST/VST3/CLAP)"), plugins);
     menu.addSeparator();

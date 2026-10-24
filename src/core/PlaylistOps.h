@@ -119,6 +119,12 @@ bool makeAudioTrack (Song& song, int track);
 bool makeInstrumentTrack (Song& song, int track, int channel);
 // "Track mode › Unassigned".
 void unassign (Song& song, int track);
+// The pattern the pencil places on an instrument track (REA round 151 [EXEC FL 2026: drawing on an instrument track
+// places a pattern named after its channel, made on the first click, empty and one bar long; every later click
+// places the same pattern; its piano roll is that channel's]): the pattern named after the track's channel whose
+// notes (if any) are all that channel's, else a new one (the channel's colour). -1 when the track is not an
+// instrument track.
+int instrumentTrackPattern (Song& song, int track);
 // The text FL's hint bar adds for a track header: "(Audio track, linked to mixer track N)" / "(Instrument track)";
 // empty for an unassigned track.
 std::string describe (const Song& song, int track);

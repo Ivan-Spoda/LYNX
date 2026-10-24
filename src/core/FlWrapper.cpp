@@ -110,6 +110,8 @@ bool parseFlWrapper (const std::vector<std::uint8_t>& blob, ForeignPlugin& out)
                     std::memcpy (&out.midiInPort, p, 4);
                     std::memcpy (&out.midiOutPort, p + 4, 4);
                 }
+                if (n >= 12) // "Send pitch bend range (semitones)" value (round 151)
+                    std::memcpy (&out.bendRange, p + 8, 4);
                 break;
             case 0x02: // wrapper options (Fruity Wrapper FUN_00874480 writes, FUN_00875aa0 reads; REA round 134)
                 if (n >= 17)
@@ -117,6 +119,11 @@ bool parseFlWrapper (const std::vector<std::uint8_t>& blob, ForeignPlugin& out)
                     std::memcpy (&out.wrapperFlags, p + 9, 4);
                     std::memcpy (&out.fixedOptions, p + 13, 4);
                     out.hasWrapperOptions = true;
+                    if (n >= 25)
+                    {
+                        std::memcpy (&out.wrapperFlags2, p + 21, 4);
+                        out.hasWrapperFlags2 = true;
+                    }
                 }
                 break;
             default: break; // pins: LYNX does not need them
@@ -153,6 +160,22 @@ void applyFlWrapperOptions (const ForeignPlugin& w, PluginRef& ref)
         ref.allowSmartDisable = (w.wrapperFlags & 0x20000000u) != 0;
     // "Use maximum buffer size from host" (fixed-buffer options bit 1): the plugin is told the host's maximum block
     ref.hostMaxBuffer = ref.fixedBuffers && (w.fixedOptions & 0x2u) != 0;
+    // round 151 [DATA: FL 2026 (wrapper version 12), each option toggled, saved and compared]: 0x1 "Send pitch bend
+    // range", 0x20 set = "Send note release velocity" off, 0x800 "Send loop position", 0x20000 "Send MOD X as
+    // polyphonic aftertouch", 0x02000000 set = "Reset plugin when FL Studio resets" off; the second word's 0x1000 set
+    // = "Send All Notes Off when playback stops" off
+    if (w.wrapperVersion >= 10)
+    {
+        ref.sendBendRange = (w.wrapperFlags & 0x1u) != 0;
+        ref.releaseVelocity = (w.wrapperFlags & 0x20u) == 0;
+        ref.sendLoopPosition = (w.wrapperFlags & 0x800u) != 0;
+        ref.modXAftertouch = (w.wrapperFlags & 0x20000u) != 0;
+        ref.resetOnFlush = (w.wrapperFlags & 0x02000000u) == 0;
+        if (w.hasWrapperFlags2)
+            ref.allNotesOffOnStop = (w.wrapperFlags2 & 0x1000u) == 0;
+    }
+    if (w.bendRange >= 1 && w.bendRange <= 48)
+        ref.bendRange = w.bendRange;
 }
 
 bool splitFlVst3State (const std::vector<std::uint8_t>& state, std::vector<std::uint8_t>& component,
@@ -340,6 +363,12 @@ const std::vector<WrapperOption>& wrapperOptions()
         { "Processing", "Allow threaded processing", "Allow the plugin to be multi-threaded (off: always on the audio thread)", &PluginRef::threaded, false, false },
         { "Processing", "Make bridged", "Load the plugin in a separate process (bridged)", &PluginRef::separateProcess, true, false },
         { "Processing", "Allow smart disable", "Allow smart disable for the plugin (off: it is always processed)", &PluginRef::allowSmartDisable, false, false },
+        { "MIDI", "Send note release velocity", "Send release velocity in note off messages", &PluginRef::releaseVelocity, false, false },
+        { "MIDI", "Send pitch bend range (semitones)", "Send a pitch bend range MIDI RPN", &PluginRef::sendBendRange, false, false },
+        { "MIDI", "Send MOD X as polyphonic aftertouch", "Send each note's Modulation X as polyphonic aftertouch", &PluginRef::modXAftertouch, false, false },
+        { "MIDI", "Send All Notes Off when playback stops", "Off: only the notes still held get their note off", &PluginRef::allNotesOffOnStop, false, false },
+        { "Compatibility", "Reset plugin when LYNX resets", "Reset the plugin before an export and on panic (clears its tails and held notes)", &PluginRef::resetOnFlush, false, false },
+        { "Compatibility", "Send loop position", "Let the plugin know about loop start and end points", &PluginRef::sendLoopPosition, false, false },
         { "Compatibility", "Use fixed size buffers", "Constant 2 ms blocks, for plugins that need equal buffers (adds latency)", &PluginRef::fixedBuffers, true, false },
         { "Compatibility", "Process maximum size buffers", "With fixed size buffers: the whole device buffer instead of 2 ms blocks", &PluginRef::maxSizeBuffers, true, true },
         { "Compatibility", "Use maximum buffer size from host", "With fixed size buffers: prepare the plugin for the host's largest block", &PluginRef::hostMaxBuffer, true, true },

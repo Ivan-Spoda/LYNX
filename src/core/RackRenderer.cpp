@@ -1266,6 +1266,7 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         gains = echo.outputGains.data();
     }
     const auto tracking = c.misc.key.pan != 0.0f || c.misc.velocity.pan != 0.0f;
+    const auto modTracking = c.misc.key.modX != 0.0f || c.misc.key.modY != 0.0f || c.misc.velocity.modX != 0.0f || c.misc.velocity.modY != 0.0f;
     // FL's Add to key (round 149): the root note moves the notes of instruments that are not samplers
     const auto keyShift = c.misc.addToKey && c.instrument != InstrumentKind::sampler ? 60 - c.misc.rootNote : 0;
 
@@ -1316,7 +1317,12 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
                     if (const auto victim = voiceOrders[(std::size_t) i].noteOn (e.key, limit); victim >= 0)
                         instrument.noteOff (victim);
                 const auto pan = tracking ? channelmisc::trackedPan (c.misc, e.key, e.velocity, e.pan) : e.pan;
-                instrument.setNextNoteExpression (pan, e.cents + (c.misc.mainPitch ? state.song.masterPitch : 0.0f), e.porta);
+                instrument.setNextNoteExpression (pan, e.cents + c.misc.fineTune + (c.misc.mainPitch ? state.song.masterPitch : 0.0f), e.porta);
+                {
+                    const auto [modX, modY] = modTracking ? channelmisc::trackedModulation (c.misc, e.key, e.velocity, e.modX, e.modY)
+                                                          : std::pair<float, float> { e.modX, e.modY };
+                    instrument.setNextNoteModulation (modX, modY);
+                }
 
                 if (e.fadeIn > 0.0f || e.fadeOut > 0.0f)
                     instrument.setNextClipFades (e.clipElapsed, e.clipRemaining, e.fadeIn, e.fadeOut);
@@ -1330,7 +1336,7 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         }
         else if (e.type == NoteEvent::Type::slide)
         {
-            instrument.slideTo (e.key, e.cents + (c.misc.mainPitch ? state.song.masterPitch : 0.0f), e.slideSamples);
+            instrument.slideTo (e.key, e.cents + c.misc.fineTune + (c.misc.mainPitch ? state.song.masterPitch : 0.0f), e.slideSamples);
         }
         else if (e.type == NoteEvent::Type::choke)
         {
@@ -1340,6 +1346,7 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         }
         else
         {
+            instrument.setNextNoteRelease (e.release);
             instrument.noteOff (e.key);
             voiceOrders[(std::size_t) i].noteOff (e.key);
             if (e.key >= 0 && e.key < 128)
@@ -1670,7 +1677,10 @@ void RackRenderer::process (const RackState* state,
     if ((wasPlaying && ! playing) || jumped)
     {
         for (auto& instrument : state->instruments)
-            instrument->allNotesOff();
+            if (jumped)
+                instrument->allNotesOff();
+            else
+                instrument->transportStopped(); // (a hosted plugin: FL's "Send All Notes Off when playback stops")
         heldNotes.fill ({});
 
         for (auto& arp : state->arpeggiators)
@@ -1742,7 +1752,7 @@ void RackRenderer::process (const RackState* state,
             {
                 for (auto& instrument : state->instruments)
                     if (instrument != nullptr)
-                        instrument->allNotesOff();
+                        instrument->panic();
                 heldNotes.fill ({});
                 for (auto& order : voiceOrders)
                     order.clear();
@@ -1917,6 +1927,9 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         timeline.sampleRate.store (sampleRate, std::memory_order_relaxed);
         timeline.beatsPerBar.store (std::max (1, song.beatsPerBar), std::memory_order_relaxed);
         timeline.playing.store (playing, std::memory_order_relaxed);
+        timeline.looping.store (song.hasLoop(), std::memory_order_relaxed);
+        timeline.loopStart.store ((double) song.loopStart, std::memory_order_relaxed);
+        timeline.loopEnd.store ((double) song.loopEnd, std::memory_order_relaxed);
     }
 
     for (int t = 0; t < tracks; ++t)

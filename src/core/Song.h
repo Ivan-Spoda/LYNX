@@ -97,6 +97,11 @@ struct ForeignPlugin
     // wrapper options (record 0x02, REA round 134): processing/troubleshooting flags and the fixed-buffer options
     std::uint32_t wrapperVersion = 0, wrapperFlags = 0, fixedOptions = 0;
     bool hasWrapperOptions = false;
+    // round 151 [DATA: FL 2026's options toggled one by one, saved and compared]: the second flags word of record 0x02
+    // (+21) and the pitch bend range of record 0x01 (+8, semitones; −1 = not saved)
+    std::uint32_t wrapperFlags2 = 0;
+    bool hasWrapperFlags2 = false;
+    int bendRange = -1;
 
     bool operator== (const ForeignPlugin&) const = default;
 };
@@ -128,6 +133,14 @@ struct PluginRef
     bool notifyRender = true;
     // the Info section's Latency: the delay compensation uses this (ms) instead of what the plugin reports (−1)
     float latencyOverrideMs = -1.0f;
+    // FL's wrapper settings with LYNX behaviour, round 151 (defaults as FL's page shows them [EXEC]):
+    bool releaseVelocity = true;    // Settings › MIDI › "Send note release velocity": note offs carry the note's release
+    bool sendBendRange = false;     // "Send pitch bend range (semitones)": a pitch-bend-sensitivity RPN when it starts
+    int bendRange = 12;             //   the range sent, 1…48 semitones
+    bool modXAftertouch = false;    // "Send MOD X as polyphonic aftertouch": each note's Mod X follows its note on
+    bool allNotesOffOnStop = true;  // "Send All Notes Off when playback stops" (off: only the held notes are released)
+    bool resetOnFlush = true;       // Troubleshooting › "Reset plugin when FL Studio resets": before an export, on panic
+    bool sendLoopPosition = true;   // "Send loop position": the play head reports the loop's start and end
 
     bool operator== (const PluginRef& o) const
     {
@@ -135,7 +148,9 @@ struct PluginRef
                && threaded == o.threaded && maxSizeBuffers == o.maxSizeBuffers && allowSmartDisable == o.allowSmartDisable
                && hostMaxBuffer == o.hostMaxBuffer
                && midiInPort == o.midiInPort && midiOutPort == o.midiOutPort && notifyRender == o.notifyRender
-               && latencyOverrideMs == o.latencyOverrideMs;
+               && latencyOverrideMs == o.latencyOverrideMs && releaseVelocity == o.releaseVelocity && sendBendRange == o.sendBendRange
+               && bendRange == o.bendRange && modXAftertouch == o.modXAftertouch && allNotesOffOnStop == o.allNotesOffOnStop
+               && resetOnFlush == o.resetOnFlush && sendLoopPosition == o.sendLoopPosition;
     }
 };
 
@@ -331,6 +346,23 @@ struct SampleZone
 // and "To LYNX" (patchToHost: the main audio output and the extra outputs to other mixer inserts).
 struct PatchNode; // defined after EffectSlot
 constexpr int patchFromHost = -1, patchToHost = -2;
+// FL's Patcher "Surface" node (REA round 151): its control outputs are the Surface tab's controls
+constexpr int patchSurface = -3;
+
+// A control on the Patcher's Surface tab (FL's Patcher › Surface, REA round 151 [EXEC FL 2026: Add control › Bevel,
+// Button, CheckBox, Digits, Label, Keyboard, Knob, Slider, XY; each one becomes a control output of the Map's
+// "Surface" node, cabled to any node parameter]). LYNX's own drawing; knob, slider, button, check box and XY pad.
+struct SurfaceControl
+{
+    enum class Kind : std::uint8_t { knob, slider, button, checkBox, xy };
+    Kind kind = Kind::knob;
+    std::string name;
+    float value = 0.0f, valueY = 0.0f; // 0..1 (an XY pad has two)
+    float x = 40.0f, y = 40.0f;        // place on the Surface tab
+    // control outputs: one each, an XY pad two (X then Y)
+    int outputs() const noexcept { return kind == Kind::xy ? 2 : 1; }
+    bool operator== (const SurfaceControl&) const = default;
+};
 
 struct PatchWire
 {
@@ -368,6 +400,27 @@ struct PatcherDoc
     // "To LYNX" extra audio outputs (bus 1…): the mixer insert each one feeds (−1 = the k-th insert after the
     // channel's own); generator Patcher only
     std::vector<int> outputTracks;
+    // the Surface tab's controls and the Surface node's place on the Map (round 151)
+    std::vector<SurfaceControl> surface;
+    float surfaceX = 30.0f, surfaceY = 30.0f;
+    // the value of the Surface node's control output k (the controls' outputs in order); 0 past the end
+    float surfaceOutput (int k) const noexcept
+    {
+        for (const auto& c : surface)
+        {
+            if (k < c.outputs())
+                return k == 0 ? c.value : c.valueY;
+            k -= c.outputs();
+        }
+        return 0.0f;
+    }
+    int surfaceOutputs() const noexcept
+    {
+        int n = 0;
+        for (const auto& c : surface)
+            n += c.outputs();
+        return n;
+    }
 
     bool empty() const noexcept { return nodes.empty() && wires.empty(); }
     bool operator== (const PatcherDoc& o) const; // (Song.cpp: needs PatchNode)
@@ -417,6 +470,8 @@ struct ChannelMisc
     // "Add to key" (0xD7 byte 63): their notes are played (60 − root) semitones away
     int rootNote = 60;
     bool addToKey = false;
+    // FL's Root note › Fine tune (REA round 151 [DATA: .flp event 0x8E, signed cents]): every note this many cents away
+    float fineTune = 0.0f;
 
     bool operator== (const ChannelMisc&) const = default;
 };

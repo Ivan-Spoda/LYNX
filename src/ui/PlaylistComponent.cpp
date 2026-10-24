@@ -1921,6 +1921,17 @@ void PlaylistComponent::mouseDown (const juce::MouseEvent& e)
 
     // paints what is chosen in the Picker (the current pattern, an audio clip or an automation clip)
     setSelection ({});
+    // an instrument track places its own pattern (FL: named after the channel, made on the first click; round 151)
+    if (const auto track = yToTrack (e.y); brush.kind == ClipKind::pattern && track >= 0 && track < (int) engine.getSong().playlistTracks.size()
+                                           && engine.getSong().playlistTracks[(std::size_t) track].mode == PlaylistTrackMode::instrument)
+    {
+        engine.editSong ([track] (Song& s) {
+            if (const auto p = trackmodes::instrumentTrackPattern (s, track); p >= 0)
+                s.currentPattern = p;
+        });
+        engine.setSelectedChannel (engine.getSong().playlistTracks[(std::size_t) track].channel); // its piano roll is the channel's
+    }
+
     const auto c = makeBrushClip (yToTrack (e.y), snap (xToTick (e.x), snapOn));
 
     if (c.kind == ClipKind::pattern)
