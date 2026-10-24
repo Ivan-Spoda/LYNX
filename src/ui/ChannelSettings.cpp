@@ -2275,11 +2275,111 @@ ui::ValueSpec countSpec (const juce::String& name, int maximum, int defaultValue
 
 // The wrench tab: FL's "Miscellaneous functions" with what LYNX's channels have (Levels, Polyphony, Time, Group,
 // Arpeggiator).
+// FL's Root note keyboard (Misc tab, REA round 149): every key 0…127 (C0…G10, C5 = 60), the channel's root marked;
+// a click sets it. LYNX's own drawing.
+class RootKeyboard final : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    std::function<void (int)> onPick;
+    void setRoot (int key)
+    {
+        root = key;
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        using namespace theme;
+        const auto w = whiteWidth();
+        for (int k = 0, white = 0; k < 128; ++k)
+            if (! isBlack (k))
+            {
+                const auto r = juce::Rectangle<float> ((float) (white++) * w, 0.0f, w - 1.0f, (float) getHeight());
+                g.setColour (k == root ? colour::accent : k == hover ? juce::Colour (0xffc8ccd4) : juce::Colour (0xffe6e8ec));
+                g.fillRect (r);
+                if (k % 12 == 0 && w * 7.0f >= 14.0f) // the octave's C named (FL's C5 = 60)
+                {
+                    g.setColour (k == root ? colour::onAccent : juce::Colour (0xff5a5f6a));
+                    g.setFont (font (8.5f));
+                    g.drawText ("C" + juce::String (k / 12), r.withTrimmedTop (r.getHeight() - 11.0f).expanded (6.0f, 0.0f).toNearestInt(),
+                                juce::Justification::centred);
+                }
+            }
+        for (int k = 0; k < 128; ++k)
+            if (isBlack (k))
+            {
+                const auto x = (float) whitesBefore (k) * w - w * 0.32f;
+                g.setColour (k == root ? colour::accent : k == hover ? colour::bg5 : colour::bg0);
+                g.fillRect (juce::Rectangle<float> (x, 0.0f, w * 0.64f, (float) getHeight() * 0.6f));
+            }
+    }
+
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        if (const auto k = keyAt (e.position); k != hover)
+        {
+            hover = k;
+            setTooltip (k >= 0 ? tr ("Root note: {0}", { keyName (k) }) : juce::String());
+            repaint();
+        }
+    }
+    void mouseExit (const juce::MouseEvent&) override
+    {
+        hover = -1;
+        repaint();
+    }
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (const auto k = keyAt (e.position); k >= 0 && onPick)
+            onPick (k);
+    }
+
+    static juce::String keyName (int key)
+    {
+        static const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        return juce::String (names[key % 12]) + juce::String (key / 12);
+    }
+
+private:
+    static bool isBlack (int k) noexcept
+    {
+        const auto n = k % 12;
+        return n == 1 || n == 3 || n == 6 || n == 8 || n == 10;
+    }
+    static int whitesBefore (int k) noexcept
+    {
+        int count = 0;
+        for (int i = 0; i < k; ++i)
+            count += isBlack (i) ? 0 : 1;
+        return count;
+    }
+    float whiteWidth() const noexcept { return (float) getWidth() / 75.0f; } // 75 white keys in 0…127
+    int keyAt (juce::Point<float> p) const noexcept
+    {
+        const auto w = whiteWidth();
+        if (p.y < (float) getHeight() * 0.6f)
+            for (int k = 0; k < 128; ++k)
+                if (isBlack (k))
+                {
+                    const auto x = (float) whitesBefore (k) * w - w * 0.32f;
+                    if (p.x >= x && p.x < x + w * 0.64f)
+                        return k;
+                }
+        const auto white = (int) std::floor (p.x / w);
+        for (int k = 0, n = 0; k < 128; ++k)
+            if (! isBlack (k) && n++ == white)
+                return k;
+        return -1;
+    }
+
+    int root = 60, hover = -1;
+};
+
 class MiscPanel final : public juce::Component,
                         private juce::ChangeListener
 {
 public:
-    static constexpr int preferredWidth = 800, preferredHeight = 330;
+    static constexpr int preferredWidth = 800, preferredHeight = 360;
 
     MiscPanel (AudioEngine& e, int c) : engine (e), channel (c)
     {
@@ -2430,7 +2530,7 @@ public:
         trackMid = knob ([this, name] {
                              const auto key = trackKey.getToggleState();
                              auto s = countSpec (name() + " - " + tr ("Tracking: the middle value (no offset)"), key ? 131 : 128, key ? 60 : 100,
-                                                 [key] (int v) { return key ? juce::MidiMessage::getMidiNoteName (120 - v, true, true, 4) : juce::String (v); });
+                                                 [key] (int v) { return key ? juce::MidiMessage::getMidiNoteName (120 - v, true, true, 5) : juce::String (v); }); // FL: C5 = 60
                              return s;
                          },
                          [trackingOf] (const ChannelDef& d) { return (double) trackingOf (d).mid; },
@@ -2473,12 +2573,37 @@ public:
         pingPong.setTooltip (tr ("Ping pong: the echoes' pan bounces off the left and right ends"));
         pingPong.onClick = [this] { edit ([on = pingPong.getToggleState()] (ChannelDef& d) { d.misc.echo.pingPong = on; }); };
         fatMode.setButtonText (tr ("Fat mode"));
-        fatMode.setTooltip (tr ("Fat mode (kept from FL projects; LYNX plays the echoes the same way)"));
+        fatMode.setTooltip (tr ("Fat mode: a second, mirrored series of echoes (opposite pan and pitch steps), all at the feedback level"));
         fatMode.onClick = [this] { edit ([on = fatMode.getToggleState()] (ChannelDef& d) { d.misc.echo.fat = on; }); };
         // Root note row: main pitch
         mainPitch.setButtonText (tr ("Enable main pitch"));
         mainPitch.setTooltip (tr ("The channel follows the main pitch (the toolbar's master pitch)"));
         mainPitch.onClick = [this] { edit ([on = mainPitch.getToggleState()] (ChannelDef& d) { d.misc.mainPitch = on; }); };
+        // FL's Add to key and Root note keyboard (round 149): a sampler's root moves its pitch, other instruments are
+        // transposed by (C5 − root) with Add to key
+        addToKey.setButtonText (tr ("Add to key"));
+        addToKey.setTooltip (tr ("Add to key: the notes are played the root note's distance from C5 away (instruments that are not samplers)"));
+        addToKey.onClick = [this] { edit ([on = addToKey.getToggleState()] (ChannelDef& d) { d.misc.addToKey = on; }); };
+        rootReset.setButtonText (tr ("Reset"));
+        rootReset.setTooltip (tr ("Reset the root note to C5"));
+        rootReset.onClick = [this] { if (rootKeys.onPick) rootKeys.onPick (60); };
+        addAndMakeVisible (rootReset);
+        rootKeys.onPick = [this] (int key) {
+            edit ([key] (ChannelDef& d) {
+                if (d.instrument == InstrumentKind::sampler)
+                {
+                    // the sample plays at its own pitch on the root: the pitch moves by the root's change (within ±24)
+                    const auto pitch = std::clamp (d.sampler.pitch + (float) (d.misc.rootNote - key), -24.0f, 24.0f);
+                    const auto moved = (int) std::lround (pitch - d.sampler.pitch);
+                    d.sampler.pitch = pitch;
+                    d.misc.rootNote = std::clamp (d.misc.rootNote - moved, 0, 127);
+                }
+                else
+                    d.misc.rootNote = key;
+            });
+        };
+        addAndMakeVisible (addToKey);
+        addAndMakeVisible (rootKeys);
         // Arpeggiator: FL's Slide and Chord
         arpSlide.setButtonText (tr ("Slide"));
         arpSlide.setTooltip (tr ("Slide: the arpeggio glides from note to note (instruments that slide)"));
@@ -2542,9 +2667,11 @@ public:
                         },
                         [] (const ChannelDef& d) { return (double) d.arp.gate; },
                         [] (ChannelDef& d, double v) { d.arp.gate = juce::jlimit (0.05f, 128.0f / 48.0f, (float) v); }, TR_NOOP ("Gate"));
-        arpRepeat = knob ([name] { return countSpec (name() + " - " + tr ("Arpeggiator repeat: times the arpeggio plays in an octave before the next one"), 16, 1); },
+        // FL's Repeat 0 plays the whole chord at once on each step (round 149)
+        arpRepeat = knob ([name] { return countSpec (name() + " - " + tr ("Arpeggiator repeat: times the arpeggio plays in an octave before the next one (0: the chord at once)"), 16, 1,
+                                                     [] (int i) { return i == 0 ? tr ("Chord") : juce::String (i); }); },
                           [] (const ChannelDef& d) { return (double) d.arp.octaveRepeat; },
-                          [] (ChannelDef& d, double v) { d.arp.octaveRepeat = juce::jlimit (1, 16, juce::roundToInt (v)); }, TR_NOOP ("Repeat"));
+                          [] (ChannelDef& d, double v) { d.arp.octaveRepeat = juce::jlimit (0, 16, juce::roundToInt (v)); }, TR_NOOP ("Repeat"));
 
         for (auto* b : { &porta, &mono })
             addAndMakeVisible (b);
@@ -2567,7 +2694,10 @@ public:
             g.fillRoundedRectangle (area.toFloat(), 4.0f);
             g.setColour (theme::colour::textSecondary);
             g.setFont (theme::font (theme::type::caption, true));
-            g.drawText (theme::caps (title), area.withHeight (20).reduced (8, 0), juce::Justification::centredLeft);
+            auto text = theme::caps (title);
+            if (&title == &sections[(std::size_t) juce::jmax (0, rootSection)].second && rootSection >= 0 && current() != nullptr)
+                text << ": " << RootKeyboard::keyName (current()->misc.rootNote); // FL's "Root note: C5"
+            g.drawText (text, area.withHeight (20).reduced (8, 0), juce::Justification::centredLeft);
         }
     }
 
@@ -2644,7 +2774,16 @@ public:
             fatMode.setBounds (toggles.removeFromLeft (100));
         }
         area.removeFromTop (6);
-        mainPitch.setBounds (area.removeFromTop (24).removeFromLeft (200));
+        {
+            auto rootRow = section (area.removeFromTop (74), tr ("Root note"));
+            rootSection = (int) sections.size() - 1;
+            auto toggles = rootRow.removeFromLeft (150);
+            mainPitch.setBounds (toggles.removeFromTop (22));
+            auto line = toggles.removeFromTop (22);
+            rootReset.setBounds (line.removeFromRight (50).reduced (0, 1));
+            addToKey.setBounds (line);
+            rootKeys.setBounds (rootRow.reduced (4, 2));
+        }
     }
 
 private:
@@ -2700,6 +2839,9 @@ private:
         pingPong.setToggleState (c->misc.echo.pingPong, juce::dontSendNotification);
         fatMode.setToggleState (c->misc.echo.fat, juce::dontSendNotification);
         mainPitch.setToggleState (c->misc.mainPitch, juce::dontSendNotification);
+        addToKey.setToggleState (c->misc.addToKey, juce::dontSendNotification);
+        addToKey.setEnabled (c->instrument != InstrumentKind::sampler);
+        rootKeys.setRoot (c->misc.rootNote);
         arpSlide.setToggleState (c->arp.slide, juce::dontSendNotification);
         const auto filter = c->instrument == InstrumentKind::synth || c->instrument == InstrumentKind::sampler;
         modX->setEnabled (filter);
@@ -2734,7 +2876,10 @@ private:
               *arpRange = nullptr, *arpGate = nullptr, *arpRepeat = nullptr, *modX = nullptr, *modY = nullptr, *timeGate = nullptr,
               *timeShift = nullptr, *trackPan = nullptr, *trackMid = nullptr, *echoFeed = nullptr, *echoPan = nullptr, *echoPitch = nullptr,
               *echoTime = nullptr, *echoCount = nullptr;
-    juce::ToggleButton porta, mono, fullPorta, pingPong, fatMode, mainPitch, arpSlide;
+    juce::ToggleButton porta, mono, fullPorta, pingPong, fatMode, mainPitch, arpSlide, addToKey;
+    RootKeyboard rootKeys;
+    juce::TextButton rootReset;
+    int rootSection = -1;
     juce::TextButton trackVol, trackKey;
     juce::ComboBox arpChord;
     juce::TextButton cutSelf;
@@ -2940,6 +3085,18 @@ public:
           modulation (modulationWindow)
     {
         setUsingNativeTitleBar (true);
+        // FL names the window after the channel and its mixer track (REA round 149 [EXEC]: "FL Studio VSTi (Master)",
+        // "Synth Bass (Synth Bass)")
+        if (const auto& song = engine.getSong(); channel >= 0 && channel < (int) song.channels.size())
+        {
+            const auto& def = song.channels[(std::size_t) channel];
+            const auto t = def.mixerTrack;
+            const auto track = t <= 0 || t >= (int) song.mixer.size() ? tr ("Master")
+                               : song.mixer[(std::size_t) t].name.empty() ? tr ("Insert {0}", { juce::String (t) })
+                                                                          : juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str());
+            setName (juce::String::fromUTF8 (def.name.c_str()) + " (" + track + ")"
+                     + (modulation ? " - " + tr ("Envelope / instrument") : juce::String()));
+        }
 
         if (modulation)
             setContentOwned (new ModulationPanel (engine, channel), true);

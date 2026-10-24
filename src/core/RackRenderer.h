@@ -127,6 +127,9 @@ struct RackState
     std::vector<std::vector<int>> midiSources;  // [plugin channel] → MIDI Out channels
     std::vector<int> midiOutChannel;            // [channel] MIDI channel 0…15 of a MIDI Out, −1 = not one
     bool hasMidiRoutes = false;
+    // FL's wrapper "Output port" (round 149): [plugin channel] → the plugin channels whose input port is its output port
+    std::vector<std::vector<int>> midiOutTargets;
+    bool hasMidiOutputs = false;
     void buildMidiRoutes();
 
     // Loads (or fetches from cache) a file's audio; nullptr on failure.
@@ -307,6 +310,12 @@ private:
     std::vector<float> channelBuffers;                      // maxChannels * 2 * chunkCapacity
     std::vector<float> trackScratchBuffers;                 // maxMixerTracks * 2 * chunkCapacity
     double chunkStartTick = 0.0, chunkTps = 1.0;            // of the chunk being rendered (for the arpeggiator)
+    // live-played notes of channels with an arpeggiator, echo delay or key / velocity tracking go through the
+    // channel's note path like the scheduled ones (FL, round 149); while stopped the arpeggiator runs on its own clock
+    std::array<NoteEvent, 256> liveRouted {};
+    int liveRoutedCount = 0;
+    double liveTick = 0.0;
+    bool routesLiveNotes (const RackState& state, int channel) const noexcept;
     WorkerPool* workers = nullptr;
     LiveInput* liveInput = nullptr;
     int liveInputOffset = 0; // of the chunk within the process() block

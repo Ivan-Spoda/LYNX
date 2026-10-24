@@ -121,13 +121,21 @@ struct PluginRef
     // The wrapper's "MIDI input port" (0…255; −1 = none): the notes / controls of the MIDI Out channels on that port
     // reach this plugin (FL: Plugin wrapper settings › MIDI › Input port)
     int midiInPort = -1;
+    // FL's wrapper settings, round 149 (Fruity Wrapper's DFM, REA_rodada149 §C):
+    // "Output port" (0…255; −1 = none): the notes the plugin sends out play the plugins whose input port it is
+    int midiOutPort = -1;
+    // "Notify about rendering mode" (wrapper flag 0x4, on by default): the plugin is told when an export renders
+    bool notifyRender = true;
+    // the Info section's Latency: the delay compensation uses this (ms) instead of what the plugin reports (−1)
+    float latencyOverrideMs = -1.0f;
 
     bool operator== (const PluginRef& o) const
     {
         return id == o.id && state == o.state && foreign == o.foreign && fixedBuffers == o.fixedBuffers && separateProcess == o.separateProcess
                && threaded == o.threaded && maxSizeBuffers == o.maxSizeBuffers && allowSmartDisable == o.allowSmartDisable
                && hostMaxBuffer == o.hostMaxBuffer
-               && midiInPort == o.midiInPort;
+               && midiInPort == o.midiInPort && midiOutPort == o.midiOutPort && notifyRender == o.notifyRender
+               && latencyOverrideMs == o.latencyOverrideMs;
     }
 };
 
@@ -377,7 +385,7 @@ struct EchoSettings
     int echoes = 4;          // FL 1..10
     float timeBeats = 0.75f; // the delay between echoes (FL: 1/192 beats; 144 = 3 steps)
     bool pingPong = false;   // echoes alternate their pan side
-    bool fat = false;        // FL's fat mode (stored; its effect is not confirmed)
+    bool fat = false;        // FL's fat mode (REA round 149): a mirrored second series, every echo at feedback × the level
 
     bool enabled() const noexcept { return feedback > 0.0f && echoes > 0; }
     bool operator== (const EchoSettings&) const = default;
@@ -404,6 +412,11 @@ struct ChannelMisc
     NoteTracking velocity { 100 }, key { 60 };
     int pitchRange = 2;      // the header's PITCH knob range, semitones (FL default 2)
     bool mainPitch = true;   // follows the song's main (master) pitch
+    // FL's Root note keyboard (REA round 149): the note at which the channel plays at its own pitch (C5 = 60). A
+    // sampler's root is in its pitch (SamplerSettings::pitch moves with it); other instruments only follow it with
+    // "Add to key" (0xD7 byte 63): their notes are played (60 − root) semitones away
+    int rootNote = 60;
+    bool addToKey = false;
 
     bool operator== (const ChannelMisc&) const = default;
 };

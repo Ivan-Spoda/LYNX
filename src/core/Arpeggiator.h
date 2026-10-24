@@ -39,6 +39,9 @@ private:
     int step = 0;          // position in the sequence
     int repeatCount = 0;
     int sounding = -1;     // key currently sounding (-1 = none)
+    // FL's Repeat 0 (round 149): each step plays the whole chord; the keys sounding together (sounding = the first)
+    std::array<int, maxHeld> soundingKeys {};
+    int soundingCount = 0;
     double offTick = -1.0; // when the sounding key is released (gate)
     double nextStep = -1.0; // FL: the steps count from the first held note (−1 = start at the next note)
     bool sliding = false;   // a slide-mode note is sounding (the next steps glide it)

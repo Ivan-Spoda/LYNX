@@ -106,9 +106,15 @@ private:
     // FL's docks and separators (REA round 146a): the strips' x in display order (left block, middle, right), the
     // x of each gap between two dock blocks and of each separator line
     void layoutStrips();
-    std::vector<int> stripXs;
-    std::vector<int> dockGaps, separatorLines;
+    std::vector<int> stripXs;                                    // layout x (before pinning)
+    std::vector<std::pair<int, MixerDock>> dockGaps, separatorLines;
+    int blockStart[3] {}, blockEnd[3] {};                        // each dock block's layout span (0 width = empty)
     int contentWidth = 0;
+    // FL keeps the left / right docks in view while the middle scrolls (round 149): the x shift of a dock block
+    // for the viewport's current scroll position (0 for the middle block)
+    int pinOffset (MixerDock dock) const noexcept;
+    MixerDock dockOf (int track) const noexcept;
+    void moved() override { repaint(); }
     static constexpr int dockGap = 14, separatorGap = 8;
     int stripWidthOf (int track) const noexcept { return track == 0 ? masterWidth : stripWidth; }
     int trackAt (int x) const noexcept;

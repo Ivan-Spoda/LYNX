@@ -19,15 +19,24 @@ namespace
 void toggleWrapperOption (AudioEngine& engine, const std::function<PluginRef* (Song&)>& find, juce::AudioPluginInstance* instance,
                           bool PluginRef::*option, bool recreates);
 
-// FL's plugin wrapper settings page (REA round 146a), in LYNX's style: what the plugin reports, then the wrapper
-// options LYNX applies in FL's sections (Processing, Bridging, MIDI). Options that re-create the plugin keep its state
-// and close this window (open it again from the channel or the slot).
+// FL's plugin wrapper settings page (REA rounds 146a / 149), in LYNX's style with the tabs and groups of FL's wrapper
+// form (Fruity Wrapper's DFM [DATA], FL 2026's page [EXEC]): Settings (Info with the latency, MIDI ports), Processing
+// (Options) and Troubleshooting (Compatibility: the fixed buffers; Location). Options that re-create the plugin keep
+// its state and close this window (open it again from the channel or the slot).
 class WrapperSettingsPage final : public juce::Component, private juce::ChangeListener
 {
 public:
-    WrapperSettingsPage (AudioEngine& e, std::function<PluginRef* (Song&)> f, juce::AudioPluginInstance& p)
+    WrapperSettingsPage (AudioEngine& e, std::function<PluginRef* (Song&)> f, juce::AudioPluginInstance& p, bool channel)
         : engine (e), find (std::move (f)), plugin (p)
     {
+        const char* tabNames[] = { TR_NOOP ("Settings"), TR_NOOP ("Processing"), TR_NOOP ("Troubleshooting") };
+        for (int t = 0; t < 3; ++t)
+        {
+            auto* b = tabs.add (new juce::TextButton (tr (tabNames[t])));
+            b->setClickingTogglesState (false); // LYNX's tab look (as the channel window's): the shown one filled
+            b->onClick = [this, t] { showTab (t); };
+            addAndMakeVisible (b);
+        }
         const auto& options = wrapperOptions();
         for (std::size_t i = 0; i < options.size(); ++i)
         {
@@ -42,100 +51,196 @@ public:
                 const auto& o = wrapperOptions()[i];
                 juce::MessageManager::callAsync ([en, fn, inst, member = o.member, re = o.recreates] { toggleWrapperOption (*en, fn, inst, member, re); });
             };
-            addAndMakeVisible (t);
+            addChildComponent (t);
         }
-        port.addItem (tr ("None"), 1);
-        for (int i = 0; i < 32; ++i)
-            port.addItem (tr ("Port {0}", { juce::String (i) }), i + 2);
-        port.setTooltip (tr ("MIDI input port number"));
-        port.onChange = [this] {
-            const auto value = port.getSelectedId() - 2;
-            engine.editSong ([fn = find, value] (Song& song) {
-                if (auto* ref = fn (song))
-                    ref->midiInPort = value;
-            });
-        };
-        addAndMakeVisible (port);
+        for (auto* box : { &inPort, &outPort })
+        {
+            box->addItem (juce::String::fromUTF8 ("\xe2\x80\x94"), 1);
+            for (int i = 0; i < 256; ++i)
+                box->addItem (juce::String (i), i + 2);
+            addChildComponent (box);
+        }
+        inPort.setTooltip (tr ("MIDI input port number"));
+        inPort.onChange = [this] { setPort (inPort.getSelectedId() - 2, false); };
+        // FL's Output port: the notes the plugin sends out play the plugins on that input port (instruments in the
+        // Channel rack that send MIDI)
+        outPort.setTooltip (tr ("MIDI output port number: the notes this plugin sends play the plugins whose input port it is"));
+        outPort.onChange = [this] { setPort (outPort.getSelectedId() - 2, true); };
+        outPort.setEnabled (channel && plugin.producesMidi());
+        // FL's Info › Latency: what the plugin reports, or set by hand (menu: Reset, Set in ms / samples / beats)
+        latency.setTooltip (tr ("Latency used by the delay compensation: what the plugin reports, or a value set by hand"));
+        latency.onClick = [this] { showLatencyMenu(); };
+        addChildComponent (latency);
+        locate.setButtonText (tr ("Locate"));
+        locate.setTooltip (tr ("Show the plugin's file in the file manager"));
+        locate.onClick = [this] { juce::File (plugin.getPluginDescription().fileOrIdentifier).revealToUser(); };
+        addChildComponent (locate);
         engine.addChangeListener (this);
         refresh();
-        setSize (460, preferredHeight());
+        showTab (0);
+        setSize (520, preferredHeight());
     }
 
     ~WrapperSettingsPage() override { engine.removeChangeListener (this); }
 
-    int preferredHeight() const { return top() + (int) wrapperOptions().size() * rowHeight + 4 * headerHeight + rowHeight + 24; }
+    int preferredHeight() const { return 380; }
 
     void paint (juce::Graphics& g) override
     {
         using namespace theme;
         g.fillAll (colour::bg1);
-        auto header = [&g] (const juce::String& text, int y) {
+        g.setColour (colour::textSecondary);
+        g.setFont (font (type::caption));
+        g.drawText (tr ("version {0}", { plugin.getPluginDescription().version }), getWidth() - 200, 8, 184, tabHeight, juce::Justification::centredRight);
+        for (const auto& [area, title] : groups)
+        {
+            g.setColour (colour::bg2);
+            g.fillRoundedRectangle (area.toFloat(), radius::md);
             g.setColour (colour::textSecondary);
             g.setFont (font (type::caption, true));
-            g.drawText (caps (text), 16, y, 400, headerHeight - 4, juce::Justification::bottomLeft);
-            g.setColour (colour::border);
-            g.fillRect (16, y + headerHeight - 2, 428, 1);
-        };
-        header (tr ("Plugin"), 8);
-        g.setFont (font (type::body));
-        int y = 8 + headerHeight + 2;
-        for (const auto& [label, value] : infoLines())
-        {
-            g.setColour (colour::textSecondary);
-            g.drawText (label, 16, y, 130, infoHeight, juce::Justification::centredLeft);
-            g.setColour (colour::textPrimary);
-            g.drawFittedText (value, 150, y, getWidth() - 166, infoHeight, juce::Justification::centredLeft, 1);
-            y += infoHeight;
+            g.drawText (caps (title), area.withHeight (headerHeight).reduced (10, 0), juce::Justification::centredLeft);
         }
-        juce::String last;
-        for (std::size_t i = 0; i < wrapperOptions().size(); ++i)
-            if (const juce::String section = wrapperOptions()[i].section; section != last)
-            {
-                header (tr (section), toggles[(int) i]->getY() - headerHeight);
-                last = section;
-            }
-        header (tr ("MIDI"), port.getY() - headerHeight);
-        g.setColour (colour::textSecondary);
-        g.drawText (tr ("Input port"), 16, port.getY(), 130, port.getHeight(), juce::Justification::centredLeft);
+        g.setFont (font (type::body));
+        for (const auto& [area, text, primary] : labels)
+        {
+            g.setColour (primary ? colour::textPrimary : colour::textSecondary);
+            g.drawFittedText (text, area, juce::Justification::centredLeft, 1);
+        }
     }
 
     void resized() override
     {
-        int y = top();
-        juce::String last;
-        for (std::size_t i = 0; i < wrapperOptions().size(); ++i)
+        groups.clear();
+        labels.clear();
+        auto area = getLocalBounds().reduced (10, 8);
+        auto bar = area.removeFromTop (tabHeight);
+        for (auto* t : tabs)
+            t->setBounds (bar.removeFromLeft (juce::jmax (80, t->getBestWidthForHeight (tabHeight) + 16)));
+        area.removeFromTop (8);
+        for (auto* c : getChildren())
+            if (! tabs.contains (dynamic_cast<juce::TextButton*> (c)))
+                c->setVisible (false);
+
+        auto group = [this] (juce::Rectangle<int>& from, int height, const juce::String& title) {
+            auto r = from.removeFromTop (height);
+            from.removeFromTop (8);
+            groups.push_back ({ r, title });
+            return r.withTrimmedTop (headerHeight).reduced (10, 4);
+        };
+        auto label = [this] (juce::Rectangle<int> r, const juce::String& text, bool primary = false) { labels.push_back ({ r, text, primary }); };
+        auto show = [] (juce::Component& c, juce::Rectangle<int> r) {
+            c.setBounds (r);
+            c.setVisible (true);
+        };
+
+        if (tab == 0)
         {
-            if (const juce::String section = wrapperOptions()[i].section; section != last)
+            const auto d = plugin.getPluginDescription();
+            auto info = group (area, headerHeight + 6 * rowHeight + 8, tr ("Info"));
+            const std::pair<juce::String, juce::String> lines[] = {
+                { tr ("Name"), d.name + (d.manufacturerName.isNotEmpty() ? " (" + d.manufacturerName + ")" : juce::String()) },
+                { tr ("Type"), d.pluginFormatName + (d.isInstrument ? "  " + tr ("instrument") : "  " + tr ("effect")) },
+                { tr ("Category"), d.category },
+                { tr ("Inputs / outputs"), juce::String (plugin.getTotalNumInputChannels()) + " / " + juce::String (plugin.getTotalNumOutputChannels()) },
+                { tr ("Parameters"), juce::String (plugin.getParameters().size()) },
+            };
+            for (const auto& [name, value] : lines)
             {
-                y += headerHeight;
-                last = section;
+                auto row = info.removeFromTop (rowHeight);
+                label (row.removeFromLeft (110), name);
+                label (row, value, true);
             }
-            toggles[(int) i]->setBounds (24, y, getWidth() - 40, rowHeight);
-            y += rowHeight;
+            auto row = info.removeFromTop (rowHeight);
+            label (row.removeFromLeft (110), tr ("Latency"));
+            show (latency, row.removeFromLeft (260).reduced (0, 2));
+
+            auto midi = group (area, headerHeight + rowHeight + 8, tr ("MIDI"));
+            auto line = midi.removeFromTop (rowHeight);
+            label (line.removeFromLeft (80), tr ("Input port"));
+            show (inPort, line.removeFromLeft (70).reduced (0, 2));
+            line.removeFromLeft (30);
+            label (line.removeFromLeft (90), tr ("Output port"));
+            show (outPort, line.removeFromLeft (70).reduced (0, 2));
         }
-        y += headerHeight;
-        port.setBounds (150, y + 2, 140, rowHeight - 4);
+        else
+        {
+            const juce::String section = tab == 1 ? "Processing" : "Compatibility";
+            int rows = 0;
+            for (const auto& o : wrapperOptions())
+                rows += section == o.section ? 1 : 0;
+            auto box = group (area, headerHeight + rows * rowHeight + 8, tr (tab == 1 ? "Options" : "Compatibility"));
+            for (std::size_t i = 0; i < wrapperOptions().size(); ++i)
+                if (section == wrapperOptions()[i].section)
+                    show (*toggles[(int) i], box.removeFromTop (rowHeight).withTrimmedLeft (wrapperOptions()[i].needsFixed ? 22 : 0));
+            if (tab == 2)
+            {
+                auto where = group (area, headerHeight + rowHeight + 8, tr ("Location"));
+                show (locate, where.removeFromRight (90).withHeight (rowHeight).reduced (0, 2));
+                label (where.removeFromLeft (50).withHeight (rowHeight), tr ("Path"));
+                label (where.withHeight (rowHeight), plugin.getPluginDescription().fileOrIdentifier, true);
+            }
+        }
+        repaint();
     }
 
 private:
-    static constexpr int headerHeight = 24, rowHeight = 24, infoHeight = 18;
+    static constexpr int tabHeight = 24, headerHeight = 24, rowHeight = 24;
 
-    int top() const { return 8 + headerHeight + 2 + (int) infoLines().size() * infoHeight + 6; }
-
-    std::vector<std::pair<juce::String, juce::String>> infoLines() const
+    void showTab (int t)
     {
-        const auto d = plugin.getPluginDescription();
-        const auto rate = plugin.getSampleRate() > 0 ? plugin.getSampleRate() : 44100.0;
-        const auto latency = plugin.getLatencySamples();
-        return {
-            { tr ("Name"), d.name + (d.version.isNotEmpty() ? "  " + d.version : juce::String()) },
-            { tr ("Vendor"), d.manufacturerName },
-            { tr ("Format"), d.pluginFormatName + (d.isInstrument ? "  (" + tr ("instrument") + ")" : juce::String()) },
-            { tr ("File"), d.fileOrIdentifier },
-            { tr ("Latency"), tr ("{0} samples ({1} ms)", { juce::String (latency), juce::String (latency * 1000.0 / rate, 1) }) },
-            { tr ("Inputs / outputs"), juce::String (plugin.getTotalNumInputChannels()) + " / " + juce::String (plugin.getTotalNumOutputChannels()) },
-            { tr ("Parameters"), juce::String (plugin.getParameters().size()) },
+        tab = t;
+        for (int k = 0; k < tabs.size(); ++k)
+            tabs[k]->setToggleState (k == t, juce::dontSendNotification);
+        resized();
+    }
+
+    void setPort (int value, bool output)
+    {
+        engine.editSong ([fn = find, value, output] (Song& song) {
+            if (auto* ref = fn (song))
+                (output ? ref->midiOutPort : ref->midiInPort) = value;
+        });
+    }
+
+    double rate() const { return plugin.getSampleRate() > 0 ? plugin.getSampleRate() : 44100.0; }
+
+    void setLatencyMs (float ms)
+    {
+        engine.editSong ([fn = find, ms] (Song& song) {
+            if (auto* ref = fn (song))
+                ref->latencyOverrideMs = ms;
+        });
+    }
+
+    void showLatencyMenu()
+    {
+        // FL's latency menu [EXEC]: Reset, Set in ms, Set in samples, Set in beats (beats at the song's tempo)
+        juce::PopupMenu menu;
+        menu.addItem (tr ("Reset"), [this] { setLatencyMs (-1.0f); });
+        auto ask = [this] (int unit) {
+            auto* ref = find (const_cast<Song&> (engine.getSong()));
+            const auto bpm = juce::jmax (10.0, (double) engine.getSong().bpm);
+            const auto ms = ref != nullptr && ref->latencyOverrideMs >= 0.0f ? (double) ref->latencyOverrideMs
+                                                                              : plugin.getLatencySamples() * 1000.0 / rate();
+            const auto current = unit == 0 ? ms : unit == 1 ? ms * rate() / 1000.0 : ms * bpm / 60000.0;
+            const char* titles[] = { TR_NOOP ("Latency in ms"), TR_NOOP ("Latency in samples"), TR_NOOP ("Latency in beats") };
+            auto* window = new juce::AlertWindow (tr ("Latency"), tr (titles[unit]), juce::MessageBoxIconType::NoIcon);
+            window->addTextEditor ("value", juce::String (current, unit == 1 ? 0 : 3));
+            window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+            window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+            juce::Component::SafePointer<WrapperSettingsPage> safe (this);
+            window->enterModalState (true, juce::ModalCallbackFunction::create ([safe, window, unit, bpm] (int result) {
+                if (result != 1 || safe == nullptr)
+                    return;
+                const auto v = juce::jmax (0.0, window->getTextEditorContents ("value").getDoubleValue());
+                const auto ms = unit == 0 ? v : unit == 1 ? v * 1000.0 / safe->rate() : v * 60000.0 / bpm;
+                safe->setLatencyMs ((float) juce::jlimit (0.0, 2000.0, ms));
+            }), true);
         };
+        menu.addItem (tr ("Set in ms..."), [ask] { ask (0); });
+        menu.addItem (tr ("Set in samples..."), [ask] { ask (1); });
+        menu.addItem (tr ("Set in beats..."), [ask] { ask (2); });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&latency));
     }
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
@@ -155,30 +260,46 @@ private:
         for (std::size_t i = 0; i < options.size(); ++i)
             if (options[i].member == &PluginRef::separateProcess && pluginSandboxEnabled())
                 toggles[(int) i]->setToggleState (true, juce::dontSendNotification), toggles[(int) i]->setEnabled (false);
-        port.setSelectedId (ref->midiInPort + 2, juce::dontSendNotification);
+        inPort.setSelectedId (ref->midiInPort + 2, juce::dontSendNotification);
+        outPort.setSelectedId (ref->midiOutPort + 2, juce::dontSendNotification);
+        const auto reported = plugin.getLatencySamples();
+        const auto text = ref->latencyOverrideMs >= 0.0f
+                              ? tr ("{0} ms (set by hand)", { juce::String (ref->latencyOverrideMs, 2) })
+                              : (reported > 0 ? tr ("{0} samples ({1} ms)", { juce::String (reported), juce::String (reported * 1000.0 / rate(), 1) })
+                                              : tr ("none"));
+        latency.setButtonText (text + juce::String::fromUTF8 ("  \xe2\x96\xbe"));
     }
+
+    struct Label
+    {
+        juce::Rectangle<int> area;
+        juce::String text;
+        bool primary = false;
+    };
 
     AudioEngine& engine;
     std::function<PluginRef* (Song&)> find;
     juce::AudioPluginInstance& plugin;
+    juce::OwnedArray<juce::TextButton> tabs;
     juce::OwnedArray<juce::ToggleButton> toggles;
-    juce::ComboBox port;
+    juce::ComboBox inPort, outPort;
+    juce::TextButton latency, locate;
+    int tab = 0;
+    std::vector<std::pair<juce::Rectangle<int>, juce::String>> groups;
+    std::vector<Label> labels;
 };
 
 // The window's content with FL's wrapper header: the plugin's editor, or the wrapper settings page (gear).
 class WrappedEditor final : public juce::Component
 {
 public:
-    WrappedEditor (juce::AudioProcessorEditor* e, AudioEngine& engine, std::function<PluginRef* (Song&)> find, juce::AudioPluginInstance& plugin)
-        : editor (e), page (engine, std::move (find), plugin)
+    WrappedEditor (juce::AudioProcessorEditor* e, AudioEngine& engine, std::function<PluginRef* (Song&)> find, juce::AudioPluginInstance& plugin,
+                   bool channel)
+        : editor (e), page (engine, std::move (find), plugin, channel)
     {
         for (auto* b : { &pluginTab, &settingsTab })
         {
-            b->setClickingTogglesState (false);
-            b->setColour (juce::TextButton::buttonColourId, theme::colour::bg2);
-            b->setColour (juce::TextButton::buttonOnColourId, theme::colour::bg4);
-            b->setColour (juce::TextButton::textColourOffId, theme::colour::textSecondary);
-            b->setColour (juce::TextButton::textColourOnId, theme::colour::textPrimary);
+            b->setClickingTogglesState (false); // LYNX's tab look (as the channel window's): the shown one filled
             addAndMakeVisible (b);
         }
         pluginTab.setTooltip (tr ("The plugin's own editor"));
@@ -276,7 +397,7 @@ public:
 
         const auto resizable = editor->isResizable();
         if (context.engine != nullptr && context.find) // FL's wrapper header and settings page (round 146a)
-            setContentOwned (new WrappedEditor (editor, *context.engine, std::move (context.find), plugin), true);
+            setContentOwned (new WrappedEditor (editor, *context.engine, std::move (context.find), plugin, context.channel), true);
         else
             setContentOwned (editor, true);
         setResizable (resizable, false);

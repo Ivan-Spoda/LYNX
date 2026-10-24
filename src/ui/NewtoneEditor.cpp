@@ -22,10 +22,11 @@ bool isNewtoneKind (EffectKind k)
 
 const char* const noteNames[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
 
+// FL's naming, as LYNX's piano roll (round 149: the editor said D4 where the piano roll says D5): key 60 = C5
 juce::String noteName (double midi)
 {
     const auto k = (int) std::lround (midi);
-    return juce::String (noteNames[((k % 12) + 12) % 12]) + juce::String (k / 12 - 1);
+    return juce::String (noteNames[((k % 12) + 12) % 12]) + juce::String (k / 12);
 }
 
 class NewtoneEditor final : public juce::Component,

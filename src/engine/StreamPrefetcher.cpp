@@ -24,7 +24,8 @@ void StreamPrefetcher::update (const Song& song, SampleLibrary& samples)
         if (c.kind != ClipKind::audio || c.channel < 0 || c.channel >= (int) song.channels.size())
             continue;
 
-        auto sample = samples.load (juce::String::fromUTF8 (song.channels[(std::size_t) c.channel].samplePath.c_str()));
+        // only what the rack already holds: a streamed file is held by its channel; never decode here (round 149)
+        auto sample = samples.findLoaded (juce::String::fromUTF8 (song.channels[(std::size_t) c.channel].samplePath.c_str()));
 
         if (sample != nullptr && sample->isMapped())
             next.push_back ({ std::move (sample), (double) c.start, (double) c.end(), (double) c.offset * secondsPerTick });
