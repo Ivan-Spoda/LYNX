@@ -69,8 +69,9 @@ minimum), `Oversampling` (0 off, 0.5 2x, 1 4x), `Pan mode` (left / right, mid / 
 
 ## Where I stopped
 
-- Dynamic phase keeps the old construction: at the crossover it does not match the reference (the measured −4.1 dB
-  at 1 kHz for a −12 dB band; LYNX's figure is printed by the test, see the log). Matching it needs a minimum-phase
+- Dynamic phase keeps the old construction, and it does not match the reference when a band works: a −12 dB low
+  band (1 kHz, 24 dB/oct) gives +2.76 dB at 1 kHz (Pro-MB −4.1) and −11.0 dB at 50 Hz (Pro-MB −12.0), because the
+  band's phase-shifted part is added to the dry input. Linear and minimum phase match the table within 0.05 dB. Matching it needs a minimum-phase
   dynamic-EQ band structure; changing it would change older projects' sound, so it is left for a DSP round.
 - Not done: per-band crossover slopes, side-chain filtering, per-band stereo link (Pro-MB's expert panel); free band
   placement with gaps (bands stay contiguous).

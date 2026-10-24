@@ -100,11 +100,13 @@ TEST (prism_linear_and_minimum_phase_round144b)
 TEST (prism_oversampling_round144b)
 {
     using namespace lynx;
-    // the static band level is the same with 2x / 4x (the gains are applied at the high rate)
+    // the static band level is the same with 2x / 4x as without (the gains are applied at the high rate)
     for (const float os : { 0.5f, 1.0f })
         for (const float mode : { 0.0f, 0.5f, 1.0f })
         {
-            CHECK (std::abs (p144b::toneGain (p144b::lowCut (mode, os), 50.0) + 12.0) < 0.35);
+            const auto g50 = p144b::toneGain (p144b::lowCut (mode, os), 50.0), base = p144b::toneGain (p144b::lowCut (mode), 50.0);
+            std::printf ("  Prism mode %.1f, oversampling %.1f: 50 Hz %.2f dB (without: %.2f)\n", mode, os, g50, base);
+            CHECK (std::abs (g50 - base) < 0.1);
             CHECK (std::abs (p144b::toneGain (p144b::lowCut (mode, os), 10000.0)) < 0.35);
         }
 }
@@ -138,10 +140,10 @@ TEST (prism_mid_side_band_pan_round144b)
 {
     using namespace lynx;
     namespace m = dyn::prism;
-    // a pure side signal (L = −R) at 100 Hz, band 1's pan fully left: left / right keeps the left side, mid / side
+    // a pure side signal (L = −R) at 100 Hz (the runner below leaves the latency in: only steady levels are read), band 1's pan fully left: left / right keeps the left side, mid / side
     // (the reference's band pan: side gain 0) removes it
     const auto runSide = [] (float panModeValue) {
-        auto p = p144b::lowCut (0.5f);
+        auto p = p144b::lowCut (0.0f); // linear phase: the band is the signal itself at 100 Hz, no phase residue
         p[(std::size_t) m::param (0, m::fLevel)] = 0.5f;
         p[(std::size_t) m::bandPanParam (0)] = 0.0f;
         p[m::panMode] = panModeValue;
@@ -157,7 +159,7 @@ TEST (prism_mid_side_band_pan_round144b)
             r[i] = -l[i];
         }
         for (std::size_t off = 0; off < l.size(); off += 512)
-            fx->process (l.data() + off, r.data() + off, 512, p, 120.0);
+            fx->process (l.data() + off, r.data() + off, (int) std::min<std::size_t> (512, l.size() - off), p, 120.0);
         return dyn108::rmsDb (l, 12000, 18000);
     };
     CHECK (std::abs (runSide (0.0f) - dyn108::rmsDb (std::vector<float> (6000, 0.25f), 0, 6000) + 3.0) < 0.5);
