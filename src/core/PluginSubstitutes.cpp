@@ -269,6 +269,12 @@ map = xml:DelayR_Ms -> Time R
 map = xml:DelaySpread -> Spread
 map = xml:DelaySpacing -> Spacing
 map = xml:DelayRatio -> Ratio
+# round 137: the quad taps and Repeat / Swell (Echoform has them since round 135w; the same on / off values)
+map = xml:TapA -> Tap A
+map = xml:TapB -> Tap B
+map = xml:TapC -> Tap C
+map = xml:TapD -> Tap D
+map = xml:RepeatSwell -> Swell
 map = xml:Feedback -> Feedback
 map = xml:Width -> Width
 map = xml:DriveIn -> Drive
@@ -286,6 +292,8 @@ map = xml:FreqDetune -> Shift detune
 map = xml:PitchShift -> Pitch
 map = xml:PitchDetune -> Pitch detune
 map = xml:Ducking -> Ducking
+# round 137: Era (Past below 2/3, Present, Future at the top; measured on the demo's own value texts)
+map = xml:Era -> Era | steps 0:0 0.6662:0.5 0.9995:1
 # the 17 modes (index floor (24 v)) onto Echoform's 12 characters: Tape, HiFi, BBD, Digital, Ghost (shifter), Pitch,
 # RevPitch (reverse), BBDuck (bucket), Clarity (clean), DuckTape (tape), PitchDuck (pitch), LoFi, Quartz (clean),
 # PhaserDDL (phaser), RichPitch (detune), ChromeTape (tape), Analog; the "duck" variants' built-in ducking is not kept
@@ -361,7 +369,9 @@ map = xml:DiffEnable -> Diffusion on
 map = xml:Drive -> Drive on
 map = xml:DrivePrePost -> Drive post
 map = xml:Speed -> Half speed
-# not translated (meaning not confirmed): DelaySync (0-17: which note each step is), InputPan (0-8)
+# round 137: InputPan (0-8, the same value law; its routes measured black-box, REA_rodada137 §4)
+map = xml:InputPan -> Input pan
+# not translated (meaning not confirmed): DelaySync (0-17: which note each step is)
 
 [fabfilter-timeless]
 product = FabFilter Timeless
@@ -1483,6 +1493,8 @@ int translateWavesHDelay (const std::vector<std::uint8_t>& state, EffectSlot& sl
     p[e::ducking] = 0.0f;
     p[e::width] = 1.0f;
     p[e::spread] = 0.5f;
+    // round 137: LoFi (RealWorld 21, on = 1) → Echoform's own LoFi switch (the same in-loop low-pass, spec §4.2)
+    p[e::lofi] = wavesValue (rw, 21).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
     const auto hp = wavesValue (rw, 17).value_or (19.0), lp = wavesValue (rw, 15).value_or (20100.0);
     p[e::lowCut] = hp > 19.5 ? linNorm (hp, 10.0, 2000.0) : 0.0f;
     // Echoform's high cut acts like a one-pole at about half its label below 80 % (REA_rodada101 §3.3)

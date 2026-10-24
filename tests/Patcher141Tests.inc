@@ -261,6 +261,15 @@ TEST (patcher_control_cables_move_parameters)
     CHECK (run (slot, 1.0f).first == 0.0f);
     slot.patcher.wires.pop_back();
     CHECK (std::abs (run (slot, 1.0f).first - 1.0f) < 1e-6f);
+
+    // a published parameter (FL's record 1100): automating the Patcher's parameter 0 moves the Utility's gain
+    slot.patcher.published = { { 1, 0, { 0.0f, 0.0f }, "Gain" } };
+    auto fx = lynx::patcher::makeEffect (slot, 48000.0, lynx::patcher::builtInFactories (48000.0));
+    std::vector<float> l (256, 1.0f), r (256, 1.0f);
+    fx->setParameter (0, 0.7f);
+    fx->process (l.data(), r.data(), 256, {}, 120.0);
+    CHECK (l.back() == 0.0f);
+    fx->setParameter (5, 0.7f); // (an index it does not publish: ignored)
 }
 
 TEST (patcher_keeps_running_nodes_across_snapshots)
@@ -356,6 +365,13 @@ TEST (patcher_state_from_fl_becomes_the_graph)
     blob.cable (1011, 2001, 1.0f, 0);
     blob.cable (1003, 1012, 1.0f, 2);
     blob.cable (2003, 1002, 1.0f, 0);
+    {
+        std::vector<std::uint8_t> exposed; // Patcher parameter 0 = the Balance's volume port
+        FlBlob::put (exposed, (std::uint64_t) 1003);
+        FlBlob::put (exposed, (std::int32_t) 0);
+        exposed.resize (32, 0);
+        FlBlob::chunk (blob.bytes, 1100, exposed);
+    }
     const auto state = blob.finish();
     const auto graph = lynx::parsePatcher (state);
     CHECK (graph.has_value());
@@ -391,6 +407,7 @@ TEST (patcher_state_from_fl_becomes_the_graph)
         return w.kind == lynx::PatchWire::Kind::control && w.from == 1 && w.to == 0 && w.fromPort == 1; // FL's "peak" = LYNX output 1
     }));
     CHECK (doc.outputTracks.size() == 1 && doc.outputTracks[0] == 5);
+    CHECK (doc.published.size() == 1 && doc.published[0].node == 0);
     CHECK (lynx::fruitySendTarget (fx) == 5);
     CHECK (std::isfinite (run (fx, 0.5f).first));
 }
@@ -467,4 +484,28 @@ TEST (patcher_demo_graphs_import_and_run)
                  slots, flSlots, nodes, controls, finite, sounding, channels, flChannels, notes);
     CHECK (slots == flSlots && slots >= 20 && finite == slots && sounding >= slots - 2);
     CHECK (channels >= 2 && notes >= channels && controls > 0);
+}
+
+TEST (patcher_midi_port_output_reaches_plugins_on_that_port)
+{
+    // a generator Patcher's "MIDI port 3" output: its notes go to the plugin channels whose MIDI input port is 3
+    auto song = lynx::Song::makeDefault();
+    song.channels.resize (3);
+    song.channels[0] = {};
+    song.channels[0].instrument = lynx::InstrumentKind::patcher;
+    lynx::PatchWire out;
+    out.kind = lynx::PatchWire::Kind::midi;
+    out.from = lynx::patchFromHost;
+    out.to = lynx::patchToHost;
+    out.toPort = 3;
+    song.channels[0].patcher.wires = { out };
+    for (int c : { 1, 2 })
+    {
+        song.channels[(std::size_t) c] = {};
+        song.channels[(std::size_t) c].instrument = lynx::InstrumentKind::plugin;
+        song.channels[(std::size_t) c].plugin.id = "test";
+        song.channels[(std::size_t) c].plugin.midiInPort = c == 1 ? 3 : 4;
+    }
+    const auto state = lynx::RackState::build (song, nullptr, 48000.0);
+    CHECK (state->hasMidiRoutes && state->midiTargets[0] == std::vector<int> { 1 } && state->midiOutChannel[0] == 0);
 }

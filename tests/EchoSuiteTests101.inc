@@ -484,6 +484,12 @@ TEST (echosuite101_lattice_taps_feedback_and_layout)
                     placed[(std::size_t) p] = true;
             }
         }
+        // round 137: Echoform's rhythm tap levels are edited on the "rhythmbars" display (one bar per tap)
+        if (kind == EffectKind::echoform)
+            for (const auto& item : l.items)
+                if (item.type == lynx::plugui::Item::display && item.display != nullptr && std::strcmp (item.display, "rhythmbars") == 0)
+                    for (int t = lynx::echosuite::echoform::rhythmTap1; t <= lynx::echosuite::echoform::rhythmTapLast; ++t)
+                        placed[(std::size_t) t] = true;
         CHECK (inside && std::all_of (placed.begin(), placed.end(), [] (bool b) { return b; }));
         // controls that swap in place (style / mode dependent) never overlap while both are shown
         auto params = lynx::makeEffectSlot (kind).params;

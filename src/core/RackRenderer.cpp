@@ -29,7 +29,8 @@ namespace
 // a hosted plugin is created again when its processing options change (fixed blocks, own process)
 bool samePluginProcessing (const PluginRef& a, const PluginRef& b) noexcept
 {
-    return a.fixedBuffers == b.fixedBuffers && a.separateProcess == b.separateProcess && a.maxSizeBuffers == b.maxSizeBuffers;
+    return a.fixedBuffers == b.fixedBuffers && a.separateProcess == b.separateProcess && a.maxSizeBuffers == b.maxSizeBuffers
+           && a.hostMaxBuffer == b.hostMaxBuffer;
 }
 
 // Silent instrument: plugin channel that could not be loaded.
@@ -556,6 +557,23 @@ void RackState::buildMidiRoutes()
     hasMidiRoutes = false;
     for (std::size_t c = 0; c < count; ++c)
     {
+        // a generator Patcher's "MIDI port N" outputs (REA_rodada141): its notes reach the plugins on those ports, as a
+        // MIDI Out on MIDI channel 1 would send them
+        if (song.channels[c].instrument == InstrumentKind::patcher)
+        {
+            for (const auto& w : song.channels[c].patcher.wires)
+                if (w.kind == PatchWire::Kind::midi && w.enabled && w.from == patchFromHost && w.to == patchToHost)
+                    for (std::size_t t = 0; t < count; ++t)
+                        if (t != c && song.channels[t].instrument == InstrumentKind::plugin && song.channels[t].plugin.midiInPort == w.toPort
+                            && std::find (midiTargets[c].begin(), midiTargets[c].end(), (int) t) == midiTargets[c].end())
+                        {
+                            midiOutChannel[c] = 0;
+                            midiTargets[c].push_back ((int) t);
+                            midiSources[t].push_back ((int) c);
+                            hasMidiRoutes = true;
+                        }
+            continue;
+        }
         if (song.channels[c].instrument != InstrumentKind::midiOut)
             continue;
         const auto settings = midictl::parseMidiOut (song.channels[c].pluginState);
@@ -629,6 +647,7 @@ void RackState::buildAutomationTables()
             case AutomationTargetKind::channelParam:
                 // VST plugins and the exact engines that take FL's parameter automation (FL Slayer: REA_rodada79)
                 if (channelOk && (song.channels[(std::size_t) t.index].instrument == InstrumentKind::plugin
+                                  || song.channels[(std::size_t) t.index].instrument == InstrumentKind::patcher // (its published parameters)
                                   || song.channels[(std::size_t) t.index].instrument == InstrumentKind::slayer
                                   || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::midiOut && midictl::isMidiParam (t.param))))
                     pluginParams.push_back ({ a, t.index, 0, 0, t.param });
@@ -642,7 +661,8 @@ void RackState::buildAutomationTables()
 
                 if (! slotOk)
                     used = false;
-                else if (song.mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].kind == EffectKind::plugin)
+                else if (song.mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].kind == EffectKind::plugin
+                         || song.mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].kind == EffectKind::patcher) // (its published parameters)
                     pluginParams.push_back ({ a, -1, t.index, t.slot, t.param });
                 else if (song.mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].isSubstitute())
                     used = false; // the missing plugin's parameters: kept for when it is back, they don't drive the substitute
@@ -1181,6 +1201,10 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
                 held[(std::size_t) (e.key >> 6)] |= bit;
             if (! c.muted)
             {
+                // Max polyphony: the oldest note is released first
+                if (const auto limit = voiceLimitFor (c.maxPolyphony, c.synth.mono); limit > 0)
+                    if (const auto victim = voiceOrders[(std::size_t) i].noteOn (e.key, limit); victim >= 0)
+                        instrument.noteOff (victim);
                 instrument.setNextNoteExpression (e.pan, e.cents + state.song.masterPitch, e.porta);
 
                 if (e.fadeIn > 0.0f || e.fadeOut > 0.0f)
@@ -1197,10 +1221,12 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         {
             instrument.allNotesOff(); // short fade, like FL's "cut"
             held = {};
+            voiceOrders[(std::size_t) i].clear();
         }
         else
         {
             instrument.noteOff (e.key);
+            voiceOrders[(std::size_t) i].noteOff (e.key);
             if (e.key >= 0 && e.key < 128)
                 held[(std::size_t) (e.key >> 6)] &= ~bit;
         }
@@ -1333,7 +1359,9 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
 
         // (not Gross Beat: its buffer must keep recording the silence it may play back later, as in FL)
         // (nor Newtone / Newtime: in slave mode they play their sample whatever the input)
-        if (key < smartDisable.size() && slots[i].kind != EffectKind::grossBeat && slots[i].kind != EffectKind::newtone
+        // (nor a slot whose "Smart disable" is off, or a plugin that does not allow it — FL's per-plugin options, REA round 139)
+        if (key < smartDisable.size() && slots[i].smartDisable && ! (isPlugin && ! slots[i].plugin.allowSmartDisable)
+            && slots[i].kind != EffectKind::grossBeat && slots[i].kind != EffectKind::newtone
             && slots[i].kind != EffectKind::newtime)
         {
             auto& sd = smartDisable[key];
@@ -1586,6 +1614,8 @@ void RackRenderer::process (const RackState* state,
                     if (instrument != nullptr)
                         instrument->allNotesOff();
                 heldNotes.fill ({});
+                for (auto& order : voiceOrders)
+                    order.clear();
                 continue;
             }
 
@@ -1609,14 +1639,21 @@ void RackRenderer::process (const RackState* state,
                         else if (e.type == NoteEvent::Type::off)
                             target.noteOffMidi (e.key, midiChannel);
                     }
+            auto& order = voiceOrders[(std::size_t) std::min (e.channel, maxChannels - 1)];
             if (e.type == NoteEvent::Type::on)
             {
+                const auto& def = state->song.channels;
+                if ((std::size_t) e.channel < def.size())
+                    if (const auto limit = voiceLimitFor (def[(std::size_t) e.channel].maxPolyphony, def[(std::size_t) e.channel].synth.mono); limit > 0)
+                        if (const auto victim = order.noteOn (e.key, limit); victim >= 0)
+                            instrument.noteOff (victim);
                 instrument.noteOn (e.key, e.velocity);
                 if (inRange)
                     held[(std::size_t) (e.key >> 6)] |= bit;
             }
             else
             {
+                order.noteOff (e.key);
                 instrument.noteOff (e.key);
                 if (inRange)
                     held[(std::size_t) (e.key >> 6)] &= ~bit;

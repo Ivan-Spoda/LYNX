@@ -38,6 +38,42 @@ enum class RecordMode : std::uint8_t
 // cleared during this take, so later notes of the same take stay.
 void commitTake (Pattern& pattern, std::vector<Note> notes, RecordMode mode, std::int64_t grid, std::vector<int>& clearedChannels);
 
+// FL's record menu "Quantize" section (REA round 139, FLEngine FUN_012ca7b0; settings QuantizeNoteStartTime,
+// QuantizeNoteEndTime 0/1/2, RecToSS):
+//   starts         "Note start time": starts to the nearest multiple of `grid`;
+//   end            what happens to the note's end: keepEnd (neither item: the end stays where it was played),
+//                  quantize ("Note end time": the end to the nearest grid line, at least one grid long),
+//                  keepLength ("Leave note duration": the played length after the moved start);
+//   stepSequencer  "Record to step sequencer": starts to the step grid and every note a step note (one step long;
+//                  the other items do not apply).
+enum class NoteEnd : std::uint8_t { keepEnd, quantize, keepLength };
+struct TakeQuantize
+{
+    std::int64_t grid = 0; // ticks (<= 1: no grid)
+    bool starts = true;
+    NoteEnd end = NoteEnd::keepLength;
+    bool stepSequencer = false;
+};
+void quantizeTake (std::vector<Note>& notes, const TakeQuantize& q);
+void commitTake (Pattern& pattern, std::vector<Note> notes, RecordMode mode, const TakeQuantize& q, std::vector<int>& clearedChannels);
+
+// FL's "Enable recording markers" (REA round 139, setting EnablePunchInOutMarkers): the Playlist's "Start recording"
+// markers open a range and the next "Stop recording" closes it (no stop: to the end; a stop with no start before it:
+// from the song start). No such markers = no ranges (everything is recorded).
+struct PunchRange
+{
+    std::int64_t in = 0, out = 0; // [in, out) ticks
+};
+std::vector<PunchRange> punchRanges (const std::vector<Marker>& markers);
+bool inPunchRanges (const std::vector<PunchRange>& ranges, double tick) noexcept;
+// The parts of a recorded audio clip [start, start + length) that fall inside the ranges, as (start, length, offset)
+// with `offset` the source offset of each part (the clip's own offset added).
+struct ClipPart
+{
+    std::int64_t start = 0, length = 0, offset = 0;
+};
+std::vector<ClipPart> punchParts (const std::vector<PunchRange>& ranges, std::int64_t start, std::int64_t length, std::int64_t offset);
+
 // Song mode: makes sure a clip of `pattern` plays at `tick`. If none does, one is placed at the start of
 // that bar, on the first track that is free there. Returns true when a clip was added.
 bool placePatternClipAt (Song& song, int pattern, std::int64_t tick);

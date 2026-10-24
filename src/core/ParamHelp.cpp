@@ -219,11 +219,16 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::latticeMod, "spread" }, TR_NOOP ("How far the taps are spread in time") },
         { { K::latticeMod, "colour" }, TR_NOOP ("Tone of the modulated signal") },
         { { K::latticeMod, "sync" }, TR_NOOP ("Locks the modulation to the project tempo") },
+        { { K::latticeMod, "input pan" }, TR_NOOP ("What enters the taps: stereo, swapped sides, or the mono sum to both, the left or the right") },
         // Echoform
         { { K::echoform, "mode" }, TR_NOOP ("The machine the echo imitates (tape, bucket brigade, digital, lo-fi, pitch...)") },
         { { K::echoform, "style" }, TR_NOOP ("Echo layout: single, ratio, four taps, dual or ping-pong") },
         { { K::echoform, "ratio" }, TR_NOOP ("Time of the second echo as a share of the first") },
         { { K::echoform, "output" }, TR_NOOP ("Level of the echoes") },
+        { { K::echoform, "rhythm" }, TR_NOOP ("Rhythm echo: a pattern of evenly spaced taps that the feedback repeats every Length") },
+        { { K::echoform, "repeats" }, TR_NOOP ("Slots in the rhythm pattern (the first one is the input itself)") },
+        { { K::echoform, "decay" }, TR_NOOP ("How much quieter the last tap of the pattern is than the first") },
+        { { K::echoform, "length" }, TR_NOOP ("Length of the rhythm pattern in beats; the feedback replays it") },
         // Ridge Strip
         { { K::ridgeStrip, "input" }, TR_NOOP ("Level into the channel strip") },
         { { K::ridgeStrip, "hpf" }, TR_NOOP ("High-pass filter: removes rumble below this frequency") },

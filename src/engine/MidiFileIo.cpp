@@ -2,6 +2,7 @@
 
 #include <map>
 
+#include "core/ExportOptions.h"
 #include "engine/Text.h"
 
 namespace lynx::MidiFileIo
@@ -184,5 +185,17 @@ bool savePattern (const Song& song, int patternIndex, const juce::File& file, ju
     }
 
     return true;
+}
+
+bool saveSong (const Song& song, const juce::File& file, juce::String& error)
+{
+    // the arrangement flattened into one pattern, written like a pattern (one track per channel)
+    Song flat;
+    flat.bpm = song.bpm;
+    flat.beatsPerBar = song.beatsPerBar;
+    flat.channels = song.channels;
+    flat.patterns.resize (1);
+    flat.patterns[0].notes = exportopts::midiExportNotes (song);
+    return savePattern (flat, 0, file, error);
 }
 } // namespace lynx::MidiFileIo
