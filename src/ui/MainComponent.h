@@ -1,10 +1,13 @@
 #pragma once
 
+#include <atomic>
 #include <map>
+#include <memory>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "core/KeyMap.h"
+#include "ui/UiTrace.h"
 #include "core/ToolbarLayout.h"
 #include "core/ValueMath.h"
 #include "engine/AudioEngine.h"
@@ -243,6 +246,7 @@ private:
     std::unique_ptr<juce::InterProcessLock> sessionLock;
     juce::File sessionMarker;
     int autosaveTicks = 0;
+    std::shared_ptr<std::atomic<bool>> autosaveRunning = std::make_shared<std::atomic<bool>> (false); // the backup file is being written
     int autosaveMinutes = 2, autosaveKeep = 10; // Settings › General › Backup
     bool lastModified = false;
     void openPianoRoll();
@@ -349,6 +353,7 @@ private:
     toolbar::MasterKnob masterVolume { engine, toolbar::MasterKnob::Kind::volume };
     toolbar::MasterKnob masterPitch { engine, toolbar::MasterKnob::Kind::pitch };
     toolbar::PerformanceMeter perfMeter;
+    uitrace::Monitor uiTraceMonitor; // LYNX_TRACE_UI: message-thread stalls to ui.log (round 151)
     toolbar::MidiActivityLight midiLight;
     juce::StringArray midiLightInputs; // the open MIDI inputs (refreshed once a second)
     int midiInputTicks = 0;

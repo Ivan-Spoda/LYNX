@@ -1,4 +1,5 @@
 #include "ui/ProjectLoading.h"
+#include "ui/UiTrace.h"
 #include "core/LoadTrace.h"
 #include "ui/MainComponent.h"
 #include "ui/PluginSkin.h"
@@ -466,6 +467,17 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     setWantsKeyboardFocus (true);
     setSize (1180, 642);
     startTimerHz (30);
+    uiTraceMonitor.start ([this, last = std::make_shared<RtStats::Snapshot>()] {
+        // the audio side of the second (the watchdog thread: atomics only)
+        const auto rt = engine.getRtStats().snapshot();
+        const auto calls = rt.callbacks - last->callbacks;
+        juce::String text;
+        text << "audio: callbacks " << juce::String ((juce::int64) calls) << ", over deadline " << juce::String ((juce::int64) (rt.overBudget - last->overBudget))
+             << ", late " << juce::String ((juce::int64) (rt.lateCalls - last->lateCalls)) << ", max load since start " << juce::String (rt.maxLoad * 100.0, 0)
+             << "%, cpu " << juce::String (engine.getDeviceManager().getCpuUsage() * 100.0, 1) << "%";
+        *last = rt;
+        return text;
+    });
 
     // new or updated plugins since the last run: an incremental scan in the background (unchanged files are
     // skipped), a few seconds after start so it doesn't compete with loading; the first run asks in the wizard
@@ -500,6 +512,7 @@ MainComponent::~MainComponent()
 
 void MainComponent::paint (juce::Graphics& g)
 {
+    const uitrace::Scope trace ("MainComponent paint", true, g.getClipBounds());
     using namespace theme;
     g.fillAll (colour::bg1);
 
@@ -2424,20 +2437,26 @@ void MainComponent::setQuickTips()
 
 void MainComponent::timerCallback()
 {
-    output.update();
-    timeDisplay.update();
-    songPosition.update();
-    masterVolume.update();
-    masterPitch.update();
-    updateRecordQuantise();
+    const uitrace::Scope trace ("MainComponent timer", false);
+    {
+        const uitrace::Scope part ("timer: toolbar displays", false);
+        output.update();
+        timeDisplay.update();
+        songPosition.update();
+        masterVolume.update();
+        masterPitch.update();
+        updateRecordQuantise();
+    }
 
     if (engine.isModified() != lastModified)
     {
+        const uitrace::Scope part ("timer: title", false);
         lastModified = engine.isModified();
         updateTitle();
     }
 
     // the Browser's "Project folder" follows the project's file (.lynx, or the .flp it was imported from)
+    const uitrace::Scope partFolders ("timer: project folder / recording target", false);
     browser.setProjectFile (currentFile != juce::File() ? currentFile : importedFlpFile);
     // and so does where audio is recorded ("<project folder>/Audio/Recorded", FL-like take names)
     engine.setRecordingTarget (recordingFolderFor (currentFile != juce::File() ? currentFile : importedFlpFile),
@@ -2496,6 +2515,7 @@ void MainComponent::timerCallback()
     // recording states first
     if (! hintsFrozen)
     {
+        const uitrace::Scope part ("timer: hint", false);
         ui::Hint hint;
         bool live = false;
 
@@ -2535,6 +2555,7 @@ void MainComponent::timerCallback()
     // CPU / memory / polyphony, a few times a second
     if (++meterTicks >= 8 && perfMeter.isVisible() && ! hintsFrozen)
     {
+        const uitrace::Scope part ("timer: performance meter", false);
         meterTicks = 0;
         const auto held = (int) heldKeys.size();
         const auto notes = playing ? songstats::soundingNotes (engine.getSong(), transport.positionTicks.load()) : 0;
@@ -2752,17 +2773,34 @@ void MainComponent::autosave()
 {
     // backup copy of the open project, so work isn't lost if something crashes ("Song (autosaved on 2026-10-20 at
     // 14h19).lynx" in the backup folder, like FL's Backup folder); only the newest few of each project are kept
+    // The plugins' settings are read here (they answer on the message thread); writing the file (the big part:
+    // every plugin's state, encoded) runs on a thread of its own, so the timed backup no longer freezes the screen
+    // (round 151: 180 ms every two minutes on a project with 71 plugins). One at a time.
+    if (autosaveRunning->load())
+        return;
     const auto folder = autosaveFolder();
     folder.createDirectory();
     const auto stem = projectStem (projectName);
-    juce::String error;
-    engine.capturePluginStates();
-    if (! ProjectFile::save (engine.getSong(), newBackupFile (folder, stem, safety::BackupKind::autosaved), error))
     {
-        ui::postHint ({ tr ("Autosave failed: {0}", { error }), {}, false, false }, 6000);
-        return;
+        const uitrace::Scope trace ("autosave: plugin states", false);
+        engine.capturePluginStates();
     }
-    rotateBackups (stem);
+    auto copy = std::make_shared<Song> (engine.getSong());
+    const auto file = newBackupFile (folder, stem, safety::BackupKind::autosaved);
+    autosaveRunning->store (true);
+    juce::Thread::launch ([copy, file, running = autosaveRunning, safe = juce::Component::SafePointer<MainComponent> (this), stem] {
+        juce::String error;
+        const auto ok = ProjectFile::save (*copy, file, error);
+        running->store (false);
+        juce::MessageManager::callAsync ([safe, ok, error, stem] {
+            if (safe == nullptr)
+                return;
+            if (! ok)
+                ui::postHint ({ tr ("Autosave failed: {0}", { error }), {}, false, false }, 6000);
+            else
+                safe->rotateBackups (stem);
+        });
+    });
 }
 
 void MainComponent::rotateBackups (const juce::String& stem)

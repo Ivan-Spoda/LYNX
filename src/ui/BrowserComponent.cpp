@@ -1,4 +1,5 @@
 #include "ui/BrowserComponent.h"
+#include "ui/UiTrace.h"
 
 #include "core/FlpImport.h"
 #include "core/ProjectContents.h"
@@ -2185,6 +2186,7 @@ void BrowserComponent::refreshPreviewVolume()
 
 void BrowserComponent::paint (juce::Graphics& g)
 {
+    const uitrace::Scope trace ("BrowserComponent paint", true, g.getClipBounds());
     g.fillAll (theme::colour::bg2);
 }
 

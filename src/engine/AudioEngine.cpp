@@ -1721,11 +1721,40 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error, co
         error = prepared.error;
         return false;
     }
+    if (asEdit)
+        keepRunningPlugins (prepared);
     loadtrace::stage (0.55, 0.90, TR_NOOP ("Loading plugins..."), TR_NOOP ("Loading {0}... {1}/{2}"));
     while (preloadNextPlugin (prepared))
     {
     }
     return finishFlpImport (std::move (prepared), asEdit);
+}
+
+void AudioEngine::keepRunningPlugins (PreparedFlp& prepared)
+{
+    // The open project imported again (Missing files › Apply): its plugins are already running with these settings,
+    // and the rack keeps a slot whose plugin did not change. Creating them all again first (round 151: 71 plugins,
+    // 25 s with the window frozen, then a crash inside a plugin as the second copies replaced the first) is skipped
+    // for every plugin the song already has with the same settings.
+    adoptPrepared (prepared);
+    std::vector<const PluginRef*> running;
+    for (const auto& c : song.channels)
+        if (c.instrument == InstrumentKind::plugin && ! c.plugin.id.empty())
+            running.push_back (&c.plugin);
+    for (const auto& track : song.mixer)
+        for (const auto& fx : track.effects)
+            if (fx.kind == EffectKind::plugin && ! fx.plugin.id.empty())
+                running.push_back (&fx.plugin);
+    auto& queue = prepared.pluginQueue;
+    queue.erase (std::remove_if (queue.begin(), queue.end(),
+                                 [&running] (const PluginRef& ref) {
+                                     const auto it = std::find_if (running.begin(), running.end(), [&ref] (const PluginRef* r) { return r != nullptr && *r == ref; });
+                                     if (it == running.end())
+                                         return false;
+                                     *it = nullptr; // each running plugin stands for one queued copy
+                                     return true;
+                                 }),
+                 queue.end());
 }
 
 void AudioEngine::publishSong()
