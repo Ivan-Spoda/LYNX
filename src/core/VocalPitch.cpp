@@ -391,6 +391,7 @@ void Psola::reset() noexcept
     period = 0.0;
     voiced = false;
     lastVoiced = false;
+    lastMark = 0.0;
     ratio = formant = 1.0;
 }
 
@@ -460,21 +461,55 @@ void Psola::placeMarks() noexcept
         if (nextMark + reach <= last)
         {
             constexpr auto m = ringSize - 1;
-            const auto from = (std::int64_t) std::ceil (nextMark - reach), to = (std::int64_t) std::floor (nextMark + reach);
-            std::int64_t best = (std::int64_t) std::lround (nextMark);
-            float top = -std::numeric_limits<float>::max();
-            for (auto i = std::max<std::int64_t> (from, now - ringSize + 1); i <= to; ++i)
+            const auto from = std::max<std::int64_t> ((std::int64_t) std::ceil (nextMark - reach), now - ringSize + 1),
+                       to = (std::int64_t) std::floor (nextMark + reach);
+            // Round 148: the mark goes where the waveform repeats the one at the previous mark best (the cross-correlation
+            // of the low-passed signal over one period, peak refined to a fraction of a sample), not to the highest
+            // single peak. [EXEC] (REA_rodada148 §1) the peak in noise moved by a sample or two from period to period:
+            // the held note wobbled 4–11 c on low notes with white noise at 20 / 10 dB SNR or breath noise (Auto-Tune
+            // Pro: 0.3–4 c); a whole period integrates the noise away, and the fraction of a sample matters on high
+            // notes (the integer marks alone left 2 c of jitter). The first mark of a phrase still takes the peak.
+            const auto prev = lastMark;
+            const auto gap = (double) from - prev;
+            const bool corr = prev > 0.0 && gap > 0.5 * period && gap < 1.5 * period && prev - 2.0 * period > (double) (now - ringSize + 2);
+            // the period just before each (it is in even with the shortest latency)
+            const auto span = (int) period;
+            const auto pm = (std::int64_t) std::lround (prev);
+            // long periods: every other sample (or fewer) of the window — the low-passed signal is smooth there
+            const auto stride = std::max (1, span / 256);
+            auto score = [&] (std::int64_t i) {
+                if (! corr)
+                    return (double) env[(std::size_t) (i & m)];
+                double sxy = 0.0;
+                for (int j = -span; j <= 0; j += stride)
+                    sxy += (double) env[(std::size_t) ((i + j) & m)] * (double) env[(std::size_t) ((pm + j) & m)];
+                return sxy;
+            };
+            // prefer the predicted position a little: ties and flat tops do not make the marks wander
+            const auto pen = corr ? 0.0 : 1e-4;
+            std::int64_t best = std::clamp<std::int64_t> ((std::int64_t) std::lround (nextMark), from, std::max (from, to));
+            auto top = -std::numeric_limits<double>::max();
+            for (auto i = from; i <= to; ++i)
             {
-                // prefer the predicted position a little: ties and flat tops do not make the marks wander
-                const auto v = env[(std::size_t) (i & m)] - 1e-4f * (float) std::abs ((double) i - nextMark) / (float) period;
+                const auto v = score (i) - pen * std::abs ((double) i - nextMark) / period;
                 if (v > top)
                 {
                     top = v;
                     best = i;
                 }
             }
-            push ((double) best, (float) period, true);
-            nextMark = (double) best + period;
+            auto pos = (double) best;
+            if (best > from && best < to)
+            {
+                const auto y0 = score (best - 1), y1 = score (best), y2 = score (best + 1), den = y0 - 2.0 * y1 + y2;
+                if (den < 0.0)
+                    pos += std::clamp (0.5 * (y0 - y2) / den, -0.5, 0.5);
+            }
+            if (corr)
+                pos += prev - (double) pm; // the lag is measured from the previous mark's own (fractional) position
+            push (pos, (float) period, true);
+            lastMark = pos;
+            nextMark = pos + period;
         }
     }
     else if (nextMark <= last)
@@ -570,12 +605,17 @@ void Psola::process (const float* x, float* y, int channels) noexcept
             for (int c = 0; c < channels; ++c)
                 acc[c][(std::size_t) (o & m)] += w * readIn (c, src);
         }
-        // unshifted voiced grains (within 1.7 cents) drift toward their marks, so a voice already on its note comes
-        // out as the input itself (delayed), not displaced by up to half a period
-        // (gently: at most 0.15 % of a period per grain, ~2.6 cents)
+        // unshifted voiced grains drift toward their marks, so a voice already on its note comes out as the input
+        // itself (delayed), not displaced by up to half a period. Round 148: faded in over the last 3.4 cents of
+        // shift and at most 0.05 % of a period per grain (~0.9 c) — the on / off switch at 1.7 cents (0.15 %) turned
+        // into a 0.5 c wobble on held notes whose correction hovers around zero
         auto hop = isVoiced ? ha / r : ha;
-        if (isVoiced && std::abs (r - 1.0) < 1e-3 && std::abs (f - 1.0) < 1e-3)
-            hop += std::clamp (0.5 * (ta - ts), -0.0015 * ha, 0.0015 * ha);
+        if (isVoiced && std::abs (f - 1.0) < 1e-3)
+        {
+            const auto w = std::max (0.0, 1.0 - std::abs (r - 1.0) / 2e-3);
+            if (w > 0.0)
+                hop += w * std::clamp (0.5 * (ta - ts), -0.0005 * ha, 0.0005 * ha);
+        }
         nextSynth = ts + hop;
         lastVoiced = isVoiced;
     }

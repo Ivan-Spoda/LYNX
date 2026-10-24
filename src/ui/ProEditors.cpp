@@ -907,6 +907,14 @@ private:
         const auto m = meters();
         const auto newest = columnBack (0);
         drawMeter (g, m, newest.in, -60.0f, colour::meterLow.withAlpha (0.85f));
+        // round 147: the detector's energy (what the threshold is compared with, DeEsser's Energy Detector) as a
+        // blue bar inside the input meter, against the same scale as the threshold arrow
+        if (const auto det = liveMeter (1); det > 0.0f)
+        {
+            const auto y = juce::jlimit (m.getY(), m.getBottom(), meterY (det * 60.0f - 60.0f));
+            g.setColour (juce::Colour (0xff4aa3df).withAlpha (0.9f));
+            g.fillRect (juce::Rectangle<float> (m.getCentreX() - 3.0f, y, 6.0f, m.getBottom() - y));
+        }
         const auto grR = m.translated (32.0f, 0.0f).withWidth (14.0f);
         g.setColour (colour::bg1);
         g.fillRect (grR);
@@ -1505,8 +1513,9 @@ public:
     }
 
 private:
-    enum { idPrev = 1, idNext, idClose, idRange, idAnalyzer, idSolo0 = 20, idMute0 = 30 };
+    enum { idPrev = 1, idNext, idClose, idRange, idAnalyzer, idClassic, idExpert, idSolo0 = 20, idMute0 = 30 };
     int selected = 0, hoverBand = -1, dragBand = -1, dragEdge = -1;
+    bool expert = false; // round 147: the band panel's expert part (side-chain filtering, stereo link), view only
     double rangeView = 12.0;
     int analyzer = 3; // 0 off, 1 pre, 2 post, 3 pre + post (view only)
     juce::Point<float> dragStart;
@@ -1520,7 +1529,8 @@ private:
     juce::Rectangle<float> panelArea() const
     {
         const auto p = plot();
-        return { p.getCentreX() - 300.0f, p.getBottom() - 176.0f, 600.0f, 166.0f };
+        const auto w = expert ? 820.0f : 600.0f;
+        return { p.getCentreX() - w * 0.5f, p.getBottom() - 176.0f, w, 166.0f };
     }
 
     static int bp (int b, int f) { return dyn::prism::param (b, f); }
@@ -1669,6 +1679,23 @@ private:
             out.push_back (menu ({ a.getX() + 522.0f, a.getY() + 36.0f, 70.0f, 22.0f }, slope, tr ("Slope"), "12 dB|24 dB|48 dB"));
             out.push_back (menu ({ a.getX() + 522.0f, a.getY() + 76.0f, 70.0f, 22.0f }, scExternal, tr ("Side chain"), "Int|Ext"));
             out.push_back (tabs ({ a.getX() + 12.0f, a.getY() + 72.0f, 64.0f, 22.0f }, panMode, "L/R|M/S")); // round 144: what PAN balances
+            // round 147: the expert part (the reference's »): side-chain filtering and the stereo link of this band
+            out.push_back (button ({ a.getX() + 12.0f, a.getY() + 104.0f, 64.0f, 22.0f }, idExpert, expert ? tr ("Expert <<") : tr ("Expert >>"), expert,
+                                   tr ("Show the band's expert settings: side-chain filtering (band or a free range) and the stereo link")));
+            if (expert)
+            {
+                const auto x0 = a.getX() + 600.0f;
+                add (tabs ({ x0 + 10.0f, a.getY() + 26.0f, 100.0f, 22.0f }, bandScFree0 + b, "Band|Free"));
+                add (knob ({ x0 + 4.0f, a.getY() + 52.0f, 56.0f, 66.0f }, bandScLow0 + b, tr ("Low"), 0));
+                add (knob ({ x0 + 58.0f, a.getY() + 52.0f, 56.0f, 66.0f }, bandScHigh0 + b, tr ("High"), 0));
+                // the band's own slopes (Pro-MB's per-band slopes): its lower / upper crossover's slope, or the global one
+                if (b > 0)
+                    add (menu ({ x0 + 4.0f, a.getY() + 122.0f, 54.0f, 20.0f }, xoverSlope0 + b - 1, tr ("Low slope"), "Global|12|24|48"));
+                if (b < nb() - 1)
+                    add (menu ({ x0 + 60.0f, a.getY() + 122.0f, 54.0f, 20.0f }, xoverSlope0 + b, tr ("High slope"), "Global|12|24|48"));
+                add (knob ({ x0 + 126.0f, a.getY() + 22.0f, 84.0f, 92.0f }, bandLink0 + b, tr ("Link"), 1));
+                add (tabs ({ x0 + 132.0f, a.getY() + 122.0f, 74.0f, 22.0f }, bandLinkMode0 + b, "Mid|Side"));
+            }
             out.push_back (button ({ a.getRight() - 72.0f, a.getY() + 8.0f, 20.0f, 20.0f }, idPrev, "<", false, tr ("Previous / next band")));
             out.push_back (button ({ a.getRight() - 50.0f, a.getY() + 8.0f, 20.0f, 20.0f }, idNext, ">", false, tr ("Previous / next band")));
             out.push_back (button ({ a.getRight() - 26.0f, a.getY() + 8.0f, 20.0f, 20.0f }, idClose, "x", false, tr ("Close the band panel (click on the empty display does the same)")));
@@ -1683,6 +1710,10 @@ private:
         out.push_back (barValue ({ 306.0f, cy - 11.0f, 124.0f, 22.0f }, lookahead, tr ("Lookahead")));
         out.push_back (button ({ 436.0f, cy - 11.0f, 150.0f, 22.0f }, idAnalyzer, tr ("Analyzer:") + " " + tr (analyzerNames[analyzer]) + (specFrozen ? " *" : ""), false,
                                tr ("Spectrum analyzer: off, pre, post or pre + post; speed; freeze")));
+        // round 147: a project saved before the measured Dynamic phase keeps its classic engine; one click updates it
+        if (v (dynamicEngine) < 0.5f && phaseOf (v (processingMode)) == Phase::dynamic)
+            out.push_back (button ({ 592.0f, cy - 11.0f, 118.0f, 22.0f }, idClassic, tr ("Classic dynamic"), true,
+                                   tr ("This project's Dynamic phase runs the engine it was saved with (before round 147). Click to use the measured one (Pro-MB's response).")));
         out.push_back (barValue ({ bar.getRight() - 312.0f, cy - 11.0f, 92.0f, 22.0f }, mix, tr ("Mix")));
         out.push_back (barValue ({ bar.getRight() - 216.0f, cy - 11.0f, 100.0f, 22.0f }, input, tr ("In")));
         out.push_back (barValue ({ bar.getRight() - 112.0f, cy - 11.0f, 104.0f, 22.0f }, output, tr ("Out")));
@@ -1696,6 +1727,8 @@ private:
         else if (c.id == idClose) selected = -1;
         else if (c.id == idRange) rangeView = rangeView >= 30.0 ? 3.0 : rangeView >= 12.0 ? 30.0 : rangeView >= 6.0 ? 12.0 : 6.0;
         else if (c.id == idAnalyzer) { showAnalyzerMenu(); return; }
+        else if (c.id == idClassic) set ({ { dynamicEngine, 1.0f } });
+        else if (c.id == idExpert) expert = ! expert;
         else if (c.id >= idSolo0 && c.id < idSolo0 + bands) set ({ { bp (c.id - idSolo0, fSolo), v (bp (c.id - idSolo0, fSolo)) >= 0.5f ? 0.0f : 1.0f } });
         else if (c.id >= idMute0 && c.id < idMute0 + bands) set ({ { bp (c.id - idMute0, fEnabled), bandOn (c.id - idMute0) ? 0.0f : 1.0f } });
         repaint();
@@ -1968,6 +2001,14 @@ private:
             g.setFont (font (type::small, true));
             g.drawText (tr ("Band {0}", { juce::String (selected + 1) }), juce::Rectangle<float> (a.getRight() - 160.0f, a.getY() + 8.0f, 86.0f, 20.0f), juce::Justification::centredRight, false);
             caption (g, { a.getX() + 86.0f, a.getY() + 114.0f, 184.0f, 12.0f }, tr ("Mode"));
+            if (expert) // round 147: the expert part's captions and its separator
+            {
+                const auto x0 = a.getX() + 600.0f;
+                g.setColour (colour::border);
+                g.drawVerticalLine ((int) x0, a.getY() + 10.0f, a.getBottom() - 10.0f);
+                caption (g, { x0 + 6.0f, a.getY() + 10.0f, 110.0f, 12.0f }, tr ("Side chain"));
+                caption (g, { x0 + 120.0f, a.getY() + 10.0f, 96.0f, 12.0f }, tr ("Stereo link"));
+            }
         }
         // output meter
         const auto m = juce::Rectangle<float> ((float) getWidth() - 14.0f, p.getY(), 8.0f, p.getHeight());
@@ -2062,17 +2103,21 @@ private:
         out.push_back (button ({ a.getX() + 70.0f, a.getY() + 12.0f, 32.0f, 22.0f }, idPower, tr ("On"), powered (b), tr ("Band on / off: a band switched off passes clean")));
         out.push_back (button ({ a.getX() + 106.0f, a.getY() + 12.0f, 22.0f, 22.0f }, idSolo, "S", state (b) == BandState::solo, tr ("Solo the band")));
         out.push_back (button ({ a.getX() + 130.0f, a.getY() + 12.0f, 22.0f, 22.0f }, idMute, "M", state (b) == BandState::mute, tr ("Mute the band")));
-        add (menu ({ a.getX() + 160.0f, a.getY() + 10.0f, 150.0f, 26.0f }, fp (b, 0), {}, "Tube|Tape|Transistor|Fuzz"));
+        add (menu ({ a.getX() + 160.0f, a.getY() + 10.0f, 120.0f, 26.0f }, fp (b, 0), {}, "Tube|Tape|Transistor|Fuzz"));
         add (knob ({ a.getX() + 10.0f, a.getY() + 60.0f, 66.0f, 92.0f }, fp (b, 2), tr ("Mix")));
         add (knob ({ a.getX() + 78.0f, a.getY() + 60.0f, 66.0f, 92.0f }, xp (b, 6), tr ("Feedback")));
         add (knob ({ a.getX() + 146.0f, a.getY() + 60.0f, 66.0f, 92.0f }, xp (b, 7), tr ("Freq")));
         add (knob ({ a.getX() + 214.0f, a.getY() + 60.0f, 70.0f, 92.0f }, xp (b, 8), tr ("Dynamics"), 1, true));
-        add (knob ({ a.getX() + 290.0f, a.getY() + 24.0f, 132.0f, 144.0f }, fp (b, 1), tr ("Drive"), 2));
+        add (knob ({ a.getX() + 290.0f, a.getY() + 40.0f, 124.0f, 128.0f }, fp (b, 1), tr ("Drive"), 2));
+        // round 147 (Saturn 2): the drive pan beside the drive (the far channel's drive shrinks), the band's pan under
+        // its level; both act on left / right or on mid / side (the bottom bar's Channel)
+        add (knob ({ a.getX() + 352.0f, a.getY() + 2.0f, 74.0f, 52.0f }, bandDrivePanParam (b), tr ("Drive pan"), 0, true));
         add (fader ({ a.getX() + 432.0f, a.getY() + 14.0f, 42.0f, 148.0f }, xp (b, 2), tr ("Bass"), true));
         add (fader ({ a.getX() + 476.0f, a.getY() + 14.0f, 42.0f, 148.0f }, xp (b, 3), tr ("Mid"), true));
         add (fader ({ a.getX() + 520.0f, a.getY() + 14.0f, 42.0f, 148.0f }, xp (b, 4), tr ("Treble"), true));
         add (fader ({ a.getX() + 564.0f, a.getY() + 14.0f, 42.0f, 148.0f }, xp (b, 5), tr ("Presence"), true));
-        add (knob ({ a.getX() + 612.0f, a.getY() + 60.0f, 70.0f, 92.0f }, fp (b, 3), tr ("Level"), 1, true));
+        add (knob ({ a.getX() + 612.0f, a.getY() + 8.0f, 70.0f, 78.0f }, fp (b, 3), tr ("Level"), 1, true));
+        add (knob ({ a.getX() + 612.0f, a.getY() + 88.0f, 70.0f, 78.0f }, bandPanParam (b), tr ("Pan"), 1, true));
         if (count() > 1)
         {
             out.push_back (button ({ a.getRight() - 72.0f, a.getY() + 10.0f, 20.0f, 20.0f }, idPrev, "<", false, tr ("Previous / next band")));
@@ -2092,19 +2137,26 @@ private:
         out.push_back (toggle ({ s.getX() + 690.0f, s.getY(), 110.0f, s.getHeight() }, wideCuts, tr ("Wide cuts")));
         const auto bar = barArea();
         const auto cy = bar.getCentreY();
-        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 160.0f, 22.0f }, xoverSlope, tr ("Crossover"), "12 dB/oct|24 dB/oct|48 dB/oct", { 0.0f, 0.5f, 1.0f }));
-        out.push_back (barMenu ({ 176.0f, cy - 11.0f, 140.0f, 22.0f }, quality, tr ("Oversampling"), "2x|4x|8x", { 0.0f, 0.5f, 1.0f }));
-        out.push_back (barMenu ({ 322.0f, cy - 11.0f, 100.0f, 22.0f }, bands, tr ("Bands"), "1|2|3|4"));
-        out.push_back (barValue ({ 428.0f, cy - 11.0f, 100.0f, 22.0f }, inputGain, tr ("In")));
-        out.push_back (barValue ({ 534.0f, cy - 11.0f, 90.0f, 22.0f }, tone, tr ("Tilt")));
-        out.push_back (barValue ({ 630.0f, cy - 11.0f, 120.0f, 22.0f }, wide() ? lowCutWide : lowCut, tr ("Low cut")));
-        out.push_back (barValue ({ 756.0f, cy - 11.0f, 130.0f, 22.0f }, wide() ? highCutWide : highCut, tr ("High cut")));
+        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 150.0f, 22.0f }, xoverSlope, tr ("Crossover"), "12 dB/oct|24 dB/oct|48 dB/oct", { 0.0f, 0.5f, 1.0f }));
+        out.push_back (barMenu ({ 166.0f, cy - 11.0f, 130.0f, 22.0f }, quality, tr ("Oversampling"), "2x|4x|8x", { 0.0f, 0.5f, 1.0f }));
+        out.push_back (barMenu ({ 302.0f, cy - 11.0f, 90.0f, 22.0f }, bands, tr ("Bands"), "1|2|3|4"));
+        out.push_back (barValue ({ 398.0f, cy - 11.0f, 90.0f, 22.0f }, inputGain, tr ("In")));
+        out.push_back (barValue ({ 494.0f, cy - 11.0f, 80.0f, 22.0f }, tone, tr ("Tilt")));
+        out.push_back (barValue ({ 580.0f, cy - 11.0f, 110.0f, 22.0f }, wide() ? lowCutWide : lowCut, tr ("Low cut")));
+        out.push_back (barValue ({ 696.0f, cy - 11.0f, 120.0f, 22.0f }, wide() ? highCutWide : highCut, tr ("High cut")));
+        // round 147 (Saturn 2's channel mode): the bands work on left / right or on mid / side
+        out.push_back (barMenu ({ 822.0f, cy - 11.0f, 128.0f, 22.0f }, channelMode, tr ("Channel"), "L/R|M/S", { 0.0f, 1.0f }));
     }
 
     // band settings as a block (style, drive, mix, level + round 128's power, state, tone, feedback, dynamics) to move
     // bands around when splitting / removing
-    static constexpr int blockSize = 4 + mixsuite::ember::extraFields;
-    int blockParam (int b, int k) const { return k < 4 ? fp (b, k) : xp (b, k - 4); }
+    static constexpr int blockSize = 4 + mixsuite::ember::extraFields + 2; // round 147: + drive pan, pan
+    int blockParam (int b, int k) const
+    {
+        if (k == blockSize - 2) return mixsuite::ember::bandDrivePanParam (b);
+        if (k == blockSize - 1) return mixsuite::ember::bandPanParam (b);
+        return k < 4 ? fp (b, k) : xp (b, k - 4);
+    }
     std::array<float, blockSize> bandValues (int b) const
     {
         std::array<float, blockSize> out {};

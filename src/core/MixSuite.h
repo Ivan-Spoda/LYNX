@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <utility>
 #include <memory>
 #include <string>
 
@@ -113,8 +114,15 @@ enum Param
     vDpOn, vDpFreq, vDpThreshold, vDpSplit, vDpLookahead, vDpListen,
     vEqOn, vHpfOn, vHpfFreq, vNotchOn, vNotchFreq, vNotchGain, vHighOn, vHighFreq, vHighGain,
     vCompOn, vExpThreshold, vCompThreshold, vRatio, vAttack, vRelease, vMakeup, vKnee, vDrive,
+    // round 147b (appended, off by default = the old sound): Ridge's own engine gets the reference console's automatic
+    // make-up (the level its compressor gives back for the threshold and ratio, measured in round 123 — the E voicing
+    // always has it) and the ANALOG switch (the console emulation's colour)
+    autoMakeup, analog,
     count
 };
+// round 147b: the auto make-up (dB) for Ridge's own compressor: the console's for the same threshold (dBFS + 18 = the
+// console's dBu scale) and ratio; 0 with the compressor off
+double autoMakeupDb (const EffectParams& p) noexcept;
 
 double hpfHz (float v) noexcept;      // 0 = off, else 16 .. 350 Hz (18 dB/oct)
 double lpfHz (float v) noexcept;      // 0 = off, else 22 kHz .. 3 kHz (12 dB/oct)
@@ -229,9 +237,20 @@ enum Param
     // its substitute role plays; its own controls with the original's laws. Voicing 0 = Ember's own engine (unchanged)
     voicing, classicStyle, classicDrive, classicPunish, classicLowCut, classicThump, classicTone, classicHighCut,
     classicSteep, classicMix, classicOutput,
+    // round 147 (Saturn 2 parity, measured black-box on the trial, REA_rodada147b; appended, defaults = the old sound):
+    // the channel mode (0 left / right, 1 mid / side: M = (L + R) / 2, S = (R − L) / 2 go through the bands' two
+    // channels), each band's drive pan (−1 … +1: the far channel's drive × (1 − |pan|)) and each band's pan (−1 … +1:
+    // the far channel's gain 1 − |pan|; in mid / side, left = mid)
+    channelMode, band1DrivePan, band2DrivePan, band3DrivePan, band4DrivePan, band1Pan, band2Pan, band3Pan, band4Pan,
     count
 };
 constexpr int maxBands = 4;
+inline int bandDrivePanParam (int band) noexcept { return band1DrivePan + std::clamp (band, 0, maxBands - 1); }
+inline int bandPanParam (int band) noexcept { return band1Pan + std::clamp (band, 0, maxBands - 1); }
+double panOf (float v) noexcept;        // −1 … +1 (0.5 = centre)
+// the two channels' scale for a pan of −1 … +1 (the far side's 1 − |pan|): first = channel 0 (left / mid)
+std::pair<float, float> panScales (double pan) noexcept;
+bool midSide (const EffectParams& p) noexcept;
 // a band's round-128 parameters: field 0 power, 1 state, 2 bass, 3 mid, 4 treble, 5 presence, 6 feedback,
 // 7 feedback frequency, 8 dynamics
 constexpr int extraFields = 9;

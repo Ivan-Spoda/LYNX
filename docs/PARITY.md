@@ -30,6 +30,19 @@ LYNX's style; the transfer-curve and GR-history displays are bars). Her Vocalstr
 model (−60 … −67 dB null on her takes). The other Complete Access plugins (Slate, SSL, LiquidSonics, sonible,
 Harrison) map to LYNX effects by role only.
 
+## Round 147: what changed (config / design, after 144 → after 147)
+
+Round 147 (`docs/analise/REA_rodada147.md`, sub-rounds `REA_rodada147a.md` / `REA_rodada147b.md`).
+
+| LYNX engine | Original | Config 144 → 147 | Design 144 → 147 | Round-147 changes |
+|---|---|---|---|---|
+| Prism Multiband | Pro-MB | 9 → 10 | 8 → 9 | Dynamic phase measured and rebuilt (minimum-phase bands in cascade; older projects keep the classic engine), expert panel: side-chain filtering band / free, stereo link + mid / side-only, each crossover its own slope; translated |
+| Echoform | EchoBoy / PrimalTap | 9 → 10 | 8 → 8 | 31 echo voicings measured from EchoBoy's styles (LYNX names), saturation type menu, PrimalTap's Multiply 1x–8x |
+| Ember Saturator | Saturn 2 | 6 → 7 | 7 → 7 | channel mode L/R \| M/S, each band's drive pan and pan (measured), translated |
+| LYNX Tune | Waves Tune Real-Time | 8 → 9 | 6 → 7 | keyboard strip: Bypass / Remove modes, note status with direction, range bar and presets, octaves, scroll, latch |
+| Ridge Strip | SSL E-Channel | 7 → 8 | 7 → 7 | ANALOG (measured noise floor), auto make-up for Ridge's own compressor, translated |
+| Hush De-esser | DeEsser | 9 → 9 | 7 → 8 | the energy-detector bar beside the threshold arrow |
+
 ## Round 144: what changed (config / design, after 137 → after 144)
 
 Round 144 (`docs/analise/REA_rodada144.md`, sub-rounds `REA_rodada144a.md` / `REA_rodada144b.md`).
@@ -273,10 +286,10 @@ lookahead on, expert mode, display range, analyser options.
 | S / M buttons per band | ✅ | |
 | Floating band panel: power, THRESHOLD, RANGE, ATTACK, RELEASE, OUTPUT, mode, RATIO, KNEE | ✅ | |
 | LOOKAHEAD per band | ✅ | round 128: LOOKAHEAD in the band panel (0–20 ms, capped by the global look-ahead, which sets the latency); translated from Pro-MB |
-| EXPERT (»): side-chain filtering, external side chain, stereo link per band | ⚠️ | round 135: external side chain (bottom bar Int / Ext: the detectors hear the side chain split by the same crossovers); no side-chain filtering or per-band stereo link |
+| EXPERT (»): side-chain filtering, external side chain, stereo link per band | ✅ | round 135: external side chain (Int / Ext: the detectors hear the side chain split by the same crossovers); round 147: **Expert >>** in the band panel — side-chain filtering Band / Free with Low / High (30 Hz – 30 kHz; the free filter measured: 4th-order sides, −24 dB an octave out; one octave and wider within 1 dB, narrower bands boost less than the reference), **stereo link** 0–100 % and 100 % + mid- / side-only with its Mid / Side mode (measured laws, within 0.25 dB of the trial); translated from Pro-MB states (only when its Expert mode is on, as the reference does); the side-chain input stays one switch for all bands |
 | Band output pan (mid / side) | ✅ | round 135: PAN in the band panel (left / right balance of the band); round 144: L/R \| M/S switch in the band panel (mid / side = the reference's law, measured: the far side's gain 1 − \|pan\|), translated from Pro-MB states |
-| Crossover slope per band 6–48 dB/oct | ⚠️ | one global slope 12 / 24 / 48 (round 144: in the band panel, where the reference has it) |
-| Processing mode Linear / Dynamic / Minimum phase | ✅ | round 144: Phase menu in the bottom bar; linear = FIR crossovers with the same magnitudes, 3072 samples at 48 kHz (measured); minimum = all-pass compensated sum; dynamic = the old engine (its crossover shape when a band works still differs: REA_rodada144b); translated |
+| Crossover slope per band 6–48 dB/oct | ✅ | round 144: the global slope in the band panel; round 147: **each crossover its own slope** (Global / 12 / 24 / 48: a band's Low / High slope in its expert part), in every processing mode (the measured Dynamic phase with different orders on the two sides of a band: exact to 1e-8 dB); translated from Pro-MB's band slopes; no 6 dB/oct and no continuous values (LYNX's crossovers are Linkwitz-Riley 12 / 24 / 48) |
+| Processing mode Linear / Dynamic / Minimum phase | ✅ | round 144: Phase menu in the bottom bar; linear = FIR crossovers with the same magnitudes, 3072 samples at 48 kHz (measured); minimum = all-pass compensated sum; translated. Round 147: **Dynamic phase measured and rebuilt** — each working band is a minimum-phase filter with the linear-phase magnitude, the bands in cascade (Pro-MB's −4.1 dB / +53° at the crossover, −8.15 dB for two adjacent −12 dB bands: matched within 0.05 dB / 1°); projects saved before round 147 keep the classic engine ("Classic dynamic" in the bottom bar updates them) |
 | Oversampling | ✅ | round 144: Off / 2x / 4x in the bottom bar: the gains applied at the high rate; latency + the oversampler's; translated |
 | Display range 3 / 6 / 12 / 30 dB | ✅ | round 128: 3 dB added |
 | Analyser off / pre / post / pre+post | ✅ | |
@@ -285,6 +298,8 @@ lookahead on, expert mode, display range, analyser options.
 | Output meter | ✅ | |
 
 **After round 144** (REA_rodada144b): configuration 7 → **9**/10, design 7 → **8**/10 — processing modes, oversampling, mid / side band pan, analyser resolution / tilt, the reference's bottom-bar order. Left: per-band slopes, side-chain filtering, per-band stereo link, the dynamic mode's crossover shape, free band placement.
+
+**After round 147** (REA_rodada147 §1–2): configuration 9 → **10**/10, design 8 → **9**/10 — the measured Dynamic phase (the reference's sound when bands work), the expert panel (side-chain filtering, stereo link, the band's own slopes). Left: free band placement with gaps (a band switched off is the gap), a side-chain input per band, slopes only 12 / 24 / 48 (no 6 or in-between values), the free side-chain filter's extra boost on bands narrower than an octave.
 
 ## Sentry Gate ← Pro-G
 
@@ -351,17 +366,19 @@ sources, 50 modulation slots).
 | 28 styles in 6 families | ⚠️ | 4 families (tube, tape, transistor, fuzz) |
 | Per-band tone: Bass / Mid / Treble / Presence | ✅ | round 128: ±18 dB (Saturn ±24) on the band's saturated signal — LYNX's own curves (shelf 120 Hz, bell 800 Hz, shelf 3.5 kHz, bell 6 kHz); the global tilt / cuts stay as LYNX extras in the bottom bar |
 | Per-band power, solo, mute | ✅ | round 128 (panel buttons, tags on the display) |
-| Drive pan (L / R), band pan | ❌ | |
+| Drive pan (L / R), band pan | ✅ | round 147b: per band DRIVE PAN (beside the drive) and PAN (under the level) [EXEC trial: the far channel's drive × (1 − \|pan\|) on the 0–100 % scale; the band pan's far side 1 − \|pan\|]; translated from Saturn 2 states |
 | Feedback amount / frequency | ✅ | round 128: a band-passed loop around the shaper (10 Hz – 1 kHz, loop gain up to 0.9) |
 | Dynamics (compress / expand the band) | ✅ | round 128: −1 … +1, the band's level follows its input level |
 | Modulation (+ Add Modulation: XLFO, EG, EF, MIDI, XY, slots) | ❌ | |
 | Crossover slope (bottom bar) | ✅ | global (original per band) |
 | Linear phase / minimum phase | ❌ | |
 | High Quality mode (oversampling) | ✅ | "Oversampling 2x / 4x / 8x" |
-| Channel mode M/S | ❌ | |
+| Channel mode M/S | ✅ | round 147b: "Channel L/R \| M/S" in the bottom bar [EXEC trial: M = (L + R) / 2, S = (R − L) / 2 through the bands' two channels; drive pan and band pan then balance mid / side]; translated (state slot 695) |
 | In / Out gain + mix | ✅ | round 128: In (±24 dB) in the bottom bar; Out; Dry / wet |
 | Auto gain | — | LYNX extra (Saturn has none; Decapitator has Auto) |
 | Decapitator: Drive, 5 styles (A, E, N, T, P), Low Cut, Tone, High Cut, Thump, Steep, Mix, Output, Auto, Punish | ⚠️ | trial not installed; Ember covers drive / tone / cuts / mix / auto gain, no Thump / Steep / Punish |
+
+**Round 147b:** configuration 6 → 7 (channel mode M/S, drive pan, band pan, measured on the trial and translated), design 7 → 7. Remaining: 6 bands, 28 styles, modulation, linear phase.
 
 ## Aether ← Fresh Air
 
@@ -608,7 +625,7 @@ Trial on this PC: yes (older capture used).
 | Comp THRESHOLD | +10…−20 dBu (= −8…−38 dBFS), default 0 dBu (−18 dBFS); clockwise = lower | −40…0 dBFS, default 0 dBFS; clockwise = higher | ⚠️ | different unit and reference, opposite direction, default 18 dB higher |
 | Comp RELEASE | 0.1–4 s, default 0.4 | 0.1–4 s, default 0.29 | ✅ | |
 | Comp F.ATK | fast 1 ms; off = auto, program dependent | "Fast attack" 1 ms; off = fixed 10 ms | ⚠️ | no program-dependent attack |
-| Auto make-up from ratio + threshold | always on (the manual) | none (the translator adds +0.9 dB output) | ❌ | engine |
+| Auto make-up from ratio + threshold | always on (the manual) | none (the translator adds +0.9 dB output) | ✅ | round 123: the E voicing has the console's measured make-up; round 147b: "Auto make-up" (Compressor section) gives Ridge's own engine the same law (threshold dBFS + 18 = the console's scale, ratio) |
 | Comp Mix | — | "Mix" 0–100 % | ➕ | |
 | Comp curve display | — | static transfer curve | ➕ | |
 | Expander THRESHOLD | −30…+10 dBu (−48…−8 dBFS), default −30 | −80…0 dBFS, default −60 | ⚠️ | |
@@ -618,7 +635,7 @@ Trial on this PC: yes (older capture used).
 | GATE switch (Exp default) | button + LED; expander is the default | "Gate \| Expand" tabs, default **Gate** | ⚠️ | default is the opposite |
 | Threshold hysteresis | variable (program dependent) | fixed 4 dB (gate) | ⚠️ | |
 | GR indicators | two LED ladders (comp, exp) 3/6/10/14/20 dB + gate LED | two horizontal bars "Comp" / "Gate" 0–30 dB | ✅ | different form, same information; no gate-open LED |
-| ANALOG on/off | switch, centre right; default (her state) Off | none | ❌ | engine (colour) |
+| ANALOG on/off | switch, centre right; default (her state) Off | none | ✅ | round 147b: "Analog" (Dynamics section) [EXEC trial: Analog on adds white noise of −110.7 dBFS RMS per channel at the output, uncorrelated L / R, whatever the input / output / compressor settings; harmonics unchanged]; both voicings; translated (RealWorld 31) |
 | INPUT trim | ±18 dB, knob in the Gain block | "Input" ±20 dB | ✅ | |
 | Phase Ø | button + LED | "Phase" toggle | ✅ | |
 | OUTPUT fader | fader −24…+12 dB beside the meter | "Output" knob ±20 dB | ⚠️ | knob, not a fader; different range |
@@ -627,6 +644,8 @@ Trial on this PC: yes (older capture used).
 | Latency | 1 sample | 0 | ✅ | irrelevant |
 | Vocalstrip 2 (SSL Native) role | de-esser, de-ploser, 3-band EQ, compander with knee/makeup/drive, process order | round 145: Ridge's **Vocal strip voicing** — every control of the reference (34 parameters, its own laws), its own panel (level, compander, de-esser / de-ploser, equaliser, order menu, GR meters), measured on the official trial; her state translated (−60 … −67 dB null on her takes) | ✅ | REA_rodada145 §2; the broadband de-esser / de-ploser on bursts is the least exact part (−13 … −25 dB) |
 | Saved-state translation | — | filters, 4 bands, comp (threshold, ratio, release, fast), output, dyn/EQ bypass translated; Split, Dyn S.C., Ch Out, expander, Analog, Input, Phase not translated (order forced to Dyn>EQ) | ⚠️ | round 113 §3c |
+
+**Round 147b:** configuration 7 → 8 (auto make-up, ANALOG measured and translated), design 7 → 7.
 
 **Scores:** configuration 6/10, design 6/10. An SSL user finds every knob in the expected column. What is missing
 or wrong: Split / Dyn S.C. semantics, Analog, auto make-up, the In/Out meter with the output fader, and
@@ -778,7 +797,7 @@ Trial on this PC: yes (no screenshot this round).
 | SideChain HighPass / BandPass | button, default HighPass | "Detection: High-pass \| Band" tabs (+ bottom-bar menu), default High-pass | ✅ | Hush BP Q 1.4; Waves "very sharp", Q unknown |
 | Audio Split / Wideband | button, default **Split** | "Processing: Wide band \| Split band" tabs, default Split | ✅ | Hush's split is 2nd order at the frequency; Waves' is 1st order at ≈ Freq/π (engine) |
 | Monitor Output / SideChain (+ yellow light) | button | "Audition" toggle under the frequency slider (plays the detection band) | ✅ | same function, different name |
-| Energy Detector meter (side-chain energy, dB below 0 dBFS, blue) aligned with the threshold | main meter | "IN" meter = **input** peak, with a threshold arrow | ⚠️ | threshold is compared with an unfiltered level; switch IN to side-chain energy (as Waves) or add it |
+| Energy Detector meter (side-chain energy, dB below 0 dBFS, blue) aligned with the threshold | main meter | "IN" meter = input peak with a threshold arrow, and **inside it a blue bar = the detector's energy** (what the threshold is compared with, in the threshold's scale; both engines) | ✅ | round 147 |
 | Attn meter (red, instantaneous GR) + **infinite peak hold, click to reset** | meter | "GR" bar with a held-peak line and number, click to reset | ✅ | round 144 |
 | Output meter −30…0 dBFS + peak readout (click to reset) | meter | none (bottom bar shows the Output **setting**) | ✅ | UI; round 135w: OUT meter −30…0 beside IN / GR, clip lamp and highest-peak read-out, click to reset |
 | Frequency-response display | **none in the classic DeEsser** (the manual lists no graph; Renaissance DeEsser has one) | small detector-band graph only in the generic `hushDeEsser()` layout; the display-first editor shows the scrolling waveform with the reduction in red | ➕ | nothing to add for parity |
@@ -790,7 +809,7 @@ Trial on this PC: yes (no screenshot this round).
 | Gestures | slider drag, value-window typing | drag, Ctrl fine, wheel, reset, right-click entry, line/arrow drags | ✅ | |
 | Saved-state translation | — | frequency (×0.81), threshold (+5 dB), Split/Wide, HP/BP, Monitor translated; range fixed at 12 dB | ✅ | round 113 §3c |
 
-**Scores:** configuration 7/10 (every Waves control exists, plus extras), design 5/10. **After round 144**: configuration 9/10, design 7/10 (round 135w: 9 / 6; round 144: the GR meter's held peak). The scrolling-waveform
+**Scores:** configuration 7/10 (every Waves control exists, plus extras), design 5/10. **After round 144**: configuration 9/10, design 7/10 (round 135w: 9 / 6; round 144: the GR meter's held peak). **After round 147**: design 7 → **8**/10 (the energy-detector bar beside the threshold arrow). The scrolling-waveform
 editor is Pro-DS-like. A DeEsser user finds Threshold, Freq, HP/BP, Split/Wide and Monitor (as "Audition")
 quickly. What they miss: the side-chain energy meter beside the threshold, the Attn peak hold, the output meter,
 presets, and the Waves defaults.
@@ -1030,12 +1049,12 @@ positions against wtune.png once it exists.
 | Reference pitch | ±100 c (415.3–466.16 Hz), 440 | "A4" knob 430–450 Hz | ⚠️ | range ±40 c only |
 | Root | 17 names (sharps and flats) | KEY menu, 12 names (sharps) | ✅ | |
 | Scale type | 44 (User, Chromatic, Major, Natural/Harmonic/Melodic minors, Justonic, modes, Blues, Whole tone, Diminished, Bebop, pentatonics, Pythagorean, Maqamat, Indian thaats …) | SCALE menu, 13 + Custom | ⚠️ | her states use Major / Natural Minor only (covered) |
-| Range | keyboard span with draggable boundary handles + presets Bass / Baritone / Tenor / Alto / Mezzo / Soprano / Generic; notes outside → **bypassed** | "Input type" menu (Soprano / Alto-Tenor / Low male / Instrument) = detector range | ⚠️ | 4 presets vs 7, no handles, outside notes not bypassed |
-| Keyboard | multi-octave piano at the bottom, per-note status area | one octave of on/off key toggles at the bottom ("TARGET NOTES") | ⚠️ | same place, less content |
-| Note status per key | Legal / Illegal / Illegal-Pitch-Up / Illegal-Pitch-Down / Bypass (click cycles) | on / off | ⚠️ | Up/Down/Bypass missing |
-| Group Octaves | switch (per-note edits apply to all octaves) | always grouped | ⚠️ | |
-| Reset Scale / Send Scale to All / Receive (key) | buttons | — (key comes from translation / project key) | ❌ | |
-| Keyboard view / navigation buttons | yes | — | ❌ | one octave only |
+| Range | keyboard span with draggable boundary handles + presets Bass / Baritone / Tenor / Alto / Mezzo / Soprano / Generic; notes outside → **bypassed** | "Input type" menu (Soprano / Alto-Tenor / Low male / Instrument) = detector range | ✅ | round 147b: the range bar over the keys (drag a boundary), seven presets in the keyboard strip (LYNX's spans [model]: classical voice ranges ± a third; they also pick the detector's input type), notes sung outside pass uncorrected |
+| Keyboard | multi-octave piano at the bottom, per-note status area | one octave of on/off key toggles at the bottom ("TARGET NOTES") | ✅ | round 128: four octaves; round 147b: 2–7 octaves shown, scrollable (see navigation) |
+| Note status per key | Legal / Illegal / Illegal-Pitch-Up / Illegal-Pitch-Down / Bypass (click cycles) | on / off | ✅ | round 128: Bypass mode; round 147b: REMOVE mode cycles legal → illegal → illegal up → illegal down (arrows on the key; an illegal note's direction picks the next legal note up / down) |
+| Group Octaves | switch (per-note edits apply to all octaves) | always grouped | ⚠️ | per-octave statuses would need 128 per-key values; LYNX keeps the grouped behaviour (the reference's default) |
+| Reset Scale / Send Scale to All / Receive (key) | buttons | — (key comes from translation / project key) | ⚠️ | round 147b: RESET SCALE in the keyboard strip; Send / Receive (instance-to-instance transmission) not done |
+| Keyboard view / navigation buttons | yes | — | ✅ | round 147b: − / + (more / fewer octaves, 2–7) and ◀ / ▶ (scroll by an octave) in the keyboard strip |
 | Central display | target note name + correction amount in cents | `pitchring`: note name, ±100 c ring, sung offset + octave | ✅ | |
 | Scrolling pitch graph | not in WTRT (guide lists none) | `pitchtrace` (input vs corrected, 8 s) | ➕ | Auto-Tune-style; useful |
 | Input / output meters | −28 … 0 dBFS | — | ✅ | round 135w: IN / OUT meters on the "Real-time" page |
@@ -1049,6 +1068,8 @@ positions against wtune.png once it exists.
 | Undo / Redo, presets (factory/user/favourites, search), A/B, Setup A/B, Save | toolbar | see header note | ✅ | round 129's preset bar (no search / favourites) |
 | MIDI learn, gestures | right-click; Alt-click etc. | yes | ✅ | |
 | Window | fixed | resizable 800×548 | ✅ | |
+
+**Round 147b:** configuration 8 → 9, design 6 → 7 (the keyboard: note statuses with directions, the range bar and presets, Reset scale, the view's navigation). Remaining: Group Octaves off, Send / Receive, MIDI reference tone.
 
 **Scores** — configuration: 4/10 (for a Waves Tune RT user: key/scale/formant/time are there, but Speed, Tolerance,
 Vibrato, Correction %, note statuses and range bypass are not), design: 5/10 (note display centre + keyboard at the
@@ -1547,13 +1568,13 @@ Sources: docs/specs/echoboy.md (Pro Tools-era guide pp. 22–54, store page); `[
 | Echo Mode: Dual | two independent times, FB mix / balance | Offset only | Style "Dual" (Time L/R, sync L/R) | ⚠️ | no FB cross-mix or FB balance |
 | Echo Mode: Ping-Pong | mono in, L then R | Ping pong | Style "Ping-pong" (+ Pairs) | ✅ | |
 | Echo Mode: Rhythm (≤16 taps, 1–8 beats, grid ½…1/64, Shape) | Rhythm editor | — | round 137: RHYTHM switch (third row): evenly spaced taps (ms / note / dotted / triplet), Repeats 1–16, Decay 0–40 dB, Length 1–8 beats; the echo train shows the pattern | ✅ (Echoform) | [EXEC] measured on the trial (impulses at 60 / 120 BPM; its host parameters RhythmMode / Note / Time / Repeats / Decay): Repeats = slots incl. the input, so repeats − 1 taps are heard, each 1 / √slots (equal power, with the decay spread from the first slot to the last); the pattern spans 2 beats (taps past it are dropped) and the feedback replays it every 2 beats — LYNX's Length defaults to 2 beats. Left: the Pattern presets and the Custom (drawn) taps of the rhythm editor (not host parameters, not measured); **round 144**: the rhythm editor (a row under the panel): the taps on the pattern's time axis, drag = level / time, double-click = add / remove a tap; Even / Free / Grid edits (Grid ½ … 1/64 — EchoBoy's Custom Time / Custom Beats roles), Shape (Decay, Reverse, Swell, Fade, Nonlin — LYNX's own laws, [model]), and a Patterns menu of 12 LYNX-authored patterns (gallop, tresillo, clave, stutter, triplet roll …; none copied). [EXEC] round 144: on the trial the Pattern / Custom Time / Custom Beats modes give no echo when only its host parameters are set (their taps live in its editor), so those are not measured |
-| Echo Style menu (~30 voicings) | main panel menu | — | Mode menu: 12 (Tape, Lo-Fi, Hi-Fi tape, Bucket brigade, Analog, Digital, Clean, Phaser, Shifter, Pitch, Reverse, Detune) | ⚠️ | covers families: tape/BBD/digital/lo-fi; no radio/telephone, chorus/vibrato, "Diffused/Verbed" variants |
+| Echo Style menu (~30 voicings) | main panel menu | — | **round 147**: Echo voicing menu (Style edit row): 31 voicings with LYNX names, one per factory style, each measured black-box on the trial (first-echo tone and per-pass loop tone from noise bursts, steady-sine gain / harmonics at Saturation 0 … 24 dB, pitch wobble, impulse spread) and modelled (fitted biquad tones ≤ 0.3 dB rms for most, a knee shaper or a compressor, sine / random wobble, diffusion) | ✅ (Echoform) | [EXEC] REA_rodada147a §2; EchoBoy's style names are not shown; the reference's L/R offset (−3.8 / +4.2 ms around the time) stays Echoform's Spread |
 | Echo Time ms | ms, pitch-bends when moved | Time + Keep pitch | Time L/R 0–20 s, default 300 ms | ✅ | |
 | Note / Dotted / Triplet | Note/Dot/Trip buttons | Tempo sync | Sync menu ms/Note/Dotted/Triplet, 1/64…8/1 | ✅ | |
 | Tempo source | host, tap, MIDI, 30–300 BPM | host | host only | ✅ | no tap tempo, no free BPM; round 129 tap pad + round 135w own BPM (30–300) |
 | Mix | Dry…Wet, 12 o'clock = 50/50 | Wet/Dry faders | Mix 0–100 % (default 50) | ✅ | |
 | Feedback | Min…Max, can run away | Level | 0–200 %, default 70 % | ✅ | |
-| Saturation | Less…More, style-dependent, centre default | Feedback distortion Sat/Limit | Drive 0–24 dB (Colour) | ⚠️ | not style-dependent; default 0, not centre |
+| Saturation | Less…More, style-dependent, centre default | Feedback distortion Sat/Limit | Drive 0–24 dB (Colour) | ✅ | **round 147**: with a voicing, Drive = EchoBoy's Saturation 0 … 24 dB with each style's own measured law (drive / make-up per 6 dB step; e.g. studio tape: −3.5 dB at low level up to 12 dB, then +2.3 dB at 24; the radio / limited styles compress) |
 | HighCut | style-dependent darkening | FB cutoff/res, LP/HP/BP | High cut 200 Hz–20 kHz + Low cut 10 Hz–2 kHz | ✅ | |
 | Prime Numbers | detunes repeat times | — | — | ✅ | trivial: snap times to primes in samples; round 135w (Echoform): "Primes" — the delay times snap to a prime number of samples |
 | Groove (shuffle…swing) | alternate repeats | — | — | ✅ | round 135w (Echoform): Groove ±25 % = odd repeats late / early by that share of the echo time ([EXEC] EchoBoy trial: +0.25 → +113…125 ms at 500 ms) |
@@ -1565,20 +1586,20 @@ Sources: docs/specs/echoboy.md (Pro Tools-era guide pp. 22–54, store page); `[
 | Tweak: L/R Offset | 0–25 ms, default 8 | Offset | Spread ±20 ms | ✅ | |
 | Tweak Dual: FB Mix / Balance / FB Balance | knobs | — | — | ✅ | round 135w (Echoform): X-feed (each side's feedback from the other) and Balance; no FB Balance; **round 144**: FB balance (±100 %, each side's feedback) |
 | Style Edit: 3-band EQ gain + per-repeat Decay, Mid Res | ±18 dB etc. | FB filter only | Low/High cut only | ⚠️ | the "EQ in the loop vs first repeat" idea is missing; **round 144**: loop EQ (bass 120 Hz shelf, mid 1.2 kHz bell, treble 5 kHz shelf, ±18 dB) inside the loop — every repeat is shaped again; no per-repeat decay / Mid Res |
-| Style Edit: saturation type (Clean, Tape, Warm, Pump, Dirt, Limit×4) | menu | Limit/Sat + knee/symmetry | via Mode only | ⚠️ | |
+| Style Edit: saturation type (Clean, Tape, Warm, Pump, Dirt, Limit×4) | menu | Limit/Sat + knee/symmetry | Saturation type menu | ✅ | **round 147**: Auto / Clean / Tape / Tube / Squash / Grit / Ceiling — the measured curves of six representative styles (digital, studio tape, valve tape, FM radio's compressor, distorted, limited); works with or without a voicing. [EXEC] the reference's own type menu lives in its editor (not a host parameter), so its types were not measured one by one [model] |
 | Style Edit: Diffusion + Size, Loop/Post | knobs + switch | Diffusion level/spread | Diffusion amount/size | ✅ | no Loop/Post choice; **round 144**: Diffusion Loop / Post |
 | Style Edit: Wobble, Rate, Shape (5), Sync | knobs/menu | Mod rate/time | Wow, Flutter (Tape) / Rate, Depth | ✅ | no shape menu, no LFO sync; **round 144**: Wobble shape (sine, triangle, square, saw, random) and LFO sync (free, 1/16 … 2 bars) for the LFO modes |
 | Ducking | — (not in EchoBoy) | — | Ducking | ➕ | |
 | Pitch / shifter / reverse modes | — | — | yes | ➕ | |
 | Echo display | Tweak "visualiser" of delay tails | — | "echotrain" display of repeats | ✅ (Echoform) | |
 | Freeze (PrimalTap) | holds the loop; ≤2048 ms at 8× | — | — | ✅ | round 135w (Echoform): Freeze holds the loop (no input, unity feedback, no colour) |
-| Multiply 2×/4×/8× (PrimalTap; halves the rate per step, max 2.5 s) | knob | Smp rate / Bits (lo-fi) | Lo-Fi mode | ⚠️ | no time-for-bandwidth trade |
+| Multiply 2×/4×/8× (PrimalTap; halves the rate per step) | knob | Smp rate / Bits (lo-fi) | Multiply 1x / 2x / 4x / 8x (Style edit row) | ✅ | **round 147** [EXEC] PrimalTap 5.5.5: the delay × 2 / 4 / 8 exactly, a brick-wall band of ≈ 6.2 / 3.1 / 1.55 kHz (−43 … −49 dB a third of an octave above), up to 8 s (16 s gave silence); LYNX: the same factor on the times (up to 20 s) and two 8th-order low-passes at 12.4 kHz / factor inside the loop |
 | VCO Rate/Depth per tap, phase flip (PrimalTap) | knobs | Mod rate | Rate/Depth (one LFO) | ⚠️ | |
 | Preset menu / user presets / A/B | Soundtoys strip | FL factory list only; no user save, no A/B | "(no preset)" | ✅ | round 129's preset bar (Echoform) |
 | Gestures, value entry, automation | standard | generic editor: full set | full set | ✅ | |
 | Translation of the saved state | encoded | none, FL defaults (ms delay, FB, etc. unrelated) | none | ❌ | state unreadable; default only |
 
-**Scores**: Fruity Delay 3 as the stand-in: configuration 2/10, design 2/10. Echoform: configuration 5/10, design 5/10. **After round 144** (Echoform): configuration 9/10, design 8/10 (round 137: 8 / 7) — the rhythm editor (patterns, free / grid taps, shapes) and the Style Edit role (input, loop EQ, FB balance, diffusion place, wobble shape / sync); left: the saturation types, the ~30 style voicings, PrimalTap's Multiply.
+**Scores**: Fruity Delay 3 as the stand-in: configuration 2/10, design 2/10. Echoform: configuration 5/10, design 5/10. **After round 144** (Echoform): configuration 9/10, design 8/10 (round 137: 8 / 7) — the rhythm editor (patterns, free / grid taps, shapes) and the Style Edit role (input, loop EQ, FB balance, diffusion place, wobble shape / sync); left: the saturation types, the ~30 style voicings, PrimalTap's Multiply. **After round 147a**: configuration 10/10, design 8/10 — the 31 measured voicings, the style-dependent Saturation, six saturation types, PrimalTap's Multiply; left: the reference's per-voicing Style Edit details (per-repeat decay, Mid Res), the chorus styles' multiple modulated voices (one wobble per side here), PrimalTap's per-tap VCO.
 
 **Verdict:** **Echoform is clearly the better EchoBoy (and PrimalTap) substitute.** It has the four-mode-like Style switch (Single/Dual/Ping-pong + Ratio/Quad), a character Mode menu standing in for EchoBoy's Style, Drive ≈ Saturation, Wow/Flutter ≈ Wobble, Diffusion, note/dotted/triplet sync and an echo display. Fruity Delay 3 is a clean FL delay with none of the "style" concept, played at FL defaults. The spec's own recommendation (§7.1) agrees. H-Delay already moved to Echoform in round 119.
 

@@ -105,6 +105,11 @@ enum Param
     loopBass,      // ±18 dB shelves / bell inside the loop (EchoBoy's Style Edit EQ: each repeat is shaped again):
     loopMid,       //   bass 120 Hz, mid 1.2 kHz (Q 0.7), treble 5 kHz; 0 dB = off
     loopTreble,
+    // ---- round 147 (docs/PARITY.md: EchoBoy's styles / saturation, PrimalTap's Multiply), appended; 0 = the old sound
+    voicing,       // the echo voicing: 0 = off (the Mode menu's character), 1 … voicingCount = a measured echo character
+                   // (output tone, loop tone, saturation, wobble, diffusion; EchoBoy's styles measured black-box [EXEC])
+    satType,       // the saturation curve: 0 = auto (the voicing's own, or the mode's), 1 … satTypeCount = a measured family
+    multiply,      // 1x / 2x / 4x / 8x the echo time, the bandwidth divided by the same (PrimalTap's Multiply [EXEC])
     paramCount
 };
 enum class Style { single, ratio, quad, dual, pingPong }; // the two-time styles last (the panel shows the right time for both)
@@ -184,6 +189,25 @@ int tapeVoicingOf (float v) noexcept; // 0 = off, 1 … tapeVoicingCount
 float tapeVoicingValue (int k) noexcept;
 const char* tapeVoicingName (int k) noexcept;
 float hybridValue (int h) noexcept;
+// round 147: the echo voicings (EchoBoy's style role, each measured black-box on the official trial, REA_rodada147a)
+constexpr int voicingCount = 31;
+int voicingOf (float v) noexcept;        // 0 = off, 1 … voicingCount
+float voicingValue (int k) noexcept;
+const char* voicingName (int k) noexcept; // LYNX's own names ("off" for 0)
+// the voicing that plays EchoBoy's factory style `style` (0 … 30, the order of its Style parameter); 0 for its edited style
+int voicingForEchoBoyStyle (int style) noexcept;
+constexpr int satTypeCount = 6;
+int satTypeOf (float v) noexcept;        // 0 = auto, 1 … satTypeCount
+float satTypeValue (int k) noexcept;
+const char* satTypeName (int k) noexcept;
+int multiplyOf (float v) noexcept;       // 1, 2, 4 or 8
+float multiplyValue (int factor) noexcept;
+double multiplyCutoffHz (int factor) noexcept; // the bandwidth at that factor (0 for 1x: no filter)
+// the static magnitude (dB) of voicing k's output tone (loop = false) or loop tone (loop = true) at `hz`
+double voicingToneDb (int k, bool loop, double hz, double sampleRate);
+// the steady-sine fundamental gain (dB) of saturation curve `type` (1 … satTypeCount) or of voicing k's own curve
+// (type 0) at `driveDb` (0 … 24) for a sine of peak `levelDb` dBFS (the compressing curves after their attack)
+double satGainDb (int k, int type, double driveDb, double levelDb);
 Mode modeOf (float v) noexcept;
 float modeValue (Mode m) noexcept;
 Style styleOf (float v) noexcept;
