@@ -10,12 +10,14 @@
 
 #include "core/Effects.h"
 #include "core/FabFilterStates.h"
+#include "core/FlEffects.h"
 #include "core/FlPluginDb.h"
 #include "core/FlWrapper.h"
 #include "core/LynxTune.h"
 #include "core/MixSuite.h"
 #include "core/VocalPitch.h"
 #include "core/VoiceTools.h"
+#include "core/VoiceShift.h"
 #include "core/EchoSuite.h"
 #include "core/DynamicsSuite.h"
 
@@ -140,7 +142,8 @@ map = xml:parameter5 -> Low cut
 map = xml:parameter6 -> High cut
 map = xml:parameter7 -> Mod rate
 map = xml:parameter8 -> Mod depth
-map = xml:parameter9 -> Reverb mode | steps 0:0 0.525:0.5 0.775:1
+# round 135: its four reverb modes (Mono / three stereo sizes, steps at 0.25 / 0.5 / 0.75 [EXEC]) -> Halo's same four
+map = xml:parameter9 -> Reverb mode | steps 0:0.125 0.25:0.25 0.5:0.375 0.75:0.625
 map = xml:parameter10 -> Shift mode | steps 0:0 0.25:0.25 0.45:0.5 0.65:0.75 0.85:1
 map = xml:parameter11 -> Color | steps 0:0 0.525:1
 
@@ -532,10 +535,14 @@ translate = fresh-air
 product = Decapitator
 vendor = Soundtoys
 lynx = Ember Saturator
+# [DATA] VST2 unique ID from real projects
+vst2 = StDc
 names = Decapitator
 # its state is encoded: a light drive (+1.4 dB, tube; round 113, was +5.4 dB) with auto gain, so the slot colours
-# without jumping in level
+# without jumping in level. Round 135: the states of her projects were read in the official trial (black-box) and are
+# translated (voicing, drive, punish, tone, the reference's filter ranges, thump / steep, mix, output trim)
 preset = Drive=0.04
+translate = soundtoys-decapitator
 
 [fabfilter-saturn]
 product = FabFilter Saturn
@@ -556,9 +563,24 @@ lynx = Auto-pan
 vst2 = StPn
 names = PanMan
 # its state is encoded (round 127: high-entropy payload, not a readable value list; no Soundtoys trial installed), so
-# a moderate sweep: Auto-pan's depth is 2·Depth − 1, so Depth=0.75 swings the balance ±50 % once per beat. Round 113's
+# (until round 135) a moderate sweep: Auto-pan's depth is 2·Depth − 1, so Depth=0.75 swings the balance ±50 % once per beat. Round 113's
 # "Depth=0.5" meant 50 % but mapped to depth 0, an exact pass-through that silently dropped the effect (round 127)
-preset = Depth=0.75
+preset = Depth=0.918; Source=0.5; Rate=0.8505; Smoothing=1; Analog=1
+# round 135: the rhythmic-panner sources (free LFO, rhythm steps); without a known state her usual setting (a 3.56 Hz
+# back-and-forth LFO, 150° wide, soft, analog stage); her states read in the official trial (black-box) are translated
+translate = soundtoys-panman
+
+[soundtoys-littlealterboy]
+product = Little AlterBoy
+vendor = Soundtoys
+lynx = Voice Shift
+# [DATA] VST2 unique ID from real projects
+vst2 = StLa
+names = Little AlterBoy; LittleAlterBoy; AlterBoy
+# round 135: LYNX's voice shifter. Its state is encoded; her states were read in the official trial (black-box, the
+# host API only) and are translated; any other state gets her usual setting (Quantize, formant +1.2 st, drive 4.6)
+preset = Pitch=0.5; Formant=0.55; Mode=0.5; Drive=0.46; Mix=1
+translate = soundtoys-littlealterboy
 
 # ---------------------------------------------------------------- vocal pitch correction -> LYNX Tune (round 95)
 [antares-auto-tune]
@@ -658,7 +680,7 @@ std::string matchKey (const std::string& name)
 std::optional<EffectKind> effectKindNamed (const std::string& name)
 {
     const auto wanted = lowerAscii (trim (name));
-    for (int k = 0; k <= (int) EffectKind::formulaController; ++k) // the last EffectKind: extend when one is appended
+    for (int k = 0; k <= (int) lastEffectKind; ++k) // the last EffectKind: extend when one is appended
     {
         const auto kind = (EffectKind) k;
         if (kind == EffectKind::plugin || kind == EffectKind::parallel)
@@ -1141,6 +1163,16 @@ int translateWavesTune (const std::vector<std::uint8_t>& state, EffectSlot& slot
         slot.params[lynxtune::humanize] = 0.0f;
         n += 2;
     }
+    // round 135w: Speed is shown as saved; it only acts (Link off) where the trial showed an effect (below ~5 ms)
+    if (const auto speed = wavesValue (rw, 20); speed && *speed > 0.0)
+    {
+        slot.params[lynxtune::speed] = lynxtune::speedValue (*speed);
+        slot.params[lynxtune::speedLink] = *speed < 5.0 ? 0.0f : 1.0f;
+        ++n;
+    }
+    // RealWorld 22 = 100 in every state of her corpus, Correction % by its default [model]
+    if (const auto amount = wavesValue (rw, 22); amount && *amount >= 1.0 && *amount <= 100.0)
+        slot.params[lynxtune::correction] = (float) (*amount / 100.0);
     return n;
 }
 
@@ -1202,6 +1234,12 @@ int translateWavesRComp (const std::vector<std::uint8_t>& state, EffectSlot& slo
     slot.params[6] = (float) std::clamp (wavesValue (rw, 26).value_or (100.0) / 100.0, 0.0, 1.0); // mix %
     slot.params[7] = linNorm (wavesValue (rw, 27).value_or (0.0), -18.0, 18.0);                  // trim dB
     slot.params[8] = 1.0f;                                                                         // vintage voicing
+    // round 135w: ARC / Manual (17), Electro / Opto (22), Warm / Smooth (16) [EXEC round 113 list]; the output limiter
+    // the reference always has
+    slot.params[9] = wavesValue (rw, 17).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
+    slot.params[10] = wavesValue (rw, 22).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
+    slot.params[11] = wavesValue (rw, 16).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
+    slot.params[12] = 1.0f;
     return 6;
 }
 
@@ -1364,17 +1402,27 @@ int translateWavesHDelay (const std::vector<std::uint8_t>& state, EffectSlot& sl
     if (slot.kind != EffectKind::echoform || ! sync || ! fb)
         return 0;
     auto& p = slot.params;
-    const bool pingPong = wavesValue (rw, 10).value_or (1.0) >= 0.5;
+    // round 135w: [EXEC] round 119's probe: 1 = PingPong, 2 = Stereo (2 used to read as ping-pong)
+    const auto ppValue = wavesValue (rw, 10).value_or (1.0);
+    const bool pingPong = ppValue >= 0.5 && ppValue < 1.5;
     const bool analog = wavesValue (rw, 23).value_or (2.0) >= 0.5;
     p[e::style] = e::styleValue (pingPong ? e::Style::pingPong : e::Style::single);
     p[e::pairs] = pingPong ? 1.0f : 0.0f;
     // round 129: phase L / R (RealWorld 8 / 9, round 119 §2 [EXEC]; 1 = inverted)
     p[e::phaseL] = wavesValue (rw, 8).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
     p[e::phaseR] = wavesValue (rw, 9).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
+    // round 135w: the ping-pong's start side (RealWorld 45: 0 left, 1 right — round 119 probe [EXEC])
+    p[e::startSide] = wavesValue (rw, 45).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
     const auto note = (int) std::lround (wavesValue (rw, 4).value_or (13.0));
-    if (*sync >= 0.5 && *sync < 1.5 && note >= 0 && note <= 19)
+    const auto ownTempo = wavesValue (rw, 2);
+    // round 135w: H-Delay's own BPM (sync 0) keeps its note and tempo (was folded into milliseconds)
+    const bool ownBpmSync = *sync < 0.5 && ownTempo && *ownTempo >= 30.0 && *ownTempo <= 300.0;
+    p[e::tempoSource] = ownBpmSync ? 1.0f : 0.0f;
+    if (ownBpmSync)
+        p[e::ownBpm] = e::bpmValue (*ownTempo);
+    if ((ownBpmSync || (*sync >= 0.5 && *sync < 1.5)) && note >= 0 && note <= 19)
     {
-        // host tempo: the note follows the project's tempo
+        // host tempo (or its own): the note follows that tempo
         const auto index = note >= 18 ? note - 12 : note / 3;  // 1/64 … 1/2, 1 bar, 2 bars
         const auto kind = note >= 18 ? 1 : (note % 3 == 0 ? 3 : (note % 3 == 1 ? 1 : 2)); // triplet, straight, dotted
         for (const auto side : { e::syncL, e::syncR })
@@ -1469,20 +1517,24 @@ int translateWavesDoubler (const std::vector<std::uint8_t>& state, EffectSlot& s
     p[g::highOn] = flag (14, 0.0);
     p[g::feedbackCut] = g::freqValue (at (15, 16.0));
     p[g::range] = flag (18, 0.0);
-    for (int v = 0; v < g::voices; ++v)
+    // round 135w: a four-voice doubler's voices 3 and 4 (blocks 46 / 56, the same layout as 26 / 36 [model]: a two-voice
+    // state carries those blocks too, so they are read only when the state names the four-voice plug-in; their source
+    // indices are not probed yet: own side)
+    const bool four = wavesPluginName (state).find ("Doubler4") != std::string::npos;
+    for (int v = 0; v < (four ? 4 : 2); ++v)
     {
         const auto b = (std::size_t) (26 + 10 * v);
         const auto param = [&] (g::VoiceParam q) -> float& { return p[(std::size_t) g::voiceParam (v, q)]; };
         param (g::vOn) = flag (b, 1.0);
         param (g::vGain) = linNorm (at (b + 1, 0.0), -48.0, 0.0);
-        param (g::vPan) = linNorm (at (b + 2, v == 0 ? -45.0 : 45.0), -45.0, 45.0);
+        param (g::vPan) = linNorm (at (b + 2, v % 2 == 0 ? -45.0 : 45.0), -45.0, 45.0);
         param (g::vOctave) = flag (b + 3, 0.0);
         param (g::vDetune) = linNorm (at (b + 4, 0.0), -100.0, 100.0);
         param (g::vDelay) = linNorm (at (b + 5, 10.0), 0.0, 100.0);
         param (g::vFeedback) = linNorm (at (b + 6, 0.0), 0.0, 100.0);
         param (g::vDepth) = linNorm (at (b + 7, 0.0), -200.0, 200.0);
         param (g::vRate) = logNorm (std::clamp (at (b + 8, 1.0), 0.1, 400.0), 0.1, 400.0);
-        param (g::vSource) = ((float) std::clamp ((int) std::lround (at (16 + (std::size_t) v, 0.0)), 0, 2) + 0.5f) / 3.0f;
+        param (g::vSource) = v >= 2 ? 1.0f / 6.0f : ((float) std::clamp ((int) std::lround (at (16 + (std::size_t) v, 0.0)), 0, 2) + 0.5f) / 3.0f;
     }
     return 33;
 }
@@ -1530,8 +1582,74 @@ int translateWavesS1Imager (const std::vector<std::uint8_t>& state, EffectSlot& 
     return 4;
 }
 
+// --- Soundtoys (round 135): her states, read black-box in the official trials -------------------------------------
+// A Soundtoys state is text ("WIDGET = …; PRESET =<encoded>;"); the payload is NOT decoded. Each state found in her
+// projects was loaded into the official trial through the host API and every parameter read back
+// (docs/analise/REA_rodada135s.md §1); the table maps the payload's FNV-1a hash to those settings in LYNX's units.
+struct KnownState
+{
+    std::uint64_t hash;
+    std::vector<std::pair<int, float>> values;
+};
+namespace vs = voiceshift;
+namespace em = mixsuite::ember;
+namespace ap = autopan;
+#include "core/SoundtoysStates.inc"
+
+std::optional<std::uint64_t> soundtoysPayloadHash (const std::vector<std::uint8_t>& state)
+{
+    static constexpr char key[] = "PRESET =";
+    const auto* b = state.data();
+    const auto n = state.size();
+    for (std::size_t i = 0; i + sizeof (key) - 1 <= n; ++i)
+        if (std::memcmp (b + i, key, sizeof (key) - 1) == 0)
+        {
+            auto start = i + sizeof (key) - 1, end = start;
+            while (end < n && b[end] != ';') ++end;
+            if (end >= n) return std::nullopt;
+            while (start < end && std::isspace (b[start])) ++start;
+            while (end > start && std::isspace (b[end - 1])) --end;
+            std::uint64_t h = 0xcbf29ce484222325ull;
+            for (auto k = start; k < end; ++k) { h ^= b[k]; h *= 0x100000001b3ull; }
+            return h;
+        }
+    return std::nullopt;
+}
+
+template <std::size_t N>
+int translateKnown (const KnownState (&table)[N], EffectKind kind, const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    if (slot.kind != kind) return 0;
+    const auto h = soundtoysPayloadHash (state);
+    if (! h) return 0;
+    for (const auto& k : table)
+        if (k.hash == *h)
+        {
+            for (const auto& [p, v] : k.values)
+                if (p >= 0 && p < (int) slot.params.size()) slot.params[(std::size_t) p] = v;
+            return (int) k.values.size();
+        }
+    return 0;
+}
+
+int translateAlterBoy (const std::vector<std::uint8_t>& s, EffectSlot& slot) { return translateKnown (alterBoyStates, EffectKind::voiceShift, s, slot); }
+int translateDecapitator (const std::vector<std::uint8_t>& s, EffectSlot& slot) { return translateKnown (decapitatorStates, EffectKind::ember, s, slot); }
+int translatePanMan (const std::vector<std::uint8_t>& s, EffectSlot& slot) { return translateKnown (panManStates, EffectKind::autoPan, s, slot); }
+} // namespace
+
+int knownSoundtoysStates() noexcept { return (int) (std::size (alterBoyStates) + std::size (decapitatorStates) + std::size (panManStates)); }
+std::optional<std::uint64_t> soundtoysStateHash (const std::vector<std::uint8_t>& state) { return soundtoysPayloadHash (state); }
+
+namespace
+{
 RawTranslator rawTranslatorNamed (std::string_view name)
 {
+    if (name == "soundtoys-littlealterboy")
+        return translateAlterBoy;
+    if (name == "soundtoys-decapitator")
+        return translateDecapitator;
+    if (name == "soundtoys-panman")
+        return translatePanMan;
     if (name == "waves-s1-imager")
         return translateWavesS1Imager;
     if (name == "waves-h-delay")
@@ -2137,9 +2255,32 @@ EffectSlot makeSubstituteSlot (const SubstituteEntry& entry, const PluginIdentit
         if (const auto translate = fabfilter::translatorNamed (entry.translator))
             if (const auto state = fabfilter::parseState (original->state))
                 count += translate (*state, slot);
+    // round 135: the header shows the original's preset name (LYNX engines only: an FL effect's preset box lists FL's
+    // own presets)
+    if (original != nullptr && ! original->state.empty() && flPluginsForEffect (slot.kind).empty())
+        slot.presetName = originalPresetName (original->state);
     if (translated != nullptr)
         *translated = count;
     return slot;
+}
+
+std::string originalPresetName (const std::vector<std::uint8_t>& state)
+{
+    if (const auto chunk = findBytes (state, "<PresetChunkXMLTree"); chunk != std::string::npos)
+    {
+        const auto a = findBytes (state, "<Preset Name=\"", chunk);
+        if (a == std::string::npos)
+            return {};
+        const auto start = a + 14;
+        const auto b = findBytes (state, "\"", start);
+        if (b == std::string::npos || b - start > 200)
+            return {};
+        return xmlUnescape (trim (std::string (state.begin() + (std::ptrdiff_t) start, state.begin() + (std::ptrdiff_t) b)));
+    }
+    for (const auto& [name, value] : juceXmlStateAttributes (state))
+        if (name == "presetName")
+            return trim (value);
+    return {};
 }
 
 bool substituteEffectSlot (EffectSlot& slot, const PluginIdentity& identity)

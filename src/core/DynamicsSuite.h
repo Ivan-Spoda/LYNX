@@ -23,6 +23,7 @@
 // peak; Prism: 0..3 = the bands' gain change in dB / 30 (negative = reduction, positive = boost), 4 = input peak,
 // 5 = output peak.
 
+#include <array>
 #include <memory>
 #include <string>
 
@@ -48,6 +49,8 @@ enum Param
     oversampling, autoGain, mix, input, output,
     // round 128 (Pro-C 3 parity): dry level (parallel compression), auto threshold, stereo-link mode, display settings
     dryGain, autoThreshold, linkMode, meterScale, inputMeter,
+    // round 135 (Pro-C 3 parity): the wet (compressed) and dry paths' stereo balance
+    wetPan, dryPan,
     count
 };
 constexpr int scBands = 3;
@@ -58,6 +61,7 @@ constexpr int linkModes = 5;
 LinkMode linkModeOf (float v) noexcept;
 float linkModeValue (LinkMode m) noexcept;
 double dryDb (float v) noexcept;         // −∞ (v = 0) … +36 dB; 0 dB at 0.5 (72 dB/unit above 0.25, square law below)
+double panOf (float v) noexcept;         // −1 (left) … +1 (right) balance of the wet / dry path
 float dryValue (double db) noexcept;
 double meterRangeDb (float v) noexcept;  // the display's range: 9, 18, 36, 72 or 90 dB
 // Auto threshold (round 128): the threshold follows the programme — the effective threshold is the detector input's
@@ -100,13 +104,36 @@ float characterCurve (Character c, float x) noexcept;
 // ---- Prism Multiband ----
 namespace prism
 {
-constexpr int bands = 4;
+// Round 135 (Pro-MB parity): up to 6 bands (was 4). Bands 1–4 and the first three crossovers keep their parameter
+// indices; bands 5–6, crossovers 4–5, their look-aheads, the band count, the bands' output pan and the external side
+// chain are appended. The band count (default 4) is how many contiguous bands the crossover tree has: 4 is the old
+// engine, sample for sample.
+constexpr int bands = 6;        // the most bands
+constexpr int legacyBands = 4;  // bands of the old parameter block
 constexpr int fieldsPerBand = 10;
 enum Field { fThreshold, fRatio, fRange, fMode, fKnee, fAttack, fRelease, fLevel, fEnabled, fSolo };
-enum Global { xover1 = bands * fieldsPerBand, xover2, xover3, slope, lookahead, mix, input, output,
+enum Global { xover1 = legacyBands * fieldsPerBand, xover2, xover3, slope, lookahead, mix, input, output,
               // round 128 (Pro-MB parity): each band's own look-ahead (≤ the global one, which sets the latency)
-              bandLookahead0, count = bandLookahead0 + bands };
-inline int param (int band, int field) noexcept { return band * fieldsPerBand + field; }
+              bandLookahead0,
+              // round 135: bands 5 and 6 (10 fields each), crossovers 4–5, their look-aheads, the band count, the pan
+              // of each band's output (6), the external side chain
+              band5 = bandLookahead0 + legacyBands, xover4 = band5 + 2 * fieldsPerBand, xover5, bandLookahead4, bandLookahead5,
+              bandCountParam, bandPan0, scExternal = bandPan0 + bands,
+              count };
+inline int param (int band, int field) noexcept
+{
+    return band < legacyBands ? band * fieldsPerBand + field : band5 + (band - legacyBands) * fieldsPerBand + field;
+}
+inline int crossoverParam (int k) noexcept { return k < 3 ? xover1 + k : xover4 + (k - 3); }      // k = 0 … 4
+inline int bandLookaheadParam (int b) noexcept { return b < legacyBands ? bandLookahead0 + b : bandLookahead4 + (b - legacyBands); }
+inline int bandPanParam (int b) noexcept { return bandPan0 + b; }
+// the live meter of band b (Effect::controlOutput): 0 … 3, then 6 and 7 (4 / 5 are the input / output peaks)
+inline int bandMeter (int b) noexcept { return b < legacyBands ? b : 6 + (b - legacyBands); }
+int bandCount (const EffectParams& p) noexcept;   // 1 … 6
+float bandCountValue (int n) noexcept;
+double panOf (float v) noexcept;                   // −1 (left) … +1 (right): the band's output balance
+// the crossovers in use (ascending, n − 1 of them)
+std::array<double, bands - 1> crossovers (const EffectParams& p) noexcept;
 
 double thresholdDb (float v) noexcept;   // −90 .. 0 dBFS (square-root law, finer near 0 dB)
 float thresholdValue (double db) noexcept;
@@ -138,6 +165,9 @@ enum Param
     // round 128 (Pro-G parity): channel mode, the expert side-chain gain / mix per detector channel, wet / dry pan,
     // ducking, input level
     channelMode, scGainL, scMixL, scGainR, scMixR, wetPan, dryPan, ducking, input,
+    // round 135 (Pro-G's bottom bar): oversampling off / 2x / 4x / 8x — the gate's gain is applied at the high rate
+    // (smoother, alias-free fast gating); latency + the oversampler's
+    oversampling,
     count
 };
 double scGainDb (float v) noexcept;      // −36 … +36 dB

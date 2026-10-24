@@ -44,7 +44,7 @@ TEST (fuzz_every_effect_survives_extreme_parameters)
     using namespace lynx;
     std::mt19937 rng (111);
     int checked = 0;
-    for (int k = 0; k <= (int) EffectKind::geminiDoubler; ++k)
+    for (int k = 0; k <= (int) lastEffectKind; ++k)
     {
         const auto kind = (EffectKind) k;
         if (kind == EffectKind::plugin)

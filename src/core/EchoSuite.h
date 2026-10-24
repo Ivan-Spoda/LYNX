@@ -21,6 +21,8 @@
 
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "core/Song.h"
 
@@ -55,6 +57,21 @@ enum Param
     phaseR,
     hybrid,     // round 124: the hybrid echo engine (off / clean / analog) — a plain two-line echo with a level-dependent
                 // gain on every pass, measured on the H-Delay trial (REA_rodada124 §5); off = Echoform as before
+    // ---- round 135w (docs/PARITY.md: H-Delay, ValhallaDelay, EchoBoy / PrimalTap rows), appended; every default is
+    // the old sound
+    tempoSource, // note sync follows the project tempo (0) or the echo's own BPM (1, H-Delay's "BPM" sync)
+    ownBpm,      // that tempo, 30 … 300 BPM (linear; default 120)
+    startSide,   // ping-pong: the first echo on the left (0, default) or on the right (1) (H-Delay's start direction)
+    filterLink,  // the editor moves the low and high cut together (UI only; the engine ignores it)
+    tapA, tapB, tapC, tapD, // quad: each tap heard or muted (all on by default)
+    swell,       // quad: feedback from the last tap (0, "Repeat") or from every tap heard (1, "Swell")
+    groove,      // ±25 % of the echo time: odd repeats late (+) or early (−) (EchoBoy's Groove, measured [EXEC])
+    feel,        // ±25 % of the echo time: the whole echo train late (+, "draggin'") or early (−, "rushin'")
+    accent,      // ±100 %: odd repeats louder (+) or softer (−) than even ones
+    primes,      // the delay times snap to a prime number of samples (EchoBoy's Prime Numbers)
+    crossFeedback, // 0 … 100 %: each side's feedback taken from the other side (EchoBoy's Dual "FB Mix")
+    balance,     // ±100 %: the echoes' left / right level
+    freeze,      // the loop holds what it has (no input, unity feedback, no colouring) (PrimalTap's Freeze)
     paramCount
 };
 enum class Style { single, ratio, quad, dual, pingPong }; // the two-time styles last (the panel shows the right time for both)
@@ -79,6 +96,15 @@ double pitchSemis (float v) noexcept;    // ±24
 double lowCutHz (float v) noexcept;      // 10 .. 2000
 double highCutHz (float v) noexcept;     // 200 .. 20000
 double outputDb (float v) noexcept;      // −18 .. +18 dB (round 119)
+double bpmOf (float v) noexcept;         // 30 .. 300 BPM (round 135w)
+float bpmValue (double bpm) noexcept;
+// the tempo the note sync follows: the project's or the echo's own (round 135w)
+double tempoFor (const EffectParams& p, double projectBpm) noexcept;
+// the nearest prime number of samples to `samples` (≥ 2) (round 135w, EchoBoy's Prime Numbers)
+int nearestPrime (int samples) noexcept;
+// round 135w: an edit of `param` with Filter link on: the low and high cut move together (the same frequency ratio);
+// returns the edits to apply (just the one when the link is off or the parameter is not a cut)
+std::vector<std::pair<int, float>> linkedEdit (const EffectParams& p, int param, float value);
 int hybridOf (float v) noexcept;         // 0 off, 1 clean, 2 analog (round 124)
 float hybridValue (int h) noexcept;
 Mode modeOf (float v) noexcept;

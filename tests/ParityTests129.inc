@@ -84,7 +84,7 @@ TEST (substitute_roles_fixed_round129)
     };
     // PanMan: Auto-pan really sweeps (+50 %; 0.5 was 0 % on the bipolar depth = no movement)
     const auto pan = slotFor ("PanMan", 0x5374506eu);
-    CHECK (pan.kind == EffectKind::autoPan && formatEffectParam (pan.kind, 1, pan.params[1], 120.0) == "+50%");
+    CHECK (pan.kind == EffectKind::autoPan && formatEffectParam (pan.kind, 1, pan.params[1], 120.0) == "+84%"); // round 135: her 150° width
     // EchoBoy / PrimalTap: Echoform, a tape echo on a quarter note
     const auto echo = slotFor ("EchoBoy", 0x53744542u);
     CHECK (echo.kind == EffectKind::echoform);

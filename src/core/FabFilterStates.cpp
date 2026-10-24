@@ -272,8 +272,8 @@ int fromProMB (const State& s, EffectSlot& slot)
     if (count == 0)
         return 0;
     std::sort (used.begin(), used.begin() + count, [] (const Ref& a, const Ref& b) { return a.lo * a.hi < b.lo * b.hi; });
-    // our four contiguous bands: each used reference band in order, with a disabled gap band where the reference
-    // leaves room below / between (gaps are dropped first when there are more than four)
+    // our contiguous bands (up to six, round 135): each used reference band in order, with a disabled gap band where the
+    // reference leaves room below / between (gaps are dropped first when there are more than six)
     struct Seg { int ref; double lo, hi; };
     std::array<Seg, 16> segs {};
     int nseg = 0;
@@ -299,7 +299,7 @@ int fromProMB (const State& s, EffectSlot& slot)
             }
         if (gap < 0)
         {
-            nseg = bands; // more than four reference bands: the four lowest
+            nseg = bands; // more than six reference bands: the six lowest
             break;
         }
         // give the gap to a neighbour
@@ -311,14 +311,16 @@ int fromProMB (const State& s, EffectSlot& slot)
             segs[(std::size_t) k] = segs[(std::size_t) (k + 1)];
         --nseg;
     }
-    // unused bands of ours sit above everything, disabled
+    // unused bands of ours sit above everything, disabled; round 135: up to six bands (four at least, as before)
+    const int nb = std::max (legacyBands, std::min (nseg, bands));
+    set (Global::bandCountParam, bandCountValue (nb));
     double la = 0.0;
-    for (int b = 0; b < bands; ++b)
+    for (int b = 0; b < nb; ++b)
     {
-        if (b < bands - 1)
+        if (b < nb - 1)
         {
             const auto hz = b + 1 < nseg ? segs[(std::size_t) b].hi : 17000.0 + 300.0 * b;
-            set (Global::xover1 + b, crossoverValue (hz));
+            set (crossoverParam (b), crossoverValue (hz));
         }
         if (b >= nseg || segs[(std::size_t) b].ref < 0)
         {
@@ -340,7 +342,7 @@ int fromProMB (const State& s, EffectSlot& slot)
         const auto soloMute = roundIndex (s.at (base + 21));
         set (param (b, fSolo), soloMute == 1 || soloMute == 3 ? 1.0f : 0.0f);
         la = std::max (la, (double) s.at (base + 12));
-        set (Global::bandLookahead0 + b, linValue (s.at (base + 12), 0.0, 20.0)); // round 128: the band's own
+        set (bandLookaheadParam (b), linValue (s.at (base + 12), 0.0, 20.0)); // round 128: the band's own
         if (b == 0)
         {
             // the slope: the steeper of the band's sides, to our nearest
@@ -491,9 +493,10 @@ int fromProQ4 (const State& s, EffectSlot& slot)
         p[(std::size_t) k] = clamp01 (v);
         ++n;
     };
+    // round 135: Facet has the flat tilt and the all pass too (they were a tilt shelf and off)
     static constexpr facet::Shape shapes[10] { facet::Shape::bell, facet::Shape::lowShelf, facet::Shape::lowCut, facet::Shape::highShelf,
                                                facet::Shape::highCut, facet::Shape::notch, facet::Shape::bandPass,
-                                               facet::Shape::tiltShelf, facet::Shape::tiltShelf, facet::Shape::off };
+                                               facet::Shape::tiltShelf, facet::Shape::flatTilt, facet::Shape::allPass };
     static constexpr int slopes[11] { 6, 6, 12, 18, 24, 30, 36, 48, 72, 96, 96 };
     int band = 0;
     for (int b = 0; b < 24 && band < facet::bands; ++b)
