@@ -173,8 +173,15 @@ std::string substituteOriginalName (const EffectSlot& slot);
 std::vector<std::pair<std::string, std::string>> juceXmlStateAttributes (const std::vector<std::uint8_t>& state);
 // The <PluginName> of a Waves preset chunk ("" when not a Waves state).
 std::string wavesPluginName (const std::vector<std::uint8_t>& state);
+// The name of the preset the original plugin was saved with (round 135): a Valhalla state's `presetName` attribute,
+// a Waves chunk's <Preset Name="...">; "" when none is stored.
+std::string originalPresetName (const std::vector<std::uint8_t>& state);
 // The "RealWorld" parameter values of the active setup of a Waves preset chunk ("*" = unused -> NaN).
 std::vector<double> wavesRealWorldParams (const std::vector<std::uint8_t>& state);
+// Round 135: the FNV-1a hash of a Soundtoys state's PRESET payload (nullopt when not one), and how many of her
+// Soundtoys states (read black-box in the official trials) are translated by it.
+std::optional<std::uint64_t> soundtoysStateHash (const std::vector<std::uint8_t>& state);
+int knownSoundtoysStates() noexcept;
 
 // --- lossless text form of an .flp plugin reference (.lynx keeps it for substitutes) ------------------------------
 // Base64 of a versioned binary record of every ForeignPlugin field; foreignFromText(foreignToText(p)) == p, the

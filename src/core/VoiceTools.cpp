@@ -504,6 +504,13 @@ public:
         if (voice[0].line.buf.empty())
             return;
         design (p);
+        // round 135w: RESET — a flip of the momentary value restarts every LFO at the same phase
+        if (const auto r = p[modReset] >= 0.5f; r != lastReset)
+        {
+            lastReset = r;
+            for (auto& v : voice)
+                v.lfo = 0.0;
+        }
         float peakIn = 0.0f, peakOut = 0.0f; // the editor's level meters (round 129: the reference's output meters)
         for (int i = 0; i < n; ++i)
             peakIn = std::max (peakIn, std::max (std::abs (l[i]), std::abs (r[i])));
@@ -555,7 +562,7 @@ public:
             {
                 auto& v = voice[k];
                 const auto& s = vs[k];
-                const auto own = k == 0 ? inL : inR, other = k == 0 ? inR : inL;
+                const auto own = k % 2 == 0 ? inL : inR, other = k % 2 == 0 ? inR : inL; // odd voices: the left side
                 const auto src = s.source == 0 ? own : (s.source == 1 ? 0.5f * (own + other) : 0.5f * (own - other));
                 // feedback from the voice's last output through the low cut
                 v.line.push (src + s.fb * v.fbHp.process (v.last, 0));
@@ -658,6 +665,7 @@ public:
 
 private:
     std::atomic<float> meterIn { 0.0f }, meterOut { 0.0f };
+    bool lastReset = false;
     void design (const EffectParams& p) noexcept
     {
         float key[5] { p[lowGain], p[lowFreq], p[highGain], p[highFreq], p[feedbackCut] };
@@ -752,7 +760,15 @@ const EffectInfo& geminiInfo()
                                      { "V1 octave", 0.0f }, { "V1 source", 0.1667f },
                                      { "V2 on", 1.0f }, { "V2 gain", 0.875f }, { "V2 pan", 1.0f }, { "V2 delay", 0.237f },
                                      { "V2 feedback", 0.0f }, { "V2 detune", 0.47f }, { "V2 depth", 0.5f }, { "V2 rate", 0.2776f },
-                                     { "V2 octave", 0.0f }, { "V2 source", 0.1667f } } };
+                                     { "V2 octave", 0.0f }, { "V2 source", 0.1667f },
+                                     // round 135w: voices 3 and 4 (the four-voice doubler's), off; ±45° like its defaults
+                                     { "V3 on", 0.0f }, { "V3 gain", 0.875f }, { "V3 pan", 0.0f }, { "V3 delay", 0.14f },
+                                     { "V3 feedback", 0.0f }, { "V3 detune", 0.56f }, { "V3 depth", 0.5f }, { "V3 rate", 0.2776f },
+                                     { "V3 octave", 0.0f }, { "V3 source", 0.1667f },
+                                     { "V4 on", 0.0f }, { "V4 gain", 0.875f }, { "V4 pan", 1.0f }, { "V4 delay", 0.30f },
+                                     { "V4 feedback", 0.0f }, { "V4 detune", 0.44f }, { "V4 depth", 0.5f }, { "V4 rate", 0.2776f },
+                                     { "V4 octave", 0.0f }, { "V4 source", 0.1667f },
+                                     { "Mod reset", 0.0f } } };
     return info;
 }
 
@@ -784,7 +800,9 @@ std::string paramText (EffectKind kind, int param, float v)
     if (kind == EffectKind::geminiDoubler)
     {
         using namespace gemini;
-        if (param >= voice1 && param < paramCount)
+        if (param == modReset)
+            return "reset";
+        if (param >= voice1 && param < modReset)
         {
             switch ((VoiceParam) ((param - voice1) % voiceParams))
             {

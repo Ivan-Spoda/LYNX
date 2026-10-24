@@ -71,12 +71,16 @@ std::unique_ptr<Effect> make (const Tuning& t);
 
 namespace gemini
 {
-constexpr int voices = 2;
+// round 135w: four voices (the four-voice doubler's voices 3 and 4, appended after voice 2, off by default) and a
+// modulation RESET (momentary: each flip of its value restarts every voice's LFO, in sync)
+constexpr int voices = 4;
 enum Param
 {
     output, directOn, directGain, directPan, align, lowOn, lowGain, lowFreq, highOn, highGain, highFreq, feedbackCut, range,
     voice1, // first parameter of voice 1; each voice has `voiceParams` parameters (VoiceParam order)
-    paramCount = voice1 + 2 * 10
+    voice3 = voice1 + 2 * 10, // round 135w (appended)
+    modReset = voice1 + 4 * 10, // round 135w (appended)
+    paramCount
 };
 enum VoiceParam { vOn, vGain, vPan, vDelay, vFeedback, vDetune, vDepth, vRate, vOctave, vSource, voiceParams };
 inline int voiceParam (int voice, VoiceParam p) noexcept { return voice1 + voice * voiceParams + (int) p; }

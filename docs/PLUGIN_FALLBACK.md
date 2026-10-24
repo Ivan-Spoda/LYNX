@@ -147,13 +147,16 @@ matches by name).
 | Waves DeEsser | Hush De-esser (5.5 kHz, −20 dBFS, 4 dB; round 113) | Waves name | frequency, threshold, split / wideband, side-chain filter, monitor, laws measured on the official trial [EXEC] (round 113 §3c) |
 | FabFilter Pro-DS, Harrison De-Esser | Hush De-esser (default; round 96) | names | — |
 | Slate Digital Fresh Air | Aether (neutral without a state; round 96) | name | Mid / High Air → Aether's air shelf gain and frequency, laws measured on the official trial (within 0.5 dB RMS for her settings) [EXEC] (round 113) |
-| Soundtoys Decapitator, FabFilter Saturn | Ember Saturator (drive +1.4 dB, auto gain; round 113) | names | Saturn 2: multiband mode — bands, crossovers, style family, drive, mix, level (round 108) [EXEC layout] |
-| Soundtoys PanMan | Auto-pan (balance swing ±50 % per beat; round 127 fixed round 113's pass-through) | VST2 ID [DATA], name | — |
+| Soundtoys Decapitator, FabFilter Saturn | Ember Saturator (drive +1.4 dB, auto gain; round 113) | VST2 ID `StDc`, names | Saturn 2: multiband mode — bands, crossovers, style family, drive, mix, level (round 108) [EXEC layout]; Decapitator: her states (round 135, read black-box in the official trial: payload hash → voicing, drive, punish, tone, wide cuts, thump / steep, mix, trim) |
+| Soundtoys PanMan | Auto-pan, panner sources (round 135: a 3.56 Hz soft LFO, 150° wide, analog — her usual setting) | VST2 ID [DATA], name | her states (round 135, read black-box in the official trial: source, rate, steps, width, smoothing, gains, analog) |
 
 | Antares Auto-Tune (Pro / Artist / Access / EFX+ / Hybrid) | LYNX Tune | VST3 class ID [DATA] (Auto-Tune Pro), names | Auto-Tune Pro: key and scale (`<Custom ScaleGivenKey / ScaleGivenScale>` [DATA]; scale list 0 major, 1 minor, 2 chromatic [model, round 113 §2]) retune, humanize, flex-tune (round 120), detune, transpose, mix, input type, formant / throat, Classic, tracking (round 127); Auto-Tune EFX+: key, scale and note switches, retune, humanize, pitch shift, formant / throat, input type, mix (round 127); otherwise the project's key or a gentle chromatic correction |
 | Waves Tune Real-Time | LYNX Tune | Waves name, names | — (the project's key, else gentle chromatic) |
 
-Not mapped yet (no LYNX module plays their role): Little AlterBoy, Filterverse, Kickstart,
+Round 135: **Soundtoys Little AlterBoy → Voice Shift** (VST2 ID `StLa`, names; her states translated — read black-box in
+the official trial; others: Quantize, formant +1.2 st, drive 4.6).
+
+Not mapped yet (no LYNX module plays their role): Filterverse, Kickstart,
 Sausage Fattener, Effectrix, Analog Lab (instrument). The mixing suite of round 96 (Ridge Strip, Glow Leveler, Hush
 De-esser, Aether, Ember Saturator) took over the channel strip, CLA-2A, de-esser, air and saturator roles.
 

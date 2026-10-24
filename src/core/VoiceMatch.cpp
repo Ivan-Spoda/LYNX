@@ -628,8 +628,10 @@ void Compressor::reset() noexcept
 
 void Compressor::process (float* l, float* r, int n, const Settings& s) noexcept
 {
-    const double T = s.thresholdDb + thrOffset, R = 1.0 + (std::max (1.0, s.ratio) - 1.0) * ratioScale, W = kneeDb;
-    const double aA = coefMs (std::max (0.01, s.attackMs) * attackScale, sr), fR = coefMs (fastReleaseMs, sr), sC = coefMs (slowChargeMs, sr);
+    const double T = s.thresholdDb + thrOffset, R = 1.0 + (std::max (1.0, s.ratio) - 1.0) * (s.smooth ? 1.0 : ratioScale), W = kneeDb;
+    const double aA = coefMs (std::max (0.01, s.attackMs) * attackScale, sr), sC = coefMs (slowChargeMs, sr);
+    const double fR = coefMs (s.manual ? std::max (1.0, s.releaseMs) : fastReleaseMs, sr);
+    const double shape = s.opto ? -slowShape : slowShape;
     const double dR = coefMs (detectorReleaseMs, sr), relK = 160.0 / std::max (1.0, s.releaseMs), dt = 1.0 / sr;
     const double makeup = s.gainDb, trim = dbToGain (s.trimDb);
     const int N = (int) dl.size();
@@ -645,12 +647,14 @@ void Compressor::process (float* l, float* r, int n, const Settings& s) noexcept
         else y = T + o / R;
         const double target = std::max (0.0, x - y);
         grf += (target > grf ? aA : fR) * (target - grf);
-        if (grf > grs)
+        if (s.manual)
+            grs = 0.0;
+        else if (grf > grs)
             grs += sC * (grf - grs);
         else
         {
             double gs = dbToGain (-grs);
-            gs += slowRate * relK * (1.0 + slowShape * (1.0 - gs)) * dt;
+            gs += slowRate * relK * (1.0 + shape * (1.0 - gs)) * dt;
             grs = gs >= 1.0 ? 0.0 : -gainToDb (gs);
             grs = std::max (grs, grf);
         }

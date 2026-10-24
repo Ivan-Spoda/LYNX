@@ -54,7 +54,7 @@ TEST (facet_round128_parameters_default_to_the_old_behaviour)
 {
     using namespace lynx::facet;
     const auto p = facet103::defaults();
-    CHECK (info().params.size() == 88 && paramCount == 88 && paramCount <= lynx::maxEffectParams);
+    CHECK (info().params.size() == (std::size_t) paramCount && paramCount >= 88 && characterParam == 88 && paramCount <= lynx::maxEffectParams); // round 135 appended Character
     for (int b = 0; b < bands; ++b)
     {
         CHECK (bandPower (p, b));
@@ -175,7 +175,7 @@ TEST (ember_round128_new_parameters_default_to_the_old_sound)
 {
     using namespace lynx::mixsuite::ember;
     const auto& in = lynx::effectInfo (lynx::EffectKind::ember);
-    CHECK ((int) in.params.size() == count && count == 65 && count <= lynx::maxEffectParams);
+    CHECK ((int) in.params.size() == count && count == 72 && count <= lynx::maxEffectParams);
     const auto p = mixsuite96::defaults (lynx::EffectKind::ember);
     CHECK (std::abs (inputDb (p[inputGain])) < 1e-9);
     for (int b = 0; b < maxBands; ++b)
