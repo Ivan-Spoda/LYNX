@@ -84,8 +84,34 @@ enum Param : int
     // round 150 (appended): the Waves Tune Real-Time role's Receive — on (default) = this instance takes the scales
     // another instance sends (Send scale to all); off = its scale stays as it is
     receiveScale,
+    // round 152 (appended): the Waves Tune Real-Time role's Group Octaves — on (default) = a key edits its note name in
+    // every octave, as before; off = a key's own status (the key map below) overrides its note name's in that octave
+    groupOctaves,
+    keyMap1,                       // 12 packed values: MIDI notes 24 … 119, 8 keys per value (base 6), 0 = follow
+    // round 152 (appended): the MIDI reference tone — a sine at each note held on the MIDI channel, mixed into the
+    // output at −18 … +18 dB (0 dB = −12 dBFS peak per note [model]); off by default
+    referenceTone = keyMap1 + 12,
+    referenceToneLevel,
     count
 };
+double referenceToneDb (float v) noexcept; // −18 … +18 dB
+// round 152: the key map of Group Octaves off
+enum class KeyStatus { follow, legal, removed, removedUp, removedDown, bypass };
+constexpr int keyStatuses = 6;
+constexpr int keyMapFirst = 24, keyMapPerParam = 8, keyMapParams = 12, keyMapKeys = keyMapPerParam * keyMapParams;
+bool groupOctavesOn (const float* params) noexcept;
+KeyStatus keyOverride (const float* params, int note) noexcept;       // follow outside 24 … 119
+void setKeyOverride (float* params, int note, KeyStatus s) noexcept;  // ignored outside 24 … 119
+bool anyKeyOverride (const float* params) noexcept;
+void clearKeyOverrides (float* params) noexcept;
+// a note's status in effect: its key's own (Group Octaves off) or its note name's (legal = a target in the scale mask
+// `mask`, the note switches, bypasses and directions) — never follow
+KeyStatus noteStatus (const float* params, int note, std::uint16_t mask) noexcept;
+// the target note with the key map in effect (Group Octaves off): the nearest allowed key within an octave with the
+// hysteresis toward `previous`, then an illegal sung key's direction; −1 never (all keys illegal: the sung note)
+int targetNoteKeys (double sung, const float* params, std::uint16_t mask, int previous, double hysteresis) noexcept;
+// the next status of a REMOVE click on a key: legal → removed → removed up → removed down → legal (the reference's)
+KeyStatus nextRemoveStatus (KeyStatus current) noexcept;
 enum class NoteDir { nearest, up, down };
 NoteDir noteDir (float v) noexcept;
 int rangeNote (float v) noexcept;       // 0 … 127
@@ -132,7 +158,7 @@ int latencyFor (double sampleRate, int range, bool lowLatency) noexcept;
 
 // round 150: Send / Receive between instances (the reference's "Send Scale to All" / "Receive"). The shared scale is
 // the key, the scale, More scales, the twelve note switches, bypasses and directions, and the keyboard's range.
-constexpr int sharedScaleParams = 3 + 12 * 3 + 2;
+constexpr int sharedScaleParams = 3 + 12 * 3 + 2 + 1 + 12; // round 152: + Group Octaves and the key map
 const std::array<int, sharedScaleParams>& sharedScaleList() noexcept;
 struct SharedScale
 {

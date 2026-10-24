@@ -275,8 +275,60 @@ enum Param
     band5DrivePan, band6DrivePan, band5Pan, band6Pan,
     inputPan, outputPan,
     band1Character, band2Character, band3Character, band4Character, band5Character, band6Character,
+    // round 152 (Saturn 2 parity, measured black-box on the trial, REA_rodada152b; appended, defaults = the old sound):
+    // each crossover's own slope (0 = the global Crossover slope, else 6 / 12 / 24 / 36 / 48 dB/oct: the first-order
+    // pair and LR2 … LR8, exactly the reference's), the processing mode (minimum phase = the IIR tree, linear phase =
+    // zero-phase FIR bands, the reference's 3072-sample latency at 48 kHz), the modulation (two step LFOs, an envelope
+    // follower, four slots source → target × amount, the reference's laws) and the effect characters' measured law
+    // (Collapse pitches down 24 semitones × drive; projects saved before round 152 keep the static stand-in)
+    crossSlope1, crossSlope2, crossSlope3, crossSlope4, crossSlope5,
+    processing,
+    lfo1Rate, lfo1Shape, lfo2Rate, lfo2Shape,
+    envAttack, envRelease,
+    mod1Source, mod1Target, mod1Amount, mod2Source, mod2Target, mod2Amount,
+    mod3Source, mod3Target, mod3Amount, mod4Source, mod4Target, mod4Amount,
+    effectLaw,
     count
 };
+// round 152: crossover k's slope (0 … 4) in dB/oct — its own, or the global Crossover slope
+int crossoverSlopeDbOct (const EffectParams& p, int k) noexcept;
+constexpr int ownSlopes = 5;                    // 6, 12, 24, 36, 48
+int ownSlopeDbOct (float v) noexcept;           // 0 = global (returns 0), else 6 … 48
+float ownSlopeValue (int dbOct) noexcept;       // 6 … 48 → its value (0 = global)
+bool linearPhase (const EffectParams& p) noexcept;
+int linearLatency (double sampleRate) noexcept; // 3072 samples at 48 kHz (the reference's, measured)
+// the linear-phase band shape: 1 / (1 + x^m), x = f / crossover, m = slope / 6 (measured, zero phase)
+double linearLow (double hz, double crossoverHz, int slopeDbOct) noexcept;
+// modulation (round 152): sources and targets
+constexpr int modSlots = 4;
+enum class ModSource { off, lfo1, lfo2, envelope };
+constexpr int modSources = 4;
+ModSource modSourceOf (float v) noexcept;
+// targets: 0 none, 1 input gain, 2 output gain, 3 mix, 4 … 9 band 1 … 6 drive, 10 … 15 band level, 16 … 21 band mix,
+// 22 … 26 crossover 1 … 5
+constexpr int modTargets = 27;
+int modTargetOf (float v) noexcept;
+const char* modTargetName (int t) noexcept;
+int modTargetParam (int t) noexcept;            // the Ember parameter a target moves (−1 for none)
+// the change of that parameter (0 … 1 units) for a modulation of `units` in the reference's units of that target
+// (its full range = 1: gains ±36 dB, drive 0 … 100 % = 30 dB of Ember's, level −∞ … +36 dB, crossover 40 Hz … 18 kHz)
+double modDelta (int target, double units) noexcept;
+double modAmount (float v) noexcept;            // −1 … +1 (the reference's level law on |2v − 1|, signed)
+float modAmountValue (double level) noexcept;   // inverse
+double lfoRateHz (float v) noexcept;            // 0.02 … 500 Hz (the reference's knob law)
+float lfoRateValue (double hz) noexcept;
+enum class LfoShape { sine, triangle, square, easeIn, easeOut };
+constexpr int lfoShapes = 5;
+LfoShape lfoShapeOf (float v) noexcept;
+double lfoValue (LfoShape s, double phase) noexcept; // −1 … +1 at a phase 0 … 1 (two steps +1 / −1 with a glide)
+double envAttackMs (float v) noexcept;          // 1 ms … 1 s (the reference's law)
+double envReleaseMs (float v) noexcept;         // 50 ms … 5 s
+// the follower's source value for a level (dB of its mean-square follower): (dB + 60.7) / 30, ≥ 0 (measured)
+double envSource (double followerDb) noexcept;
+bool modulated (const EffectParams& p) noexcept;
+bool measuredEffects (const EffectParams& p) noexcept;
+constexpr int collapseCharacter = 25;           // the character that pitches down with the measured law
+double collapseRatio (double referenceDrive) noexcept; // 2^(−2 · drive): −24 semitones at 100 %
 constexpr int maxBands = 6;   // round 150 (four before)
 constexpr int firstBands = 4; // the bands whose parameters sit in the first blocks
 inline int bandDrivePanParam (int band) noexcept
@@ -367,6 +419,7 @@ std::string paramText (EffectKind kind, int param, float v);
 std::unique_ptr<Effect> make (EffectKind kind);
 // Hush with its look-ahead (= latency) known before the first block (round 128)
 std::unique_ptr<Effect> makeHush (const EffectParams* params);
+std::unique_ptr<Effect> makeEmber (const EffectParams* params); // round 152: the processing mode known at once
 bool isSuiteKind (EffectKind kind) noexcept;
 
 // Meters the editor shows (written by the audio thread, read by the UI): see Effect::controlOutput.

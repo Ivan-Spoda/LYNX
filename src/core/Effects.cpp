@@ -3398,6 +3398,9 @@ void upgradeLoadedEffectParams (EffectSlot& slot, std::size_t savedCount) noexce
     if (slot.kind == EffectKind::autoPan && savedCount <= (std::size_t) autopan::count + 19)
         slot.params[(std::size_t) autopan::count + 19] = 0.0f;
     // round 150: Echoform saved before the voicings' measured stereo behaviour keeps the round-147 voicings
+    // round 152: Ember saved before the effect characters' measured law keeps the static stand-ins
+    if (slot.kind == EffectKind::ember && savedCount <= (std::size_t) mixsuite::ember::effectLaw)
+        slot.params[(std::size_t) mixsuite::ember::effectLaw] = 0.0f;
     if (slot.kind == EffectKind::echoform && savedCount <= (std::size_t) echosuite::echoform::voicingStereo
         && slot.params.size() > (std::size_t) echosuite::echoform::voicingStereo)
         slot.params[(std::size_t) echosuite::echoform::voicingStereo] = 0.0f;
@@ -3448,6 +3451,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return mixsuite::makeHush (&slot.params);
     if (slot.kind == EffectKind::facetEq) // its phase mode (latency) known before the first block
         return facet::make (&slot.params);
+    if (slot.kind == EffectKind::ember) // round 152: its processing mode (linear phase: latency) known before the first block
+        return mixsuite::makeEmber (&slot.params);
     if (dyn::isDynKind (slot.kind)) // their look-ahead / oversampling latency known before the first block
         return dyn::make (slot.kind, &slot.params);
     if (slot.kind == EffectKind::apexLimiter) // round 135: the oversampling latency known before the first block

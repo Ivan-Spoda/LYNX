@@ -7,9 +7,11 @@
 #include <cstdio>
 
 #include "core/Biquad.h"
+#include "core/DynamicsSuite.h"
 #include "core/Effects.h"
 #include "core/EmberClassic.h"
 #include "core/LrCrossover.h"
+#include "core/ParametricEqLinear.h"
 #include "core/VoiceMatch.h"
 #include "core/VoxStrip.h"
 
@@ -1573,6 +1575,146 @@ std::pair<float, float> bandCountValues (int n) noexcept
 }
 int characterIndex (float v) noexcept { return std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * characters), 0, characters); }
 
+// ---- round 152 (REA_rodada152b): own crossover slopes, linear phase, modulation, the effect characters' law ----
+namespace
+{
+// a knob law given as a table at equal steps of the value (the reference's value texts, read black-box)
+template <std::size_t N>
+double tableLaw (const double (&t)[N], float v) noexcept
+{
+    const auto x = std::clamp ((double) v, 0.0, 1.0) * (double) (N - 1);
+    const auto i = std::min ((std::size_t) x, N - 2);
+    return t[i] + (t[i + 1] - t[i]) * (x - (double) i);
+}
+template <std::size_t N>
+float tableInverse (const double (&t)[N], double y) noexcept
+{
+    if (y <= t[0]) return 0.0f;
+    for (std::size_t i = 0; i + 1 < N; ++i)
+        if (y <= t[i + 1])
+            return (float) (((double) i + (y - t[i]) / std::max (t[i + 1] - t[i], 1e-12)) / (double) (N - 1));
+    return 1.0f;
+}
+// XLFO Frequency (21 texts, 0.05 apart) [EXEC]
+constexpr double rateTable[21] { 0.02, 0.145, 0.27, 0.395, 0.52, 1.02, 1.52, 2.02, 2.52, 3.02, 3.52, 6.395, 9.27, 12.145,
+                                 15.019, 32.519, 50.018, 100.02, 150.01, 250.01, 500.0 };
+// Slot Level (21 texts) [EXEC]
+constexpr double levelTable[21] { 0.0, 0.001, 0.002, 0.018, 0.034, 0.05, 0.072, 0.094, 0.116, 0.138, 0.16, 0.21, 0.26, 0.31,
+                                  0.36, 0.498, 0.635, 0.773, 0.91, 0.955, 1.0 };
+// EF Attack / Release (41 texts, 0.025 apart) [EXEC]
+constexpr double attackTable[41] { 1, 4.33, 7.66, 10.99, 14.32, 17.65, 20.98, 25.97, 30.97, 34.81, 38.65, 42.5, 46.34, 50.18,
+                                   56.66, 63.79, 70.93, 78.42, 85.92, 93.41, 100.9, 108.4, 115.9, 123.4, 130.9, 143.4, 155.8,
+                                   168.3, 185.1, 202.9, 220.8, 253.2, 285.7, 318.2, 350.6, 405.6, 460.5, 560.4, 660.3, 793.5, 1000 };
+constexpr double releaseTable[41] { 50, 66.5, 83, 99.5, 116, 132.5, 149, 173.7, 198.5, 217.5, 236.6, 255.6, 274.7, 293.7,
+                                    325.8, 361.1, 396.5, 433.6, 470.7, 507.9, 545, 582.1, 619.2, 656.4, 693.5, 755.4, 817.2,
+                                    879.1, 962.2, 1051, 1139, 1300, 1461, 1622, 1782, 2055, 2327, 2822, 3317, 3977, 5000 };
+} // namespace
+
+int ownSlopeDbOct (float v) noexcept
+{
+    static constexpr int s[ownSlopes + 1] { 0, 6, 12, 24, 36, 48 };
+    return s[std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * ownSlopes), 0, ownSlopes)];
+}
+float ownSlopeValue (int dbOct) noexcept
+{
+    static constexpr int s[ownSlopes] { 6, 12, 24, 36, 48 };
+    for (int k = 0; k < ownSlopes; ++k)
+        if (dbOct <= s[k]) return (float) (k + 1) / (float) ownSlopes;
+    return 1.0f;
+}
+int crossoverSlopeDbOct (const EffectParams& p, int k) noexcept
+{
+    const auto own = ownSlopeDbOct (p[(std::size_t) (crossSlope1 + std::clamp (k, 0, maxBands - 2))]);
+    return own > 0 ? own : slopeDbOct (p[xoverSlope]);
+}
+bool linearPhase (const EffectParams& p) noexcept { return on (p[processing]); }
+int linearLatency (double sampleRate) noexcept { return dyn::prism::linearLatency (sampleRate); }
+double linearLow (double hz, double crossoverHz, int slopeDbOct) noexcept
+{
+    const auto x = std::max (hz, 0.0) / std::max (crossoverHz, 1.0);
+    return 1.0 / (1.0 + std::pow (x, (double) std::max (slopeDbOct, 6) / 6.0));
+}
+ModSource modSourceOf (float v) noexcept { return (ModSource) std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * (modSources - 1)), 0, modSources - 1); }
+int modTargetOf (float v) noexcept { return std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * (modTargets - 1)), 0, modTargets - 1); }
+const char* modTargetName (int t) noexcept
+{
+    static const char* const names[modTargets] { "None", "Input gain", "Output gain", "Mix",
+                                                 "B1 drive", "B2 drive", "B3 drive", "B4 drive", "B5 drive", "B6 drive",
+                                                 "B1 level", "B2 level", "B3 level", "B4 level", "B5 level", "B6 level",
+                                                 "B1 mix", "B2 mix", "B3 mix", "B4 mix", "B5 mix", "B6 mix",
+                                                 "Crossover 1", "Crossover 2", "Crossover 3", "Crossover 4", "Crossover 5" };
+    return names[std::clamp (t, 0, modTargets - 1)];
+}
+int modTargetParam (int t) noexcept
+{
+    if (t <= 0 || t >= modTargets) return -1;
+    if (t == 1) return inputGain;
+    if (t == 2) return output;
+    if (t == 3) return mix;
+    if (t < 10) return bandParam (t - 4, 1);
+    if (t < 16) return bandParam (t - 10, 3);
+    if (t < 22) return bandParam (t - 16, 2);
+    return crossoverParam (t - 22);
+}
+double modDelta (int t, double units) noexcept
+{
+    // the reference's target ranges (its parameters' value texts) in Ember's parameter units [EXEC: a slot of level L
+    // moves its target by L × the source in the target's own 0 … 1 range — e.g. B1 Output Level: 72 dB × L]
+    if (t <= 0 || t >= modTargets) return 0.0;
+    if (t == 1) return units * 72.0 / 48.0;            // ±36 dB → Ember's input ±24 dB
+    if (t == 2) return units * 72.0 / 36.0;            // ±36 dB → Ember's output ±18 dB
+    if (t == 3 || (t >= 16 && t < 22)) return units;   // 0 … 100 %
+    if (t < 10) return units * 30.0 / 36.0;            // 0 … 100 % = 0 … 30 dB of Ember's 0 … 36 dB drive
+    if (t < 16) return units * 72.0 / 36.0;            // −∞ … +36 dB (0.5 = 0 dB) → Ember's ±18 dB
+    return units * std::log (450.0) / std::log (600.0); // 40 Hz … 18 kHz → Ember's 30 Hz … 18 kHz (log)
+}
+double modAmount (float v) noexcept
+{
+    const auto d = 2.0 * (double) std::clamp (v, 0.0f, 1.0f) - 1.0;
+    const auto m = tableLaw (levelTable, (float) std::abs (d));
+    return d < 0.0 ? -m : m;
+}
+float modAmountValue (double level) noexcept
+{
+    const auto m = tableInverse (levelTable, std::min (std::abs (level), 1.0));
+    return (float) (0.5 + (level < 0.0 ? -0.5 : 0.5) * (double) m);
+}
+double lfoRateHz (float v) noexcept { return tableLaw (rateTable, v); }
+float lfoRateValue (double hz) noexcept { return tableInverse (rateTable, hz); }
+LfoShape lfoShapeOf (float v) noexcept { return (LfoShape) std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * (lfoShapes - 1)), 0, lfoShapes - 1); }
+double lfoValue (LfoShape s, double phase) noexcept
+{
+    // the reference's step LFO with two steps (+1, −1): each step glides from the other value over the whole step with
+    // its glide function (linear, squared, square root, sine), or jumps (square) [EXEC: the four functions measured]
+    phase -= std::floor (phase);
+    const bool first = phase < 0.5;
+    const auto u = (first ? phase : phase - 0.5) * 2.0;
+    if (s == LfoShape::square) return first ? 1.0 : -1.0;
+    double f = u;
+    switch (s)
+    {
+        case LfoShape::sine: f = 0.5 - 0.5 * std::cos (pi * u); break;
+        case LfoShape::easeIn: f = u * u; break;
+        case LfoShape::easeOut: f = std::sqrt (u); break;
+        default: break;
+    }
+    const auto from = first ? -1.0 : 1.0;
+    return from + (-2.0 * from) * f;
+}
+double envAttackMs (float v) noexcept { return tableLaw (attackTable, v); }
+double envReleaseMs (float v) noexcept { return tableLaw (releaseTable, v); }
+double envSource (double followerDb) noexcept { return std::max (0.0, (followerDb + 60.7) / 30.0); }
+bool modulated (const EffectParams& p) noexcept
+{
+    for (int k = 0; k < modSlots; ++k)
+        if (modSourceOf (p[(std::size_t) (mod1Source + 3 * k)]) != ModSource::off
+            && modTargetOf (p[(std::size_t) (mod1Target + 3 * k)]) != 0 && std::abs (modAmount (p[(std::size_t) (mod1Amount + 3 * k)])) > 1e-9)
+            return true;
+    return false;
+}
+bool measuredEffects (const EffectParams& p) noexcept { return on (p[effectLaw]); }
+double collapseRatio (double referenceDrive) noexcept { return std::exp2 (-2.0 * std::clamp (referenceDrive, 0.0, 1.0)); }
+
 float shape (Style s, float x) noexcept
 {
     switch (s)
@@ -1705,9 +1847,15 @@ struct CharacterStage
     {
         const auto& c = characterTable[std::max (k, 1) - 1];
         const auto d = referenceDrive (driveDb);
-        const auto dDb = interpDrive (c.driveDb, d);
-        return { (float) dbToGain (dDb + extraDb), (float) dbToGain (interpDrive (c.gainDb, d) - dDb) }; // A · g (D x) / D
+        // round 152: Collapse with the measured law — the pitch drop's own level curve (the output's rms at seven input
+        // levels per drive step, fitted with the same knee: 0.02 … 0.37 dB rms) [EXEC]
+        static constexpr float collapseD[6] { -1.5f, 1.5f, 11.0f, 22.0f, 35.25f, 47.0f };
+        static constexpr float collapseA[6] { 0.82f, 1.5f, 1.25f, 3.21f, 12.76f, 24.96f };
+        const bool measured = law && k == collapseCharacter;
+        const auto dDb = interpDrive (measured ? collapseD : c.driveDb, d);
+        return { (float) dbToGain (dDb + extraDb), (float) dbToGain (interpDrive (measured ? collapseA : c.gainDb, d) - dDb) }; // A · g (D x) / D
     }
+    bool law = false; // round 152: the effect characters' measured law (set by the engine per block)
 
     float curve (float u) const noexcept
     {
@@ -1815,12 +1963,110 @@ struct BandExtras
     }
 };
 
+// round 152: the measured "breakdown" effect's pitch drop (Collapse with the measured law): a two-tap delay-line pitch
+// shifter (taps half a window apart, sin² cross-fade) whose delay grows at 1 − ratio per sample [EXEC: the output
+// frequency is the input's × 2^(−2 · drive) at every level and input frequency; the window length is LYNX's]
+struct PitchDown
+{
+    std::vector<float> buf[2];
+    int size = 0, w = 0;
+    double phase = 0.0, window = 2400.0;
+
+    void prepare (double sr)
+    {
+        window = std::max (64.0, 0.05 * sr);
+        size = 1;
+        while (size < (int) window + 8) size <<= 1;
+        for (auto& b : buf) b.assign ((std::size_t) size, 0.0f);
+        reset();
+    }
+    void reset() noexcept
+    {
+        for (auto& b : buf) std::fill (b.begin(), b.end(), 0.0f);
+        w = 0;
+        phase = 0.0;
+    }
+    float tap (int c, double d) const noexcept
+    {
+        const auto pos = (double) w - d;
+        const auto i0 = (int) std::floor (pos);
+        const auto f = (float) (pos - (double) i0);
+        const auto& b = buf[c];
+        const auto a = b[(std::size_t) (i0 & (size - 1))], bb = b[(std::size_t) ((i0 + 1) & (size - 1))];
+        return a + (bb - a) * f;
+    }
+    void run (float& l, float& r, double ratio) noexcept
+    {
+        if (size == 0) return;
+        buf[0][(std::size_t) w] = l;
+        buf[1][(std::size_t) w] = r;
+        if (ratio < 0.9999)
+        {
+            const auto ph2 = phase + 0.5 - std::floor (phase + 0.5);
+            const auto g1 = std::sin (pi * phase), g2 = std::sin (pi * ph2);
+            const auto d1 = phase * window, d2 = ph2 * window;
+            l = (float) (g1 * g1) * tap (0, d1) + (float) (g2 * g2) * tap (0, d2);
+            r = (float) (g1 * g1) * tap (1, d1) + (float) (g2 * g2) * tap (1, d2);
+            phase += (1.0 - ratio) / window;
+            phase -= std::floor (phase);
+        }
+        else
+            phase = 0.0;
+        w = (w + 1) & (size - 1);
+    }
+};
+
+// round 152: a plain stereo delay of a fixed length (the linear-phase mode's dry paths), allocated in prepare()
+struct LongDelay
+{
+    std::vector<float> buf[2];
+    int n = 0, pos = 0;
+    void allocate (int length)
+    {
+        n = std::max (length, 0);
+        for (auto& b : buf) b.assign ((std::size_t) std::max (n, 1), 0.0f);
+        pos = 0;
+    }
+    void reset() noexcept
+    {
+        for (auto& b : buf) std::fill (b.begin(), b.end(), 0.0f);
+        pos = 0;
+    }
+    void process (float& l, float& r) noexcept
+    {
+        if (n <= 0) return;
+        std::swap (buf[0][(std::size_t) pos], l);
+        std::swap (buf[1][(std::size_t) pos], r);
+        pos = pos + 1 == n ? 0 : pos + 1;
+    }
+};
+
 class Saturator final : public Effect
 {
 public:
+    explicit Saturator (const EffectParams* initial = nullptr) noexcept
+    {
+        if (initial != nullptr) linOn = linearPhase (*initial);
+    }
+
     void prepare (double rate) noexcept override
     {
         sr = rate;
+        // round 152: the linear-phase crossovers (FFT convolvers) and their dry delays, the pitch drop, allocated here
+        linLatency = linearLatency (rate);
+        const auto size = dyn::prism::linearFftSize (rate);
+        if (size != linSize)
+        {
+            linSize = size;
+            for (auto& c : linConv)
+                c.init (size);
+            linTable.assign ((std::size_t) (size / 2 + 1), 0.0f);
+        }
+        linDry.allocate (linLatency);
+        linTop.allocate (linLatency);
+        linDesigned = false;
+        for (auto& pd : pitch)
+            pd.prepare (rate);
         dry.setLength (Oversampler::latency());
         dc.set (sr, 8.0);
         classic.prepare (sr); // round 136: the Classic voicing (allocates here, never in process)
@@ -1865,12 +2111,76 @@ public:
             x.reset();
         for (auto& x : chars)
             x.reset();
+        // round 152
+        for (auto& c : linConv)
+            if (c.n > 0) c.clear();
+        linDry.reset();
+        linTop.reset();
+        for (auto& pd : pitch)
+            pd.reset();
+        lfoPhase = { 0.0, 0.0 };
+        envPower = 0.0;
     }
 
-    int latencySamples() const noexcept override { return Oversampler::latency(); }
+    int latencySamples() const noexcept override { return Oversampler::latency() + (linOn ? linLatency : 0); }
     float controlOutput (int k) const noexcept override { return meters.read (k); }
 
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
+    {
+        linOn = linearPhase (p); // round 152 (its latency follows)
+        if (! modulated (p))
+        {
+            processBlock (l, r, n, p);
+            return;
+        }
+        // round 152: the modulation, at a control rate of 32 samples — the sources at the start of each block, the
+        // targets moved from the slot's own values
+        constexpr int step = 32;
+        for (int off = 0; off < n; off += step)
+        {
+            const int m = std::min (step, n - off);
+            modulate (l + off, r + off, m, p);
+            processBlock (l + off, r + off, m, pm);
+        }
+    }
+
+private:
+    void modulate (const float* l, const float* r, int n, const EffectParams& p) noexcept
+    {
+        // the follower: a mean-square one-pole (attack while rising, release / 10 while falling) [EXEC fit: the
+        // trial's default 1 ms / 50 ms within 0.025 source units rms, REA_rodada152b §4]
+        const auto ta = envAttackMs (p[envAttack]) * 1e-3 * sr, tr = envReleaseMs (p[envRelease]) * 1e-4 * sr;
+        const auto aa = 1.0 - std::exp (-1.0 / std::max (ta, 1e-3)), ar = 1.0 - std::exp (-1.0 / std::max (tr, 1e-3));
+        const auto envNow = envSource (10.0 * std::log10 (envPower + 1e-30));
+        for (int i = 0; i < n; ++i)
+        {
+            const double v = 0.5 * ((double) l[i] * l[i] + (double) r[i] * r[i]);
+            envPower += (v > envPower ? aa : ar) * (v - envPower);
+        }
+        std::array<double, 2> lfo {};
+        for (int k = 0; k < 2; ++k)
+        {
+            lfo[(std::size_t) k] = lfoValue (lfoShapeOf (p[(std::size_t) (k == 0 ? lfo1Shape : lfo2Shape)]), lfoPhase[(std::size_t) k]);
+            lfoPhase[(std::size_t) k] += lfoRateHz (p[(std::size_t) (k == 0 ? lfo1Rate : lfo2Rate)]) * (double) n / sr;
+            lfoPhase[(std::size_t) k] -= std::floor (lfoPhase[(std::size_t) k]);
+        }
+        pm = p;
+        const bool lin = linearPhase (p);
+        for (int k = 0; k < modSlots; ++k)
+        {
+            const auto src = modSourceOf (p[(std::size_t) (mod1Source + 3 * k)]);
+            const auto t = modTargetOf (p[(std::size_t) (mod1Target + 3 * k)]);
+            const auto prm = modTargetParam (t);
+            if (src == ModSource::off || prm < 0 || (lin && t >= 22)) continue; // linear phase: crossovers not modulated
+            const auto value = src == ModSource::lfo1 ? lfo[0] : (src == ModSource::lfo2 ? lfo[1] : envNow);
+            pm[(std::size_t) prm] += (float) modDelta (t, modAmount (p[(std::size_t) (mod1Amount + 3 * k)]) * value);
+        }
+        for (int k = 0; k < modSlots; ++k)
+            if (const auto prm = modTargetParam (modTargetOf (p[(std::size_t) (mod1Target + 3 * k)])); prm >= 0)
+                pm[(std::size_t) prm] = std::clamp (pm[(std::size_t) prm], 0.0f, 1.0f);
+    }
+
+    void processBlock (float* l, float* r, int n, const EffectParams& p) noexcept
     {
         // round 147: mid / side — M = (L + R) / 2 on channel 0, S = (R − L) / 2 on channel 1 (the trial's sign: a
         // left-only tone's even harmonics land on the right), decoded L = M − S, R = M + S
@@ -1901,9 +2211,12 @@ public:
             }
     }
 
-private:
     void chunk (float* l, float* r, int n, const EffectParams& p) noexcept
     {
+        // round 152: linear phase — the single band and the Classic voicing are delayed like the FIR bands
+        if (linearPhase (p) && (on (p[voicing]) || activeBands (p) <= 1))
+            for (int i = 0; i < n; ++i)
+                linDry.process (l[i], r[i]);
         if (on (p[voicing])) // round 136: the Classic voicing (core/EmberClassic.h) replaces the whole engine
         {
             chunkClassic (l, r, n, p);
@@ -1928,6 +2241,7 @@ private:
         // round 150: band 1's character (when set) replaces the Style menu and the voicing
         auto& chr = chars[0];
         chr.configure (characterIndex (p[characterParam (0)]), sr);
+        chr.law = measuredEffects (p); // round 152
         const auto vk = chr.k > 0 ? 0 : voiceIndex (p[voice]);
         const auto s = vk > 0 ? voiceStyle (vk) : styleOf (p[style]);
         const auto drv = (float) dbToGain (driveDb (p[drive]) + (on (p[punish]) ? punishDb : 0.0));
@@ -2025,11 +2339,19 @@ private:
             os[1].process (wr.data(), n, curve);
         }
         const bool post = ex.toneOn || ex.dyn != 0.0;
+        const bool collapse = chr.k == collapseCharacter && measuredEffects (p); // round 152
+        const auto cRatio = collapse ? collapseRatio (referenceDrive (driveDb (p[drive]))) : 1.0;
+        // round 152 (with the measured law): the single band applies band 1's mix and level like the reference (before,
+        // they only acted in the multiband mode)
+        const bool bandLaw = measuredEffects (p);
+        const auto bandMix = std::clamp (p[band1Mix], 0.0f, 1.0f);
+        const auto bandGain = (float) dbToGain (bandLevelDb (p[band1Level]));
 
         for (int i = 0; i < n; ++i)
         {
             auto a = dc.process (wl[(std::size_t) i], 0) * compA2, b = dc.process (wr[(std::size_t) i], 1) * compB;
             if (chr.k > 0) chr.post (a, b);
+            if (collapse) pitch[0].run (a, b, cRatio); // round 152
             if (tape)
             {
                 a = deemphasis.process (a, 0);
@@ -2050,6 +2372,11 @@ private:
             }
             float da = l[i], db = r[i];
             dry.process (da, db);
+            if (bandLaw) // round 152: band 1's own mix and level, as the reference's single band
+            {
+                a = (da + (a - da) * bandMix) * bandGain;
+                b = (db + (b - db) * bandMix) * bandGain;
+            }
             if (! powered) { a = da; b = db; }  // switched off: the band passes clean
             if (muted) { a = 0.0f; b = 0.0f; }
             a *= panA; // round 147: the band's pan
@@ -2075,14 +2402,20 @@ private:
             f[(std::size_t) k] = crossoverHz (p[(std::size_t) crossoverParam (k)]);
             if (k > 0) f[(std::size_t) k] = std::max (f[(std::size_t) k], f[(std::size_t) k - 1] * 1.05);
         }
-        const auto slope = slopeDbOct (p[xoverSlope]);
+        // round 152: each crossover its own slope (or the global one)
+        std::array<int, maxBands - 1> slope {};
+        for (int k = 0; k < maxBands - 1; ++k)
+            slope[(std::size_t) k] = crossoverSlopeDbOct (p, k);
+        const bool linear = linearPhase (p);
+        if (linear && (f != linHz || slope != linSlopes || nb != linBands || ! linDesigned))
+            designLinear (f, slope, nb);
         if (f != splitHz || slope != splitSlope || nb != splitBands)
         {
             for (int k = 0; k < maxBands - 1; ++k)
             {
-                split[(std::size_t) k].design (sr, f[(std::size_t) k], slope);
+                split[(std::size_t) k].design (sr, f[(std::size_t) k], slope[(std::size_t) k]);
                 for (int j = 0; j < k; ++j) // the bands below split k pass its all-pass copy, so the sum stays flat
-                    ap[(std::size_t) k][(std::size_t) j].design (sr, f[(std::size_t) k], slope);
+                    ap[(std::size_t) k][(std::size_t) j].design (sr, f[(std::size_t) k], slope[(std::size_t) k]);
             }
             if (nb != splitBands)
             {
@@ -2131,6 +2464,7 @@ private:
             }
             // round 150: a character replaces the style's curve, its drive law and the level (no auto gain on top)
             chars[(std::size_t) b].configure (characterIndex (p[(std::size_t) characterParam (b)]), sr);
+            chars[(std::size_t) b].law = measuredEffects (p); // round 152
             if (chars[(std::size_t) b].k > 0)
             {
                 const auto extra = on (p[punish]) ? punishDb : 0.0;
@@ -2147,7 +2481,32 @@ private:
             bandOs[(std::size_t) b][1].setFactor (factor);
         }
 
-        for (int i = 0; i < n; ++i)
+        for (int i = 0; i < n && linear; ++i)
+        {
+            // round 152: linear phase — band k < top = the zero-phase FIR of its share, the top band = the delayed
+            // input minus the others (so the bands sum to the delayed input exactly); the dry input is delayed alike
+            float a = l[i], b = r[i];
+            if (lc > 0.0)
+            {
+                a = lowcut.process (a, 0);
+                b = lowcut.process (b, 1);
+            }
+            float ta = a, tb = b;
+            linTop.process (ta, tb);
+            for (int k = 0; k < nb - 1; ++k)
+            {
+                float ca = a, cb = b;
+                linConv[(std::size_t) k].step (ca, cb);
+                band (k, 0, i) = ca;
+                band (k, 1, i) = cb;
+                ta -= ca;
+                tb -= cb;
+            }
+            band (nb - 1, 0, i) = ta;
+            band (nb - 1, 1, i) = tb;
+            linDry.process (l[i], r[i]);
+        }
+        for (int i = 0; i < n && ! linear; ++i)
         {
             float x[2] { l[i], r[i] };
             for (int c = 0; c < 2; ++c)
@@ -2190,6 +2549,8 @@ private:
             auto& ex = extras[(std::size_t) b];
             ex.configure (p, b, sr, factor);
             auto& chr = chars[(std::size_t) b];
+            const bool collapse = chr.k == collapseCharacter && measuredEffects (p);
+            const auto ratio = collapse ? collapseRatio (referenceDrive (driveDb (p[(std::size_t) bandParam (b, 1)]))) : 1.0;
             if (chr.k > 0)
             {
                 if (ex.fbGain > 0.0)
@@ -2229,6 +2590,7 @@ private:
             {
                 auto wa = bandDc[(std::size_t) b].process (bl[i], 0) * k, wb = bandDc[(std::size_t) b].process (br[i], 1) * kB;
                 if (chr.k > 0) chr.post (wa, wb);
+                if (collapse) pitch[(std::size_t) b].run (wa, wb, ratio); // round 152
                 if (post) ex.post (wa, wb, dryBand[0][(std::size_t) i], dryBand[1][(std::size_t) i]);
                 auto ya = (dryBand[0][(std::size_t) i] + (wa - dryBand[0][(std::size_t) i]) * m) * gA;
                 auto yb = (dryBand[1][(std::size_t) i] + (wb - dryBand[1][(std::size_t) i]) * m) * gB;
@@ -2380,7 +2742,8 @@ private:
     std::array<LrSplit, maxBands - 1> split;
     std::array<std::array<LrSplit, maxBands - 2>, maxBands - 1> ap; // ap[k][j]: split k's all-pass for band j < k
     std::array<double, maxBands - 1> splitHz {};
-    int splitSlope = 0, splitBands = 0;
+    std::array<int, maxBands - 1> splitSlope {};
+    int splitBands = 0;
     std::array<std::array<Oversampler, 2>, maxBands> bandOs;
     std::array<Delay2<256>, maxBands> bandDry;
     std::array<OnePoleHp, maxBands> bandDc;
@@ -2388,6 +2751,43 @@ private:
     std::array<std::array<float, maxBlock>, 2> dryBand {};
     std::array<BandExtras, maxBands> extras;
     std::array<CharacterStage, maxBands> chars; // round 150
+    // round 152: linear phase, the modulation, the pitch drop
+    std::array<lynx::peqfl::FftConvolver, maxBands - 1> linConv;
+    std::vector<float> linTable;
+    LongDelay linDry, linTop;
+    int linSize = 0, linLatency = 0, linBands = 0;
+    std::array<double, maxBands - 1> linHz {};
+    std::array<int, maxBands - 1> linSlopes {};
+    bool linDesigned = false;
+    std::atomic<bool> linOn { false };
+    std::array<PitchDown, maxBands> pitch;
+    std::array<double, 2> lfoPhase {};
+    double envPower = 0.0;
+    EffectParams pm {};
+
+    // the FIR of band k < top: lo_k · Π_{j<k} (1 − lo_j), lo = 1 / (1 + (f / fc)^(slope / 6)) on the analog axis
+    // [EXEC: the trial's linear-phase bands, every slope, 0.00 dB]
+    void designLinear (const std::array<double, maxBands - 1>& f, const std::array<int, maxBands - 1>& slope, int nb) noexcept
+    {
+        linHz = f;
+        linSlopes = slope;
+        linBands = nb;
+        linDesigned = true;
+        if (linSize <= 0) return;
+        const auto bins = linSize / 2 + 1;
+        for (int k = 0; k < nb - 1; ++k)
+        {
+            for (int i = 0; i < bins; ++i)
+            {
+                const auto hz = (double) i * sr / (double) linSize;
+                double m = linearLow (hz, f[(std::size_t) k], slope[(std::size_t) k]);
+                for (int j = 0; j < k; ++j)
+                    m *= 1.0 - linearLow (hz, f[(std::size_t) j], slope[(std::size_t) j]);
+                linTable[(std::size_t) i] = (float) m;
+            }
+            linConv[(std::size_t) k].setKernel (linTable);
+        }
+    }
     Meters meters;
 };
 } // namespace
@@ -2506,7 +2906,17 @@ const EffectInfo& emberInfo()
                                      { "B5 drive pan", 0.5f }, { "B6 drive pan", 0.5f }, { "B5 pan", 0.5f }, { "B6 pan", 0.5f },
                                      { "Input pan", 0.5f }, { "Output pan", 0.5f },
                                      { "B1 character", 0.0f }, { "B2 character", 0.0f }, { "B3 character", 0.0f },
-                                     { "B4 character", 0.0f }, { "B5 character", 0.0f }, { "B6 character", 0.0f } } };
+                                     { "B4 character", 0.0f }, { "B5 character", 0.0f }, { "B6 character", 0.0f },
+                                     // round 152 (Saturn 2: own crossover slopes, processing, modulation, effect law)
+                                     { "Slope 1", 0.0f }, { "Slope 2", 0.0f }, { "Slope 3", 0.0f }, { "Slope 4", 0.0f }, { "Slope 5", 0.0f },
+                                     { "Processing", 0.0f },
+                                     { "LFO 1 rate", 0.248f }, { "LFO 1 shape", 0.0f }, { "LFO 2 rate", 0.248f }, { "LFO 2 shape", 0.0f },
+                                     { "Env attack", 0.0f }, { "Env release", 0.0f },
+                                     { "Mod 1 source", 0.0f }, { "Mod 1 target", 0.0f }, { "Mod 1 amount", 0.5f },
+                                     { "Mod 2 source", 0.0f }, { "Mod 2 target", 0.0f }, { "Mod 2 amount", 0.5f },
+                                     { "Mod 3 source", 0.0f }, { "Mod 3 target", 0.0f }, { "Mod 3 amount", 0.5f },
+                                     { "Mod 4 source", 0.0f }, { "Mod 4 target", 0.0f }, { "Mod 4 amount", 0.5f },
+                                     { "Effect law", 1.0f } } };
     return info;
 }
 
@@ -2530,6 +2940,8 @@ std::unique_ptr<Effect> make (EffectKind kind)
         default: return nullptr;
     }
 }
+
+std::unique_ptr<Effect> makeEmber (const EffectParams* params) { return std::make_unique<ember::Saturator> (params); }
 
 namespace
 {
@@ -2762,6 +3174,26 @@ std::string paramText (EffectKind kind, int param, float v)
             case band1Character: case band2Character: case band3Character: case band4Character: case band5Character: case band6Character:
                 return characterName (characterIndex (v));
             case xoverSlope: return std::to_string (slopeDbOct (v)) + " dB/oct";
+            // round 152
+            case crossSlope1: case crossSlope2: case crossSlope3: case crossSlope4: case crossSlope5:
+                return ownSlopeDbOct (v) == 0 ? std::string ("global") : std::to_string (ownSlopeDbOct (v)) + " dB/oct";
+            case processing: return on (v) ? "Linear phase" : "Minimum phase";
+            case lfo1Rate: case lfo2Rate: return fmt (lfoRateHz (v) < 10.0 ? "%.2f Hz" : "%.1f Hz", lfoRateHz (v));
+            case lfo1Shape: case lfo2Shape:
+            {
+                static const char* names[lfoShapes] { "Sine", "Triangle", "Square", "Ease in", "Ease out" };
+                return names[(int) lfoShapeOf (v)];
+            }
+            case envAttack: return fmt ("%.1f ms", envAttackMs (v));
+            case envRelease: return envReleaseMs (v) < 1000.0 ? fmt ("%.0f ms", envReleaseMs (v)) : fmt ("%.2f s", envReleaseMs (v) / 1000.0);
+            case mod1Source: case mod2Source: case mod3Source: case mod4Source:
+            {
+                static const char* names[modSources] { "Off", "LFO 1", "LFO 2", "Envelope" };
+                return names[(int) modSourceOf (v)];
+            }
+            case mod1Target: case mod2Target: case mod3Target: case mod4Target: return modTargetName (modTargetOf (v));
+            case mod1Amount: case mod2Amount: case mod3Amount: case mod4Amount: return fmt ("%+.3f", modAmount (v));
+            case effectLaw: return on (v) ? "measured" : "static";
             case band2Style: case band3Style: case band4Style: case band5Style: case band6Style:
             {
                 static const char* names[] = { "tube", "tape", "transistor", "fuzz" };
