@@ -39,6 +39,7 @@ int scaleIndex (float v) noexcept { return stepped (v, vocal::scaleCount); }
 int keyIndex (float v) noexcept { return stepped (v, 12); }
 double retuneMs (float v) noexcept { return 400.0 * (double) v * (double) v; }
 double formantSemitones (float v) noexcept { return 14.0 * ((double) std::clamp (v, 0.0f, 1.0f) - 0.5); }
+double formantSemitones (float v, bool wide) noexcept { return (wide ? 24.0 : 14.0) * ((double) std::clamp (v, 0.0f, 1.0f) - 0.5); }
 int transposeSemitones (float v) noexcept { return stepped (v, 25) - 12; }
 double referenceHz (float v) noexcept { return 430.0 + 20.0 * (double) std::clamp (v, 0.0f, 1.0f); }
 int midiChannelIndex (float v) noexcept
@@ -132,6 +133,10 @@ const EffectInfo& info()
         e.params.push_back ({ "Keep vibrato", 1.0f });
         e.params.push_back ({ "Vibrato amount", 0.5f });
         e.params.push_back ({ "Correction", 1.0f });
+        e.params.push_back ({ "Drive stage", 0.0f }); // round 136
+        e.params.push_back ({ "Drive", 0.0f });
+        e.params.push_back ({ "Wide formant", 0.0f });
+        e.params.push_back ({ "Output", 0.5f });
         return e;
     }();
     return i;
@@ -168,6 +173,9 @@ std::string paramText (int param, float v)
         case classicMode:
         case lowLatency: return onOff();
         case formantShift: std::snprintf (t, sizeof t, "%+.1f st", formantSemitones (v)); return t;
+        case driveStage: case wideFormant: return onOff();
+        case drive: std::snprintf (t, sizeof t, "%.1f", 10.0 * v); return t;
+        case outputTrim: std::snprintf (t, sizeof t, "%+.1f dB", -24.0 + 48.0 * v); return t;
         case transpose: std::snprintf (t, sizeof t, "%+d st", transposeSemitones (v)); return t;
         case reference: std::snprintf (t, sizeof t, "%.1f Hz", referenceHz (v)); return t;
         case range: return rangeName (rangeIndex (v));
@@ -251,7 +259,11 @@ public:
         // round 128: natural vibrato (gain on the vibrato already sung), ignore vibrato, created vibrato
         // round 135w: Keep vibrato / Vibrato amount multiply the natural-vibrato gain; Speed (unlinked) corrects the
         // in-note deviations on its own time; the tolerances widen and delay the note changes; Correction scales it all
-        const auto natGain = std::pow (10.0, naturalVibratoDb (p[naturalVibrato]) / 20.0)
+        // round 138 ([EXEC] REA_rodada138 §3.6): on the reference the vibrato that survives the correction grows by about
+        // 10^(dB/34) (+6 dB: x1.5, +12 dB: x2.1) and shrinks to no less than about 2/3 (-6 ... -12 dB), not by the full
+        // 10^(dB/20) amplitude gain (was x3.9 / x0.27 at +-12 dB)
+        const auto natDb = naturalVibratoDb (p[naturalVibrato]);
+        const auto natGain = std::max (natDb < 0.0 ? 0.66 : 0.0, std::pow (10.0, natDb / 34.0))
                              * (p[keepVibrato] >= 0.5f ? vibratoAmountOf (p[vibratoAmount]) : 0.0);
         const auto linked = p[speedLink] >= 0.5f;
         const auto speedTau = speedMs (p[speed]) * 0.001;
@@ -285,7 +297,16 @@ public:
         const auto human = std::clamp ((double) p[humanize], 0.0, 1.0);
         const auto flex = std::clamp ((double) p[flexTune], 0.0, 1.0);
         const auto trans = (double) transposeSemitones (p[transpose]);
-        const auto fShift = std::exp2 (formantSemitones (p[formantShift]) / 12.0);
+        const auto fShift = std::exp2 (formantSemitones (p[formantShift], p[wideFormant] >= 0.5f) / 12.0);
+        // round 136: the drive stage — [EXEC] the voice shifter's Drive on 200 Hz stairs (−40 … 0 dBFS, drive 0 … 10):
+        // y = K·(s(G·x + b) − s(b)), s(v) = v / (1 + |v / c|^p)^(1/p), G = −2.646 + 3.653·drive dB, K = 0.751 − 1.988·drive
+        // dB, c 1.2707, p 2.0545, b 0.341 (levels within 0.5 dB, H2 / H3 within a few dB, REA_rodada136 §3)
+        const bool driveOn = p[driveStage] >= 0.5f;
+        const double dv = 10.0 * std::clamp ((double) p[drive], 0.0, 1.0);
+        const double dG = std::pow (10.0, (-2.646 + 3.6529 * dv) / 20.0), dK = std::pow (10.0, (0.751 - 1.9875 * dv) / 20.0);
+        const double trimGain = std::pow (10.0, (-24.0 + 48.0 * std::clamp ((double) p[outputTrim], 0.0, 1.0)) / 20.0);
+        auto side = [] (double v) { return v / std::pow (1.0 + std::pow (std::abs (v / 1.2707), 2.0545), 1.0 / 2.0545); };
+        const double sideB = side (0.341);
         const auto preserve = p[formantPreserve] >= 0.5f;
         const auto wet = std::clamp (p[mix], 0.0f, 1.0f);
         const auto dt = 1.0 / sr;
@@ -414,11 +435,13 @@ public:
 
             // retune: the applied correction follows the wanted one; humanize slows it on sustained (steady) notes.
             // [EXEC] Auto-Tune Pro (round 120 §5): a note held steady for ~0.6 s is retuned as if the retune speed were
-            // longer by the humanize amount (100 % = +100 ms of its speed = +135 ms of LYNX's time constant)
+            // longer by the humanize amount (100 % = +100 ms of its speed = +135 ms of LYNX's time constant).
+            // Round 138 (REA_rodada138 §3.2): the slow-down sets in between 0.275 and 0.375 s of steadiness (fitted on
+            // notes that move after 0.3 s and after 0.8 s, retune 0 … 50 ms, humanize 25 … 100 %; was 0.2 … 0.6 s)
             auto t = tau;
             if (human > 0.0)
             {
-                const auto x = std::clamp ((noteAge - 0.2) / 0.4, 0.0, 1.0);
+                const auto x = std::clamp ((noteAge - 0.275) / 0.1, 0.0, 1.0);
                 t += human * 0.135 * x * x * (3.0 - 2.0 * x);
             }
             shift += (t > 0.0 ? 1.0 - std::exp (-dt / t) : 1.0) * (wanted - shift);
@@ -459,9 +482,12 @@ public:
             const auto d0 = dry[rd], d1 = dry[rd + dryRing];
             ++dryPos;
 
-            l[i] = d0 + wet * (y[0] - d0);
+            if (driveOn)
+                for (auto& v : y)
+                    v = (float) (dK * (side (dG * v + 0.341) - sideB));
+            l[i] = (float) (trimGain * (d0 + wet * (y[0] - d0)));
             if (stereo)
-                r[i] = d1 + wet * (y[1] - d1);
+                r[i] = (float) (trimGain * (d1 + wet * (y[1] - d1)));
             peakIn = std::max (peakIn, std::max (std::abs (xin[0]), std::abs (xin[1])));
             peakOut = std::max (peakOut, std::max (std::abs (l[i]), stereo ? std::abs (r[i]) : 0.0f));
         }

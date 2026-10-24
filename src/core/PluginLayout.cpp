@@ -1090,7 +1090,14 @@ Layout lynxTune()
     adv (knob (398, 420, 34, "Onset rate", TR_NOOP ("ONSET RATE"), 452, showValue));
     adv (label (470, 368, 300, 16, TR_NOOP ("Pitch tracking"), alignLeft));
     adv (toggle (470, 400, 150, 20, "Ignore vibrato", TR_NOOP ("Ignore vibrato")));
-    adv (label (470, 430, 320, 14, TR_NOOP ("Notes are picked from the pitch with its vibrato smoothed"), alignLeft | dim));
+    adv (label (470, 430, 160, 14, TR_NOOP ("Notes are picked from the pitch"), alignLeft | dim));
+    adv (label (470, 444, 160, 14, TR_NOOP ("with its vibrato smoothed"), alignLeft | dim));
+    // round 136: the voice-shifter extras (the Drive stage it measured, a ±12 st formant range, an output trim)
+    adv (label (640, 368, 150, 16, TR_NOOP ("Voice shifter"), alignLeft));
+    adv (toggle (640, 386, 150, 18, "Drive stage", TR_NOOP ("Drive stage")));
+    adv (toggle (640, 408, 150, 18, "Wide formant", TR_NOOP ("Formant ±12 st")));
+    adv (knob (672, 446, 22, "Drive", TR_NOOP ("DRIVE"), 462, showValue));
+    adv (knob (748, 446, 22, "Output", TR_NOOP ("OUTPUT"), 462, showValue | bipolar));
     // round 135w: the real-time corrector's controls (the Waves Tune Real-Time role): Speed with its link to the
     // retune (Note Transition), the tolerances, vibrato on / amount, correction %, input / output meters
     auto rt = [&v] (LayoutItem i) { v.push_back (onPage (std::move (i), 2)); };
@@ -1753,6 +1760,31 @@ Layout aetherLayout()
     return l;
 }
 
+// round 136: Ember's Classic voicing (core/EmberClassic.h) — with Voicing on, Ember's own controls hide and the
+// Classic ones (the reference's laws and texts) show; added around emberLayout() so that layout stays as it is
+Layout withEmberClassic (Layout l)
+{
+    for (auto& it : l.items)
+        if (it.whenParam == nullptr)
+            it = when (it, "Voicing", 0.0f, 0.5f);
+    auto add = [&l] (LayoutItem it) { l.items.push_back (when (it, "Voicing", 0.5f, 1.0f)); };
+    add (section (4, 4, 200, 222, TR_NOOP ("Style")));
+    auto styles = radio (12, 30, 184, 120, "Classic style", TR_NOOP ("A|E|N|T|P"));
+    add (styles);
+    add (toggle (12, 166, 184, 22, "Classic punish", TR_NOOP ("Punish")));
+    add (section (208, 4, 308, 222, TR_NOOP ("Classic")));
+    add (dial (266, 86, 70, "Classic drive", TR_NOOP ("Drive"), big));
+    add (dial (380, 60, 36, "Classic tone", TR_NOOP ("Tone"), bipolar));
+    add (dial (460, 60, 36, "Classic mix", TR_NOOP ("Mix")));
+    add (dial (340, 148, 30, "Classic low cut", TR_NOOP ("Low cut")));
+    add (dial (410, 148, 30, "Classic high cut", TR_NOOP ("High cut")));
+    add (dial (480, 148, 30, "Classic output", TR_NOOP ("Output")));
+    add (toggle (216, 200, 80, 20, "Classic thump", TR_NOOP ("Thump")));
+    add (toggle (300, 200, 80, 20, "Classic steep", TR_NOOP ("Steep")));
+    add (toggle (400, 200, 108, 20, "Voicing", TR_NOOP ("Classic")));
+    return l;
+}
+
 Layout emberLayout()
 {
     Layout l;
@@ -2188,6 +2220,46 @@ Layout autoPanLayout()
     return l;
 }
 
+// round 136 (merged by round 138): Auto-pan's Rhythm voicing — the PanMan model measured on the official trial
+// (core/RhythmPan.h, REA_rodada136 §2) — gets its own controls; the panner above shows while it is off. The VOICING
+// switch at the bottom flips between them; her saved PanMan states open on the Rhythm voicing.
+Layout withRhythmVoicing (Layout l)
+{
+    for (auto& it : l.items)
+    {
+        if (it.whenParam != nullptr) // keep the item's own condition as the second one
+        {
+            it.when2Param = it.whenParam;
+            it.when2Min = it.whenMin;
+            it.when2Max = it.whenMax;
+            it.whenParam = nullptr;
+        }
+        it = when (it, "Voicing", 0.0f, 0.5f);
+    }
+    l.height = 280;
+    auto add = [&l] (LayoutItem it) { l.items.push_back (when (it, "Voicing", 0.5f, 1.0f)); };
+    add (section (4, 4, 330, 242, TR_NOOP ("Pan")));
+    add (dial (60, 76, 44, "Offset", TR_NOOP ("Offset"), bipolar));
+    add (dial (166, 76, 44, "Width", TR_NOOP ("Width")));
+    add (dial (272, 76, 44, "Rhythm smoothing", TR_NOOP ("Smoothing")));
+    add (display (20, 160, 298, 26, "panpos"));
+    add (label (20, 190, 30, 16, TR_NOOP ("L"), alignLeft));
+    add (label (154, 190, 30, 16, TR_NOOP ("C")));
+    add (label (288, 190, 30, 16, TR_NOOP ("R")));
+    add (tabs (20, 216, 298, 20, "Pattern", TR_NOOP ("Left / right|8 steps")));
+    add (section (340, 4, 250, 242, TR_NOOP ("Rate")));
+    add (tabs (350, 28, 230, 22, "Sync", TR_NOOP ("Hz|Beats")));
+    add (when (dial (465, 104, 52, "Rhythm rate", TR_NOOP ("Rate"), big), "Sync", 0.0f, 0.5f));
+    add (when (dial (465, 104, 52, "Beats", TR_NOOP ("Beats"), big), "Sync", 0.5f, 1.0f));
+    add (dial (370, 190, 24, "Start phase", TR_NOOP ("Phase")));
+    add (dial (560, 190, 24, "Amount", TR_NOOP ("Amount")));
+    add (section (596, 4, 160, 242, TR_NOOP ("Level")));
+    add (dial (676, 80, 36, "Rhythm output", TR_NOOP ("Output"), bipolar));
+    add (tabs (610, 216, 132, 22, "Rhythm analog", TR_NOOP ("Digital|Analog|Hot"), { 0.0f, 0.5f, 1.0f }));
+    l.items.push_back (toggle (8, 254, 300, 20, "Voicing", TR_NOOP ("Measured rhythm voicing")));
+    return l;
+}
+
 Layout voiceShiftLayout()
 {
     // round 135: the voice manipulators' one-screen panel (the role: a small Soundtoys voice shifter, screenshot of the
@@ -2567,6 +2639,10 @@ Layout echoformLayout()
     // round 124: the hybrid engine (H-Delay's measured loop)
     v.push_back (label (620, 254, 48, 20, TR_NOOP ("Hybrid")));
     v.push_back (menuOf (670, 252, 104, 24, "Hybrid", TR_NOOP ("Hybrid"), TR_NOOP ("Off|Clean|Analog"), { 0.0f, 0.5f, 1.0f }));
+    // round 136: the measured tape-echo loops (EchoBoy's role)
+    v.push_back (label (782, 254, 40, 20, TR_NOOP ("Tape")));
+    v.push_back (menuOf (824, 252, 122, 24, "Tape voicing", TR_NOOP ("Tape voicing"), TR_NOOP ("Off|Ping-pong tape|Studio tape|Studio tape hot"),
+                         { 0.0f, 1.0f / 3.0f, 2.0f / 3.0f, 1.0f }));
     // the mode selector along the bottom
     v.push_back (label (8, 254, 52, 20, TR_NOOP ("Mode")));
     v.push_back (menuOf (64, 252, 200, 24, "Mode", TR_NOOP ("Mode"),
@@ -2859,7 +2935,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::compressor: l = compressorLayout(); break;
         case EffectKind::hushDeEsser: l = hushDeEsser(); break;
         case EffectKind::aether: l = aetherLayout(); break;
-        case EffectKind::ember: l = emberLayout(); break;
+        case EffectKind::ember: l = withEmberClassic (emberLayout()); break;
         case EffectKind::epochVerb: l = captionsAbove (epochVerbLayout()); break;
         case EffectKind::atrium: l = captionsAbove (atriumLayout()); break;
         case EffectKind::foilPlate: l = captionsAbove (foilPlateLayout()); break;
@@ -2878,7 +2954,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::quellDenoiser: l = quellDenoiser(); break;
         case EffectKind::geminiDoubler: l = geminiDoubler(); break;
         case EffectKind::voiceShift: l = voiceShiftLayout(); break;
-        case EffectKind::autoPan: l = autoPanLayout(); break;
+        case EffectKind::autoPan: l = withRhythmVoicing (autoPanLayout()); break;
         default: l = generated (kind); break;
     }
     return cache.emplace (kind, std::move (l)).first->second;

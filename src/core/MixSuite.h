@@ -216,6 +216,10 @@ enum Param
     // voicings: a curve and its own EQ), and the reference's filter ranges ("wide cuts": a low cut 20 Hz – 1 kHz and a
     // 6 dB/oct high cut 1 – 20 kHz, read from the two parameters after it)
     punish, thump, steep, voice, wideCuts, lowCutWide, highCutWide,
+    // round 136 (appended): the Classic voicing (core/EmberClassic.h), measured on the reference five-style saturator
+    // its substitute role plays; its own controls with the original's laws. Voicing 0 = Ember's own engine (unchanged)
+    voicing, classicStyle, classicDrive, classicPunish, classicLowCut, classicThump, classicTone, classicHighCut,
+    classicSteep, classicMix, classicOutput,
     count
 };
 constexpr int maxBands = 4;

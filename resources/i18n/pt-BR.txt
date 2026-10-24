@@ -3726,3 +3726,20 @@ countries: br
 "Installed" = "Instalados"
 "Plugin database: LYNX's built-in generators and effects, FL's engines and the installed plugins" = "Banco de plugins: geradores e efeitos embutidos do LYNX, motores do FL e os plugins instalados"
 "[double-click] add it (generators: a new channel; effects: into the selected insert)" = "[duplo clique] adicionar (geradores: um novo canal; efeitos: no insert selecionado)"
+# round 136: Ember's Classic voicing
+"A|E|N|T|P" = "A|E|N|T|P"
+# round 136: LYNX Tune's voice-shifter extras
+"Notes are picked from the pitch" = "As notas são escolhidas pela afinação"
+"with its vibrato smoothed" = "com o vibrato suavizado"
+"Voice shifter" = "Deslocador de voz"
+"Drive stage" = "Estágio de drive"
+"Formant ±12 st" = "Formante ±12 st"
+"DRIVE" = "DRIVE"
+# round 136: Echoform's tape voicing
+"Tape voicing" = "Voz de fita"
+"Off|Ping-pong tape|Studio tape|Studio tape hot" = "Desligado|Fita pingue-pongue|Fita de estúdio|Fita de estúdio quente"
+# round 138 (merge of rounds 135 / 136): Auto-pan's measured Rhythm voicing panel
+"Measured rhythm voicing" = "Voz rítmica medida"
+"Hz|Beats" = "Hz|Tempos"
+"Left / right|8 steps" = "Esquerda / direita|8 passos"
+"Digital|Analog|Hot" = "Digital|Analógico|Quente"
