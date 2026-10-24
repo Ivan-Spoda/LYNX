@@ -8,6 +8,7 @@
         std::vector<int> params;           // the editor parameter of each bar (state controls)
         std::vector<juce::String> labels;  // under each bar
         bool bipolar = false;              // pan: drawn from the centre
+        bool plain = false;                // round 137: plain effect parameters (not state controls)
     };
 
     Bars barsFor (const juce::String& id) const
@@ -30,6 +31,18 @@
             }
             b.bipolar = target == 1;
         }
+        else if (id == "rhythmbars") // round 137: Echoform's rhythm taps (plain parameters), one bar per heard tap
+        {
+            namespace ef = echosuite::echoform;
+            const auto bpm = engine.getSong().bpm > 1.0 ? engine.getSong().bpm : 120.0;
+            const auto taps = ef::rhythmTaps (fx->params, bpm);
+            for (int k = 0; k < (int) taps.size(); ++k)
+            {
+                b.params.push_back (ef::rhythmTap1 + k);
+                b.labels.push_back (juce::String (k + 1));
+            }
+            b.plain = true;
+        }
         else if (id == "mbdbars")
         {
             const auto& table = stateTable();
@@ -51,7 +64,8 @@
     static bool isBars (const LayoutItem& item)
     {
         return item.type == Item::display && item.display != nullptr
-               && (std::strcmp (item.display, "equobars") == 0 || std::strcmp (item.display, "mbdbars") == 0);
+               && (std::strcmp (item.display, "equobars") == 0 || std::strcmp (item.display, "mbdbars") == 0
+                   || std::strcmp (item.display, "rhythmbars") == 0);
     }
 
     juce::Rectangle<float> barsArea (const LayoutItem& item) const
@@ -108,6 +122,15 @@
         const auto to = barAt (e.position.x);
         const auto from = start ? to : barAt (barsLastX);
         barsLastX = e.position.x;
+        if (b.plain)
+        {
+            std::vector<std::pair<int, float>> changes;
+            for (int i = juce::jmin (from, to); i <= juce::jmax (from, to); ++i)
+                changes.push_back ({ b.params[(std::size_t) i], v });
+            setParams (changes);
+            ui::showValueTip (*this, rectOf (item).toNearestInt(), valueText (b.params[(std::size_t) to], v));
+            return;
+        }
         auto bytes = fx->state;
         const auto& table = stateTable();
         for (int i = juce::jmin (from, to); i <= juce::jmax (from, to); ++i)
@@ -132,7 +155,7 @@
         const auto s = scale();
         const auto curveColour = fx.enabled ? colour::accent : colour::textDisabled;
 
-        if (id == "equobars" || id == "mbdbars")
+        if (id == "equobars" || id == "mbdbars" || id == "rhythmbars")
         {
             paintBars (g, item, fx);
             return true;

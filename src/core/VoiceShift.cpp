@@ -18,6 +18,13 @@ float semitoneValue (double st) noexcept { return (float) std::clamp ((st + 12.0
 Mode modeOf (float v) noexcept { return (Mode) std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * 2.0f), 0, 2); }
 double driveAmount (float v) noexcept { return 10.0 * (double) std::clamp (v, 0.0f, 1.0f); }
 
+int midiChannelIndex (float v) noexcept
+{
+    const auto k = (int) std::lround (std::clamp (v, 0.0f, 1.0f) * 128.0f);
+    return k <= 0 ? -1 : k - 1;
+}
+float midiChannelValue (int channel) noexcept { return channel < 0 ? 0.0f : (float) std::clamp (channel + 1, 0, 128) / 128.0f; }
+
 int latencyFor (double sampleRate) noexcept { return (int) std::ceil (2.0 * sampleRate / minHz) + 4; }
 
 // [EXEC trial, 1 kHz at −18 dBFS] the drive raises the level by ≈ 1.75 dB per step up to ~5, then saturates
@@ -38,7 +45,8 @@ float driveCurve (float x, double amount) noexcept
 const EffectInfo& info()
 {
     static const EffectInfo i { "Voice Shift",
-                                { { "Pitch", 0.5f }, { "Formant", 0.5f }, { "Link", 0.0f }, { "Mode", 0.0f }, { "Drive", 0.0f }, { "Mix", 1.0f } } };
+                                { { "Pitch", 0.5f }, { "Formant", 0.5f }, { "Link", 0.0f }, { "Mode", 0.0f }, { "Drive", 0.0f }, { "Mix", 1.0f },
+                                  { "MIDI", 0.0f } } };
     return i;
 }
 
@@ -57,6 +65,14 @@ std::string paramText (int param, float v)
         }
         case drive: std::snprintf (t, sizeof t, "%.1f", driveAmount (v)); return t;
         case mix: std::snprintf (t, sizeof t, "%.0f%%", 100.0 * std::clamp (v, 0.0f, 1.0f)); return t;
+        case midi:
+        {
+            const auto c = midiChannelIndex (v);
+            if (c < 0)
+                return "Off";
+            std::snprintf (t, sizeof t, "Channel %d", c + 1);
+            return t;
+        }
         default: std::snprintf (t, sizeof t, "%.2f", (double) v); return t;
     }
 }
@@ -94,9 +110,24 @@ public:
         dcX[0] = dcX[1] = dcY[0] = dcY[1] = 0.0f;
     }
 
+    void setHeldNotes (const NoteMask* channels, int count) noexcept override
+    {
+        held = channels;
+        heldCount = count;
+    }
+
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
-        const auto pitchSt = pitchSemitones (p[pitch]);
+        // round 137: the highest note held on the MIDI channel replaces the Pitch knob (relative to C4) / the robot note
+        int midiNote = -1;
+        if (const auto ch = midiChannelIndex (p[midi]); ch >= 0 && held != nullptr && ch < heldCount)
+            for (int k = 127; k >= 0 && midiNote < 0; --k)
+                if ((held[ch][(std::size_t) (k >> 6)] >> (k & 63)) & 1u)
+                    midiNote = k;
+        meterMidi.store (midiNote < 0 ? 0.0f : (float) midiNote, std::memory_order_relaxed);
+        const auto robotAt = midiNote >= 0 ? (double) midiNote : robotNote;
+        const auto pitchSt = midiNote >= 0 ? (modeOf (p[mode]) == Mode::robot ? 0.0 : std::clamp ((double) midiNote - robotNote, -24.0, 24.0))
+                                           : pitchSemitones (p[pitch]);
         const auto formantSt = formantSemitones (p[formant]);
         const auto linked = p[link] >= 0.5f;
         const auto md = modeOf (p[mode]);
@@ -128,8 +159,8 @@ public:
                     }
                     else if (md == Mode::robot)
                     {
-                        target = (int) robotNote;
-                        wanted = robotNote - sung;
+                        target = (int) robotAt;
+                        wanted = robotAt - sung;
                     }
                     else
                     {
@@ -181,7 +212,7 @@ public:
 
     float controlOutput (int o) const noexcept override
     {
-        const auto v = (o == 0 ? meterSung : meterOut).load (std::memory_order_relaxed);
+        const auto v = (o == 0 ? meterSung : o == 2 ? meterMidi : meterOut).load (std::memory_order_relaxed);
         return std::clamp (v, 0.0f, 127.0f) / 127.0f;
     }
 
@@ -198,7 +229,9 @@ private:
     double sung = -1.0, wanted = 0.0, shift = 0.0, unvoicedFor = 1e9;
     int target = -1;
     float dcA = 0.999f, dcX[2] {}, dcY[2] {};
-    std::atomic<float> meterSung { -1.0f }, meterOut { -1.0f };
+    std::atomic<float> meterSung { -1.0f }, meterOut { -1.0f }, meterMidi { 0.0f };
+    const NoteMask* held = nullptr;
+    int heldCount = 0;
 };
 } // namespace
 

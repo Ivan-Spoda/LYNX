@@ -1014,6 +1014,18 @@ private:
             // round 135: the wet (compressed) and dry paths' stereo balance, at the panel's right end
             out.push_back (knob ({ s.getRight() - 136.0f, s.getY() + 14.0f, 62.0f, 82.0f }, wetPan, tr ("Wet pan"), 0, true));
             out.push_back (knob ({ s.getRight() - 70.0f, s.getY() + 14.0f, 62.0f, 82.0f }, dryPan, tr ("Dry pan"), 0, true));
+            // round 137: the trigger (the reference's side-chain Host Sync / MIDI inputs): the detector hears a pulse
+            const auto tx = s.getRight() - 268.0f;
+            out.push_back (menu ({ tx, s.getY() + 16.0f, 120.0f, 22.0f }, trigger, tr ("Trigger"), "Off|Host sync|MIDI"));
+            const auto trig = triggerOf (v (trigger));
+            if (trig == Trigger::hostSync)
+            {
+                out.push_back (menu ({ tx, s.getY() + 46.0f, 120.0f, 22.0f }, triggerSync, tr ("Note"), "1/1|1/2|1/4|1/8|1/16"));
+                out.push_back (knob ({ tx, s.getY() + 74.0f, 58.0f, 78.0f }, triggerRate, tr ("Rate"), 0));
+                out.push_back (knob ({ tx + 62.0f, s.getY() + 74.0f, 58.0f, 78.0f }, triggerLength, tr ("Length"), 0));
+            }
+            else if (trig == Trigger::midi)
+                out.push_back (knob ({ tx + 20.0f, s.getY() + 50.0f, 80.0f, 92.0f }, triggerChannel, tr ("Channel"), 0));
         }
         const auto b = barArea();
         const auto cy = b.getCentreY();
@@ -1028,7 +1040,7 @@ private:
     juce::Rectangle<float> scEqArea() const
     {
         const auto s = scPanel();
-        return { 320.0f, s.getY() + 10.0f, s.getWidth() - 334.0f - 140.0f, s.getHeight() - 20.0f };
+        return { 320.0f, s.getY() + 10.0f, s.getWidth() - 334.0f - 140.0f - 132.0f, s.getHeight() - 20.0f }; // round 137: − the trigger column
     }
     float scX (double hz) const
     {
