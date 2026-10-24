@@ -237,7 +237,7 @@ private:
 
         audioLabel.setBounds (r.removeFromTop (24));
         devices.setBounds (r.getX(), r.getY(), w, 200); // its resized() sets its own height
-        r.removeFromTop (devices.getHeight());
+        r.removeFromTop (juce::jmax (0, devices.getHeight() - 18)); // it ends with an empty row of its own
         r.removeFromTop (6);
 
         flLabel.setBounds (r.removeFromTop (24));
@@ -387,7 +387,7 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (juce::Colours::black.withAlpha (0.55f));
+        g.fillAll (juce::Colours::black.withAlpha (0.45f));
         const auto panel = wizard.getBounds().toFloat();
         for (int i = 1; i <= 6; ++i) // a soft shadow
         {

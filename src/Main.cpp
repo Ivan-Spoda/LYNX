@@ -3740,11 +3740,15 @@ private:
             setContentOwned (content, true);
             setResizable (true, true);
             setResizeLimits (800, 400, 10000, 10000);
-            // ~88% of the main display's usable area (at least the UI's design size)
+            // ~88% of the main display's usable area (at least the UI's design size, but never larger than the
+            // display: the AppImage catalog test runs on an 800x600 screen)
             if (const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
             {
                 const auto area = display->userArea;
-                setSize (juce::jmax (getWidth(), (int) (area.getWidth() * 0.88)), juce::jmax (getHeight(), (int) (area.getHeight() * 0.88)));
+                const auto fit = [] (int design, int available) {
+                    return juce::jmin (available, juce::jmax (design, (int) (available * 0.88)));
+                };
+                setSize (fit (getWidth(), area.getWidth()), fit (getHeight(), area.getHeight()));
             }
 
             centreWithSize (getWidth(), getHeight());
