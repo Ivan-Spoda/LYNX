@@ -29,6 +29,7 @@
 #include "core/FruityPhaser.h"
 #include "core/EmphasizerFx.h"
 #include "core/FreqShifterFl.h"
+#include "core/LowLifterFl.h"
 #include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
 
@@ -1202,6 +1203,13 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
             emphasizer::toParams (*s, slot.params.data());
             return slot;
         }
+    if (pluginName == "Low Lifter") // REA_rodada154 §5: FL's own engine
+        if (const auto s = lowlifter::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::flLowLifter);
+            lowlifter::toParams (*s, slot.params.data());
+            return slot;
+        }
     if (pluginName == "Frequency Shifter") // REA_rodada154 §4: FL's own engine
         if (const auto s = fsfl::parse (state))
         {
@@ -1509,6 +1517,7 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::voiceShift: return {}; // LYNX's own effect: no FL counterpart
         case EffectKind::emphasizer: return { "Emphasizer" };
         case EffectKind::flFrequencyShifter: return { "Frequency Shifter" };
+        case EffectKind::flLowLifter: return { "Low Lifter" };
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb:

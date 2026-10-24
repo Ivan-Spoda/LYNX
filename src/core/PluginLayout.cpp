@@ -1135,9 +1135,9 @@ Layout emphasizer()
     l.height = 98;
     auto& v = l.items;
     v.push_back (section (0, 0, 236, 74, nullptr, boxed));
-    v.push_back (knob (40, 44, 26, "Input gain", TR_NOOP ("INPUT GAIN"), 12, showValue));
-    v.push_back (knob (118, 44, 30, "Emphasis", TR_NOOP ("EMPHASIS"), 12, showValue));
-    v.push_back (knob (196, 44, 26, "Output", TR_NOOP ("OUTPUT"), 12, showValue));
+    v.push_back (knob (40, 30, 34, "Input gain", TR_NOOP ("INPUT GAIN"), 60, showValue));
+    v.push_back (knob (118, 30, 40, "Emphasis", TR_NOOP ("EMPHASIS"), 60, showValue));
+    v.push_back (knob (196, 30, 34, "Output", TR_NOOP ("OUTPUT"), 60, showValue));
     v.push_back (display (240, 4, 268, 66, "meter"));
     v.push_back (label (4, 78, 120, 16, "EMPHASIZER", alignLeft));
     v.push_back (toggle (236, 78, 96, 16, "Soft clipping", TR_NOOP ("SOFT CLIPPING")));

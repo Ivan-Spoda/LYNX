@@ -16,6 +16,7 @@
 #include "core/VintagePhaser.h"
 #include "core/EmphasizerFx.h"
 #include "core/FreqShifterFl.h"
+#include "core/LowLifterFl.h"
 #include "core/Vocodex.h"
 #include "core/FruityVocoder.h"
 #include "core/MaximusFx.h"
@@ -2864,6 +2865,16 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                                   { "Left phase offset", 0.5f } } };
             return info;
         }
+        case EffectKind::flLowLifter:
+        {
+            // FL's controls; defaults = the plug-in's Default preset (as a new instance in FL)
+            static const EffectInfo info { "Low Lifter", { { "On", 1.0f }, { "Dry/Wet", 1.0f }, { "Low band gain", 0.4999f },
+                                                           { "Slope", 0.6993f }, { "Look-ahead", 1.0f }, { "Invert polarity", 0.0f },
+                                                           { "Pre gain", 0.4998f }, { "Diffuser mix", 0.0f }, { "Diffuser depth", 0.5f },
+                                                           { "High band gain", 1.0f }, { "Crossover", 0.892f }, { "Low cut", 0.0f },
+                                                           { "Multiband", 0.0f }, { "High band", 1.0f }, { "Low band", 1.0f } } };
+            return info;
+        }
     }
     return eq;
 }
@@ -3317,6 +3328,8 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return emphasizer::paramText (param, v);
         case EffectKind::flFrequencyShifter:
             return fsfl::paramText (param, v);
+        case EffectKind::flLowLifter:
+            return lowlifter::paramText (param, v);
 
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
@@ -3547,6 +3560,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::voiceShift: return voiceshift::make(); // round 135
         case EffectKind::emphasizer: return emphasizer::make(); // round 154
         case EffectKind::flFrequencyShifter: return fsfl::make(); // round 154
+        case EffectKind::flLowLifter: return lowlifter::make(); // round 154
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();

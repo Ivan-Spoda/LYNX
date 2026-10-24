@@ -1,4 +1,4 @@
-# REA round 154 (fldsp154) — FL native plugins' sound, next tier: Emphasizer (exact), Emphasis survey
+# REA round 154 (fldsp154) — FL native plugins' sound, next tier: Emphasizer, Frequency Shifter and Low Lifter (exact), Emphasis survey
 
 Date: 2026-10-24. Clean-room: FL Studio's own binaries were studied with Ghidra 12.1.4 (headless) and run unmodified
 in our own harness; this document describes their behaviour in our own words. No Image-Line code, preset or sample is
@@ -25,8 +25,8 @@ Native plugin names (event `0xC9`) in the girlfriend's 48 projects (`tmp/gf/all`
 | Fruity Soft Clipper / Balance / Stereo Enhancer / Reeverb 2 / Parametric EQ 2 / Limiter / Flangus | 2…38 | many | Exact / Near-exact | — |
 | FLEX | 13 | 15 | Approximate (packs encrypted, never opened) | — |
 | Emphasis | 0 | 5 (4 demo Masters + render test) | Approximate (LYNX limiter) | surveyed, §3 |
-| Frequency Shifter | 0 | 4 | Approximate | open |
-| Low Lifter | 0 | 3 | Approximate | open |
+| Frequency Shifter | 0 | 4 (+ 9 presets) | Approximate | ported, §4 |
+| Low Lifter | 0 | 3 (+ 7 presets) | Approximate | ported, §5 |
 
 All 92 Emphasizer instances in her projects (12 projects plus their backups) carry the same 29-byte state: version 2,
 controls `0, 5013, 0, 0, 0, 10000`, meter byte 1 — the plug-in's default (Emphasis 50 %) on the Master. LYNX used to
@@ -119,6 +119,107 @@ cases re-dispatch after recursive calls, which Ghidra does not follow). Its stat
 polyphase stages per channel, true-peak path, envelope orders 1–4, a "Steady" loudness analyser with rational
 saturation polynomials, M/S and linking). Its front end maps 13 controls + the 3 option bytes (`FUN_00706860`).
 The exact port is left for a later round; LYNX keeps the limiter approximation.
+
+## 4. Frequency Shifter **[DECOMP + EXEC]**
+
+`Plugins/Fruity/Effects/Frequency Shifter/Frequency Shifter_x64.dll` (SHA-256 `5aab5d96…59ca`, Delphi front end) and
+its own `Engine_x64.dll` next to it (SHA-256 `a7774536…d8fa`, C++, one export `dispatch`: 0 create, 1 free, 2 sample
+rate, 3 set control, 4 process one sample, 5 control name, 6 value text, 7/8 enter/leave a block with FTZ/DAZ).
+Round 15 §3 had the state and the control laws; this round rebuilt the engine (`FUN_180002780` and its helpers).
+
+### 4.1 Host contract
+
+The front end calls `dispatch(4)` once per sample with {L, R, side-chain L, R, side-chain present, song position,
+next position, tempo}; positions are −1 while the transport is stopped. Controls arrive as (raw − min)/(max − min)
+(`dispatch(3)`): Mix, Type and Range act at once, the others glide per sample (`k = 1 − 0.1^(200/fs)`, snapping within
+10⁻⁵); the Frequency control glides separately (`k = 1 − 0.1^(10/fs)`, snap 10⁻⁴). A new engine starts at the
+defaults (the frequency glide from 0, i.e. −20 kHz) and glides to the state's values over the first samples.
+
+### 4.2 Signal path (float32, coefficient design in double)
+
+1. Feedback: `tanhf(fb·last wet)` added to the input (fb = `2·1.005x − 1.005`); the engine's own `tanhf` (rational fit
+   below 1, `1 − 2/(e^{2x}+1)` with a 32-entry exp table up to 10, ±1 beyond) is reproduced bit for bit.
+2. 20 Hz high-pass then 20 kHz low-pass (RBJ, Q 0.5); the low-pass is designed at a construction-time 44.1 kHz even
+   when the host runs at another rate (FL's behaviour, kept).
+3. Ring modulator (Type 2): `x·cos(2π·phase)` (double cos), the right channel at phase + L/R offset/4, or the
+   side-chain signal when one is connected (not routed in LYNX).
+4. Shifter: HQ (Type 0) first splits the signal around the shift frequency with 16th-order crossovers (4 Butterworth
+   Q's 0.5098 / 0.6013 / 0.9000 / 2.5629, each section applied twice, 4 lanes L, R, L, R), re-designed every 32
+   samples, low band at `min(20000, max(20, 22050 − |f|))`, high band at `min(20000, max(20, |f|))`; the two halves go
+   through matching crossovers and are cross-faded in 2 ms (`500/fs` per sample) when the shift changes sign; the dry
+   path runs through the same crossovers (as all-passes) so dry and wet stay aligned.
+   Then a Hilbert pair: two chains of four `y = c·(x + y[n−2]) − x[n−2]` sections (coefficients 0.4794009,
+   0.8762185, 0.97659755, 0.9974992 | 0.1617585, 0.7330289, 0.94534963, 0.99059916), the first chain one sample late.
+   Quadrature oscillator: the C run-time's vector `sinf` on (2πφ, 2πφ + π/2, 2πφ', 2πφ' + π/2) (φ' = φ + L/R offset);
+   `wetL = (b₂·cos + a₂·sin)·(1 − Lshape) + (b₀·cos − a₀·sin)·Lshape`, likewise R with lanes 1/3; phase advance
+   `frac(inc + 1000 + φ)`, `inc = f/fs`.
+5. Mix: wet `min(1, 2x)`, dry `min(1, 2 − 2x)`; Mono↔Stereo `s = (1 − x)/2`: `L = s·R + (1 − s)·L`,
+   `R = (1 − s)·R + s·L`.
+
+Frequency: `0.1·2^(K·|2x − 1|)` Hz with K = 17.60964 (20 kHz range) or 10.965784 (200 Hz), the library's `powf`
+(the IldspMath replica matches it on 40000 random arguments; the vector `sinf` on 160000 lanes). Tempo range: period
+`(int)(48·2^(7 − 14·|x − ½|)) / 192`, phase restarted from the position when the transport starts or the range
+changes.
+
+### 4.3 Verification **[EXEC]**
+
+`tmp/fldsp154/cpp/fscmp.cpp` (LYNX engine) against the plug-in in our harness (`early` order, transport stopped,
+120 BPM, `py/fsbatch.py 1 16`):
+
+| Test | Result |
+|---|---|
+| the 14 installation states (5 demo slots, 9 presets) incl. HQ / plain / ring modulator, feedback, shapes, phase offsets | 14/14 bit-identical at 44.1 kHz; the two Tempo-range presets at 48 kHz −85 dB |
+| 16 random states × {44.1, 48, 96 kHz}, 0–3 control changes at random samples | 15/16 bit-identical; one Tempo-range state at 96 kHz −46 dB |
+| design coefficients with the C library's `sin`/`cos` instead of the engine's vector double sincos | 4 of 2 000 000 float coefficients differ (1 ulp) |
+| unit test `fl_frequency_shifter_matches_fl_engine` (4 states, 24000 frames) | FNV-1a of the DLL's output |
+
+LYNX: `src/core/FreqShifterFl.{h,cpp}`, `EffectKind::flFrequencyShifter` (project id `flFrequencyShifter`), the FL
+import uses it for every readable state (the old approximation `freqShift` stays for unreadable ones), addable from the
+Mixer. While the song plays LYNX passes the song position in beats.
+
+## 5. Low Lifter **[DECOMP + EXEC]**
+
+`Plugins/Fruity/Effects/Low Lifter/Low Lifter_x64.dll` (SHA-256 `a492a7aa…fa96`, Delphi front end) creates
+`LowFreqEnhancerImpl` in `Shared/ildsp_x64.dll`, a wrapper around the Faust program `lowFreqEnhancementChebyshev`
+(dsp vtable `0x1803de0a0`: instanceConstants `FUN_180177050`, instanceResetUserInterface `FUN_1801772d0`,
+instanceClear `FUN_180177320`, buildUserInterface `FUN_180177a80`, compute `FUN_180177f50` — 15.4 KB of code). Round 15
+§5 had the state; round 17 §13 the Chebyshev core; round 63 started the engine. This round rebuilt all of it.
+
+### 5.1 Controls
+
+State: `i32` version 6 · 15 × `i32` controls · UI bytes. The front end (`FUN_006c71d0`) sends each control to the
+Faust zone of the same index: switches (On, Look-ahead, Invert, Multiband, High / Low band) as their raw integer,
+Dry/Wet and Diffuser mix as x, and `a + (b − a)·Exp(Ln(x)/c)` (Delphi run-time) for Low gain (−120, 12, 7.275), Slope
+(−60, 0, 3.105), Pre gain (0, 18, 1), Diffuser depth (−0.99, 0.99, 1), High gain (−120, 0, 5), Crossover and Low cut
+(20, 120, 0.498918). Host gate (`FUN_006c7a80`): a block whose samples are all within ±10⁻⁶ counts down a one-second
+tail (`= sample rate`); once it is spent the engine is skipped and the input passes until a louder block arrives.
+
+### 5.2 Engine (float32 per sample)
+
+Per sample, one-pole TPT smoothers (20 Hz: `G = g/(1+g)`, `g = tan(π·20/fs)`) on every control (slope at 5 Hz) and a
+1 Hz fade-in from 0 to 1. Per channel:
+- crossover at f (≥ 20 Hz): two cascaded Butterworth TPT state-variable filters (24 dB/oct) give the low band B and the
+  high band `x − 2√2·bp − lp`; in multiband mode a second split at f/2 and f/4 (filters at g = tan(π·f/2/fs),
+  tan(π·f/4/fs)) and back at f yields four bands; the high band goes to a 2048-sample delay line;
+- each band × pre gain → look-ahead limiter: delay 0 or 10 ms (`(int)(0.01·fs)`), |x| through four peak holds of
+  `rint((la + 0.05)·fs/4)` samples, bounded below at 1, then four attack (`exp(−14.44/(fs·la))`, 0 without
+  look-ahead) / release (`exp(−144.45/fs)`) stages → E; `u = x_delayed/E`, `T₂ = 2u² − 1`,
+  `y = (((2T₂ − 1)·b + 1)·x_d/E + a·T₂)/(1 + 2a)` with `a = 10^(slope/20)`, `b = 10^(slope/10)` (= u + aT₂ + bT₃);
+  a 20 Hz TPT high-pass;
+- the bands are summed (multiband: the three split bands; otherwise the single one), times the fade-in, through four
+  rotation all-passes (`buf = s·x − c·z`, `y = c·x + s·z`, c = depth, s = √(1 − c²); lengths `fs·{0.5, 0.2071,
+  0.1589, 0.1340}/f − 1` samples) mixed by the diffuser mix, times low gain · low switch · polarity, plus the delayed
+  high band × high gain · high switch, then the low cut (TPT high-pass);
+- the dry signal through all-passes matching the crossovers and the same delay; output `dry·(1 − wet) + wet·…`.
+The library's `tanf` (double evaluation, FMA on FMA machines) and `powf` / `expf` are reproduced; the two channels
+were compiled with different groupings of a few products, which the port keeps (Ghidra prints chained products
+without their grouping — the disassembly decides).
+
+### 5.3 Verification **[EXEC]**
+
+`cpp/llcmp.cpp` (LYNX effect) against the plug-in in our harness (`py/llbatch.py 1 12`): the 11 installation states
+(3 demo slots, 7 presets + Default) and 12 random states at 44.1 / 48 / 96 kHz — **23/23 bit-identical**, both
+channels; a 1.6 s gap of silence (gate) at 44.1 and 48 kHz bit-identical. Unit test `fl_low_lifter_matches_fl_engine`.
 
 ## Where I stopped
 
