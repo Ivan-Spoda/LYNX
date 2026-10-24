@@ -186,6 +186,8 @@ void Engine::reset() noexcept
 {
     dsBand.reset();
     dsOut.reset();
+    dsOutHigh.reset();
+    dpOutLow.reset();
     dpBand.reset();
     dpDetect.reset();
     dsDelay.reset();
@@ -211,11 +213,13 @@ void Engine::set (const Settings& n) noexcept
     {
         dsBand.design (sr, s.dsHz, true);
         dsOut.design (sr, s.dsHz, false);
+        dsOutHigh.design (sr, s.dsHz, true);
         double k = 0.84, liftDb = 5.17;
         dePloserDetector (s.dpHz, k, liftDb);
         dpDetect.design (sr, s.dpHz * k, false);
         dpLift = dbToGain (liftDb);
         dpBand.design (sr, s.dpHz, true);
+        dpOutLow.design (sr, s.dpHz, false);
         hpf.filter (sr, 1, s.hpfHz, 1.0);
         matchedPeak (notch, sr, s.notchHz, notchQ (s.notchDb), s.notchDb);
         matchedPeak (high, sr, s.highHz, highQ (s.highDb), s.highDb);
@@ -251,11 +255,13 @@ void Engine::deEss (float& a, float& b) noexcept
     const double rel = gainToDb ((dsEb + 1e-20) / (dsEf + 1e-20));
     dsGrDb = (2.0 / 3.0) * std::max (0.0, rel - s.dsThresholdDb);
     dsDelay.process (a, b); // look-ahead: the audio comes 1 ms after the detector
-    // [EXEC] split: the part above the frequency (the audio minus its 3rd-order low-pass) is turned down
+    // [EXEC] split: a 3rd-order Butterworth crossover at the frequency (low-pass + high-pass, an all-pass sum), the
+    // high band turned down: out = LP + g · HP (fitted exactly on steady tones at 7, 10, 15 kHz and pink noise)
     const float la = dsOut.process (a, 0), lb = dsOut.process (b, 1);
-    if (s.dsListen) { a -= la; b -= lb; return; } // audition: the band the de-esser acts on
+    const float ha = dsOutHigh.process (a, 0), hb = dsOutHigh.process (b, 1);
+    if (s.dsListen) { a = ha; b = hb; return; } // audition: the band the de-esser acts on
     const auto g = (float) dbToGain (-dsGrDb);
-    if (s.dsSplit) { a = la + g * (a - la); b = lb + g * (b - lb); }
+    if (s.dsSplit) { a = la + g * ha; b = lb + g * hb; }
     else { a *= g; b *= g; }
 }
 
@@ -268,11 +274,12 @@ void Engine::dePlos (float& a, float& b) noexcept
     const double rel = gainToDb ((dpEb + 1e-20) / (dpEf + 1e-20));
     dpGrDb = 0.75 * std::max (0.0, rel - s.dpThresholdDb);
     dpDelay.process (a, b);
-    // [EXEC] split: the part below the frequency (the audio minus its 3rd-order high-pass) is turned down
+    // [EXEC] split: the same crossover, the low band turned down: out = HP + g · LP
     const float ha = dpBand.process (a, 0), hb = dpBand.process (b, 1);
-    if (s.dpListen) { a -= ha; b -= hb; return; }
+    const float la = dpOutLow.process (a, 0), lb = dpOutLow.process (b, 1);
+    if (s.dpListen) { a = la; b = lb; return; }
     const auto g = (float) dbToGain (-dpGrDb);
-    if (s.dpSplit) { a = ha + g * (a - ha); b = hb + g * (b - hb); }
+    if (s.dpSplit) { a = ha + g * la; b = hb + g * lb; }
     else { a *= g; b *= g; }
 }
 

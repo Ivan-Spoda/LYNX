@@ -65,8 +65,9 @@ the lexicographic permutations of De-esser, De-ploser, EQ, Compander (her 0.478 
   high-pass at the frequency, reduction 2/3 of the excess of (band − full) over the threshold; de-ploser band = a
   3rd-order low-pass at 0.78 / 0.84 / 0.92 × the frequency (50 / 100 / 250 Hz) with a passband lift of 8.3 / 5.2 /
   2.3 dB, reduction 3/4 of the excess. Times fitted on alternating tones: de-esser 1.5 / 40 ms, de-ploser 3 / 40 ms.
-- SPLIT: out = LP(x) + g · (x − LP(x)) for the de-esser (3rd-order low-pass at the frequency; pink noise: 0.02–0.14
-  error) and HP(x) + g · (x − HP(x)) for the de-ploser.
+- SPLIT: a 3rd-order Butterworth crossover at the frequency (low-pass + high-pass: an all-pass sum, so with no
+  reduction only the phase changes), the band's side turned down — de-esser out = LP + g · HP, de-ploser out = HP +
+  g · LP. Solved exactly from steady tones at 7 / 10 / 15 kHz × four thresholds (magnitude and phase) and pink noise.
 - Look-ahead delays the audio 1 ms (de-esser) / 10 ms (de-ploser) and the plugin reports it as latency — **also while
   the module is off** (her state: de-ploser off with look-ahead on = 441 samples at 44.1 kHz).
 
@@ -93,7 +94,7 @@ LYNX vs the trial (null over the signal after the first second; `D:\lynx-work\vo
 | high-pass; notch (200 Hz … 5 kHz) | below −139 dB; −58 … −105 dB |
 | notch at 10 kHz; high band 1 … 3 kHz; 5 … 20 kHz | −25 … −55; −33 … −62; −16 … −31 dB |
 | de-esser / de-ploser broadband | −13 … −25 dB (level within 0.3–1.4 dB) |
-| de-esser / de-ploser split | −1 … −22 dB (level within 0.1–2.2 dB) |
+| de-esser / de-ploser split (sibilance / plosives, pink, steady tones) | −24 … −64 dB (level within 0.05 dB) |
 
 ## 3. Auto-Tune Pro before the trial ends (2026-10-25 21:00) [EXEC]
 
@@ -119,8 +120,8 @@ defaults (reverbs at a 25 % slot mix, delays at Echoform's tape echo), so a proj
 ## Where I stopped
 - Done: §1 inventory, §2 Vocalstrip 2 measured and Ridge's Vocal strip voicing + translator (tests
   `tests/Vox145Tests.inc`, pt-BR), §3 Auto-Tune tracking / input type in noise, §4 Complete Access role entries.
-- Not done: the de-esser / de-ploser SPLIT detector (the split renders null at −1 … −22 dB: the reduction in split
-  mode is smaller than the broadband law for the same tone; data in `vs\out\dsdp`, `dsdet`, `dstime`); the notch /
+- Not done: the broadband de-esser / de-ploser on sibilance and plosive bursts (−13 … −25 dB: the detectors' time
+  behaviour is fitted to 0.6 dB RMS, the rest is in the attack shape; data in `vs\out\dsdp`, `dsdet`, `dstime`); the notch /
   high band within 0.3–1.5 dB above 10 kHz (the reference is neither bilinear nor exactly the analog prototype there);
   LYNX Tune's pitch jitter in noise (§3); Soundtoys leftovers (Decapitator ≥ 5 / Punish curve, EchoBoy Dual and the
   ping-pong kernel, PanMan's first ~200 ms after a reset — the existing round-136 renders start after the host's

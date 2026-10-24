@@ -17,7 +17,8 @@
 //  - de-esser / de-ploser: level-independent detectors — the level of the band (3rd-order Butterworth high-pass at
 //    the frequency; the de-ploser: a low-pass at 0.78 … 0.92 × the frequency with a passband lift) relative to the
 //    full signal, both peak followers (de-esser 1.5 / 40 ms, de-ploser 3 / 40 ms); gain reduction 2/3 (de-esser) and
-//    3/4 (de-ploser) of the excess over the threshold; SPLIT applies it to the band only (x + (g − 1) · band);
+//    3/4 (de-ploser) of the excess over the threshold; SPLIT: a 3rd-order Butterworth crossover, only the band's
+//    side turned down (LP + g · HP / HP + g · LP);
 //    look-ahead delays the audio 1 ms / 10 ms;
 //  - EQ: high-pass = cookbook 2nd-order, Q 1 (a small bump above the corner); notch and high band = peaking filters
 //    with the analog prototype's magnitude (magnitude-matched digital design) and a Q that follows the gain
@@ -129,11 +130,11 @@ private:
     Settings s;
     std::array<int, 4> mods { 0, 1, 2, 3 };
     // de-esser
-    ThirdOrder dsBand, dsOut;
+    ThirdOrder dsBand, dsOut, dsOutHigh;
     Delay dsDelay;
     double dsAtt = 0, dsRel = 0, dsEb = 0, dsEf = 0, dsGrDb = 0;
     // de-ploser
-    ThirdOrder dpBand, dpDetect;
+    ThirdOrder dpBand, dpDetect, dpOutLow;
     Delay dpDelay;
     double dpAtt = 0, dpRel = 0, dpEb = 0, dpEf = 0, dpGrDb = 0, dpLift = 1;
     // EQ
