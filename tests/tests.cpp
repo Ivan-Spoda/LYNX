@@ -15783,3 +15783,4 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Feat132Tests.inc"
 #include "Parity135sTests.inc"
 #include "VoiceMatch136Tests.inc"
+#include "Vox138Tests.inc"

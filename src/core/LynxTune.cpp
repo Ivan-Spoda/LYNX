@@ -259,7 +259,11 @@ public:
         // round 128: natural vibrato (gain on the vibrato already sung), ignore vibrato, created vibrato
         // round 135w: Keep vibrato / Vibrato amount multiply the natural-vibrato gain; Speed (unlinked) corrects the
         // in-note deviations on its own time; the tolerances widen and delay the note changes; Correction scales it all
-        const auto natGain = std::pow (10.0, naturalVibratoDb (p[naturalVibrato]) / 20.0)
+        // round 138 ([EXEC] REA_rodada138 §3.6): on the reference the vibrato that survives the correction grows by about
+        // 10^(dB/34) (+6 dB: x1.5, +12 dB: x2.1) and shrinks to no less than about 2/3 (-6 ... -12 dB), not by the full
+        // 10^(dB/20) amplitude gain (was x3.9 / x0.27 at +-12 dB)
+        const auto natDb = naturalVibratoDb (p[naturalVibrato]);
+        const auto natGain = std::max (natDb < 0.0 ? 0.66 : 0.0, std::pow (10.0, natDb / 34.0))
                              * (p[keepVibrato] >= 0.5f ? vibratoAmountOf (p[vibratoAmount]) : 0.0);
         const auto linked = p[speedLink] >= 0.5f;
         const auto speedTau = speedMs (p[speed]) * 0.001;
@@ -431,11 +435,13 @@ public:
 
             // retune: the applied correction follows the wanted one; humanize slows it on sustained (steady) notes.
             // [EXEC] Auto-Tune Pro (round 120 §5): a note held steady for ~0.6 s is retuned as if the retune speed were
-            // longer by the humanize amount (100 % = +100 ms of its speed = +135 ms of LYNX's time constant)
+            // longer by the humanize amount (100 % = +100 ms of its speed = +135 ms of LYNX's time constant).
+            // Round 138 (REA_rodada138 §3.2): the slow-down sets in between 0.275 and 0.375 s of steadiness (fitted on
+            // notes that move after 0.3 s and after 0.8 s, retune 0 … 50 ms, humanize 25 … 100 %; was 0.2 … 0.6 s)
             auto t = tau;
             if (human > 0.0)
             {
-                const auto x = std::clamp ((noteAge - 0.2) / 0.4, 0.0, 1.0);
+                const auto x = std::clamp ((noteAge - 0.275) / 0.1, 0.0, 1.0);
                 t += human * 0.135 * x * x * (3.0 - 2.0 * x);
             }
             shift += (t > 0.0 ? 1.0 - std::exp (-dt / t) : 1.0) * (wanted - shift);

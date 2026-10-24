@@ -1028,7 +1028,13 @@ int translateAutoTunePro (const std::vector<std::uint8_t>& state, EffectSlot& sl
     if (! key)
         return 0;
     slot.params[lynxtune::key] = (float) key->first / 11.0f;
-    slot.params[lynxtune::scale] = (float) key->second / (float) (vocal::scaleCount - 1);
+    if (key->second >= vocal::scaleCount) // whole tone / diminished (round 138: modern scale lists): "More scales"
+    {
+        slot.params[lynxtune::scale] = 0.0f;
+        slot.params[lynxtune::moreScales] = key->second == (int) vocal::Scale::wholeTone ? 0.5f : 1.0f;
+    }
+    else
+        slot.params[lynxtune::scale] = (float) key->second / (float) (vocal::scaleCount - 1);
     const auto x = autoTuneProParams (state);
     auto has = [&x] (int n) {
         const auto it = x.find (n);
@@ -1059,7 +1065,14 @@ int translateAutoTunePro (const std::vector<std::uint8_t>& state, EffectSlot& sl
     if (has (70) || classic)
         set (lynxtune::formantPreserve, ! classic && at (70, 1.0) >= 0.5 ? 1.0 : 0.0);
     if (has (71) && ! classic && at (70, 1.0) >= 0.5)
-        set (lynxtune::formantShift, -12.0 * std::log2 (std::clamp (at (71, 100.0), 50.0, 180.0) / 100.0) / 14.0 + 0.5);
+    {
+        // round 138 (REA_rodada138 §3.4, [EXEC] the vowel envelopes of the official trial at throat 50 … 180 %): the formants
+        // move −0.0146·(L − 100)^1.4 semitones for a longer throat (−3.5 at 150 %, −6.8 at 180 %) and about
+        // +0.03·(100 − L)^1.4 for a shorter one (+2.7 at 75 %) — about half of the old −12·log2 (L / 100) model
+        const auto L = std::clamp (at (71, 100.0), 50.0, 180.0);
+        const auto st = L >= 100.0 ? -0.0146 * std::pow (L - 100.0, 1.4) : 0.03 * std::pow (100.0 - L, 1.4);
+        set (lynxtune::formantShift, st / 14.0 + 0.5);
+    }
     if (has (9))
         set (lynxtune::tracking, std::clamp (at (9, 50.0), 1.0, 100.0) * 0.4 / 50.0);
     // round 128: natural vibrato (X62, dB), ignore vibrato (X44), Create Vibrato (X5 shape, X7 rate, X6 cents, X46 / X50
@@ -1834,8 +1847,23 @@ std::optional<std::pair<int, int>> autoTuneProKey (const std::vector<std::uint8_
         return std::nullopt;
     // [EXEC] the scale list's first entries (the official trial's own texts, REA round 120 §5): 0 = Major, 1 = Minor,
     // 2 = Chromatic — as read from her takes in round 113 §2. The other scales (tunings) are not translated.
+    // Round 138 (REA_rodada138 §3.1): a state that carries <ModernScales> (saved by a newer Auto-Tune Pro) stores the
+    // index of the MODERN scale list instead (0 Chromatic, 1 Major, 2 Minor, 3 Harmonic Minor, 4 Jazz Melodic Minor,
+    // 5 Dorian, 6 Phrygian, 7 Lydian, 8 Mixolydian, 9 Locrian, 10 Major Pentatonic, 11 Minor Pentatonic, 12 Blues,
+    // 13 Whole Tone, 14 Diminished): [EXEC] her 42 states with "2" load into the official trial as Minor, the one with
+    // "1" as Major (the old reading took them for Chromatic / Minor)
     vocal::Scale lynxScale;
-    if (scale == 0.0f)
+    if (findBytes (state, "<ModernScales") != std::string::npos)
+    {
+        using S = vocal::Scale;
+        static constexpr S modern[15] { S::chromatic, S::major, S::minor, S::harmonicMinor, S::melodicMinor, S::dorian, S::phrygian,
+                                        S::lydian, S::mixolydian, S::locrian, S::majorPentatonic, S::minorPentatonic, S::blues,
+                                        S::wholeTone, S::diminished };
+        if (scale < 0.0f || scale > 14.0f || scale != std::floor (scale))
+            return std::nullopt;
+        lynxScale = modern[(int) scale];
+    }
+    else if (scale == 0.0f)
         lynxScale = vocal::Scale::major;
     else if (scale == 1.0f)
         lynxScale = vocal::Scale::minor;
@@ -1850,6 +1878,40 @@ std::optional<std::pair<std::uint16_t, std::uint16_t>> autoTuneProNoteEdits (con
 {
     // [DATA] <Scales><Scale ScaleIndex="n" Length="7|12"><Bypass Values="0100000"/><Remove Values="…"/>: one digit per
     // scale degree (major / minor: 7 degrees above the root; chromatic: 12 semitones above the root)
+    // round 138: a <ModernScales> state keeps one 12-digit row per modern scale (semitones above the root; Remove = the
+    // notes that are not targets, the scale's own non-members included)
+    if (const auto ms = findBytes (state, "<ModernScales"); ms != std::string::npos)
+    {
+        using S = vocal::Scale;
+        static constexpr S modern[15] { S::chromatic, S::major, S::minor, S::harmonicMinor, S::melodicMinor, S::dorian, S::phrygian,
+                                        S::lydian, S::mixolydian, S::locrian, S::majorPentatonic, S::minorPentatonic, S::blues,
+                                        S::wholeTone, S::diminished };
+        int mi = -1;
+        for (int k = 0; k < 15; ++k)
+            if ((int) modern[k] == lynxScale)
+                mi = k;
+        const auto at = mi < 0 ? std::string::npos : findBytes (state, "<Scale ScaleIndex=\"" + std::to_string (mi) + "\"", ms);
+        if (at == std::string::npos)
+            return std::nullopt;
+        const std::string text (state.begin() + (std::ptrdiff_t) at, state.begin() + (std::ptrdiff_t) std::min (state.size(), at + 600));
+        auto mask = [&] (const char* element) -> std::optional<std::uint16_t> {
+            const auto e = text.find (element);
+            if (e == std::string::npos)
+                return std::nullopt;
+            const auto v = attributeIn (text, e, "Values");
+            if (v.size() != 12u)
+                return std::nullopt;
+            std::uint16_t m = 0;
+            for (int d = 0; d < 12; ++d)
+                if (v[(std::size_t) d] == '1')
+                    m = (std::uint16_t) (m | (1u << ((key + d) % 12)));
+            return m;
+        };
+        const auto bypass = mask ("<Bypass "), remove = mask ("<Remove ");
+        if (! bypass || ! remove)
+            return std::nullopt;
+        return std::pair<std::uint16_t, std::uint16_t> { *bypass, *remove };
+    }
     const int index = lynxScale == (int) vocal::Scale::major ? 0 : lynxScale == (int) vocal::Scale::minor ? 1 : lynxScale == (int) vocal::Scale::chromatic ? 2 : -1;
     if (index < 0)
         return std::nullopt;

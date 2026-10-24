@@ -135,7 +135,7 @@ TEST (auto_tune_pro_extra_controls_translate_round127)
         const auto s = vm127::tuneSlot (vm127::autoTuneState (2, 0, { { 4, 20 }, { 3, 20 }, { 74, -5 }, { 92, 60 }, { 10, 2 }, { 70, 1 }, { 71, 120 }, { 9, 75 } }), n);
         CHECK (std::abs (t::referenceHz (s.params[t::reference]) - 440.0 * std::exp2 (20.0 / 1200.0)) < 0.01);
         CHECK (t::transposeSemitones (s.params[t::transpose]) == -5 && std::abs (s.params[t::mix] - 0.6f) < 1e-6f);
-        CHECK (t::rangeIndex (s.params[t::range]) == 2 && std::abs (t::formantSemitones (s.params[t::formantShift]) + 12.0 * std::log2 (1.2)) < 0.01);
+        CHECK (t::rangeIndex (s.params[t::range]) == 2 && std::abs (t::formantSemitones (s.params[t::formantShift]) + 0.0146 * std::pow (20.0, 1.4)) < 0.01); // round 138's measured throat law
         CHECK (std::abs (s.params[t::tracking] - 0.6f) < 1e-6f);
     }
     // Classic mode: no formant correction, no Flex-Tune, no transpose; Bass Instrument → Instrument
