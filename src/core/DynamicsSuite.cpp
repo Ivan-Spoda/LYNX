@@ -922,6 +922,13 @@ bool measuredDynamic (const EffectParams& p) noexcept { return on (p[dynamicEngi
 double linkAmount (float v) noexcept { return std::clamp (2.0 * (double) v, 0.0, 1.0); }
 double linkOnly (float v) noexcept { return std::clamp (2.0 * (double) v - 1.0, 0.0, 1.0); }
 double scFilterHz (float v) noexcept { return 30.0 * std::pow (1000.0, (double) std::clamp (v, 0.0f, 1.0f)); }
+int crossoverSlopeDbOct (const EffectParams& p, int k) noexcept
+{
+    static constexpr int own[4] { 0, 12, 24, 48 };
+    const auto s = own[pick (p[(std::size_t) (xoverSlope0 + std::clamp (k, 0, bands - 2))], 4)];
+    return s > 0 ? s : slopeDbOct (p[Global::slope]);
+}
+float crossoverSlopeValue (int dbOct) noexcept { return dbOct <= 0 ? 0.0f : (dbOct <= 12 ? 1.0f / 3.0f : (dbOct <= 24 ? 2.0f / 3.0f : 1.0f)); }
 float scFilterValue (double hz) noexcept { return (float) std::clamp (std::log (std::max (hz, 1.0) / 30.0) / std::log (1000.0), 0.0, 1.0); }
 int oversamplingOf (float v) noexcept { return 1 << pick (v, 3); }
 int linearFftSize (double sampleRate) noexcept
@@ -988,7 +995,6 @@ double bandStaticDb (const EffectParams& p, int b, double inputDb)
 double responseDb (const EffectParams& p, const double* bandGainDb, double sampleRate, double hz)
 {
     const auto f = crossovers (p);
-    const auto slope = slopeDbOct (p[Global::slope]);
     const auto nb = bandCount (p);
     const auto w = 2.0 * pi * hz / sampleRate;
     // bands of the tree: B0 = L1, B1 = H1·L2, B2 = H1·H2·L3, …, the last = H1·…·H(n−1); out = x + Σ (g − 1)·Bk
@@ -997,7 +1003,7 @@ double responseDb (const EffectParams& p, const double* bandGainDb, double sampl
     for (int k = 0; k < nb - 1; ++k)
     {
         Split s;
-        s.design (sampleRate, f[(std::size_t) k], slope);
+        s.design (sampleRate, f[(std::size_t) k], crossoverSlopeDbOct (p, k));
         band[(std::size_t) k] = rest * s.response (false, w);
         rest *= s.response (true, w);
     }
@@ -1013,7 +1019,7 @@ double responseDb (const EffectParams& p, const double* bandGainDb, double sampl
             for (int j = k + 1; j < nb - 1; ++j)
             {
                 Split s;
-                s.design (sampleRate, f[(std::size_t) j], slope);
+                s.design (sampleRate, f[(std::size_t) j], crossoverSlopeDbOct (p, j));
                 band[(std::size_t) k] *= s.response (false, w) + s.response (true, w);
             }
     bool solo = false;
@@ -1022,14 +1028,14 @@ double responseDb (const EffectParams& p, const double* bandGainDb, double sampl
     if (mode == Phase::dynamic && measuredDynamic (p) && ! solo)
     {
         // round 147: the measured engine — the product of each band's 1 + (g − 1)·A (its own crossovers' magnitudes)
-        const auto n = slope <= 12 ? 1 : (slope <= 24 ? 2 : 4);
         const auto om = minphase::warp (hz, sampleRate);
         double m = 1.0;
         for (int b = 0; b < nb; ++b)
         {
             const auto wl = b > 0 ? minphase::warp (f[(std::size_t) (b - 1)], sampleRate) : 0.0;
             const auto wh = b < nb - 1 ? minphase::warp (f[(std::size_t) b], sampleRate) : 0.0;
-            m *= minphase::bandMagnitude (wl, wh, n, dbToGain (bandGainDb[b]), om);
+            const auto nl = b > 0 ? slopeOrder (crossoverSlopeDbOct (p, b - 1)) : 1, nh = b < nb - 1 ? slopeOrder (crossoverSlopeDbOct (p, b)) : 1;
+            m *= minphase::bandMagnitude (wl, wh, nl, nh, dbToGain (bandGainDb[b]), om);
         }
         return gainToDb (std::abs (m)) + trimDb (p[output]);
     }
@@ -1218,7 +1224,9 @@ private:
     void processChunk (float* l, float* r, const float* scl, const float* scr, int n, const EffectParams& p) noexcept
     {
         const auto f = crossovers (p);
-        const auto slope = slopeDbOct (p[Global::slope]);
+        std::array<int, bands - 1> slope {};
+        for (int k = 0; k < bands - 1; ++k)
+            slope[(std::size_t) k] = crossoverSlopeDbOct (p, k);
         const auto nb = bandCount (p);
         const auto md = (Phase) mode;
         const bool linear = md == Phase::linear, minimum = md == Phase::minimum;
@@ -1226,10 +1234,10 @@ private:
         {
             for (int k = 0; k < bands - 1; ++k)
             {
-                split[(std::size_t) k].design (sr, f[(std::size_t) k], slope);
-                scSplit[(std::size_t) k].design (sr, f[(std::size_t) k], slope);
+                split[(std::size_t) k].design (sr, f[(std::size_t) k], slope[(std::size_t) k]);
+                scSplit[(std::size_t) k].design (sr, f[(std::size_t) k], slope[(std::size_t) k]);
                 for (int j = 0; j < bands - 1; ++j)
-                    comp[(std::size_t) j][(std::size_t) k].design (sr, f[(std::size_t) k], slope);
+                    comp[(std::size_t) j][(std::size_t) k].design (sr, f[(std::size_t) k], slope[(std::size_t) k]);
             }
             lastF = f;
             lastSlope = slope;
@@ -1454,7 +1462,6 @@ private:
             }
             for (int b = nb; b < bands; ++b)
                 dynWorks[(std::size_t) b] = false;
-            const auto order = slope <= 12 ? 1 : (slope <= 24 ? 2 : 4);
             const auto run = [&] (int len, double rate, int every, const float* d0, const float* d1, auto&& gainAt, float* o0, float* o1) noexcept {
                 std::array<double, bands> wl {}, wh {};
                 for (int b = 0; b < nb; ++b)
@@ -1475,7 +1482,9 @@ private:
                                 if (std::abs (gc[c] - dynGain[(std::size_t) b][(std::size_t) c]) > 1e-7)
                                 {
                                     dynGain[(std::size_t) b][(std::size_t) c] = gc[c];
-                                    dynBand[(std::size_t) b][(std::size_t) c].design (wl[(std::size_t) b], wh[(std::size_t) b], order, std::max (gc[c], 1e-6));
+                                    dynBand[(std::size_t) b][(std::size_t) c].design (wl[(std::size_t) b], wh[(std::size_t) b],
+                                                                                      b > 0 ? slopeOrder (slope[(std::size_t) (b - 1)]) : 1,
+                                                                                      b < nb - 1 ? slopeOrder (slope[(std::size_t) b]) : 1, std::max (gc[c], 1e-6));
                                 }
                         }
                     const double xl = d0[i], xr = d1[i];
@@ -1720,7 +1729,7 @@ private:
     std::array<double, bands - 1> lastF {};
     const float* scL = nullptr;
     const float* scR = nullptr;
-    int lastSlope = 0;
+    std::array<int, bands - 1> lastSlope {};
     bool designed = false, kernelsDirty = true;
     int mode = -1, osFactor = 0, linSize = 0, lastNb = 0;
     std::array<peqfl::FftConvolver, bands - 1> lin;
@@ -1752,7 +1761,8 @@ private:
     std::array<std::array<double, 2>, bands> dynGain {};
     std::array<bool, bands> dynWorks {};
     std::array<double, bands - 1> dynF {};
-    int dynSlope = 0, dynNb = 0, dynOs = 0;
+    std::array<int, bands - 1> dynSlope {};
+    int dynNb = 0, dynOs = 0;
     std::array<bool, bands> dynMs {};
     LiveMeters meters;
 };
@@ -2165,6 +2175,9 @@ const EffectInfo& prismInfo()
             i.params.push_back ({ n, 0.0f });
         for (const auto* n : { "B1 SC high", "B2 SC high", "B3 SC high", "B4 SC high", "B5 SC high", "B6 SC high" })
             i.params.push_back ({ n, 1.0f });
+        // round 147: each crossover's own slope (0 = the global Slope, the old sound)
+        for (const auto* n : { "Crossover 1 slope", "Crossover 2 slope", "Crossover 3 slope", "Crossover 4 slope", "Crossover 5 slope" })
+            i.params.push_back ({ n, 0.0f });
         return i;
     }();
     return info;
@@ -2317,6 +2330,11 @@ std::string paramText (EffectKind kind, int param, float v)
             case bandScLow0: case bandScLow0 + 1: case bandScLow0 + 2: case bandScLow0 + 3: case bandScLow0 + 4: case bandScLow0 + 5:
             case bandScHigh0: case bandScHigh0 + 1: case bandScHigh0 + 2: case bandScHigh0 + 3: case bandScHigh0 + 4: case bandScHigh0 + 5:
                 return hzText (scFilterHz (v));
+            case xoverSlope0: case xoverSlope0 + 1: case xoverSlope0 + 2: case xoverSlope0 + 3: case xoverSlope0 + 4:
+            {
+                static const char* const names[4] { "global", "12 dB/oct", "24 dB/oct", "48 dB/oct" };
+                return names[pick (v, 4)];
+            }
             case slope: return std::to_string (slopeDbOct (v)) + " dB/oct";
             case lookahead: return v <= 0.0f ? "off" : msText (lookaheadMs (v));
             case mix: return fmt ("%.0f%%", v * 100.0);

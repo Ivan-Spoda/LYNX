@@ -2073,6 +2073,11 @@ Layout prismMultiband()
         add (dial (420, 630, 20, links[b], TR_NOOP ("Stereo link")));
         add (tabs (480, 626, 130, 22, linkModes[b], TR_NOOP ("Mid|Side")));
     }
+    // round 147: each crossover's own slope (0 = the global one)
+    static const char* xs[5] { "Crossover 1 slope", "Crossover 2 slope", "Crossover 3 slope", "Crossover 4 slope", "Crossover 5 slope" };
+    static const char* xsCaption[5] { TR_NOOP ("Slope 1"), TR_NOOP ("Slope 2"), TR_NOOP ("Slope 3"), TR_NOOP ("Slope 4"), TR_NOOP ("Slope 5") };
+    for (int k = 0; k < 5; ++k)
+        v.push_back (dial (660.0f + 52.0f * (float) k, 630, 16, xs[k], xsCaption[k]));
     l.height = 668;
     return l;
 }

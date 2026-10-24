@@ -88,6 +88,17 @@ panel opens its right part (Side chain: Band | Free, Low, High; Stereo link: Lin
 translated when their Expert mode is on (an external side-chain input on any band turns LYNX's side-chain switch to
 external). Tests: tests/Parity147Tests.inc.
 
+### Per-crossover slopes
+
+Pro-MB gives every band its own low / high slope. LYNX's bands share their crossovers, so each crossover got its
+own slope (appended `Crossover 1 … 5 slope`: Global = the old Slope, 12, 24, 48 dB/oct), shown as the band's **Low
+slope / High slope** in the expert part of the band panel; Pro-MB states set each crossover from the band below's
+high slope (or the band above's low slope next to a gap). All processing modes follow it (the split, the
+all-pass copies, the FIR kernels, the editor's curve). The measured Dynamic phase with different orders on a band's
+two sides has no quadratic shortcut: its zeros come from P (z) = 1 + g·z^nl + ρ·z^nh + ρ·z^(nl+nh), z = (Ω / Ω_l)²,
+degree ≤ 8, by Aberth's iteration started on the two circles the edge factors give (checked on 1 500 cases: the
+designed magnitude equals 1 + (g − 1)·A within 1e-8 dB, all stable).
+
 ## 3. Hush De-esser: DeEsser's Energy Detector meter
 
 DeEsser (Waves, demo here: its window as a user sees it, round 129) shows the side-chain energy beside its threshold
@@ -98,8 +109,21 @@ the threshold dial's units, so reduction starts where the bar crosses the arrow)
 (second meter slot, unused by Hush before). Test: a 9 kHz tone at −6 / −26 dB reads −6.8 / −26.8 dB, a 200 Hz tone
 −54 dB.
 
+## 4. Measured, not implemented
+
+- [EXEC] PanMan 5.5.5 (Tweak page through its host parameters RateMod ±3, OffsetMod ±180°, WidthMod ±180°): with
+  a 1 kHz tone switching between −40 and −6 dB every 2 s (Rate 1 Hz, Width 180°), the loud halves are modulated and
+  the quiet ones are not: WidthMod −180 → width 0 (no motion), +180 → still full; OffsetMod +90 → the pan centre
+  moves to +0.65 (from centre to right); RateMod +3 → about 8 Hz (3 octaves up), −3 → about 1/8 Hz. So the Tweak
+  modulation follows an input envelope whose threshold / sensitivity live in PanMan's editor, not in host
+  parameters; a level sweep (−60 … 0 dB at Rate 0.01 Hz) did not give a clean law (`D:\lynx-work\parity147\pm\`).
+  ManualTrigger could not be observed through `process` (each run starts from the plug-in's reset). Auto-pan's
+  Tweak row stays ❌.
+- [EXEC] CLA-2A Stereo (Waves, demo) loads in the host from round 127's shell cache, but its VST3 parameter list
+  holds only the shell's generic controls (bypass, meter display, MIDI CC): ANALOG 50 / 60 Hz cannot be set black-box
+  without its window, so Glow's ANALOG row stays ❌.
+
 ## Where I stopped
 
-- Prism: per-band slopes (Pro-MB: 6 – 48 dB/oct per side, continuous; LYNX: one 12 / 24 / 48 for every crossover —
-  the closed-form dynamic filters assume one order per band), free band placement with gaps, one side-chain input
+- Prism: slopes only 12 / 24 / 48 (Pro-MB: 6 – 48 continuous), free band placement with gaps, one side-chain input
   per band, the free side-chain filter's extra boost below one octave, the detector's release shape (§1).

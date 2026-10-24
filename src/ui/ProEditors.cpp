@@ -1686,8 +1686,13 @@ private:
             {
                 const auto x0 = a.getX() + 600.0f;
                 add (tabs ({ x0 + 10.0f, a.getY() + 26.0f, 100.0f, 22.0f }, bandScFree0 + b, "Band|Free"));
-                add (knob ({ x0 + 4.0f, a.getY() + 56.0f, 56.0f, 74.0f }, bandScLow0 + b, tr ("Low"), 0));
-                add (knob ({ x0 + 58.0f, a.getY() + 56.0f, 56.0f, 74.0f }, bandScHigh0 + b, tr ("High"), 0));
+                add (knob ({ x0 + 4.0f, a.getY() + 52.0f, 56.0f, 66.0f }, bandScLow0 + b, tr ("Low"), 0));
+                add (knob ({ x0 + 58.0f, a.getY() + 52.0f, 56.0f, 66.0f }, bandScHigh0 + b, tr ("High"), 0));
+                // the band's own slopes (Pro-MB's per-band slopes): its lower / upper crossover's slope, or the global one
+                if (b > 0)
+                    add (menu ({ x0 + 4.0f, a.getY() + 122.0f, 54.0f, 20.0f }, xoverSlope0 + b - 1, tr ("Low slope"), "Global|12|24|48"));
+                if (b < nb() - 1)
+                    add (menu ({ x0 + 60.0f, a.getY() + 122.0f, 54.0f, 20.0f }, xoverSlope0 + b, tr ("High slope"), "Global|12|24|48"));
                 add (knob ({ x0 + 126.0f, a.getY() + 22.0f, 84.0f, 92.0f }, bandLink0 + b, tr ("Link"), 1));
                 add (tabs ({ x0 + 132.0f, a.getY() + 122.0f, 74.0f, 22.0f }, bandLinkMode0 + b, "Mid|Side"));
             }

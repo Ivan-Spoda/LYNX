@@ -33,25 +33,27 @@ inline double warp (double hz, double sampleRate) noexcept
     return std::tan (pi * std::min (hz, sampleRate * 0.45) / sampleRate);
 }
 
-// the band's crossover magnitude A at Ω (wl ≤ 0: no lower crossover, wh ≤ 0: no upper one), order 2n
-inline double bandShare (double wl, double wh, int n, double w) noexcept
+// the band's crossover magnitude A at Ω (wl ≤ 0: no lower crossover, wh ≤ 0: no upper one), orders 2·nl / 2·nh
+inline double bandShare (double wl, double wh, int nl, int nh, double w) noexcept
 {
     double a = 1.0;
     if (wh > 0.0)
-        a /= 1.0 + std::pow (w / wh, 2.0 * n);
+        a /= 1.0 + std::pow (w / wh, 2.0 * nh);
     if (wl > 0.0)
     {
-        const auto x = std::pow (w / wl, 2.0 * n);
+        const auto x = std::pow (w / wl, 2.0 * nl);
         a *= x / (1.0 + x);
     }
     return a;
 }
+inline double bandShare (double wl, double wh, int n, double w) noexcept { return bandShare (wl, wh, n, n, w); }
 
 // the magnitude of one band's filter at Ω: 1 + (g − 1)·A
-inline double bandMagnitude (double wl, double wh, int n, double g, double w) noexcept
+inline double bandMagnitude (double wl, double wh, int nl, int nh, double g, double w) noexcept
 {
-    return 1.0 + (g - 1.0) * bandShare (wl, wh, n, w);
+    return 1.0 + (g - 1.0) * bandShare (wl, wh, nl, nh, w);
 }
+inline double bandMagnitude (double wl, double wh, int n, double g, double w) noexcept { return bandMagnitude (wl, wh, n, n, g, w); }
 
 class Band
 {
@@ -59,8 +61,12 @@ public:
     static constexpr int maxSections = 8; // S: ≤ 2n = 8 roots → ≤ 4 sections, run twice
 
     // design for gain g (linear) between Ω_l and Ω_h (≤ 0 = absent), crossovers of order 2n (n = 1, 2, 4)
-    void design (double wl, double wh, int n, double g) noexcept
+    void design (double wl, double wh, int n, double g) noexcept { design (wl, wh, n, n, g); }
+
+    // round 147: the band's two crossovers may have different orders 2·nl (lower) and 2·nh (upper)
+    void design (double wl, double wh, int nl, int nh, double g) noexcept
     {
+        const int n = wl <= 0.0 ? nh : nl; // the edge bands have one crossover
         gain = 1.0;
         count = 0;
         if (wl <= 0.0 && wh <= 0.0)
@@ -70,18 +76,20 @@ public:
         }
         std::array<std::complex<double>, 8> zeros {}, poles {};
         int nz = 0, np = 0;
-        const auto butterworth = [&] (double radius, std::array<std::complex<double>, 8>& out, int& k0) {
-            for (int k = 0; k < n; ++k)
-                out[(std::size_t) k0++] = std::polar (radius, pi * (2.0 * k + n + 1.0) / (2.0 * n));
+        const auto butterworth = [&] (double radius, std::array<std::complex<double>, 8>& out, int& k0, int order) {
+            for (int k = 0; k < order; ++k)
+                out[(std::size_t) k0++] = std::polar (radius, pi * (2.0 * k + order + 1.0) / (2.0 * order));
         };
         if (wh > 0.0)
-            butterworth (wh, poles, np);
+            butterworth (wh, poles, np, nh);
         if (wl > 0.0)
-            butterworth (wl, poles, np);
-        if (wl <= 0.0)
-            butterworth (wh * std::pow (g, 0.5 / n), zeros, nz);           // Num = g + x_h
+            butterworth (wl, poles, np, nl);
+        if (wl > 0.0 && wh > 0.0 && nl != nh)
+            mixedZeros (wl, wh, nl, nh, g, zeros, nz);
+        else if (wl <= 0.0)
+            butterworth (wh * std::pow (g, 0.5 / n), zeros, nz, n);        // Num = g + x_h
         else if (wh <= 0.0)
-            butterworth (wl * std::pow (g, -0.5 / n), zeros, nz);          // Num = 1 + g·x_l
+            butterworth (wl * std::pow (g, -0.5 / n), zeros, nz, n);       // Num = 1 + g·x_l
         else
         {
             // ρ t² + (g + ρ) t + 1 = 0, t = x_l, ρ = (Ω_l / Ω_h)^{2n}; the numerically stable quadratic roots
@@ -160,6 +168,62 @@ public:
 
 private:
     struct Analog { double c2 = 0.0, c1 = 0.0, c0 = 1.0; }; // c2·s² + c1·s + c0 (the default: 1)
+
+    // a middle band whose crossovers have different orders: Num in z = (Ω / Ω_l)² is
+    // P (z) = 1 + g·z^nl + ρ·z^nh + ρ·z^(nl+nh), ρ = (Ω_l / Ω_h)^(2·nh), of degree ≤ 8: its roots by Aberth's method,
+    // started on the two circles the edge factors give (|z| = g^(−1/nl) and (g / ρ)^(1/nh)); each root z gives the
+    // left-half-plane zero s = −Ω_l·√(−z)
+    static void mixedZeros (double wl, double wh, int nl, int nh, double g, std::array<std::complex<double>, 8>& zeros, int& nz) noexcept
+    {
+        using C = std::complex<double>;
+        const int d = nl + nh;
+        const auto rho = std::pow (wl / wh, 2.0 * nh);
+        std::array<double, 9> a {}; // monic coefficients, a[k] for z^k
+        a[0] += 1.0;
+        a[(std::size_t) nl] += g;
+        a[(std::size_t) nh] += rho;
+        a[(std::size_t) d] += rho;
+        for (auto& x : a)
+            x /= rho;
+        std::array<C, 8> z {};
+        const auto r1 = std::pow (g, -1.0 / nl), r2 = std::pow (g / rho, 1.0 / nh);
+        for (int k = 0; k < nl; ++k)
+            z[(std::size_t) k] = std::polar (r1, pi * (2.0 * k + 1.0) / nl + 0.31);
+        for (int k = 0; k < nh; ++k)
+            z[(std::size_t) (nl + k)] = std::polar (r2, pi * (2.0 * k + 1.0) / nh + 0.17);
+        for (int it = 0; it < 80; ++it)
+        {
+            double worst = 0.0;
+            for (int i = 0; i < d; ++i)
+            {
+                C p = 1.0, dp = 0.0; // Horner (monic)
+                for (int k = d - 1; k >= 0; --k)
+                {
+                    dp = dp * z[(std::size_t) i] + p;
+                    p = p * z[(std::size_t) i] + a[(std::size_t) k];
+                }
+                if (std::abs (dp) == 0.0)
+                    continue;
+                const auto ratio = p / dp;
+                C sum = 0.0;
+                for (int j = 0; j < d; ++j)
+                    if (j != i)
+                        sum += 1.0 / (z[(std::size_t) i] - z[(std::size_t) j]);
+                const auto step = ratio / (1.0 - ratio * sum);
+                z[(std::size_t) i] -= step;
+                worst = std::max (worst, std::abs (step) / std::max (1e-300, std::abs (z[(std::size_t) i])));
+            }
+            if (worst < 1e-14)
+                break;
+        }
+        for (int i = 0; i < d && nz < 8; ++i)
+        {
+            auto s = -wl * std::sqrt (-z[(std::size_t) i]);
+            if (s.real() > 0.0)
+                s = -s;
+            zeros[(std::size_t) nz++] = s;
+        }
+    }
     struct Digital { double b0 = 1.0, b1 = 0.0, b2 = 0.0, a1 = 0.0, a2 = 0.0; };
 
     static int sections (const std::complex<double>* roots, int n, std::array<Analog, 4>& out) noexcept

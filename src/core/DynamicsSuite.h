@@ -149,7 +149,9 @@ enum Global { xover1 = legacyBands * fieldsPerBand, xover2, xover3, slope, looka
               // high frequency (30 Hz … 30 kHz)
               bandLink0, bandLinkMode0 = bandLink0 + bands, bandScFree0 = bandLinkMode0 + bands,
               bandScLow0 = bandScFree0 + bands, bandScHigh0 = bandScLow0 + bands,
-              count = bandScHigh0 + bands };
+              // round 147: each crossover's own slope (Pro-MB's per-band slopes): 0 = the global Slope, then 12 / 24 / 48
+              xoverSlope0 = bandScHigh0 + bands,
+              count = xoverSlope0 + bands - 1 };
 inline int param (int band, int field) noexcept
 {
     return band < legacyBands ? band * fieldsPerBand + field : band5 + (band - legacyBands) * fieldsPerBand + field;
@@ -189,6 +191,9 @@ double linkAmount (float v) noexcept;
 double linkOnly (float v) noexcept;
 double scFilterHz (float v) noexcept;   // 30 Hz … 30 kHz (30 · 1000^v, the reference's law)
 float scFilterValue (double hz) noexcept;
+int crossoverSlopeDbOct (const EffectParams& p, int k) noexcept; // round 147: crossover k's slope (its own or the global)
+float crossoverSlopeValue (int dbOct) noexcept;                  // 12 / 24 / 48 → its own value (0 = global)
+inline int slopeOrder (int dbOct) noexcept { return dbOct <= 12 ? 1 : (dbOct <= 24 ? 2 : 4); } // n of LR(2n)
 int oversamplingOf (float v) noexcept;   // 1 (off), 2 or 4
 int linearFftSize (double sampleRate) noexcept; // 4096 up to 50 kHz, ×2 per doubling of the rate
 int linearLatency (double sampleRate) noexcept; // 3/4 of the FFT size (3072 samples at 48 kHz, as measured)

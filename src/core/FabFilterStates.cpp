@@ -364,6 +364,17 @@ int fromProMB (const State& s, EffectSlot& slot)
             set (Global::slope, dbOct < 18.0 ? 0.0f : (dbOct < 36.0 ? 0.5f : 1.0f));
         }
     }
+    // round 147: each crossover's own slope — the band below's high slope, or the band above's low slope (gaps)
+    for (int k = 0; k + 1 < std::min (nb, nseg); ++k)
+    {
+        const auto& lo = segs[(std::size_t) k];
+        const auto& hi = segs[(std::size_t) (k + 1)];
+        const auto norm = lo.ref >= 0 ? s.at ((std::size_t) (22 * lo.ref + 4)) : (hi.ref >= 0 ? s.at ((std::size_t) (22 * hi.ref + 2)) : -1.0f);
+        if (norm < 0.0f)
+            continue;
+        const auto dbOct = 6.0 + 42.0 * std::clamp ((double) norm, 0.0, 1.0);
+        set (xoverSlope0 + k, crossoverSlopeValue (dbOct < 18.0 ? 12 : (dbOct < 36.0 ? 24 : 48)));
+    }
     set (Global::lookahead, s.at (141) >= 0.5f ? linValue (la, 0.0, 20.0) : 0.0f);
     set (Global::mix, clamp01 (s.at (133)));
     set (Global::input, linValue (levelDb (s.at (134)), -36.0, 36.0));

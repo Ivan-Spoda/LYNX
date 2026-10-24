@@ -212,7 +212,7 @@ TEST (prism_stereo_link_round147)
 {
     using namespace lynx;
     namespace m = dyn::prism;
-    CHECK (m::bandLink0 == 88 && m::count == 118 && (int) effectInfo (EffectKind::prismMultiband).params.size() == m::count);
+    CHECK (m::bandLink0 == 88 && m::count == 123 && (int) effectInfo (EffectKind::prismMultiband).params.size() == m::count);
     CHECK (formatEffectParam (EffectKind::prismMultiband, m::bandLink0, 0.25f, 120.0) == "50%");
     CHECK (formatEffectParam (EffectKind::prismMultiband, m::bandLink0 + 2, 0.75f, 120.0) == "100%, 50% only");
     CHECK (formatEffectParam (EffectKind::prismMultiband, m::bandScLow0, m::scFilterValue (2000.0), 120.0) == "2.00 kHz");
@@ -323,4 +323,48 @@ TEST (hush_energy_detector_meter_round147)
     CHECK (loudHigh > -9.0 && loudHigh < 0.5);
     CHECK (std::abs ((loudHigh - quietHigh) - 20.0) < 2.0); // follows the level
     CHECK (low < loudHigh - 20.0);                          // the detector hears the sibilance band only
+}
+
+TEST (prism_per_crossover_slopes_round147)
+{
+    using namespace lynx;
+    namespace m = dyn::prism;
+    namespace mp = minphase;
+    CHECK (m::xoverSlope0 == 118 && m::count == 123);
+    // the default follows the global slope (the old sound)
+    const auto def = makeEffectSlot (EffectKind::prismMultiband).params;
+    for (int k = 0; k < 5; ++k)
+        CHECK (m::crossoverSlopeDbOct (def, k) == m::slopeDbOct (def[m::slope]));
+    CHECK (formatEffectParam (EffectKind::prismMultiband, m::xoverSlope0 + 1, 1.0f, 120.0) == "48 dB/oct");
+    // two bands at 1 kHz, the low one −12 dB: crossover 1 at 48 dB/oct while the global slope is 24
+    auto p = p147::twoBands (-12.0, 0.0);
+    p[m::xoverSlope0] = m::crossoverSlopeValue (48);
+    const auto w = [] (double hz) { return mp::warp (hz, 48000.0); };
+    for (const float mode : { 0.5f, 0.0f, 1.0f }) // dynamic, linear, minimum
+    {
+        p[m::processingMode] = mode;
+        const auto g = p147::toneGain (p, 500.0);
+        const auto expected = 20.0 * std::log10 (mp::bandMagnitude (0.0, w (1000.0), 4, 4, p147::dbToGain (-12.0), w (500.0)));
+        std::printf ("  Prism crossover 48 dB/oct (mode %.1f): 500 Hz %.2f dB (expected %.2f; 24 dB/oct: -10.60)\n", mode, g, expected);
+        CHECK (std::abs (g - expected) < 0.15);
+    }
+    // a middle band between a 12 dB/oct and a 48 dB/oct crossover (the measured dynamic engine, mixed orders)
+    auto q = dyn108::defaults (EffectKind::prismMultiband);
+    q[m::bandCountParam] = m::bandCountValue (3);
+    q[m::xover1] = m::crossoverValue (300.0);
+    q[m::xover2] = m::crossoverValue (3000.0);
+    q[m::xoverSlope0] = m::crossoverSlopeValue (12);
+    q[m::xoverSlope0 + 1] = m::crossoverSlopeValue (48);
+    for (int b = 0; b < 3; ++b)
+        q[(std::size_t) m::param (b, m::fRange)] = 0.5f;
+    q[(std::size_t) m::param (1, m::fLevel)] = 0.3f; // −12 dB
+    const double gains[m::bands] { 0.0, -12.0, 0.0, 0.0, 0.0, 0.0 };
+    for (const double hz : { 150.0, 300.0, 1000.0, 3000.0, 5000.0 })
+    {
+        const auto g = p147::toneGain (q, hz);
+        const auto expected = 20.0 * std::log10 (mp::bandMagnitude (w (300.0), w (3000.0), 1, 4, p147::dbToGain (-12.0), w (hz)));
+        std::printf ("  Prism mixed slopes 12 / 48: %.0f Hz %.2f dB (expected %.2f)\n", hz, g, expected);
+        CHECK (std::abs (g - expected) < 0.15);
+        CHECK (std::abs (m::responseDb (q, gains, 48000.0, hz) - expected) < 0.05);
+    }
 }
