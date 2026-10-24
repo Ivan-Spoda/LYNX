@@ -171,7 +171,7 @@ Any knob or fader (channel, mixer, effect, plugin parameter) becomes a clip with
 - Delay, reverb, chorus, filter, distortion, lo-fi
 - Effector (12 algorithms), vocoder with side inputs, pitch correction
 - Volume gate, rhythmic envelope, auto-pan, Linkwitz-Riley crossover
-- Pitch shift, frequency shifter, utility, parallel container (Patcher)
+- Pitch shift, frequency shifter, utility, Patcher (a node graph of effects, instruments and plugins with audio, MIDI and control cables)
 
 </td>
 <td width="33%" valign="top">

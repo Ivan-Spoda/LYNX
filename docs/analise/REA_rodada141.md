@@ -84,8 +84,26 @@ The state format was documented in rounds 14/20 (chunks, nodes `5000…5001`, po
   into a 33-point curve; FL's Peak Controller outputs (peak, LFO, peak + LFO) map to LYNX's. Unmapped targets are
   reported.
 - Pins: "N Sidechain" sets the slot's side-chain to insert N; "Insert N" extra outputs set `outputTracks`.
-- Demos (all 24 mixer Patchers and both generator Patchers of FL 2026's Demo projects): import, run finite, and sound
-  — `patcher_demo_graphs_import_and_run` **[TEST + DATA]**.
+- Node names keep FL's old casings ("Fruity delay 2" in FL's own "Patcher (effect)" render test): they are matched
+  case-insensitively (`canonicalFlEffectName`) — before this, such nodes were silently dropped by the flattening.
+- Control cables whose source has no LYNX control output (X-Y controller, Control Surface: pass-through placeholders)
+  are left out, so their targets keep the value FL saved instead of being pinned to 0 (that silenced both "Stroll Up"
+  Patchers in a first pass) **[TEST]**.
+- Labels and pin names are decoded as UTF-16 (v4) / Windows-1252 (v3) to UTF-8.
+- FL's positions are spread ×2.0 / ×1.6 (FL's boxes are smaller; dense demo graphs sit ~60 px apart).
+- Demos (all 24 mixer Patchers and the 3 generator Patchers of FL 2026's Demo projects): 280 nodes and 76 control
+  cables imported; every graph runs finite and sounds with a noise input — `patcher_demo_graphs_import_and_run`
+  **[TEST + DATA]**.
+
+### 3.1 Against FL's own renders **[DATA: `FL64.exe /R /Ewav`, `/mnt/d/lynx-work/patcher141/render`]**
+
+FL ships two render tests for the Patcher (`Data/System/Render tests/Patcher (effect).flp`, `Patcher (generator).flp`).
+FL renders vs LYNX's `renderwav` (un-normalized, same length):
+
+| Project | FL | LYNX | Note |
+|---|---|---|---|
+| Patcher (effect): 3x Osc → Patcher { Control Surface, Fruity Delay 2 (input pan 66, mode 2) } | L −19.90 / R −22.31 dB RMS, peak −5.71 / −10.12 | L −19.90 / R −22.31, peak −5.71 / −10.12 | identical to 0.01 dB |
+| Patcher (generator): { Sytrus ← Notes, → out } | L −11.73 dB RMS, peak −2.41 | L −11.69, peak −2.36 | sample correlation 0.998 |
 
 ## 4. Editor (`ui/PatcherEditor.cpp`)
 
