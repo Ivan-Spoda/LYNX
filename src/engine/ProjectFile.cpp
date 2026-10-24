@@ -259,6 +259,12 @@ juce::var pluginToVar (const PluginRef& p)
         o->setProperty ("hostMaxBuffer", true);
     if (p.midiInPort >= 0)
         o->setProperty ("midiInPort", p.midiInPort);
+    if (p.midiOutPort >= 0)
+        o->setProperty ("midiOutPort", p.midiOutPort);
+    if (! p.notifyRender)
+        o->setProperty ("notifyRender", false);
+    if (p.latencyOverrideMs >= 0.0f)
+        o->setProperty ("latencyMs", p.latencyOverrideMs);
     return juce::var (o.release());
 }
 
@@ -277,6 +283,9 @@ PluginRef pluginFromVar (const juce::var& v)
     p.allowSmartDisable = (bool) v.getProperty ("allowSmartDisable", true);
     p.hostMaxBuffer = (bool) v.getProperty ("hostMaxBuffer", false);
     p.midiInPort = juce::jlimit (-1, 255, (int) v.getProperty ("midiInPort", -1));
+    p.midiOutPort = juce::jlimit (-1, 255, (int) v.getProperty ("midiOutPort", -1));
+    p.notifyRender = (bool) v.getProperty ("notifyRender", true);
+    p.latencyOverrideMs = v.hasProperty ("latencyMs") ? juce::jlimit (0.0f, 2000.0f, (float) (double) v["latencyMs"]) : -1.0f;
     return p;
 }
 
@@ -782,6 +791,8 @@ juce::var channelToVar (const ChannelDef& c)
         misc->setProperty ("keyTracking", juce::Array<juce::var> { m.key.mid, m.key.pan, m.key.modX, m.key.modY });
         misc->setProperty ("pitchRange", m.pitchRange);
         misc->setProperty ("mainPitch", m.mainPitch);
+        misc->setProperty ("rootNote", m.rootNote);
+        misc->setProperty ("addToKey", m.addToKey);
         o->setProperty ("misc", juce::var (misc.release()));
     }
     if (c.cutGroup != 0 || c.cutBy != 0)
@@ -987,7 +998,7 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
                     def.arp.chord.push_back (juce::jlimit (-48, 48, (int) i));
             def.arp.chordSustain = (bool) fl.getProperty ("chordSustain", true);
             def.arp.slide = (bool) fl.getProperty ("slide", false);
-            def.arp.octaveRepeat = juce::jlimit (1, 16, (int) fl.getProperty ("octaveRepeat", 1));
+            def.arp.octaveRepeat = juce::jlimit (0, 16, (int) fl.getProperty ("octaveRepeat", 1));
         }
     }
     if (const auto& misc = c["misc"]; misc.isObject())
@@ -1020,6 +1031,8 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
         tracking (misc["keyTracking"], m.key);
         m.pitchRange = juce::jlimit (0, 48, (int) misc.getProperty ("pitchRange", 2));
         m.mainPitch = (bool) misc.getProperty ("mainPitch", true);
+        m.rootNote = juce::jlimit (0, 127, (int) misc.getProperty ("rootNote", 60));
+        m.addToKey = (bool) misc.getProperty ("addToKey", false);
     }
 
     if (const auto& cut = c["cut"]; cut.isArray() && cut.size() == 2)

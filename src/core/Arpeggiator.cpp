@@ -11,6 +11,7 @@ void Arpeggiator::reset() noexcept
     step = 0;
     repeatCount = 0;
     sounding = -1;
+    soundingCount = 0;
     offTick = -1.0;
     nextStep = -1.0;
     sliding = false;
@@ -58,6 +59,8 @@ int Arpeggiator::sequenceLength (const ArpSettings& s) const noexcept
 {
     // one pass over the notes (the held ones, or the chord on the lowest), FL's Repeat times per octave, over `range`
     const auto notes = s.chord.empty() ? heldCount : (heldCount > 0 ? (int) s.chord.size() : 0);
+    if (s.octaveRepeat == 0) // FL's Repeat 0: one step per octave, the whole chord at once
+        return notes > 0 ? std::clamp (s.range, 1, 4) : 0;
     return notes * std::clamp (s.range, 1, 4) * std::max (1, s.octaveRepeat);
 }
 
@@ -129,6 +132,23 @@ void Arpeggiator::process (int channel, const NoteEvent* in, int inCount, double
         if (outCount < maxEvents)
             out[outCount++] = e;
     };
+    // the note-offs of what sounds (one key, or Repeat 0's chord)
+    auto emitOffs = [&] (NoteEvent off) {
+        off.type = NoteEvent::Type::off;
+        if (soundingCount > 0)
+            for (int k = 0; k < soundingCount; ++k)
+            {
+                off.key = soundingKeys[(std::size_t) k];
+                emit (off);
+            }
+        else
+        {
+            off.key = sounding;
+            emit (off);
+        }
+        sounding = -1;
+        soundingCount = 0;
+    };
 
     // FL: a note lasts time · gate; past 100 % the next one waits for it (the step is time · max(1, gate)) [EXEC]
     const auto gate = std::clamp ((double) s.gate, 0.05, 128.0 / 48.0);
@@ -154,12 +174,9 @@ void Arpeggiator::process (int channel, const NoteEvent* in, int inCount, double
         if (offOffset == nextOffset && offOffset <= boundaryOffset && sounding >= 0)
         {
             NoteEvent off;
-            off.type = NoteEvent::Type::off;
-            off.key = sounding;
             off.channel = channel;
             off.sampleOffset = std::clamp (offOffset, 0, n - 1);
-            emit (off);
-            sounding = -1;
+            emitOffs (off);
             offTick = -1.0;
             continue;
         }
@@ -190,11 +207,7 @@ void Arpeggiator::process (int channel, const NoteEvent* in, int inCount, double
 
                 if (sounding >= 0)
                 {
-                    NoteEvent off = e;
-                    off.type = NoteEvent::Type::off;
-                    off.key = sounding;
-                    emit (off);
-                    sounding = -1;
+                    emitOffs (e);
                     offTick = -1.0;
                 }
             }
@@ -210,6 +223,26 @@ void Arpeggiator::process (int channel, const NoteEvent* in, int inCount, double
             e.sampleOffset = std::clamp (boundaryOffset, 0, n - 1);
 
             const auto index = nextIndex (s);
+            if (s.octaveRepeat == 0) // FL's Repeat 0: the chord at once, an octave per step
+            {
+                if (sounding >= 0)
+                    emitOffs (e);
+                const auto notes = s.chord.empty() ? heldCount : (int) s.chord.size();
+                e.type = NoteEvent::Type::on;
+                for (int k = 0; k < notes && soundingCount < maxHeld; ++k)
+                {
+                    const auto base = s.chord.empty() ? heldKeys[(std::size_t) k] : heldKeys[0] + s.chord[(std::size_t) k];
+                    e.key = std::clamp (base + 12 * index, 0, 127);
+                    e.velocity = heldVelocity[(std::size_t) (s.chord.empty() ? k : 0)];
+                    emit (e);
+                    soundingKeys[(std::size_t) soundingCount++] = e.key;
+                }
+                sounding = soundingCount > 0 ? soundingKeys[0] : -1;
+                offTick = boundary + noteTicks;
+                boundary += stepTicks;
+                nextStep = boundary;
+                continue;
+            }
             const auto key = keyAt (s, index);
             const auto velocity = heldVelocity[(std::size_t) (s.chord.empty() ? index % heldCount : 0)];
 
@@ -224,11 +257,7 @@ void Arpeggiator::process (int channel, const NoteEvent* in, int inCount, double
             else
             {
                 if (sounding >= 0)
-                {
-                    e.type = NoteEvent::Type::off;
-                    e.key = sounding;
-                    emit (e);
-                }
+                    emitOffs (e);
                 e.type = NoteEvent::Type::on;
                 e.key = key;
                 e.velocity = velocity;

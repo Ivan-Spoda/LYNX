@@ -386,6 +386,15 @@ std::shared_ptr<const SampleData> SampleLibrary::load (const juce::String& path)
     return data;
 }
 
+std::shared_ptr<const SampleData> SampleLibrary::findLoaded (const juce::String& path)
+{
+    auto& shared = sharedCache();
+    const std::scoped_lock l (shared.lock);
+    if (const auto it = shared.entries.find (path); it != shared.entries.end())
+        return it->second.lock();
+    return nullptr;
+}
+
 std::shared_ptr<const SampleData> SampleLibrary::decode (const juce::String& path)
 {
     const auto file = platform::localFile (path); // FL's Windows spelling on macOS/Linux (platform/Paths.h)

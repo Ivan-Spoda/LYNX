@@ -56,7 +56,7 @@ private:
     {
         int key = 0;
         double onTick = 0.0;
-        std::array<int, 16> echoKeys {};
+        std::array<int, 32> echoKeys {}; // (fat mode: the second, mirrored series after the first)
         int count = 0;
     };
     void schedule (const Pending& p) noexcept;

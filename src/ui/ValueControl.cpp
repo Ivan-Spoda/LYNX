@@ -232,18 +232,27 @@ std::optional<double> wheelValue (double value, const juce::MouseEvent& e, const
 void addValueItems (juce::PopupMenu& menu, juce::Component& target, AudioEngine* engine, const ValueSpec& spec, double current,
                     std::function<void (double)> set)
 {
+    // in FL's order (REA round 149 [EXEC]: FL's parameter menu): Reset, Automation, Remote control, Value
     juce::Component::SafePointer<juce::Component> safe (&target);
-    menu.addItem (tr ("Type value..."), [safe, spec, current, set] {
-        if (safe != nullptr)
-            typeValue (*safe, spec, current, set);
-    });
     menu.addItem (tr ("Reset ({0})", { spec.text (spec.defaultValue) }), [spec, set] { set (spec.defaultValue); });
 
     if (engine != nullptr && spec.target)
-    {
+        addAutomationItem (menu, *engine, *spec.target, true);
+    else
         menu.addSeparator();
-        addAutomationItem (menu, *engine, *spec.target);
-    }
+
+    // FL's Copy value / Paste value: the position within the control's range, so it pastes into another kind of control
+    static double copied = -1.0;
+    const auto range = spec.maximum - spec.minimum;
+    menu.addSectionHeader (tr ("Value"));
+    menu.addItem (tr ("Copy value"), range > 0.0, false, [spec, current, range] { copied = (current - spec.minimum) / range; });
+    menu.addItem (tr ("Paste value"), copied >= 0.0 && range > 0.0, false, [spec, set, range] {
+        set (juce::jlimit (spec.minimum, spec.maximum, spec.minimum + copied * range));
+    });
+    menu.addItem (tr ("Type in value..."), [safe, spec, current, set] {
+        if (safe != nullptr)
+            typeValue (*safe, spec, current, set);
+    });
 }
 
 void showValueMenu (juce::Component& target, AudioEngine* engine, const ValueSpec& spec, double current, std::function<void (double)> set)

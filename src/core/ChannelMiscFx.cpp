@@ -125,29 +125,40 @@ void NoteEcho::process (int channel, const NoteEvent* in, int inCount, double st
             Held h;
             h.key = e.key;
             h.onTick = tick;
-            auto gain = 1.0f;
-            for (int k = 1; k <= echoes; ++k)
+            // FL's fat mode (REA round 149 [DECOMP FLEngine FUN_00d28c90, the channel echo generator]): a second
+            // series mirrors the first (the pan and pitch steps negated) and every echo plays at feedback × the note's
+            // level instead of decaying (feedback^k)
+            const auto series = s.fat ? 2 : 1;
+            const auto feedback = std::clamp (s.feedback, 0.0f, 2.0f);
+            int count = 0;
+            for (int pass = 0; pass < series; ++pass)
             {
-                gain *= std::clamp (s.feedback, 0.0f, 2.0f);
-                auto echo = e;
-                const auto cents = (double) s.pitch * k;
-                const auto semis = (int) std::trunc (cents / 100.0);
-                echo.key = std::clamp (e.key + semis, 0, 127);
-                echo.cents = e.cents + (float) (cents - semis * 100.0);
-                // the pan moves k steps; ping pong bounces it off the ends, else it stays there [EXEC]
-                auto pan = (double) e.pan + (double) s.pan * k;
-                if (s.pingPong)
+                const auto sign = pass == 0 ? 1.0 : -1.0;
+                auto gain = 1.0f;
+                for (int k = 1; k <= echoes; ++k)
                 {
-                    pan = std::fmod (pan + 1.0, 4.0);
-                    if (pan < 0.0)
-                        pan += 4.0;
-                    pan = pan <= 2.0 ? pan - 1.0 : 3.0 - pan;
+                    gain = s.fat ? feedback : gain * feedback;
+                    auto echo = e;
+                    const auto cents = sign * (double) s.pitch * k;
+                    const auto semis = (int) std::trunc (cents / 100.0);
+                    echo.key = std::clamp (e.key + semis, 0, 127);
+                    echo.cents = e.cents + (float) (cents - semis * 100.0);
+                    // the pan moves k steps; ping pong bounces it off the ends, else it stays there [EXEC]
+                    auto pan = (double) e.pan + sign * (double) s.pan * k;
+                    if (s.pingPong)
+                    {
+                        pan = std::fmod (pan + 1.0, 4.0);
+                        if (pan < 0.0)
+                            pan += 4.0;
+                        pan = pan <= 2.0 ? pan - 1.0 : 3.0 - pan;
+                    }
+                    echo.pan = (float) std::clamp (pan, -1.0, 1.0);
+                    if (count < (int) h.echoKeys.size())
+                        h.echoKeys[(std::size_t) count++] = echo.key;
+                    schedule ({ tick + k * delay, echo, gain });
                 }
-                echo.pan = (float) std::clamp (pan, -1.0, 1.0);
-                h.echoKeys[(std::size_t) (k - 1)] = echo.key;
-                schedule ({ tick + k * delay, echo, gain });
             }
-            h.count = echoes;
+            h.count = count;
             if (heldCount < (int) held.size())
                 held[(std::size_t) heldCount++] = h;
         }
@@ -162,10 +173,11 @@ void NoteEcho::process (int channel, const NoteEvent* in, int inCount, double st
                 continue;
             const auto h = held[(std::size_t) found];
             held[(std::size_t) found] = held[(std::size_t) --heldCount];
-            for (int k = 1; k <= h.count; ++k)
+            for (int i = 0; i < h.count; ++i)
             {
                 auto off = e;
-                off.key = h.echoKeys[(std::size_t) (k - 1)];
+                off.key = h.echoKeys[(std::size_t) i];
+                const auto k = echoes > 0 ? i % echoes + 1 : 1;
                 schedule ({ tick + k * delay, off, 1.0f }); // the echo keeps the note's length
             }
         }

@@ -868,6 +868,10 @@ void PianoRollComponent::paint (juce::Graphics& g)
                 g.drawText (tr ("No events yet: draw them here"), lane.reduced (8, 4), juce::Justification::centredLeft, true);
             }
         }
+        // the lane's name in it, as FL writes it next to "Control" (round 149: the box on the left is narrow)
+        g.setColour (theme::colour::textSecondary.withAlpha (0.8f));
+        g.setFont (theme::font (theme::type::caption, true));
+        g.drawText (laneBox.getText(), lane.reduced (8, 3).removeFromTop (14), juce::Justification::topLeft, true);
 
         for (int i = 0; i < (int) pattern.notes.size() && ! eventLaneTarget(); ++i)
         {
