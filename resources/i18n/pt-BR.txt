@@ -3936,3 +3936,7 @@ countries: br
 "Links (this project, then global)" = "Vínculos (deste projeto, depois os globais)"
 "global" = "global"
 "Pattern events" = "Eventos do pattern"
+
+# round 147 (parity147): Prism Multiband's measured Dynamic phase
+"Classic dynamic" = "Dinâmica clássica"
+"This project's Dynamic phase runs the engine it was saved with (before round 147). Click to use the measured one (Pro-MB's response)." = "A fase dinâmica deste projeto usa o motor com que foi salvo (antes da rodada 147). Clique para usar o medido (a resposta do Pro-MB)."

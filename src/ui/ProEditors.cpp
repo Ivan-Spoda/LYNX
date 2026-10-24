@@ -1505,7 +1505,7 @@ public:
     }
 
 private:
-    enum { idPrev = 1, idNext, idClose, idRange, idAnalyzer, idSolo0 = 20, idMute0 = 30 };
+    enum { idPrev = 1, idNext, idClose, idRange, idAnalyzer, idClassic, idSolo0 = 20, idMute0 = 30 };
     int selected = 0, hoverBand = -1, dragBand = -1, dragEdge = -1;
     double rangeView = 12.0;
     int analyzer = 3; // 0 off, 1 pre, 2 post, 3 pre + post (view only)
@@ -1683,6 +1683,10 @@ private:
         out.push_back (barValue ({ 306.0f, cy - 11.0f, 124.0f, 22.0f }, lookahead, tr ("Lookahead")));
         out.push_back (button ({ 436.0f, cy - 11.0f, 150.0f, 22.0f }, idAnalyzer, tr ("Analyzer:") + " " + tr (analyzerNames[analyzer]) + (specFrozen ? " *" : ""), false,
                                tr ("Spectrum analyzer: off, pre, post or pre + post; speed; freeze")));
+        // round 147: a project saved before the measured Dynamic phase keeps its classic engine; one click updates it
+        if (v (dynamicEngine) < 0.5f && phaseOf (v (processingMode)) == Phase::dynamic)
+            out.push_back (button ({ 592.0f, cy - 11.0f, 118.0f, 22.0f }, idClassic, tr ("Classic dynamic"), true,
+                                   tr ("This project's Dynamic phase runs the engine it was saved with (before round 147). Click to use the measured one (Pro-MB's response).")));
         out.push_back (barValue ({ bar.getRight() - 312.0f, cy - 11.0f, 92.0f, 22.0f }, mix, tr ("Mix")));
         out.push_back (barValue ({ bar.getRight() - 216.0f, cy - 11.0f, 100.0f, 22.0f }, input, tr ("In")));
         out.push_back (barValue ({ bar.getRight() - 112.0f, cy - 11.0f, 104.0f, 22.0f }, output, tr ("Out")));
@@ -1696,6 +1700,7 @@ private:
         else if (c.id == idClose) selected = -1;
         else if (c.id == idRange) rangeView = rangeView >= 30.0 ? 3.0 : rangeView >= 12.0 ? 30.0 : rangeView >= 6.0 ? 12.0 : 6.0;
         else if (c.id == idAnalyzer) { showAnalyzerMenu(); return; }
+        else if (c.id == idClassic) set ({ { dynamicEngine, 1.0f } });
         else if (c.id >= idSolo0 && c.id < idSolo0 + bands) set ({ { bp (c.id - idSolo0, fSolo), v (bp (c.id - idSolo0, fSolo)) >= 0.5f ? 0.0f : 1.0f } });
         else if (c.id >= idMute0 && c.id < idMute0 + bands) set ({ { bp (c.id - idMute0, fEnabled), bandOn (c.id - idMute0) ? 0.0f : 1.0f } });
         repaint();

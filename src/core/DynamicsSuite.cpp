@@ -11,6 +11,7 @@
 #include "core/Effects.h"
 #include "core/FacetEq.h"
 #include "core/LrCrossover.h"
+#include "core/MinPhaseBand.h"
 #include "core/MixSuite.h"
 #include "core/ParametricEqLinear.h"
 
@@ -917,6 +918,7 @@ Phase phaseOf (float v) noexcept
     const auto k = pick (v, 3);
     return k == 0 ? Phase::linear : (k == 1 ? Phase::dynamic : Phase::minimum);
 }
+bool measuredDynamic (const EffectParams& p) noexcept { return on (p[dynamicEngine]); }
 int oversamplingOf (float v) noexcept { return 1 << pick (v, 3); }
 int linearFftSize (double sampleRate) noexcept
 {
@@ -1013,6 +1015,20 @@ double responseDb (const EffectParams& p, const double* bandGainDb, double sampl
     bool solo = false;
     for (int b = 0; b < nb; ++b)
         solo = solo || on (p[(std::size_t) param (b, fSolo)]);
+    if (mode == Phase::dynamic && measuredDynamic (p) && ! solo)
+    {
+        // round 147: the measured engine — the product of each band's 1 + (g − 1)·A (its own crossovers' magnitudes)
+        const auto n = slope <= 12 ? 1 : (slope <= 24 ? 2 : 4);
+        const auto om = minphase::warp (hz, sampleRate);
+        double m = 1.0;
+        for (int b = 0; b < nb; ++b)
+        {
+            const auto wl = b > 0 ? minphase::warp (f[(std::size_t) (b - 1)], sampleRate) : 0.0;
+            const auto wh = b < nb - 1 ? minphase::warp (f[(std::size_t) b], sampleRate) : 0.0;
+            m *= minphase::bandMagnitude (wl, wh, n, dbToGain (bandGainDb[b]), om);
+        }
+        return gainToDb (std::abs (m)) + trimDb (p[output]);
+    }
     std::complex<double> y = solo || mode == Phase::minimum ? std::complex<double> {} : std::complex<double> { 1.0, 0.0 };
     for (int b = 0; b < nb; ++b)
     {
@@ -1109,6 +1125,10 @@ public:
         linDry.reset();
         linSc.reset();
         resetOversamplers();
+        for (auto& row : dynBand)
+            for (auto& fl : row)
+                fl.reset();
+        dynWorks.fill (false);
         env.fill (-120.0);
         gains.fill (1.0f);
     }
@@ -1290,6 +1310,107 @@ private:
                 band[(std::size_t) b][0][(std::size_t) i] = sl;
                 band[(std::size_t) b][1][(std::size_t) i] = sr2;
             }
+        }
+
+        // round 147: Dynamic phase's measured engine — the (look-ahead delayed) input through each working band's
+        // minimum-phase filter in cascade (core/MinPhaseBand.h); soloed bands are still listened to through the split
+        if (md == Phase::dynamic && measuredDynamic (p) && ! anySolo)
+        {
+            if (f != dynF || slope != dynSlope || nb != dynNb || osFactor != dynOs || msPan != dynMs)
+            {
+                // a new crossover layout: every filter is designed again (their states are kept: no click)
+                dynF = f;
+                dynSlope = slope;
+                dynNb = nb;
+                dynOs = osFactor;
+                dynMs = msPan;
+                for (auto& g2 : dynGain)
+                    g2.fill (-1.0);
+            }
+            std::array<bool, bands> works {};
+            for (int b = 0; b < nb; ++b)
+            {
+                const auto i0 = (std::size_t) param (b, 0);
+                const bool w = enabled[(std::size_t) b]
+                               && (std::abs (rangeDb (p[i0 + fRange])) >= 0.01 || level[(std::size_t) b] != 0.0
+                                   || panL[(std::size_t) b] != 1.0f || panR[(std::size_t) b] != 1.0f);
+                if (w && ! dynWorks[(std::size_t) b])
+                {
+                    for (auto& fl : dynBand[(std::size_t) b])
+                        fl.reset();
+                    dynGain[(std::size_t) b].fill (-1.0);
+                }
+                works[(std::size_t) b] = dynWorks[(std::size_t) b] = w;
+            }
+            for (int b = nb; b < bands; ++b)
+                dynWorks[(std::size_t) b] = false;
+            const auto order = slope <= 12 ? 1 : (slope <= 24 ? 2 : 4);
+            const auto run = [&] (int len, double rate, int every, const float* d0, const float* d1, auto&& gainAt, float* o0, float* o1) noexcept {
+                std::array<double, bands> wl {}, wh {};
+                for (int b = 0; b < nb; ++b)
+                {
+                    wl[(std::size_t) b] = b > 0 ? minphase::warp (std::min (f[(std::size_t) (b - 1)], sr * 0.45), rate) : 0.0;
+                    wh[(std::size_t) b] = b < nb - 1 ? minphase::warp (std::min (f[(std::size_t) b], sr * 0.45), rate) : 0.0;
+                }
+                for (int i = 0; i < len; ++i)
+                {
+                    if (i % every == 0)
+                        for (int b = 0; b < nb; ++b)
+                        {
+                            if (! works[(std::size_t) b])
+                                continue;
+                            const auto g = (double) gainAt (b, i);
+                            const double gc[2] { g * panL[(std::size_t) b], g * panR[(std::size_t) b] };
+                            for (int c = 0; c < 2; ++c)
+                                if (std::abs (gc[c] - dynGain[(std::size_t) b][(std::size_t) c]) > 1e-7)
+                                {
+                                    dynGain[(std::size_t) b][(std::size_t) c] = gc[c];
+                                    dynBand[(std::size_t) b][(std::size_t) c].design (wl[(std::size_t) b], wh[(std::size_t) b], order, std::max (gc[c], 1e-6));
+                                }
+                        }
+                    const double xl = d0[i], xr = d1[i];
+                    // the pan's two gains act on left / right, or on mid / side (round 144's pan mode)
+                    double a = msPan ? 0.5 * (xl + xr) : xl, c = msPan ? 0.5 * (xl - xr) : xr;
+                    for (int b = 0; b < nb; ++b)
+                        if (works[(std::size_t) b])
+                        {
+                            a = dynBand[(std::size_t) b][0].process (a);
+                            c = dynBand[(std::size_t) b][1].process (c);
+                        }
+                    const auto yl = msPan ? a + c : a, yr = msPan ? a - c : c;
+                    o0[i] = (float) ((xl + (yl - xl) * mx) * outGain);
+                    o1[i] = (float) ((xr + (yr - xr) * mx) * outGain);
+                }
+            };
+            if (osFactor <= 1)
+            {
+                run (n, sr, 8, dry[0].data(), dry[1].data(), [&] (int b, int i) { return gain[(std::size_t) b][(std::size_t) i]; }, l, r);
+                return;
+            }
+            // oversampled: the input and the gains interpolated (the same half-band filters), the filters designed at
+            // the high rate, the result decimated back
+            const int hi = n * osFactor;
+            const auto upsample = [&] (mixsuite::Oversampler& os, const float* src, float* dst) noexcept {
+                std::array<float, chunk> tmp {};
+                std::copy (src, src + n, tmp.begin());
+                int k = 0;
+                os.process (tmp.data(), n, [&] (float v) { dst[k++] = v; return 0.0f; });
+            };
+            for (int c = 0; c < 2; ++c)
+                upsample (upDry[(std::size_t) c], dry[(std::size_t) c].data(), hiDry[(std::size_t) c].data());
+            for (int b = 0; b < nb; ++b)
+                upsample (upGain[(std::size_t) b], gain[(std::size_t) b].data(), hiGain[(std::size_t) b].data());
+            run (hi, sr * osFactor, 8 * osFactor, hiDry[0].data(), hiDry[1].data(),
+                 [&] (int b, int k) { return hiGain[(std::size_t) b][(std::size_t) k]; }, hiDry[0].data(), hiDry[1].data());
+            for (int c = 0; c < 2; ++c)
+            {
+                auto* out = c == 0 ? l : r;
+                const auto* src = hiDry[(std::size_t) c].data();
+                std::fill (out, out + n, 0.0f);
+                int k = 0;
+                down[(std::size_t) c].process (out, n, [&] (float) { return src[k++]; });
+            }
+            return;
         }
 
         // 2. the bands' gains applied and summed (at the oversampled rate when oversampling is on)
@@ -1493,6 +1614,13 @@ private:
     std::array<mixsuite::Oversampler, 2> upDry, down;
     std::array<std::array<mixsuite::Oversampler, 2>, bands> upBand;
     std::array<mixsuite::Oversampler, bands> upGain;
+    // round 147: the measured Dynamic phase — each band's two filters (left / right or mid / side), their last gains
+    std::array<std::array<minphase::Band, 2>, bands> dynBand {};
+    std::array<std::array<double, 2>, bands> dynGain {};
+    std::array<bool, bands> dynWorks {};
+    std::array<double, bands - 1> dynF {};
+    int dynSlope = 0, dynNb = 0, dynOs = 0;
+    bool dynMs = false;
     LiveMeters meters;
 };
 } // namespace
@@ -1890,6 +2018,9 @@ const EffectInfo& prismInfo()
         i.params.push_back ({ "Processing", 0.5f });
         i.params.push_back ({ "Oversampling", 0.0f });
         i.params.push_back ({ "Pan mode", 0.0f });
+        // round 147: the measured Dynamic phase engine for new instances; projects saved before it load the old one
+        // (engine/ProjectFile.cpp sets 0 when the saved parameter list ends before this index)
+        i.params.push_back ({ "Dynamic engine", 1.0f });
         return i;
     }();
     return info;
@@ -2032,6 +2163,7 @@ std::string paramText (EffectKind kind, int param, float v)
             }
             case oversampling: return oversamplingOf (v) == 1 ? "Off" : std::to_string (oversamplingOf (v)) + "x";
             case panMode: return on (v) ? "mid / side" : "left / right";
+            case dynamicEngine: return on (v) ? "measured" : "classic";
             case slope: return std::to_string (slopeDbOct (v)) + " dB/oct";
             case lookahead: return v <= 0.0f ? "off" : msText (lookaheadMs (v));
             case mix: return fmt ("%.0f%%", v * 100.0);

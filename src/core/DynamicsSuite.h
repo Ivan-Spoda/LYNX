@@ -139,6 +139,10 @@ enum Global { xover1 = legacyBands * fieldsPerBand, xover2, xover3, slope, looka
               // round 144: what each band's PAN balances — left / right (0, as before) or mid / side (1, the reference's
               // band pan: mid gain = 1 − pan right of centre, side gain = 1 + pan left of it)
               panMode,
+              // round 147 (REA_rodada147 §1): Dynamic phase's engine — 1 = the measured one (each working band a
+              // minimum-phase filter with the linear-phase magnitude, the bands in cascade: core/MinPhaseBand.h), 0 = the
+              // round-108 construction (input + each band's gain change), kept for projects saved before round 147
+              dynamicEngine,
               count };
 inline int param (int band, int field) noexcept
 {
@@ -173,6 +177,7 @@ double trimDb (float v) noexcept;        // ±36 dB
 // classic crossover sum, all-pass compensated: the crossovers' phase is always there)
 enum class Phase { linear, dynamic, minimum };
 Phase phaseOf (float v) noexcept;
+bool measuredDynamic (const EffectParams& p) noexcept; // round 147: Dynamic phase runs the measured engine
 int oversamplingOf (float v) noexcept;   // 1 (off), 2 or 4
 int linearFftSize (double sampleRate) noexcept; // 4096 up to 50 kHz, ×2 per doubling of the rate
 int linearLatency (double sampleRate) noexcept; // 3/4 of the FFT size (3072 samples at 48 kHz, as measured)

@@ -3301,6 +3301,13 @@ EffectSlot makeEffectSlot (EffectKind kind)
     return slot;
 }
 
+void upgradeLoadedEffectParams (EffectSlot& slot, std::size_t savedCount) noexcept
+{
+    // round 147: Prism Multiband saved before its measured Dynamic phase engine keeps the round-108 construction
+    if (slot.kind == EffectKind::prismMultiband && savedCount <= (std::size_t) dyn::prism::dynamicEngine)
+        slot.params[(std::size_t) dyn::prism::dynamicEngine] = 0.0f;
+}
+
 std::unique_ptr<Effect> makeParallelEffect (const EffectSlot& slot)
 {
     return std::make_unique<ParallelEffect> (slot);
