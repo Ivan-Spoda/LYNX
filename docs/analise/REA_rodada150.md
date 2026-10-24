@@ -96,7 +96,7 @@ keep the classic one through `upgradeLoadedEffectParams`, the editor shows "Old 
   from 3 octaves (rms 0.09 / 0.10 / 0.21 / 0.28 dB). LYNX's ScFilter uses it with the measured detector (projects saved
   before keep round 147's filter).
 
-## 6. Compressor ← Renaissance Compressor: the reference's ranges [EXEC]
+## 5. Compressor ← Renaissance Compressor: the reference's ranges [EXEC]
 
 The trial's (Waves, demo mode: mute-masked) parameter texts: Ratio 50.00 → 1.00 → 0.50 (ln-linear: 50 at 0, 1.00 at 0.625,
 0.50 at 1; within 0.9 %), Gain −30 … +30 dB, Attack 0.5 · 1000^v ms (default 16), Release 5 · 1000^v ms (default 160).
@@ -110,7 +110,7 @@ LYNX (`Compressor`, appended): **Ranges** LYNX | RComp, **RC ratio / gain / atta
 voicing's compression away from her 2.95 : 1 (−8.2 / −13.7 dB at 10.46 : 1 vs −7.0 / −12.0), threshold default, the
 bipolar gain-change meter.
 
-## 5. Tests
+## 6. Tests
 
 tests/Parity150Tests.inc: the slope laws and the quantisation, the layout (order, gaps, no overlap), Dynamic phase with
 6 dB/oct (edge shelf, bell, 6 / 24 at −20 / −12 / +6 dB, 6 / 12) and 36 dB/oct against the trial's numbers (curve and
@@ -120,4 +120,14 @@ the free layout; the RComp ranges (texts, expansion, compression, translation). 
 
 ## Where I stopped
 
-(filled in at the end of the round)
+- Done (parent): §1–§5; sub-rounds 150a (Echoform: Dual / Ping-Pong voicings, L/R offset, wobble from delay tracks;
+  EchoBoy's styles have no multi-voice chorus on the trial) and 150b (Ember: six bands, in / out pan, 28 characters;
+  LYNX Tune Send / Receive) merged. Full tests 1 276 780 checks, 0 failures; Windows build OK; `--plugui` checked
+  (Prism's Split | Free buttons). Desktop page `LYNX-paridade/Round-150.html`.
+- Prism left: slow attacks (50 – 100 %) fit only to 0.5 – 1.3 dB rms; narrow even-order bands in Dynamic phase (0.3 dB
+  at the edges); Linear phase on the prewarped axis; the free layout's mouse editing was checked in code and tests,
+  not yet by hand in the running app; mixed 6 / n bands use a measured table (r = 2 … 34, levels ≥ −30 dB).
+- Compressor ← RComp left: threshold default, bipolar gain-change meter, the vintage voicing's ratio law away from
+  her state.
+- 150a continues with Auto-pan ← PanMan and Foil Plate ← Little Plate (separate landing).
+- Still open from the brief: Ridge (vox148 works there), Glow ← CLA-2A (its VST3 exposes no parameters black-box).
