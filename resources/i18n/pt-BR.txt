@@ -4142,7 +4142,6 @@ countries: br
 "Iron light" = "Ferro leve"
 "Iron medium" = "Ferro médio"
 "Iron heavy" = "Ferro pesado"
-"Blur" = "Borrão"
 "Collapse" = "Colapso"
 "Wavefold" = "Dobra de onda"
 "Octave rectifier" = "Retificador de oitava"

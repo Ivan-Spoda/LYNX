@@ -1923,7 +1923,7 @@ Layout emberLayout()
         }
     // round 150 (Saturn 2): bands 5 / 6, the global input / output pan, each band's measured character
     l.height = 1040;
-    v.push_back (section (4, 870, 512, 166, TR_NOOP ("Bands 5 / 6, pans, characters")));
+    v.push_back (section (4, 870, 512, 236, TR_NOOP ("Bands 5 / 6, pans, characters")));
     v.push_back (tabs (12, 894, 150, 20, "More bands", TR_NOOP ("Off|5|6"), { 0.0f, 0.5f, 1.0f }));
     v.push_back (dial (200, 904, 18, "Crossover 4", TR_NOOP ("X-over 4")));
     v.push_back (dial (250, 904, 18, "Crossover 5", TR_NOOP ("X-over 5")));
@@ -1942,6 +1942,26 @@ Layout emberLayout()
             auto k = knob (60.0f + 50.0f * (float) c, cy, 18, b56[b][c], nullptr, cy + 9.0f, noCaption | (c >= 3 ? bipolar : 0), c == 0 ? 4 : 0);
             k.colour = 4 + b;
             v.push_back (when (k, "More bands", b == 0 ? 0.25f : 0.75f, 1.01f));
+        }
+    }
+    // bands 5 / 6's power, solo / mute, tone, feedback and dynamics (the round-128 row's columns)
+    l.height = 1110;
+    static std::array<std::array<std::array<char, 24>, 9>, 2> extra56 {};
+    for (int b = 0; b < 2; ++b)
+    {
+        const auto cy = 1050.0f + 32.0f * (float) b;
+        auto name = label (12, cy - 8.0f, 24, 16, b == 0 ? TR_NOOP ("B5") : TR_NOOP ("B6"));
+        name.colour = 4 + b;
+        v.push_back (when (name, "More bands", b == 0 ? 0.25f : 0.75f, 1.01f));
+        for (int c = 0; c < 9; ++c)
+        {
+            auto& n = extra56[(std::size_t) b][(std::size_t) c];
+            std::snprintf (n.data(), n.size(), "B%d %s", b + 5, extraFieldNames[c]);
+            LayoutItem item;
+            if (c == 0) item = toggle (extraX[0] - 14.0f, cy - 9.0f, 28, 18, n.data(), nullptr);
+            else if (c == 1) item = tabs (extraX[1], cy - 9.0f, 90, 18, n.data(), TR_NOOP ("-|S|M"), { 0.0f, 0.5f, 1.0f });
+            else item = knob (extraX[c], cy, 20, n.data(), nullptr, cy + 10.0f, noCaption | (c >= 2 && c <= 5 ? bipolar : 0) | (c == 8 ? bipolar : 0));
+            v.push_back (when (item, "More bands", b == 0 ? 0.25f : 0.75f, 1.01f));
         }
     }
     static const char* const chars[] { "B1 character", "B2 character", "B3 character", "B4 character", "B5 character", "B6 character" };

@@ -2143,13 +2143,14 @@ private:
         const auto s = stripArea();
         out.push_back (tabs ({ s.getX(), s.getY(), 372.0f, s.getHeight() }, voice, tr ("Style menu|Tape pre|Console|Grit|Triode|Pentode"),
                              { 0.0f, 0.2f, 0.4f, 0.6f, 0.8f, 1.0f }));
-        out.push_back (toggle ({ s.getX() + 380.0f, s.getY(), 80.0f, s.getHeight() }, punish, tr ("Punish")));
-        out.push_back (toggle ({ s.getX() + 464.0f, s.getY(), 76.0f, s.getHeight() }, thump, tr ("Thump")));
-        out.push_back (toggle ({ s.getX() + 544.0f, s.getY(), 72.0f, s.getHeight() }, steep, tr ("Steep")));
-        out.push_back (toggle ({ s.getX() + 620.0f, s.getY(), 100.0f, s.getHeight() }, wideCuts, tr ("Wide cuts")));
-        // round 150 (Saturn 2): the whole effect's input / output pan (left / right, or mid / side with Channel M/S)
-        out.push_back (barValue ({ s.getX() + 728.0f, s.getY(), 100.0f, s.getHeight() }, inputPan, tr ("In pan")));
-        out.push_back (barValue ({ s.getX() + 832.0f, s.getY(), 100.0f, s.getHeight() }, outputPan, tr ("Out pan")));
+        out.push_back (toggle ({ s.getX() + 376.0f, s.getY(), 76.0f, s.getHeight() }, punish, tr ("Punish")));
+        out.push_back (toggle ({ s.getX() + 456.0f, s.getY(), 70.0f, s.getHeight() }, thump, tr ("Thump")));
+        out.push_back (toggle ({ s.getX() + 530.0f, s.getY(), 64.0f, s.getHeight() }, steep, tr ("Steep")));
+        out.push_back (toggle ({ s.getX() + 598.0f, s.getY(), 92.0f, s.getHeight() }, wideCuts, tr ("Wide cuts")));
+        // round 150 (Saturn 2): the whole effect's input / output pan (left / right, or mid / side with Channel M/S);
+        // they end left of the IN / OUT meter
+        out.push_back (barValue ({ s.getX() + 698.0f, s.getY(), 86.0f, s.getHeight() }, inputPan, tr ("In pan")));
+        out.push_back (barValue ({ s.getX() + 788.0f, s.getY(), 86.0f, s.getHeight() }, outputPan, tr ("Out pan")));
         const auto bar = barArea();
         const auto cy = bar.getCentreY();
         out.push_back (barMenu ({ 10.0f, cy - 11.0f, 150.0f, 22.0f }, xoverSlope, tr ("Crossover"), "12 dB/oct|24 dB/oct|48 dB/oct", { 0.0f, 0.5f, 1.0f }));
