@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "core/Arpeggiator.h"
+#include "core/ChannelMiscFx.h"
 #include "core/VoiceLimit.h"
 #include "core/Biquad.h"
 #include "core/Effects.h"
@@ -77,6 +78,8 @@ struct RackState
 
     // Arpeggiators of channels with arpeggio on (nullptr for the others); reused across snapshots.
     std::vector<std::shared_ptr<Arpeggiator>> arpeggiators;
+    // Echo delays of channels with FL's Misc › Echo delay on (nullptr for the others; REA round 146b).
+    std::vector<std::shared_ptr<channelmisc::NoteEcho>> echoes;
 
     // Cut groups: channels each channel cuts when it plays (cutBy == its cutGroup).
     std::vector<std::vector<int>> cutTargets;
