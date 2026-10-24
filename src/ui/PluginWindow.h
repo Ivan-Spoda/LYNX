@@ -12,8 +12,16 @@ namespace lynx
 // it is open (even if the channel is removed), and only one window per plugin.
 namespace PluginWindows
 {
+// Where the plugin's wrapper options live (REA round 146a: FL's plugin wrapper settings page). With an engine, the
+// window gets FL's wrapper header: the plugin's own editor and a "Wrapper settings" page with its processing, bridging
+// and MIDI options and what the plugin reports. `find` locates the PluginRef in the song (nullptr: gone).
+struct WrapperContext
+{
+    AudioEngine* engine = nullptr;
+    std::function<PluginRef* (Song&)> find;
+};
 // `owner` is the adapter (PluginInstrument/PluginEffect) that holds the plugin.
-void open (std::shared_ptr<void> owner, juce::AudioPluginInstance& plugin, const juce::String& title);
+void open (std::shared_ptr<void> owner, juce::AudioPluginInstance& plugin, const juce::String& title, WrapperContext context = {});
 void closeAll();
 bool isOpen (const juce::AudioPluginInstance& plugin);
 void close (const juce::AudioPluginInstance& plugin);

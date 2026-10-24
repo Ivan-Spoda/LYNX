@@ -205,3 +205,20 @@ TEST (rea146a_consolidate_track)
             ++onTrack;
     CHECK (onTrack == 2 && song.playlist.size() == 3); // the new clip and the muted one; track 0 keeps its clip
 }
+
+#include "core/FlWrapper.h"
+
+TEST (rea146a_wrapper_settings_page_options)
+{
+    // FL's wrapper settings page: the Processing options first, then Bridging; the buffer sub-options need fixed buffers
+    const auto& o = lynx::wrapperOptions();
+    CHECK (o.size() == 6);
+    if (o.size() == 6)
+    {
+        CHECK (std::string (o[0].label) == "Use fixed size buffers" && o[0].member == &lynx::PluginRef::fixedBuffers && o[0].recreates);
+        CHECK (o[1].needsFixed && o[2].needsFixed && ! o[0].needsFixed && ! o[3].needsFixed);
+        CHECK (! o[3].recreates && ! o[4].recreates && o[5].recreates && std::string (o[5].section) == "Bridging");
+        lynx::PluginRef ref;
+        CHECK (ref.*(o[3].member) && ref.*(o[4].member) && ! (ref.*(o[0].member))); // FL's defaults
+    }
+}
