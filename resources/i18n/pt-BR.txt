@@ -4211,6 +4211,14 @@ countries: br
 # round 150 (parity150a): Foil Plate's measured plate voicing
 "Measured plate" = "Placa medida"
 "Thresh." = "Limiar"
+"Brown|Black|Orange" = "Marrom|Preto|Laranja"
+"4K console" = "Console 4K"
+"Mic pre" = "Pré de microfone"
+"Mic" = "Mic"
+"Vocal detector" = "Detector vocal"
+"Detector" = "Detector"
+"Hush|Vocal" = "Hush|Vocal"
+"Vocal: the measured single-vocal detector (sibilants that stand out from the voice)" = "Vocal: o detector medido de voz única (sibilantes que se destacam da voz)"
 # round 152 (parity152): Foil Plate's one-knob Plate view
 "Full|Plate" = "Completo|Placa"
 # round 152 (parity152): Prism's model revision
