@@ -71,7 +71,7 @@ public:
     std::optional<std::string> captureState();
     // Sets a parameter from the UI / controllers (setValueNotifyingHost), guarded like the audio calls.
     void setParameterFromUi (int index, float value);
-    void setRenderMode (bool offline) { if (! hasCrashed()) setPluginRenderMode (*plugin, offline, blockSize); }
+    void setRenderMode (bool offline) { if (! hasCrashed()) setPluginRenderMode (*plugin, offline, plugin->getBlockSize() > 0 ? plugin->getBlockSize() : blockSize); }
     bool usesFixedBlocks() const noexcept { return fixed != nullptr; }
     // The MIDI "parameters" (core/MidiControls.h): CC / aftertouch / pitch bend values last asked for.
     float midiControlValue (int index) const noexcept { return midiControls.value (index); }
@@ -120,7 +120,7 @@ public:
     std::optional<std::string> captureState();
     // Sets a parameter from the UI / controllers (setValueNotifyingHost), guarded like the audio calls.
     void setParameterFromUi (int index, float value);
-    void setRenderMode (bool offline) { if (! hasCrashed()) setPluginRenderMode (*plugin, offline, blockSize); }
+    void setRenderMode (bool offline) { if (! hasCrashed()) setPluginRenderMode (*plugin, offline, plugin->getBlockSize() > 0 ? plugin->getBlockSize() : blockSize); }
     bool usesFixedBlocks() const noexcept { return fixed != nullptr; }
     float midiControlValue (int index) const noexcept { return midiControls.value (index); }
 

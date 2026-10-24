@@ -81,6 +81,12 @@ struct Options
     // forced on; off = the export uses the same (draft) quality as playback, so it matches what was heard
     bool hqAllPlugins = true;
     bool showWhenDone = false;       // FL's "Show file(s) when complete": the file manager opens on the result
+    // FL's "Disable maximum polyphony" (on by default; REA round 139, FLEngine FUN_00d1a…: every channel's Max
+    // polyphony is set to 0 for the render): the channels' polyphony limits are lifted in the exported song
+    bool disableMaxPolyphony = true;
+    // more formats written from the same render (FL's WAV / MP3 / OGG / FLAC boxes can be ticked together): a mask of
+    // `1 << Format`, besides `format` (whose settings window shows); 0 = only `format`
+    std::uint32_t moreFormats = 0;
     Channels channels = Channels::stereo;
 
     bool operator== (const Options&) const = default;
@@ -93,6 +99,21 @@ const std::vector<double>& sampleRates();
 
 // ".wav", ".mp3", ".ogg", ".flac"
 const char* extension (Format format);
+
+// Every format the export writes, `format` first, then the others of `moreFormats` in WAV, MP3, OGG, FLAC order.
+std::vector<Format> formatsOf (const Options& o);
+
+// FL's "LastExportedFormats" (REA round 139, FLEngine FUN_011dd840 / the render window's close): a mask of the ticked
+// format boxes, bit 3 WAV, 4 MP3, 5 OGG, 6 FLAC, 7 MIDI, 9 M4A; 8 (WAV) when nothing valid was saved (< 8 or > 0x3FF).
+// The File › Export entries open the window with one format (WAV 3, MP3 4, OGG 5, FLAC 6, MIDI 7, M4A 9) or, with
+// "Last exported format(s)", the boxes of that mask.
+constexpr std::uint32_t flFormatBit (Format f) noexcept
+{
+    return f == Format::wav ? 0x8u : f == Format::mp3 ? 0x10u : f == Format::ogg ? 0x20u : 0x40u;
+}
+std::uint32_t flLastExportedMask (const Options& o) noexcept; // the mask of the formats `o` writes
+Options withFlLastExported (Options o, std::uint32_t mask);    // `o` with the formats of an FL mask (invalid → WAV)
+Options withSingleFormat (Options o, Format f);                // what an FL File › Export › "<format> file..." entry opens
 
 // Bits per sample written to the file (32 = float WAV; MP3/OGG encode floats and report 16).
 int fileBits (const Options& o) noexcept;
@@ -108,6 +129,11 @@ double mp3SampleRate (double rate) noexcept;
 // FLAC and the lossy formats are estimates).
 double lengthInBars (double seconds, double bpm, int beatsPerBar) noexcept;
 std::int64_t estimatedBytes (const Options& o, double seconds) noexcept;
+
+// The notes FL's File › Export › "MIDI file..." writes (REA round 139): in song mode, each pattern clip's part of its
+// pattern placed at the clip (notes from `offset` to `offset + length`, cut at the clip's end; muted clips / notes /
+// playlist tracks left out), sorted; in pattern mode or with no pattern clip, the current pattern's notes.
+std::vector<Note> midiExportNotes (const Song& song);
 
 // Remembered between sessions as "key=value" lines; unknown or bad values fall back to the defaults (clamped).
 std::string toText (const Options& o);

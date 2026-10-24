@@ -129,6 +129,7 @@ Options clamped (Options o)
     o.loops = std::clamp (o.loops, 1, 16);
     if ((int) o.stems < 0 || (int) o.stems > 2) o.stems = d.stems;
     if ((int) o.channels < 0 || (int) o.channels > 3) o.channels = d.channels;
+    o.moreFormats &= 0xFu & ~(1u << (int) o.format);
     return o;
 }
 
@@ -142,14 +143,92 @@ std::int64_t estimatedBytes (const Options& o, double seconds) noexcept
     if (seconds <= 0.0)
         return 0;
     const auto channels = o.channels == Channels::stereo ? 2.0 : 1.0;
-    switch (o.format)
-    {
-        case Format::wav: return (std::int64_t) (seconds * o.sampleRate * channels * (o.wavBits / 8.0)) + 44;
-        case Format::flac: return (std::int64_t) (seconds * o.sampleRate * channels * (o.flacBits / 8.0) * 0.6); // ~60 % of PCM
-        case Format::mp3: return (std::int64_t) (seconds * o.mp3Kbps * 1000.0 / 8.0);
-        case Format::ogg: return (std::int64_t) (seconds * o.oggKbps * 1000.0 / 8.0);
-    }
-    return 0;
+    std::int64_t total = 0; // every format the export writes (FL's disk space counts all ticked boxes)
+    for (const auto f : { Format::wav, Format::mp3, Format::ogg, Format::flac })
+        if (f == o.format || (o.moreFormats & (1u << (int) f)) != 0)
+        switch (f)
+        {
+            case Format::wav: total += (std::int64_t) (seconds * o.sampleRate * channels * (o.wavBits / 8.0)) + 44; break;
+            case Format::flac: total += (std::int64_t) (seconds * o.sampleRate * channels * (o.flacBits / 8.0) * 0.6); break; // ~60 % of PCM
+            case Format::mp3: total += (std::int64_t) (seconds * o.mp3Kbps * 1000.0 / 8.0); break;
+            case Format::ogg: total += (std::int64_t) (seconds * o.oggKbps * 1000.0 / 8.0); break;
+        }
+    return total;
+}
+
+std::vector<Format> formatsOf (const Options& o)
+{
+    std::vector<Format> out { o.format };
+    for (const auto f : { Format::wav, Format::mp3, Format::ogg, Format::flac })
+        if (f != o.format && (o.moreFormats & (1u << (int) f)) != 0)
+            out.push_back (f);
+    return out;
+}
+
+std::uint32_t flLastExportedMask (const Options& o) noexcept
+{
+    std::uint32_t mask = flFormatBit (o.format);
+    for (const auto f : { Format::wav, Format::mp3, Format::ogg, Format::flac })
+        if ((o.moreFormats & (1u << (int) f)) != 0)
+            mask |= flFormatBit (f);
+    return mask;
+}
+
+Options withFlLastExported (Options o, std::uint32_t mask)
+{
+    if (mask < 8 || mask > 0x3FF) // FL: anything else falls back to WAV
+        mask = 8;
+    std::vector<Format> chosen;
+    for (const auto f : { Format::wav, Format::mp3, Format::ogg, Format::flac })
+        if ((mask & flFormatBit (f)) != 0)
+            chosen.push_back (f);
+    if (chosen.empty()) // only formats LYNX writes elsewhere (MIDI, M4A): WAV
+        chosen.push_back (Format::wav);
+    o.format = chosen.front();
+    o.moreFormats = 0;
+    for (std::size_t i = 1; i < chosen.size(); ++i)
+        o.moreFormats |= 1u << (int) chosen[i];
+    return o;
+}
+
+Options withSingleFormat (Options o, Format f)
+{
+    o.format = f;
+    o.moreFormats = 0;
+    return o;
+}
+
+std::vector<Note> midiExportNotes (const Song& song)
+{
+    std::vector<Note> out;
+    const auto trackMuted = [&song] (int track) {
+        return track >= 0 && track < (int) song.playlistTracks.size() && song.playlistTracks[(std::size_t) track].muted;
+    };
+    if (song.mode == PlayMode::song)
+        for (const auto& c : song.playlist)
+        {
+            if (c.kind != ClipKind::pattern || c.muted || c.length <= 0 || trackMuted (c.track) || c.pattern < 0
+                || c.pattern >= (int) song.patterns.size())
+                continue;
+            for (auto n : song.patterns[(std::size_t) c.pattern].notes)
+            {
+                if (n.muted || n.start < c.offset || n.start >= c.offset + c.length)
+                    continue;
+                n.start = c.start + (n.start - c.offset);
+                n.length = std::max<std::int64_t> (1, std::min (n.length, c.end() - n.start));
+                out.push_back (n);
+            }
+        }
+
+    if (out.empty() && (song.mode != PlayMode::song || std::none_of (song.playlist.begin(), song.playlist.end(),
+                                                                       [] (const Clip& c) { return c.kind == ClipKind::pattern; })))
+        if (song.currentPattern >= 0 && song.currentPattern < (int) song.patterns.size())
+            for (const auto& n : song.patterns[(std::size_t) song.currentPattern].notes)
+                if (! n.muted)
+                    out.push_back (n);
+
+    std::stable_sort (out.begin(), out.end(), [] (const Note& a, const Note& b) { return a.start < b.start; });
+    return out;
 }
 
 std::string toText (const Options& o)
@@ -174,6 +253,8 @@ std::string toText (const Options& o)
       << "trimPdc=" << (o.trimPdc ? 1 : 0) << "\n"
       << "hqAllPlugins=" << (o.hqAllPlugins ? 1 : 0) << "\n"
       << "showWhenDone=" << (o.showWhenDone ? 1 : 0) << "\n"
+      << "disableMaxPolyphony=" << (o.disableMaxPolyphony ? 1 : 0) << "\n"
+      << "moreFormats=" << o.moreFormats << "\n"
       << "channels=" << (int) o.channels << "\n";
     return s.str();
 }
@@ -202,6 +283,8 @@ Options fromText (const std::string& text)
     o.trimPdc = toInt (kv, "trimPdc", d.trimPdc ? 1 : 0) != 0;
     o.hqAllPlugins = toInt (kv, "hqAllPlugins", d.hqAllPlugins ? 1 : 0) != 0;
     o.showWhenDone = toInt (kv, "showWhenDone", d.showWhenDone ? 1 : 0) != 0;
+    o.disableMaxPolyphony = toInt (kv, "disableMaxPolyphony", d.disableMaxPolyphony ? 1 : 0) != 0;
+    o.moreFormats = (std::uint32_t) std::clamp (toInt (kv, "moreFormats", 0), 0, 15);
     o.channels = (Channels) toInt (kv, "channels", (int) d.channels);
     return clamped (o);
 }
@@ -282,6 +365,10 @@ Song makeRenderSong (const Song& song, const Options& o, std::int64_t tailTicks,
 
     if (! o.masterEffects && ! base.mixer.empty())
         base.mixer[0].effects.clear();
+
+    if (o.disableMaxPolyphony) // FL: every channel's Max polyphony becomes 0 (no limit) for the render
+        for (auto& c : base.channels)
+            c.maxPolyphony = 0;
 
     base.mode = PlayMode::song;
     base.loopStart = base.loopEnd = 0;

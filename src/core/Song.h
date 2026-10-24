@@ -111,6 +111,12 @@ struct PluginRef
     bool separateProcess = false; // "Make bridged": this plugin runs in its own process even with the global option off
     bool maxSizeBuffers = false;  // with fixedBuffers: "Process maximum size buffers" (the device buffer, not 2 ms)
     bool threaded = true;         // "Allow threaded processing" (REA round 134): off = always on the audio thread itself
+    // "Allow smart disable" (REA round 139, wrapper flag 0x20000000): off = this plugin is never smart-disabled, whatever
+    // its slot's "Smart disable" says (for plugins that misbehave when they are not called)
+    bool allowSmartDisable = true;
+    // with fixedBuffers: "Use maximum buffer size from host" (fixed-buffer options bit 1) — the plugin is prepared for
+    // the host's maximum block (4096) instead of the fixed block it is always called with
+    bool hostMaxBuffer = false;
     // The wrapper's "MIDI input port" (0…255; −1 = none): the notes / controls of the MIDI Out channels on that port
     // reach this plugin (FL: Plugin wrapper settings › MIDI › Input port)
     int midiInPort = -1;
@@ -118,7 +124,8 @@ struct PluginRef
     bool operator== (const PluginRef& o) const
     {
         return id == o.id && state == o.state && foreign == o.foreign && fixedBuffers == o.fixedBuffers && separateProcess == o.separateProcess
-               && threaded == o.threaded && maxSizeBuffers == o.maxSizeBuffers
+               && threaded == o.threaded && maxSizeBuffers == o.maxSizeBuffers && allowSmartDisable == o.allowSmartDisable
+               && hostMaxBuffer == o.hostMaxBuffer
                && midiInPort == o.midiInPort;
     }
 };
@@ -355,6 +362,9 @@ struct ChannelDef
     std::string samplePath; // used when instrument == sampler
     std::vector<SampleZone> zones; // multi-sample sampler (empty: samplePath only)
     int mixerTrack = 0;     // 0 = straight to Master
+    // FL's Polyphony › Max (REA round 139): at most this many notes sound at once, a new one releases the oldest
+    // (0 = unlimited). The Export window's "Disable maximum polyphony" lifts it for the render.
+    int maxPolyphony = 0;
     PluginRef plugin;       // used when instrument == plugin
     std::vector<std::uint8_t> controllerState; // instrument == controller: FL Envelope Controller state
     std::vector<float> modelParams; // instrument == sakura / drumpad / boobass / drumsynth / harmless: FL's raw state parameters
@@ -499,6 +509,10 @@ struct EffectSlot
     bool enabled = true;
     EffectParams params {}; // 0..1; meaning depends on the effect
     float mix = 1.0f;       // slot dry/wet (as in FL): 0 = dry signal only
+    // FL's per-plugin "Smart disable" (REA round 139): on = the slot is skipped while its input and output are silent
+    // (built-ins after 1 s, plugins after 4 s); off = always processed. FL's "Switch smart disable for all plugins"
+    // turns it on everywhere.
+    bool smartDisable = true;
     PluginRef plugin;                             // used when kind == plugin
     int sidechain = -1;   // mixer track whose (post-fader) output feeds the effect's detector (compressor); −1 = none
     int sidechain2 = -1;  // second side input (vocoder carrier); −1 = none
@@ -790,6 +804,10 @@ struct Marker
     std::int64_t tick = 0;
     std::string name;
     int numerator = 0, denominator = 4;
+    // FL's marker action (the .flp's marker type, REA_rodada6 §5 / round 139): 0 = plain marker, 9 "Start recording"
+    // (punch in), 10 "Stop recording" (punch out); other FL actions are kept as their number (no effect in LYNX)
+    int action = 0;
+    static constexpr int punchIn = 9, punchOut = 10;
 
     bool isSignature() const noexcept { return numerator > 0; }
     bool operator== (const Marker&) const = default;
