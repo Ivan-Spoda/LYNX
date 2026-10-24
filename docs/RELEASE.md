@@ -8,7 +8,7 @@ a tag push builds `LYNX.exe` from the tagged source, runs the self-test on Windo
   "Open with LYNX" for `.flp` (FL Studio stays the default program), uninstaller in *Apps & features*. The workflow
   also installs and uninstalls it silently as a check.
 - `LYNX-x.y.z-windows-x64.zip` — portable build (extract and run), with `Demo.lynx`.
-- `LYNX-x.y.z-x86_64.AppImage` — Linux, one file (no "linux" in the name: AppImage naming rule; the AppImage
+- `LYNX-x.y.z-x86_64.AppImage` — Linux, one file (no "linux" in the name: AppImage naming rule; embeds AppImageUpdate information, with its `.zsync` next to it; the AppImage
   catalog warns otherwise). Built in an Ubuntu 22.04 container, so it needs only glibc 2.35; the job fails when
   `scripts/check-linux-compat.sh` finds a newer glibc symbol or a dependency on the system's libstdc++, or when
   `scripts/check-appimage-start.sh` sees it quit within 12 s offline. Carries AppStream metadata

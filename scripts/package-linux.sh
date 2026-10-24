@@ -57,7 +57,16 @@ if [[ ! -x "$TOOL" ]]; then
     chmod +x "$TOOL"
 fi
 # no FUSE needed to run the tool itself (containers, CI)
-APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" "$TOOL" "$APPDIR" "$OUTDIR/$APPIMAGE" > "$WORK/appimagetool.log" 2>&1 \
-    || { cat "$WORK/appimagetool.log"; exit 1; }
+# update information (AppImageUpdate): the newest release of Ka1-S/LYNX, pre-releases included; appimagetool writes
+# the matching .zsync next to the AppImage, and the release job attaches it with the other files in dist/
+UPDATE_INFO="${UPDATE_INFO-gh-releases-zsync|Ka1-S|LYNX|latest-all|LYNX-*-$ARCH.AppImage.zsync}"
+APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" "$TOOL" ${UPDATE_INFO:+-u "$UPDATE_INFO"} "$APPDIR" "$OUTDIR/$APPIMAGE" \
+    > "$WORK/appimagetool.log" 2>&1 || { cat "$WORK/appimagetool.log"; exit 1; }
+if [[ -n "$UPDATE_INFO" && ! -f "$OUTDIR/$APPIMAGE.zsync" ]]; then
+    [[ -f "$APPIMAGE.zsync" ]] && mv "$APPIMAGE.zsync" "$OUTDIR/"
+    # appimagetool only writes the .zsync when zsyncmake is installed (the release job installs it)
+    [[ -f "$OUTDIR/$APPIMAGE.zsync" ]] || ! command -v zsyncmake > /dev/null \
+        || { echo "no $APPIMAGE.zsync written"; cat "$WORK/appimagetool.log"; exit 1; }
+fi
 chmod 755 "$OUTDIR/$APPIMAGE"
-ls -la "$OUTDIR/$NAME.tar.gz" "$OUTDIR/$APPIMAGE"
+ls -la "$OUTDIR/$NAME.tar.gz" "$OUTDIR/$APPIMAGE"*
