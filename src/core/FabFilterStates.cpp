@@ -604,8 +604,48 @@ int fromProQ4 (const State& s, EffectSlot& slot)
     return n;
 }
 
+// ---------------------------------------------------------------- Pro-DS -> Hush De-esser
+// layout (FabF v2, 20 values = the plug-in's 20 parameters, in their own units; [EXEC] read through the official trial's
+// parameter API, round 148): 0 mode (0 single vocal, 1 allround), 1 threshold (norm: -60 + 60 v dB), 2 range dB,
+// 3 band processing (0 wide band, 1 split band), 4 stereo link, 5 link mode (0 mid, 1 side), 6 look-ahead ms,
+// 7 look-ahead enabled, 8 audition triggering, 9 side-chain input, 10 / 11 high-pass / low-pass (norm: 2000 x 10^v Hz),
+// 12 audition side chain, 13 MIDI, 14 oversampling, 15 / 16 input level / pan, 17 / 18 output level / pan, 19 bypass.
+// Single Vocal runs Hush's measured vocal voicing (core/VoiceMatch.h vocalds, fitted to her two states); Allround
+// keeps Hush's own engine in its allround mode.
+int fromProDS (const State& s, EffectSlot& slot)
+{
+    if (slot.kind != EffectKind::hushDeEsser || ! s.named || s.count != 20 || ! finiteAll (s, 20))
+        return 0;
+    using namespace mixsuite::hush;
+    auto& p = slot.params;
+    const bool allroundMode = s.at (0) >= 0.5f;
+    p[vocalVoicing] = allroundMode ? 0.0f : 1.0f;
+    p[voicing] = 0.0f;
+    p[allround] = allroundMode ? 1.0f : 0.0f;
+    p[threshold] = clamp01 (s.at (1));
+    p[range] = linValue (s.at (2), 0.0, 24.0);
+    p[mode] = s.at (3) >= 0.5f ? 0.0f : 1.0f; // wide band = Hush's "wideband" mode
+    p[linkMid] = s.at (5) < 0.5f ? 1.0f : 0.0f;
+    p[stereoLink] = 1.0f;
+    p[lookaheadTime] = lookaheadTimeValue (std::clamp ((double) s.at (6), 0.0, 15.0));
+    p[lookahead] = s.at (7) >= 0.5f ? 1.0f : 0.0f;
+    p[listen] = s.at (8) >= 0.5f ? 1.0f : 0.0f;
+    p[external] = s.at (9) >= 0.5f ? 1.0f : 0.0f;
+    const auto hpHz = 2000.0 * std::pow (10.0, std::clamp ((double) s.at (10), 0.0, 1.0));
+    const auto lpHz = 2000.0 * std::pow (10.0, std::clamp ((double) s.at (11), 0.0, 1.0));
+    p[frequency] = (float) std::clamp (std::log (std::clamp (hpHz, 2000.0, 16000.0) / 2000.0) / std::log (8.0), 0.0, 1.0);
+    p[lowPass] = lpHz >= 19999.0 ? 1.0f : (float) std::clamp (std::log (lpHz / 2000.0) / std::log (10.0), 0.0, 0.998);
+    if (std::abs (s.at (17)) <= 12.0f)
+        p[output] = linValue (s.at (17), -12.0, 12.0);
+    if (s.at (19) >= 0.5f)
+        slot.enabled = false;
+    return 20;
+}
+
 Translator translatorNamed (std::string_view name)
 {
+    if (name == "pro-ds")
+        return fromProDS;
     if (name == "pro-q4")
         return fromProQ4;
     if (name == "pro-c3")

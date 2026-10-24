@@ -375,6 +375,8 @@ public:
     {
         det.reset();
         psola.reset();
+        activity = 0.0;
+        hpX[0] = hpX[1] = hpY[0] = hpY[1] = 0.0;
         std::fill (dry.begin(), dry.end(), 0.0f);
         dryPos = 0;
         shift = 0.0;
@@ -661,6 +663,23 @@ public:
             const auto d0 = dry[rd], d1 = dry[rd + dryRing];
             ++dryPos;
 
+            // round 148: the overlap-add of shifted grains loses the highs' incoherent part (two-period Hann grains at
+            // half overlap keep 0.75 of their power: -1.25 dB) — [EXEC] her takes at retune 0 / 20: 0.5–1.5 dB darker than
+            // Auto-Tune Pro above 4 kHz. A first-order shelf (+1 dB from 5 kHz) is faded in while a correction of 5 cents or
+            // more is being applied to a voiced sound (about halves the difference: 10 kHz -1.0 -> -0.5 dB, 16 kHz -1.3 -> -0.8 dB) [model]
+            {
+                const double a = std::exp (-2.0 * 3.141592653589793 * 5000.0 / sr);
+                // (voiced only: unvoiced sounds pass as plain overlap-add, untouched)
+                const double want = unvoicedFor > 0.0 ? 0.0 : std::min (1.0, std::abs (semis - trans) / 0.05);
+                activity += (1.0 - std::exp (-1.0 / (0.01 * sr))) * (want - activity);
+                constexpr double lift = 0.12201845430196334; // 10^(1/20) - 1
+                for (int c = 0; c < 2; ++c)
+                {
+                    hpY[c] = a * (hpY[c] + y[c] - hpX[c]);
+                    hpX[c] = y[c];
+                    y[c] = (float) (y[c] + activity * lift * hpY[c]);
+                }
+            }
             if (driveOn)
                 for (auto& v : y)
                     v = (float) (dK * (side (dG * v + 0.341) - sideB));
@@ -754,6 +773,7 @@ private:
     std::atomic<int> latencyNow { 1200 };
     std::atomic<float> meterSung { -1.0f }, meterTarget { -1.0f }, meterShift { 0.0f }, meterHeld { 0.0f };
     std::atomic<float> meterIn { 0.0f }, meterOut { 0.0f };
+    double activity = 0.0, hpX[2] {}, hpY[2] {}; // round 148: the high-frequency make-up
     double candidateTime = 0.0; // round 135w: Tolerance time
     int candidate = -1;
 };
