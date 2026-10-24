@@ -239,8 +239,9 @@ drawn in LYNX's own style, with a presets bar that lists the plugin's FL presets
 grid of knobs.
 
 Also on every insert: LYNX's own Filter, Distortion, Lo-fi, Reverb, Compressor, Limiter, Crossover, Volume gate,
-Rhythmic envelope, Auto-pan and the parallel container (Patcher graphs from FL projects are reduced to it, each effect
-inside running its own engine), plus any VST3/CLAP plugin. FL's Peak, Envelope and Keyboard Controllers are imported
+Rhythmic envelope, Auto-pan and the **Patcher** (round 141): a node graph of effects, instruments and VST3/CLAP plugins
+with audio, note and control cables, delay-compensated like FL's — as a mixer slot or a Channel Rack generator, with
+extra outputs to other inserts; FL projects' Patchers open as the same graph. Plus any VST3/CLAP plugin. FL's Peak, Envelope and Keyboard Controllers are imported
 as LYNX controllers.
 
 ## LYNX originals: the mixing suite

@@ -1937,6 +1937,13 @@ Layout crestCompressor()
     v.push_back (onPage (label (470, 530, 50, 22, TR_NOOP ("Scale")), 2));
     v.push_back (onPage (tabs (520, 530, 230, 22, "Meter scale", TR_NOOP ("9 dB|18 dB|36 dB|72 dB|90 dB")), 2));
     v.push_back (onPage (toggle (20, 562, 160, 20, "Input meter", TR_NOOP ("Input meter")), 2));
+    // round 137 (Pro-C 3's side-chain Host Sync / MIDI inputs): the detector hears a pulse instead of the audio
+    v.push_back (onPage (label (192, 562, 52, 20, TR_NOOP ("Trigger")), 2));
+    v.push_back (onPage (tabs (246, 562, 196, 20, "Trigger", TR_NOOP ("Off|Host sync|MIDI")), 2));
+    v.push_back (onPage (when (menuOf (450, 562, 70, 20, "Trigger sync", TR_NOOP ("Note"), "1/1|1/2|1/4|1/8|1/16", { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f }), "Trigger", 0.25f, 0.75f), 2));
+    v.push_back (onPage (when (dial (546, 566, 20, "Trigger rate", TR_NOOP ("Rate")), "Trigger", 0.25f, 0.75f), 2));
+    v.push_back (onPage (when (dial (600, 566, 20, "Trigger length", TR_NOOP ("Length")), "Trigger", 0.25f, 0.75f), 2));
+    v.push_back (onPage (when (stepper (630, 562, 120, 20, "Trigger channel", TR_NOOP ("MIDI channel"), 129), "Trigger", 0.75f, 1.0f), 2));
     v.push_back (onPage (dial (36, 548, 26, "Stereo link", TR_NOOP ("Stereo link")), 1));
     v.push_back (onPage (toggle (72, 528, 120, 20, "External SC", TR_NOOP ("External input")), 1));
     v.push_back (onPage (toggle (72, 554, 120, 20, "SC listen", TR_NOOP ("Listen")), 1));

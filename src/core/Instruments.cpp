@@ -227,6 +227,7 @@ private:
             case InstrumentKind::plugin:
             case InstrumentKind::controller:
             case InstrumentKind::midiOut:
+            case InstrumentKind::patcher:
             case InstrumentKind::sakura:
             case InstrumentKind::drumpad:
             case InstrumentKind::boobass:

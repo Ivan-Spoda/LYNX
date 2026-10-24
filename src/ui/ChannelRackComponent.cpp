@@ -1,3 +1,4 @@
+#include "ui/PatcherEditor.h"
 #include "ui/ChannelRackComponent.h"
 
 #include "ui/AutomationUi.h"
@@ -68,6 +69,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::fruitydance: return "Fruity Dance";
         case InstrumentKind::directwave: return "DirectWave";
         case InstrumentKind::midiOut: return "MIDI Out";
+        case InstrumentKind::patcher: return "Patcher";
     }
     return "?";
 }
@@ -966,6 +968,14 @@ void ChannelRackComponent::toggleEditor (int channel, bool keepOthers)
 
     const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
 
+    if (kind == InstrumentKind::patcher) // its node graph editor (REA_rodada141)
+    {
+        if (PatcherWindows::isChannelOpen (channel))
+            PatcherWindows::closeChannel (channel);
+        else
+            PatcherWindows::openChannel (engine, channel);
+        return;
+    }
     if (kind != InstrumentKind::plugin && ! hasChannelSettings (kind))
         return; // built-in drums and audio clips have no editor window: the click only selects
 
@@ -2059,6 +2069,14 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
         midictl::writeMidiOut (c.pluginState, settings);
         const auto added = add (c);
         openChannelSettings (engine, added);
+    });
+    // FL's Patcher as a generator (REA_rodada141): an empty graph, its editor opens
+    menu.addItem (tr ("Patcher"), [this, add] {
+        ChannelDef c;
+        c.name = "Patcher";
+        c.instrument = InstrumentKind::patcher;
+        const auto added = add (c);
+        PatcherWindows::openChannel (engine, added);
     });
     menu.addSeparator();
 

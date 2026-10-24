@@ -23,6 +23,7 @@
 #include "engine/SampleLibrary.h"
 #include "engine/Text.h"
 #include "platform/FileTypes.h"
+#include "ui/PatcherEditor.h"
 #include "ui/ClipProperties.h"
 #include "ui/NewProjectDialog.h"
 #include "ui/PluginMonitorWindow.h"
@@ -563,6 +564,15 @@ public:
             return;
         }
 
+        if (args.contains ("--patchershot"))
+        {
+            // LYNX.exe --patchershot prefix [project]: every Patcher's editor (round 141) as PNGs (a demo one without a project)
+            const auto i = args.indexOf ("--patchershot");
+            runPatcherShot (args[i + 1].unquoted(), i + 2 < args.size() ? args[i + 2].unquoted() : juce::String());
+            quit();
+            return;
+        }
+
         if (args.contains ("--snapshot"))
         {
             const auto i = args.indexOf ("--snapshot");
@@ -1048,7 +1058,52 @@ private:
         // every built-in effect's editor and engine with extreme settings (round 111): a crash or NaN output fails here
         const auto effectsOk = runEffectFuzz (4, {}); // (no mouse drags: nothing may open on screen)
 
-        const auto ok = audioOk && projectOk && richOk && substituteOk && undoOk && recordOk && recordUndoOk && midiOk && packageOk
+        // FL's Patcher (round 141): a mixer slot and a generator channel with their graphs survive save / load, and the
+        // generator one plays through the rack
+        bool patcherOk = false;
+        {
+            auto song = lynx::Song::makeDefault();
+            song.mixer.resize (4);
+            auto slot = lynx::makeEffectSlot (lynx::EffectKind::patcher);
+            lynx::PatchNode reverb, gain;
+            reverb.effect = lynx::makeEffectSlot (lynx::EffectKind::utility); // (exact defaults: params are saved to 4 decimals)
+            reverb.label = "Room";
+            reverb.x = 120.5f;
+            reverb.y = 40.0f;
+            gain.effect = lynx::makeEffectSlot (lynx::EffectKind::utility);
+            gain.effect.enabled = false;
+            slot.patcher.nodes = { reverb, gain };
+            lynx::PatchWire a, b, c, control;
+            a.to = 0;
+            b.from = 0, b.to = 1, b.gain = 0.5f;
+            c.from = 1;
+            control.kind = lynx::PatchWire::Kind::control, control.from = 0, control.to = 1, control.toPort = 0, control.curve = { 0.0f, 0.25f, 1.0f };
+            slot.patcher.wires = { a, b, c, control };
+            slot.patcher.outputTracks = { 3 };
+            song.mixer[1].effects = { slot };
+            lynx::ChannelDef ch;
+            ch.name = "Patched";
+            ch.instrument = lynx::InstrumentKind::patcher;
+            lynx::PatchNode synth;
+            synth.generator = true;
+            synth.channel.instrument = lynx::InstrumentKind::synth;
+            synth.channel.name = "Synth";
+            ch.patcher.nodes = { synth };
+            lynx::PatchWire notes, out;
+            notes.kind = lynx::PatchWire::Kind::midi, notes.to = 0;
+            out.from = 0;
+            ch.patcher.wires = { notes, out };
+            song.channels.push_back (ch);
+            const auto back = lynx::ProjectFile::fromJson (lynx::ProjectFile::toJson (song), error);
+            patcherOk = back && back->mixer.size() >= 2 && back->mixer[1].effects.size() == 1
+                        && back->mixer[1].effects[0].kind == lynx::EffectKind::patcher && back->mixer[1].effects[0].patcher == slot.patcher
+                        && back->channels.back().instrument == lynx::InstrumentKind::patcher && back->channels.back().patcher.nodes.size() == 1
+                        && back->channels.back().patcher.nodes[0].generator
+                        && back->channels.back().patcher.nodes[0].channel.instrument == lynx::InstrumentKind::synth
+                        && back->channels.back().patcher.wires == ch.patcher.wires;
+        }
+
+        const auto ok = audioOk && projectOk && richOk && substituteOk && patcherOk && undoOk && recordOk && recordUndoOk && midiOk && packageOk
                         && wavpack != "ERROR" && effectsOk;
 
         juce::String report;
@@ -1057,6 +1112,7 @@ private:
                << "project=" << (projectOk ? "OK" : "ERROR " + error) << "\n"
                << "project_features=" << (richOk ? "OK" : "ERROR") << "\n"
                << "plugin_substitutes=" << (substituteOk ? "OK" : "ERROR") << "\n"
+               << "patcher=" << (patcherOk ? "OK" : "ERROR") << "\n"
                << "undo=" << (undoOk ? "OK" : "ERROR") << "\n"
                << "recording=" << (recordOk && recordUndoOk ? "OK" : "ERROR") << "\n"
                << "midi=" << (midiOk ? "OK" : "ERROR") << "\n"
@@ -1089,7 +1145,7 @@ private:
             for (int k = 0; k <= (int) lynx::lastEffectKind; ++k)
             {
                 const auto kind = (lynx::EffectKind) k;
-                if (! lynx::NativeEffectWindows::canOpen (kind))
+                if (! lynx::NativeEffectWindows::canOpen (kind) || kind == lynx::EffectKind::patcher) // (the Patcher's editor is a graph window)
                     continue;
                 const auto before = lynx::RackRenderer::nonFiniteEffectBlocks();
                 const auto& info = lynx::effectInfo (kind);
@@ -2696,6 +2752,99 @@ private:
                 if (w->getName().startsWith ("Formula") && w->getContentComponent() != nullptr)
                     savePng (w->getContentComponent()->createComponentSnapshot (w->getContentComponent()->getLocalBounds()), prefix + "-formula-controller.png");
         lynx::FormulaControllerWindows::closeAll();
+    }
+
+    void runPatcherShot (const juce::String& prefix, const juce::String& projectPath)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        lynx::AudioEngine offline (false);
+        {
+            lynx::MainComponent ui (offline, false);
+            ui.setSize (1280, 720);
+            if (projectPath.isNotEmpty())
+                ui.openFile (juce::File (projectPath));
+            else
+            {
+                auto song = lynx::Song::makeDefault();
+                song.mixer.resize (4);
+                auto slot = lynx::makeEffectSlot (lynx::EffectKind::patcher);
+                slot.patcher.wires.clear();
+                for (auto [kind, x, y] : { std::tuple { lynx::EffectKind::frequencySplitter, 200.0f, 60.0f }, { lynx::EffectKind::reverb, 420.0f, 0.0f },
+                                           { lynx::EffectKind::fruityDelay3, 420.0f, 120.0f }, { lynx::EffectKind::peakController, 200.0f, 260.0f } })
+                {
+                    lynx::PatchNode n;
+                    n.effect = lynx::makeEffectSlot (kind);
+                    n.x = x;
+                    n.y = y;
+                    slot.patcher.nodes.push_back (n);
+                }
+                auto wire = [&] (int from, int fromPort, int to, int toPort, float gain = 1.0f, lynx::PatchWire::Kind kind = lynx::PatchWire::Kind::audio) {
+                    lynx::PatchWire w;
+                    w.kind = kind;
+                    w.from = from, w.fromPort = fromPort, w.to = to, w.toPort = toPort, w.gain = gain;
+                    slot.patcher.wires.push_back (w);
+                };
+                wire (lynx::patchFromHost, 0, 0, 0);
+                wire (0, 1, 1, 0);
+                wire (0, 3, 2, 0, 0.5f);
+                wire (1, 0, lynx::patchToHost, 0);
+                wire (2, 0, lynx::patchToHost, 0);
+                wire (lynx::patchFromHost, 1, 3, 0);
+                wire (3, 1, 2, 2, 1.0f, lynx::PatchWire::Kind::control);
+                wire (0, 2, lynx::patchToHost, 1, 0.7f);
+                slot.patcher.outputTracks = { 3 };
+                slot.patcher.inputX = -20.0f;
+                slot.patcher.outputX = 660.0f;
+                song.mixer[1].effects = { slot };
+                lynx::ChannelDef ch;
+                ch.name = "Patcher";
+                ch.instrument = lynx::InstrumentKind::patcher;
+                lynx::PatchNode synth, chorus;
+                synth.generator = true;
+                synth.channel.instrument = lynx::InstrumentKind::synth;
+                synth.channel.name = "Synth";
+                synth.x = 220.0f;
+                chorus.effect = lynx::makeEffectSlot (lynx::EffectKind::chorus);
+                chorus.x = 420.0f;
+                ch.patcher.nodes = { synth, chorus };
+                lynx::PatchWire notes, a, b;
+                notes.kind = lynx::PatchWire::Kind::midi, notes.to = 0;
+                a.from = 0, a.to = 1;
+                b.from = 1;
+                ch.patcher.wires = { notes, a, b };
+                ch.patcher.outputX = 640.0f;
+                song.channels.push_back (ch);
+                offline.setSong (std::move (song));
+            }
+            offline.dispatchPendingMessages();
+            const auto& song = offline.getSong();
+            auto shootOpen = [&] (const juce::String& name) {
+                for (int k = 0; k < juce::TopLevelWindow::getNumTopLevelWindows(); ++k)
+                    if (auto* w = dynamic_cast<juce::DocumentWindow*> (juce::TopLevelWindow::getTopLevelWindow (k)))
+                        if (w->getName().startsWith (lynx::tr ("Patcher")) && w->getContentComponent() != nullptr)
+                        {
+                            auto* c = w->getContentComponent();
+                            savePng (c->createComponentSnapshot (c->getLocalBounds()), prefix + name);
+                            delete w;
+                            return;
+                        }
+            };
+            int shots = 0;
+            for (int t = 0; t < (int) song.mixer.size() && shots < 12; ++t)
+                for (int s = 0; s < (int) song.mixer[(std::size_t) t].effects.size(); ++s)
+                    if (song.mixer[(std::size_t) t].effects[(std::size_t) s].kind == lynx::EffectKind::patcher)
+                    {
+                        lynx::PatcherWindows::openSlot (offline, t, s);
+                        shootOpen ("-insert" + juce::String (t) + "-slot" + juce::String (s) + ".png");
+                        ++shots;
+                    }
+            for (int c = 0; c < (int) song.channels.size(); ++c)
+                if (song.channels[(std::size_t) c].instrument == lynx::InstrumentKind::patcher)
+                {
+                    lynx::PatcherWindows::openChannel (offline, c);
+                    shootOpen ("-channel" + juce::String (c) + ".png");
+                }
+        }
     }
 
     void runSnapshot (const juce::String& prefix, const juce::String& projectPath)

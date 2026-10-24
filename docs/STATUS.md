@@ -107,8 +107,8 @@ out-of-process plugin sandbox. macOS adds Audio Units, Linux LV2; drivers Core A
   Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter / Fast LP / Free Filter (exact), Newtone / Newtime (state kept, pass-through, source sample in slave mode; Newtone edits rendered by LYNX's engine), Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
   Love Philter (exact), Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
   Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter and EQUO (exact engines), Hardcore, Distructor and Multiband Delay (exact), Frequency Shifter,
-  Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder (exact); Patcher graphs of any shape are
-  reduced to series/parallel chains.
+  Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder (exact); Patcher graphs of any shape run as
+  the real graph (round 141: nodes, cables with gains, notes, control cables, delay compensation, editor).
 - Generators: 3x Osc on its engine (REA round 47: the three oscillators on FL's host wave tables, stereo detune and
   phase, random start phases, AM, the custom wave from the channel's sample read from the user's installation, the HQ
   band-limited oscillators, and the plugin voice processor 3x Osc keeps, with its release path; bit-identical to FL's
@@ -409,7 +409,8 @@ accordingly. Highlights of what is **confirmed and applied**:
   and export modes, on Linux and Windows builds, with automation, transport positions and 22–96 kHz. The DLL's own
   Delphi math runtime (exp, ln, sin, cos, power, tanh) is re-created (`core/DelphiMath`, shared with the Fruity Vocoder since round 78). The old parametric-EQ
   conversion remains only for states the engine cannot read.
-- **Patcher:** any graph in the demos reduced to series/parallel (nested containers), cables of the right class.
+- **Patcher:** the real graph (REA_rodada141): every node, cable, gain, note and control cable, positions, side-chain
+  pin, extra outputs; FL's "Patcher (effect)" / "Patcher (generator)" render tests match FL (0.01 / 0.04 dB).
 - **Sidechain:** level-0 routes are sidechain links; Fruity Limiter (compression section) and Fruity
   Compressor with a side input listen to the source track (their exact engines below).
 - **Fruity Limiter and Fruity Compressor:** FL's exact engines as mixer effects (`core/FruityDynamics`, REA round 48),

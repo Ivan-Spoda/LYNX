@@ -1,3 +1,4 @@
+#include "ui/PatcherEditor.h"
 #include "ui/ControllerEditors.h"
 #include "ui/PluginEditors.h"
 
@@ -3573,6 +3574,11 @@ void open (AudioEngine& engine, int track, int slot)
 
     const auto& fxSlot = mixer[(std::size_t) track].effects[(std::size_t) slot];
     const auto kind = fxSlot.kind;
+    if (kind == EffectKind::patcher) // its node graph editor (REA_rodada141)
+    {
+        PatcherWindows::openSlot (engine, track, slot);
+        return;
+    }
     if (! canOpen (fxSlot))
         return;
     if (kind == EffectKind::formulaController) // the formula, its knobs and a monitor (REA round 133)

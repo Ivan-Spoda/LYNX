@@ -1,0 +1,1024 @@
+#include "core/Patcher.h"
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstring>
+#include <map>
+
+#include "core/FrequencySplitter.h"
+#include "core/Pdc.h"
+
+namespace lynx::patcher
+{
+namespace
+{
+class PassEffect final : public Effect
+{
+public:
+    void prepare (double) noexcept override {}
+    void reset() noexcept override {}
+    void process (float*, float*, int, const EffectParams&, double) noexcept override {}
+};
+
+// what makes a running node reusable: everything but the values the graph hands it every block
+bool sameEffectSetup (const EffectSlot& a, const EffectSlot& b)
+{
+    if (a.kind != b.kind || a.plugin.id != b.plugin.id || a.state != b.state || a.samplePath != b.samplePath || ! (a.plugin == b.plugin))
+        return false;
+    if (a.kind == EffectKind::parallel)
+        return a == b; // its children are built in
+    if (a.kind == EffectKind::patcher)
+        return sameStructure (a.patcher, b.patcher);
+    // effects whose setup depends on parameters at creation (latency, mode) are rebuilt by the rack as well
+    return true;
+}
+
+bool sameInstrumentSetup (const ChannelDef& a, const ChannelDef& b)
+{
+    if (a.instrument != b.instrument || a.samplePath != b.samplePath || a.zones != b.zones || a.modelParams != b.modelParams
+        || a.pluginState != b.pluginState || a.plugin.id != b.plugin.id || ! (a.plugin == b.plugin) || a.controllerState != b.controllerState)
+        return false;
+    if (a.instrument == InstrumentKind::patcher)
+        return sameStructure (a.patcher, b.patcher);
+    return true;
+}
+
+float mapControl (const std::vector<float>& curve, float v) noexcept
+{
+    v = std::clamp (v, 0.0f, 1.0f);
+    if (curve.size() < 2)
+        return v;
+    const auto x = v * (float) (curve.size() - 1);
+    const auto i = std::min ((std::size_t) x, curve.size() - 2);
+    const auto f = x - (float) i;
+    return curve[i] + (curve[i + 1] - curve[i]) * f;
+}
+} // namespace
+
+std::optional<PatchNode::BusHead> busHeadOf (const PatchNode& node, int bus)
+{
+    if (bus <= 0 || node.generator)
+        return std::nullopt;
+    for (const auto& h : node.busHeads)
+        if (h.bus == bus)
+            return h;
+    if (node.effect.kind == EffectKind::frequencySplitter && bus <= 3) // LYNX's own: band sends 1 low, 2 mid, 3 high
+    {
+        PatchNode::BusHead head;
+        head.bus = bus;
+        auto slot = node.effect;
+        slot.params[(std::size_t) fsplit::outputLow] = bus == 1 ? 1.0f : 0.0f;
+        slot.params[(std::size_t) fsplit::outputMid] = bus == 2 ? 1.0f : 0.0f;
+        slot.params[(std::size_t) fsplit::outputHigh] = bus == 3 ? 1.0f : 0.0f;
+        head.head = slot;
+        return head;
+    }
+    return std::nullopt;
+}
+
+NodePorts nodePorts (const PatchNode& node)
+{
+    NodePorts p;
+    if (node.generator)
+    {
+        p.audioIns = 0;
+        p.midiIn = true;
+        p.controlOuts = node.channel.instrument == InstrumentKind::controller ? 8 : 0;
+        if (node.channel.instrument == InstrumentKind::patcher)
+            p.audioOuts = 1 + (int) node.channel.patcher.outputTracks.size();
+        return p;
+    }
+    p.audioIns = 2; // main + side-chain
+    p.midiIn = node.effect.kind == EffectKind::plugin;
+    int highest = 0;
+    for (const auto& h : node.busHeads)
+        highest = std::max (highest, h.bus);
+    if (node.effect.kind == EffectKind::frequencySplitter)
+        highest = std::max (highest, 3);
+    p.audioOuts = 1 + highest;
+    if (node.effect.kind == EffectKind::peakController)
+        p.controlOuts = 3;
+    else if (node.effect.kind == EffectKind::formulaController)
+        p.controlOuts = 1;
+    return p;
+}
+
+bool sameStructure (const PatcherDoc& a, const PatcherDoc& b)
+{
+    if (a.nodes.size() != b.nodes.size() || a.wires.size() != b.wires.size() || a.outputTracks != b.outputTracks)
+        return false;
+    for (std::size_t i = 0; i < a.nodes.size(); ++i)
+    {
+        const auto& x = a.nodes[i];
+        const auto& y = b.nodes[i];
+        if (x.generator != y.generator || x.busHeads.size() != y.busHeads.size())
+            return false;
+        if (x.generator ? ! sameInstrumentSetup (x.channel, y.channel) : ! sameEffectSetup (x.effect, y.effect))
+            return false;
+        for (std::size_t h = 0; h < x.busHeads.size(); ++h)
+            if (x.busHeads[h].bus != y.busHeads[h].bus || x.busHeads[h].head.has_value() != y.busHeads[h].head.has_value()
+                || (x.busHeads[h].head && ! sameEffectSetup (*x.busHeads[h].head, *y.busHeads[h].head)))
+                return false;
+    }
+    for (std::size_t i = 0; i < a.wires.size(); ++i)
+    {
+        const auto& x = a.wires[i];
+        const auto& y = b.wires[i];
+        if (x.kind != y.kind || x.from != y.from || x.fromPort != y.fromPort || x.to != y.to || x.toPort != y.toPort || x.curve != y.curve
+            || (x.kind != PatchWire::Kind::audio && x.enabled != y.enabled))
+            return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+
+struct Graph::Node
+{
+    bool generator = false;
+    EffectSlot setup;   // effect nodes
+    ChannelDef channel; // generator nodes
+    std::shared_ptr<Effect> effect;
+    std::shared_ptr<Instrument> instrument;
+    bool plugin = false; // values reach it through setParameter (control cables), not the params array
+
+    struct Head
+    {
+        int bus = 1;
+        std::shared_ptr<Effect> effect; // null = direct
+        EffectSlot slot;
+        float gain = 1.0f;
+    };
+    std::vector<Head> heads;
+    std::vector<std::array<std::vector<float>, 2>> out; // [0] main output, [1 + h] head h
+    bool sidechain = false;
+    int inLatency = 0, outLatency = 0;
+    std::vector<int> mainInputs, sideInputs; // wire indices
+};
+
+struct Graph::AudioWire
+{
+    int from = patchFromHost, fromBuffer = 0; // node, and its output buffer (0 main, 1 + h head); host: 0 input, 1 side-chain
+    int to = patchToHost, toBus = 0;
+    std::shared_ptr<DelayLine> delay;
+    int docIndex = 0;
+};
+
+struct Graph::ControlWire
+{
+    int from = 0, output = 0, to = 0, param = 0;
+    std::vector<float> curve;
+    int docIndex = 0;
+};
+
+struct Graph::Values
+{
+    struct NodeValues
+    {
+        EffectParams params {};
+        bool enabled = true;
+        float mix = 1.0f;
+        std::vector<EffectParams> heads;
+        std::vector<float> headGains;
+    };
+    std::vector<NodeValues> nodes;
+    std::vector<float> gains;
+    std::vector<char> on;
+};
+
+Graph::Graph (const PatcherDoc& doc, double sampleRate, const Factories& factories, const Graph* previous) : rate (sampleRate)
+{
+    const auto count = (int) doc.nodes.size();
+    std::vector<char> taken (previous != nullptr ? previous->nodes.size() : 0, 0);
+
+    for (int i = 0; i < count; ++i)
+    {
+        const auto& src = doc.nodes[(std::size_t) i];
+        auto node = std::make_unique<Node>();
+        node->generator = src.generator;
+
+        // a running instance with the same setup (the previous graph's node at the same index first)
+        auto reuse = [&] () -> const Node* {
+            if (previous == nullptr)
+                return nullptr;
+            auto matches = [&] (std::size_t k) {
+                const auto& p = *previous->nodes[k];
+                return ! taken[k] && p.generator == src.generator
+                       && (src.generator ? p.instrument != nullptr && sameInstrumentSetup (p.channel, src.channel)
+                                         : p.effect != nullptr && sameEffectSetup (p.setup, src.effect));
+            };
+            if ((std::size_t) i < previous->nodes.size() && matches ((std::size_t) i))
+            {
+                taken[(std::size_t) i] = 1;
+                return previous->nodes[(std::size_t) i].get();
+            }
+            for (std::size_t k = 0; k < previous->nodes.size(); ++k)
+                if (matches (k))
+                {
+                    taken[k] = 1;
+                    return previous->nodes[k].get();
+                }
+            return nullptr;
+        }();
+
+        if (src.generator)
+        {
+            node->channel = src.channel;
+            node->plugin = src.channel.instrument == InstrumentKind::plugin;
+            if (reuse != nullptr)
+            {
+                node->instrument = reuse->instrument;
+                node->instrument->configure (src.channel, 140.0);
+            }
+            else if (factories.instrument)
+                node->instrument = factories.instrument (src.channel);
+        }
+        else
+        {
+            node->setup = src.effect;
+            node->plugin = src.effect.kind == EffectKind::plugin;
+            if (reuse != nullptr)
+                node->effect = reuse->effect;
+            else if (factories.effect)
+                node->effect = factories.effect (src.effect);
+            if (node->effect == nullptr)
+                node->effect = std::make_shared<PassEffect>();
+        }
+
+        // extra outputs used by some cable
+        for (const auto& w : doc.wires)
+            if (w.kind == PatchWire::Kind::audio && w.from == i && w.fromPort > 0
+                && std::none_of (node->heads.begin(), node->heads.end(), [&] (const Node::Head& h) { return h.bus == w.fromPort; }))
+                if (const auto head = busHeadOf (src, w.fromPort))
+                {
+                    Node::Head h;
+                    h.bus = head->bus;
+                    h.gain = head->gain;
+                    if (head->head)
+                    {
+                        h.slot = *head->head;
+                        const Node::Head* old = nullptr;
+                        if (reuse != nullptr)
+                            for (const auto& o : reuse->heads)
+                                if (o.bus == h.bus && o.effect != nullptr && sameEffectSetup (o.slot, h.slot))
+                                    old = &o;
+                        h.effect = old != nullptr ? old->effect : (factories.effect ? factories.effect (h.slot) : nullptr);
+                        if (h.effect == nullptr)
+                            h.effect = std::make_shared<PassEffect>();
+                    }
+                    node->heads.push_back (std::move (h));
+                }
+
+        node->out.resize (1 + node->heads.size());
+        for (auto& o : node->out)
+            for (auto& side : o)
+                side.assign ((std::size_t) capacity, 0.0f);
+        nodes.push_back (std::move (node));
+    }
+
+    // cables
+    int highestAux = 0;
+    for (std::size_t w = 0; w < doc.wires.size(); ++w)
+    {
+        const auto& src = doc.wires[w];
+        const auto validNode = [count] (int n) { return n >= 0 && n < count; };
+        if (src.kind == PatchWire::Kind::audio)
+        {
+            AudioWire a;
+            a.docIndex = (int) w;
+            a.from = src.from;
+            a.to = src.to;
+            a.toBus = std::max (0, src.toPort);
+            if (src.from == patchFromHost)
+                a.fromBuffer = src.fromPort == 1 ? 1 : 0;
+            else if (validNode (src.from))
+            {
+                if (src.fromPort > 0)
+                {
+                    const auto& heads = nodes[(std::size_t) src.from]->heads;
+                    const auto h = std::find_if (heads.begin(), heads.end(), [&] (const Node::Head& x) { return x.bus == src.fromPort; });
+                    if (h == heads.end())
+                        continue; // an output the node does not have: silence
+                    a.fromBuffer = 1 + (int) (h - heads.begin());
+                }
+            }
+            else
+                continue;
+            if (src.to == patchToHost)
+                highestAux = std::max (highestAux, a.toBus);
+            else if (! validNode (src.to) || nodes[(std::size_t) src.to]->generator || a.toBus > 1)
+                continue;
+            wires.push_back (std::move (a));
+        }
+        else if (src.kind == PatchWire::Kind::midi)
+        {
+            if (src.from == patchFromHost && validNode (src.to) && src.enabled
+                && std::find (noteTargets.begin(), noteTargets.end(), src.to) == noteTargets.end())
+                noteTargets.push_back (src.to);
+        }
+        else if (validNode (src.from) && validNode (src.to) && src.enabled && src.toPort >= 0
+                 && std::max (0, src.fromPort) < nodePorts (doc.nodes[(std::size_t) src.from]).controlOuts) // (a source with that output)
+        {
+            ControlWire c;
+            c.from = src.from;
+            c.output = std::max (0, src.fromPort);
+            c.to = src.to;
+            c.param = src.toPort;
+            c.curve = src.curve;
+            c.docIndex = (int) w;
+            if (! nodes[(std::size_t) c.to]->plugin && ! nodes[(std::size_t) c.to]->generator && c.param >= maxEffectParams)
+                continue;
+            controls.push_back (std::move (c));
+        }
+    }
+    highestAux = std::max (highestAux, (int) doc.outputTracks.size());
+    aux.resize ((std::size_t) highestAux);
+    for (auto& a : aux)
+        for (auto& side : a)
+            side.assign ((std::size_t) capacity, 0.0f);
+
+    // order: nodes once all their audio sources ran (Kahn); what is left (loops) in index order
+    std::vector<int> pendingInputs ((std::size_t) count, 0);
+    for (const auto& w : wires)
+        if (w.from >= 0 && w.to >= 0 && w.from != w.to)
+            ++pendingInputs[(std::size_t) w.to];
+    std::vector<char> placed ((std::size_t) count, 0);
+    for (bool progress = true; progress;)
+    {
+        progress = false;
+        for (int i = 0; i < count; ++i)
+            if (! placed[(std::size_t) i] && pendingInputs[(std::size_t) i] == 0)
+            {
+                placed[(std::size_t) i] = 1;
+                order.push_back (i);
+                progress = true;
+                for (const auto& w : wires)
+                    if (w.from == i && w.to >= 0 && w.to != i)
+                        --pendingInputs[(std::size_t) w.to];
+            }
+    }
+    for (int i = 0; i < count; ++i)
+        if (! placed[(std::size_t) i])
+            order.push_back (i);
+
+    for (std::size_t k = 0; k < wires.size(); ++k)
+        if (wires[k].to >= 0)
+        {
+            auto& node = *nodes[(std::size_t) wires[k].to];
+            (wires[k].toBus == 0 ? node.mainInputs : node.sideInputs).push_back ((int) k);
+            node.sidechain = node.sidechain || wires[k].toBus == 1;
+        }
+
+    // delay compensation (FL: a cable from a source with less latency than the destination's goes through a delay)
+    std::vector<int> position ((std::size_t) count, 0);
+    for (std::size_t k = 0; k < order.size(); ++k)
+        position[(std::size_t) order[k]] = (int) k;
+    auto runsBefore = [&] (const AudioWire& w) { return w.from < 0 || w.to < 0 || position[(std::size_t) w.from] < position[(std::size_t) w.to]; };
+    auto sourceLatency = [&] (const AudioWire& w) { return w.from >= 0 ? nodes[(std::size_t) w.from]->outLatency : 0; };
+    for (const auto i : order)
+    {
+        auto& node = *nodes[(std::size_t) i];
+        int in = 0;
+        for (const auto k : node.mainInputs)
+            if (runsBefore (wires[(std::size_t) k]))
+                in = std::max (in, sourceLatency (wires[(std::size_t) k]));
+        for (const auto k : node.sideInputs)
+            if (runsBefore (wires[(std::size_t) k]))
+                in = std::max (in, sourceLatency (wires[(std::size_t) k]));
+        node.inLatency = in;
+        const auto own = node.generator ? (node.instrument != nullptr ? node.instrument->latencySamples() : 0)
+                                        : (doc.nodes[(std::size_t) i].effect.enabled ? node.effect->latencySamples() : 0);
+        node.outLatency = in + std::max (0, own);
+    }
+    std::vector<int> outLatency ((std::size_t) highestAux + 1, 0);
+    for (const auto& w : wires)
+        if (w.to == patchToHost)
+            outLatency[(std::size_t) w.toBus] = std::max (outLatency[(std::size_t) w.toBus], sourceLatency (w));
+    latency = outLatency.empty() ? 0 : *std::max_element (outLatency.begin(), outLatency.end());
+    for (auto& w : wires)
+    {
+        if (! runsBefore (w))
+            continue;
+        const auto target = w.to >= 0 ? nodes[(std::size_t) w.to]->inLatency : latency; // every output aligned to the longest
+        const auto difference = target - sourceLatency (w);
+        if (difference > 0)
+            w.delay = std::make_shared<DelayLine> (difference);
+    }
+
+    outputs.resize (aux.size() + 1);
+    for (std::size_t k = 0; k < wires.size(); ++k)
+        if (wires[k].to == patchToHost && wires[k].toBus < (int) outputs.size())
+            outputs[(std::size_t) wires[k].toBus].push_back ((int) k);
+
+    for (auto& s : scratch)
+        s.assign ((std::size_t) capacity, 0.0f);
+    zeros.assign ((std::size_t) capacity, 0.0f);
+    active = std::make_unique<Values>();
+    takeValues (doc, 140.0);
+    applyPending();
+}
+
+Graph::~Graph()
+{
+    delete pending.exchange (nullptr);
+    delete retired.exchange (nullptr);
+}
+
+void Graph::takeValues (const PatcherDoc& doc, double bpm)
+{
+    auto values = std::make_unique<Values>();
+    values->nodes.resize (nodes.size());
+    for (std::size_t i = 0; i < nodes.size() && i < doc.nodes.size(); ++i)
+    {
+        const auto& src = doc.nodes[i];
+        auto& v = values->nodes[i];
+        if (! src.generator)
+        {
+            v.params = src.effect.params;
+            v.enabled = src.effect.enabled;
+            v.mix = src.effect.mix;
+        }
+        for (const auto& h : nodes[i]->heads)
+        {
+            const auto head = busHeadOf (src, h.bus);
+            v.heads.push_back (head && head->head ? head->head->params : h.slot.params);
+            v.headGains.push_back (head ? head->gain : h.gain);
+        }
+        if (src.generator && nodes[i]->instrument != nullptr)
+            nodes[i]->instrument->configure (src.channel, bpm);
+    }
+    for (const auto& w : wires)
+    {
+        const auto& src = doc.wires[(std::size_t) w.docIndex];
+        values->gains.push_back (std::isfinite (src.gain) ? src.gain : 1.0f);
+        values->on.push_back (src.enabled ? 1 : 0);
+    }
+    delete retired.exchange (nullptr);
+    delete pending.exchange (values.release());
+}
+
+void Graph::applyPending() noexcept
+{
+    if (auto* incoming = pending.exchange (nullptr))
+    {
+        auto* old = active.release();
+        active.reset (incoming);
+        delete retired.exchange (old); // (normally null: the UI frees it on its next call)
+    }
+}
+
+void Graph::prepare (double sampleRate) noexcept
+{
+    if (sampleRate == rate)
+        return;
+    rate = sampleRate;
+    for (auto& n : nodes)
+    {
+        if (n->effect != nullptr)
+            n->effect->prepare (sampleRate);
+        if (n->instrument != nullptr)
+            n->instrument->prepare (sampleRate);
+        for (auto& h : n->heads)
+            if (h.effect != nullptr)
+                h.effect->prepare (sampleRate);
+    }
+}
+
+void Graph::reset() noexcept
+{
+    for (auto& n : nodes)
+    {
+        if (n->effect != nullptr)
+            n->effect->reset();
+        for (auto& h : n->heads)
+            if (h.effect != nullptr)
+                h.effect->reset();
+        for (auto& o : n->out)
+            for (auto& side : o)
+                std::fill (side.begin(), side.end(), 0.0f);
+    }
+}
+
+void Graph::setSongPosition (double ticks) noexcept
+{
+    for (auto& n : nodes)
+    {
+        if (n->effect != nullptr)
+            n->effect->setSongPosition (ticks);
+        if (n->instrument != nullptr)
+            n->instrument->setSongPosition (ticks);
+        for (auto& h : n->heads)
+            if (h.effect != nullptr)
+                h.effect->setSongPosition (ticks);
+    }
+}
+
+void Graph::setPlaying (bool playing) noexcept
+{
+    for (auto& n : nodes)
+        if (n->effect != nullptr)
+            n->effect->setPlaying (playing);
+}
+
+void Graph::setHeldNotes (const NoteMask* channels, int count) noexcept
+{
+    for (auto& n : nodes)
+        if (n->effect != nullptr)
+            n->effect->setHeldNotes (channels, count);
+}
+
+void Graph::noteOn (int key, float velocity) noexcept
+{
+    for (const auto t : noteTargets)
+    {
+        if (auto& i = nodes[(std::size_t) t]->instrument)
+            i->noteOn (key, velocity);
+    }
+}
+
+void Graph::noteOff (int key) noexcept
+{
+    for (const auto t : noteTargets)
+        if (auto& i = nodes[(std::size_t) t]->instrument)
+            i->noteOff (key);
+}
+
+void Graph::noteOnMidi (int key, float velocity, int midiChannel) noexcept
+{
+    for (const auto t : noteTargets)
+        if (auto& i = nodes[(std::size_t) t]->instrument)
+            i->noteOnMidi (key, velocity, midiChannel);
+}
+
+void Graph::noteOffMidi (int key, int midiChannel) noexcept
+{
+    for (const auto t : noteTargets)
+        if (auto& i = nodes[(std::size_t) t]->instrument)
+            i->noteOffMidi (key, midiChannel);
+}
+
+void Graph::allNotesOff() noexcept
+{
+    for (auto& n : nodes)
+        if (n->instrument != nullptr)
+            n->instrument->allNotesOff();
+}
+
+void Graph::slideTo (int key, float cents, float samples) noexcept
+{
+    for (const auto t : noteTargets)
+        if (auto& i = nodes[(std::size_t) t]->instrument)
+            i->slideTo (key, cents, samples);
+}
+
+void Graph::setNextNoteExpression (float pan, float cents, bool porta) noexcept
+{
+    for (const auto t : noteTargets)
+        if (auto& i = nodes[(std::size_t) t]->instrument)
+            i->setNextNoteExpression (pan, cents, porta);
+}
+
+bool Graph::hasInstruments() const noexcept
+{
+    return std::any_of (nodes.begin(), nodes.end(), [] (const auto& n) { return n->instrument != nullptr; });
+}
+
+bool Graph::instrumentsIdle() const noexcept
+{
+    return std::all_of (nodes.begin(), nodes.end(), [] (const auto& n) { return n->instrument == nullptr || n->instrument->idle(); });
+}
+
+float Graph::controlOutput (int) const noexcept { return 0.0f; }
+
+const float* Graph::auxOutput (int index, int side) const noexcept
+{
+    return index >= 0 && index < (int) aux.size() ? aux[(std::size_t) index][(std::size_t) (side & 1)].data() : nullptr;
+}
+
+std::shared_ptr<Effect> Graph::effectAt (int node) const
+{
+    return node >= 0 && node < (int) nodes.size() ? nodes[(std::size_t) node]->effect : nullptr;
+}
+
+std::shared_ptr<Instrument> Graph::instrumentAt (int node) const
+{
+    return node >= 0 && node < (int) nodes.size() ? nodes[(std::size_t) node]->instrument : nullptr;
+}
+
+void Graph::process (const float* inL, const float* inR, const float* scL, const float* scR, float* outL, float* outR, int n, double bpm) noexcept
+{
+    for (int done = 0; done < n; done += capacity)
+    {
+        const auto piece = std::min (capacity, n - done);
+        processPiece (inL + done, inR + done, scL != nullptr ? scL + done : nullptr, scR != nullptr ? scR + done : nullptr, outL + done,
+                      outR + done, piece, bpm);
+    }
+}
+
+void Graph::processPiece (const float* inL, const float* inR, const float* scL, const float* scR, float* outL, float* outR, int n, double bpm) noexcept
+{
+    applyPending();
+    auto& values = *active;
+
+    // control cables: the source's latest output moves the target's parameter (one block of lag, as the mixer's links)
+    for (const auto& c : controls)
+    {
+        const auto& source = *nodes[(std::size_t) c.from];
+        const auto raw = source.effect != nullptr && ! source.generator ? source.effect->controlOutput (c.output)
+                         : source.instrument != nullptr                 ? source.instrument->controlOutput (c.output)
+                                                                        : 0.0f;
+        const auto v = mapControl (c.curve, raw);
+        auto& target = *nodes[(std::size_t) c.to];
+        if (target.generator)
+        {
+            if (target.instrument != nullptr)
+                target.instrument->setParameter (c.param, v);
+        }
+        else if (target.plugin)
+            target.effect->setParameter (c.param, v);
+        else
+            values.nodes[(std::size_t) c.to].params[(std::size_t) c.param] = v;
+    }
+
+    auto sourceOf = [&] (const AudioWire& w, int side) -> const float* {
+        if (w.from == patchFromHost)
+        {
+            if (w.fromBuffer == 1)
+                return (side == 0 ? scL : scR) != nullptr ? (side == 0 ? scL : scR) : zeros.data();
+            return side == 0 ? inL : inR;
+        }
+        return nodes[(std::size_t) w.from]->out[(std::size_t) w.fromBuffer][(std::size_t) side].data();
+    };
+    auto gather = [&] (const std::vector<int>& list, float* l, float* r) {
+        std::fill (l, l + n, 0.0f);
+        std::fill (r, r + n, 0.0f);
+        for (const auto k : list)
+        {
+            const auto& w = wires[(std::size_t) k];
+            const auto on = values.on[(std::size_t) k] != 0;
+            const auto gain = on ? values.gains[(std::size_t) k] : 0.0f;
+            const auto* sl = sourceOf (w, 0);
+            const auto* sr = sourceOf (w, 1);
+            if (w.delay != nullptr)
+            {
+                w.delay->mixInto (on ? sl : nullptr, on ? sr : nullptr, gain, l, r, n); // (keeps its line running)
+                continue;
+            }
+            if (! on || gain == 0.0f)
+                continue;
+            for (int i = 0; i < n; ++i)
+            {
+                l[i] += sl[i] * gain;
+                r[i] += sr[i] * gain;
+            }
+        }
+    };
+
+    auto* inBufL = scratch[0].data();
+    auto* inBufR = scratch[1].data();
+    auto* scBufL = scratch[2].data();
+    auto* scBufR = scratch[3].data();
+
+    for (const auto i : order)
+    {
+        auto& node = *nodes[(std::size_t) i];
+        auto& v = values.nodes[(std::size_t) i];
+        auto* oL = node.out[0][0].data();
+        auto* oR = node.out[0][1].data();
+
+        if (node.generator)
+        {
+            std::fill (oL, oL + n, 0.0f);
+            std::fill (oR, oR + n, 0.0f);
+            if (node.instrument != nullptr)
+                node.instrument->render (oL, oR, n, 1.0f, 1.0f);
+            continue;
+        }
+
+        gather (node.mainInputs, inBufL, inBufR);
+        std::copy (inBufL, inBufL + n, oL);
+        std::copy (inBufR, inBufR + n, oR);
+        if (v.enabled && v.mix > 0.0f)
+        {
+            if (node.sidechain)
+            {
+                gather (node.sideInputs, scBufL, scBufR);
+                node.effect->setSidechain (scBufL, scBufR);
+            }
+            node.effect->process (oL, oR, n, v.params, bpm);
+            if (v.mix < 0.999f)
+                for (int k = 0; k < n; ++k)
+                {
+                    oL[k] = inBufL[k] + (oL[k] - inBufL[k]) * v.mix;
+                    oR[k] = inBufR[k] + (oR[k] - inBufR[k]) * v.mix;
+                }
+        }
+        for (std::size_t h = 0; h < node.heads.size(); ++h)
+        {
+            auto* hL = node.out[1 + h][0].data();
+            auto* hR = node.out[1 + h][1].data();
+            std::copy (inBufL, inBufL + n, hL);
+            std::copy (inBufR, inBufR + n, hR);
+            if (node.heads[h].effect != nullptr)
+                node.heads[h].effect->process (hL, hR, n, v.heads[h], bpm);
+            const auto g = v.headGains[h];
+            if (g != 1.0f)
+                for (int k = 0; k < n; ++k)
+                {
+                    hL[k] *= g;
+                    hR[k] *= g;
+                }
+        }
+    }
+
+    // "To LYNX": the main output and the extra ones
+    gather (outputs[0], inBufL, inBufR);
+    std::copy (inBufL, inBufL + n, outL);
+    std::copy (inBufR, inBufR + n, outR);
+    for (std::size_t bus = 1; bus < outputs.size(); ++bus)
+        gather (outputs[bus], aux[bus - 1][0].data(), aux[bus - 1][1].data());
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+
+namespace
+{
+class PatcherEffect final : public Effect
+{
+public:
+    PatcherEffect (const EffectSlot& slot, double sampleRate, const Factories& factories, const Graph* previous)
+        : graph (slot.patcher, sampleRate, factories, previous)
+    {
+    }
+
+    void prepare (double sampleRate) noexcept override { graph.prepare (sampleRate); }
+    void reset() noexcept override { graph.reset(); }
+    void process (float* l, float* r, int n, const EffectParams&, double bpm) noexcept override
+    {
+        for (int done = 0; done < n; done += Graph::capacity)
+        {
+            const auto piece = std::min (Graph::capacity, n - done);
+            graph.process (l + done, r + done, side ? sideL + done : nullptr, side ? sideR + done : nullptr, l + done, r + done, piece, bpm);
+            // the first extra output goes to its insert like a Fruity Send (the rack pulls it from there)
+            if (sendL != nullptr && sendR != nullptr && graph.auxOutputs() > 0)
+            {
+                const auto* al = graph.auxOutput (0, 0);
+                const auto* ar = graph.auxOutput (0, 1);
+                for (int i = 0; i < piece; ++i)
+                {
+                    sendL[done + i] += al[i];
+                    sendR[done + i] += ar[i];
+                }
+            }
+        }
+        side = false;
+    }
+    void setSendOutput (float* l, float* r) noexcept override
+    {
+        sendL = l;
+        sendR = r;
+    }
+    void setParameter (int, float) noexcept override {}
+    void setSongPosition (double ticks) noexcept override { graph.setSongPosition (ticks); }
+    void setPlaying (bool playing) noexcept override { graph.setPlaying (playing); }
+    void setSidechain (const float* l, const float* r) noexcept override
+    {
+        sideL = l;
+        sideR = r;
+        side = l != nullptr && r != nullptr;
+    }
+    void setHeldNotes (const NoteMask* channels, int count) noexcept override { graph.setHeldNotes (channels, count); }
+    int latencySamples() const noexcept override { return graph.latencySamples(); }
+
+    Graph graph;
+
+private:
+    const float* sideL = nullptr;
+    const float* sideR = nullptr;
+    bool side = false;
+    float* sendL = nullptr;
+    float* sendR = nullptr;
+};
+
+class PatcherInstrument final : public Instrument
+{
+public:
+    PatcherInstrument (const ChannelDef& channel, double sampleRate, const Factories& factories, const Graph* previous)
+        : graph (channel.patcher, sampleRate, factories, previous)
+    {
+        for (auto& s : buffer)
+            s.assign ((std::size_t) Graph::capacity, 0.0f);
+        accumulated.resize ((std::size_t) graph.auxOutputs());
+        for (auto& a : accumulated)
+            for (auto& side : a)
+                side.assign (auxCapacity, 0.0f);
+        configure (channel, 140.0);
+    }
+
+    void prepare (double sampleRate) noexcept override { graph.prepare (sampleRate); }
+    void noteOn (int key, float velocity) noexcept override { graph.noteOn (key, velocity); }
+    void noteOff (int key) noexcept override { graph.noteOff (key); }
+    void allNotesOff() noexcept override { graph.allNotesOff(); }
+    void noteOnMidi (int key, float velocity, int midiChannel) noexcept override { graph.noteOnMidi (key, velocity, midiChannel); }
+    void noteOffMidi (int key, int midiChannel) noexcept override { graph.noteOffMidi (key, midiChannel); }
+    void slideTo (int key, float cents, float samples) noexcept override { graph.slideTo (key, cents, samples); }
+    void setNextNoteExpression (float pan, float cents, bool porta) noexcept override { graph.setNextNoteExpression (pan, cents, porta); }
+    void setSongPosition (double ticks) noexcept override { graph.setSongPosition (ticks); }
+    int latencySamples() const noexcept override { return graph.latencySamples(); }
+    bool idle() const noexcept override { return idleWhenQuiet && graph.instrumentsIdle(); }
+
+    void configure (const ChannelDef& channel, double bpm) noexcept override
+    {
+        tempo = bpm;
+        graph.takeValues (channel.patcher, bpm);
+        tracks.clear();
+        for (int k = 1; k <= graph.auxOutputs(); ++k)
+            tracks.push_back (patcher::auxOutputTrack (channel, k));
+        // only instruments (no effects that ring on) and no extra outputs: silent when its instruments are
+        idleWhenQuiet = std::all_of (channel.patcher.nodes.begin(), channel.patcher.nodes.end(), [] (const PatchNode& n) { return n.generator; });
+    }
+
+    void render (float* left, float* right, int n, float gainLeft, float gainRight) noexcept override
+    {
+        static const std::vector<float> silence ((std::size_t) Graph::capacity, 0.0f);
+        for (int done = 0; done < n; done += Graph::capacity)
+        {
+            const auto piece = std::min (Graph::capacity, n - done);
+            graph.process (silence.data(), silence.data(), nullptr, nullptr, buffer[0].data(), buffer[1].data(), piece, tempo);
+            for (int i = 0; i < piece; ++i)
+            {
+                left[done + i] += buffer[0][(std::size_t) i] * gainLeft;
+                right[done + i] += buffer[1][(std::size_t) i] * gainRight;
+            }
+            for (int k = 0; k < graph.auxOutputs(); ++k)
+            {
+                const auto* al = graph.auxOutput (k, 0);
+                const auto* ar = graph.auxOutput (k, 1);
+                auto& acc = accumulated[(std::size_t) k];
+                for (int i = 0; i < piece && cursor + i < (int) auxCapacity; ++i)
+                {
+                    acc[0][(std::size_t) (cursor + i)] += al[i] * gainLeft;
+                    acc[1][(std::size_t) (cursor + i)] += ar[i] * gainRight;
+                }
+            }
+            cursor += piece;
+        }
+    }
+
+    void beginChunk (int n) noexcept override
+    {
+        cursor = 0;
+        for (auto& a : accumulated)
+            for (auto& side : a)
+                std::fill (side.begin(), side.begin() + std::min<std::ptrdiff_t> (n, (std::ptrdiff_t) side.size()), 0.0f);
+    }
+    int auxOutputCount() const noexcept override { return (int) accumulated.size(); }
+    int auxOutputTrack (int k) const noexcept override { return k >= 0 && k < (int) tracks.size() ? tracks[(std::size_t) k] : -1; }
+    const float* auxOutputData (int k, int side) const noexcept override
+    {
+        return k >= 0 && k < (int) accumulated.size() ? accumulated[(std::size_t) k][(std::size_t) (side & 1)].data() : nullptr;
+    }
+
+    Graph graph;
+
+private:
+    static constexpr std::size_t auxCapacity = 16384;
+    std::array<std::vector<float>, 2> buffer;
+    std::vector<std::array<std::vector<float>, 2>> accumulated;
+    std::vector<int> tracks;
+    int cursor = 0;
+    bool idleWhenQuiet = true;
+    double tempo = 140.0;
+};
+} // namespace
+
+std::unique_ptr<Effect> makeEffect (const EffectSlot& slot, double sampleRate, const Factories& factories, const Effect* previous)
+{
+    const auto* old = dynamic_cast<const PatcherEffect*> (previous);
+    return std::make_unique<PatcherEffect> (slot, sampleRate, factories, old != nullptr ? &old->graph : nullptr);
+}
+
+std::unique_ptr<Instrument> makeInstrument (const ChannelDef& channel, double sampleRate, const Factories& factories, const Instrument* previous)
+{
+    const auto* old = dynamic_cast<const PatcherInstrument*> (previous);
+    return std::make_unique<PatcherInstrument> (channel, sampleRate, factories, old != nullptr ? &old->graph : nullptr);
+}
+
+Graph* graphOf (Effect* effect) noexcept
+{
+    auto* p = dynamic_cast<PatcherEffect*> (effect);
+    return p != nullptr ? &p->graph : nullptr;
+}
+
+Graph* graphOf (Instrument* instrument) noexcept
+{
+    auto* p = dynamic_cast<PatcherInstrument*> (instrument);
+    return p != nullptr ? &p->graph : nullptr;
+}
+
+bool acceptValues (Effect* effect, const EffectSlot& slot)
+{
+    if (auto* g = graphOf (effect))
+    {
+        g->takeValues (slot.patcher);
+        return true;
+    }
+    return false;
+}
+
+bool acceptValues (Instrument* instrument, const ChannelDef& channel)
+{
+    if (auto* g = graphOf (instrument))
+    {
+        instrument->configure (channel, 140.0); // (the rack configures it again with the song's tempo)
+        return true;
+    }
+    return false;
+}
+
+int auxOutputTrack (const ChannelDef& channel, int k) noexcept
+{
+    if (k <= 0)
+        return channel.mixerTrack;
+    if (k <= (int) channel.patcher.outputTracks.size() && channel.patcher.outputTracks[(std::size_t) k - 1] >= 0)
+        return channel.patcher.outputTracks[(std::size_t) k - 1];
+    return std::min (channel.mixerTrack + k, maxMixerTracks - 1);
+}
+
+Factories builtInFactories (double sampleRate, double bpm)
+{
+    Factories f;
+    f.effect = [sampleRate] (const EffectSlot& slot) -> std::shared_ptr<Effect> {
+        if (slot.kind == EffectKind::plugin)
+            return nullptr;
+        if (slot.kind == EffectKind::patcher)
+            return makeEffect (slot, sampleRate, builtInFactories (sampleRate));
+        std::shared_ptr<Effect> e = lynx::makeEffect (slot);
+        e->prepare (sampleRate);
+        return e;
+    };
+    f.instrument = [sampleRate, bpm] (const ChannelDef& channel) -> std::shared_ptr<Instrument> {
+        if (channel.instrument == InstrumentKind::plugin)
+            return nullptr;
+        if (channel.instrument == InstrumentKind::patcher)
+            return makeInstrument (channel, sampleRate, builtInFactories (sampleRate, bpm));
+        std::shared_ptr<Instrument> i = lynx::makeInstrument (channel.instrument);
+        i->prepare (sampleRate);
+        i->configure (channel, bpm);
+        return i;
+    };
+    return f;
+}
+
+int addNode (PatcherDoc& doc, PatchNode node)
+{
+    doc.nodes.push_back (std::move (node));
+    return (int) doc.nodes.size() - 1;
+}
+
+void removeNode (PatcherDoc& doc, int node)
+{
+    if (node < 0 || node >= (int) doc.nodes.size())
+        return;
+    doc.nodes.erase (doc.nodes.begin() + node);
+    std::erase_if (doc.wires, [node] (const PatchWire& w) { return w.from == node || w.to == node; });
+    for (auto& w : doc.wires)
+    {
+        if (w.from > node)
+            --w.from;
+        if (w.to > node)
+            --w.to;
+    }
+}
+
+bool connect (PatcherDoc& doc, const PatchWire& wire)
+{
+    const auto count = (int) doc.nodes.size();
+    const auto validFrom = wire.from == patchFromHost || (wire.from >= 0 && wire.from < count);
+    const auto validTo = wire.to == patchToHost || (wire.to >= 0 && wire.to < count);
+    if (! validFrom || ! validTo || (wire.from == wire.to && wire.from >= 0 && wire.kind == PatchWire::Kind::audio))
+        return false;
+    if (wire.kind == PatchWire::Kind::control && (wire.from < 0 || wire.to < 0))
+        return false;
+    if (wire.to >= 0 && doc.nodes[(std::size_t) wire.to].generator && wire.kind == PatchWire::Kind::audio)
+        return false;
+    for (const auto& w : doc.wires)
+        if (w.kind == wire.kind && w.from == wire.from && w.fromPort == wire.fromPort && w.to == wire.to && w.toPort == wire.toPort)
+            return false;
+    doc.wires.push_back (wire);
+    return true;
+}
+
+std::string nodeName (const PatchNode& node)
+{
+    auto blank = [] (const std::string& t) { return std::all_of (t.begin(), t.end(), [] (unsigned char c) { return std::isspace (c) != 0; }); };
+    if (! blank (node.label))
+        return node.label;
+    if (node.generator)
+        return ! blank (node.channel.plugin.name) ? node.channel.plugin.name : ! blank (node.channel.name) ? node.channel.name : "Instrument";
+    if (node.effect.kind == EffectKind::plugin)
+        return ! blank (node.effect.plugin.name) ? node.effect.plugin.name : "Plugin";
+    return effectInfo (node.effect.kind).name;
+}
+} // namespace lynx::patcher

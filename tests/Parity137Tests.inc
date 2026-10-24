@@ -144,11 +144,11 @@ TEST (voiceshift_midi_control_round137)
     p[vs::midi] = vs::midiChannelValue (2);
     p[vs::mode] = 1.0f; // Robot sings the held note: E4 = 329.6 Hz
     CHECK (std::abs (runHeld (p, 200.0) - 329.63) < 5.0);
-    p[vs::mode] = 0.0f; // Transpose by 64 − 60 = +4 st: 200 → 252 Hz (the Pitch knob is replaced)
-    p[vs::pitch] = vs::semitoneValue (-7.0);
+    p[vs::mode] = 0.0f; // Transpose by 64 − 60 = +4 st: 200 → 252 Hz (the Pitch knob, +2 st, is replaced)
+    p[vs::pitch] = vs::semitoneValue (2.0);
     CHECK (std::abs (runHeld (p, 200.0) - 200.0 * std::exp2 (4.0 / 12.0)) < 4.0);
-    p[vs::midi] = 0.0f; // MIDI off: the Pitch knob again
-    CHECK (std::abs (runHeld (p, 300.0) - 300.0 * std::exp2 (-7.0 / 12.0)) < 4.0);
+    p[vs::midi] = 0.0f; // MIDI off: the Pitch knob again (+2 st: 224.5 Hz)
+    CHECK (std::abs (runHeld (p, 200.0) - 200.0 * std::exp2 (2.0 / 12.0)) < 4.0);
 }
 
 TEST (lattice_input_pan_round137)
