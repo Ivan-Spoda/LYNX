@@ -4216,7 +4216,6 @@ countries: br
 "Min. phase|Linear" = "Fase mín.|Linear"
 "LFO 1" = "LFO 1"
 "LFO 2" = "LFO 2"
-"Group oct." = "Agrupar oit."
 "Group octaves: on = a key edits its note in every octave; off = each key keeps its own status" = "Agrupar oitavas: ligado = uma tecla edita sua nota em todas as oitavas; desligado = cada tecla tem seu próprio estado"
 "Click a key: change the status of this key only" = "Clique numa tecla: muda o estado só desta tecla"
 "Click a key: bypass / correct this key only" = "Clique numa tecla: ignora / corrige só esta tecla"
@@ -4245,3 +4244,4 @@ countries: br
 "B6 level" = "B6 nível"
 "B6 mix" = "B6 mix"
 "Ref. tone" = "Tom de ref."
+"Measured effect characters" = "Caracteres de efeito medidos"

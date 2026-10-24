@@ -1115,7 +1115,7 @@ Layout lynxTune()
     rt (label (494, 430, 214, 14, TR_NOOP ("may stray before the target changes"), alignLeft | dim));
     // round 152: the MIDI reference tone (the notes held on the MIDI channel as sines) and its level
     rt (toggle (494, 452, 104, 18, "Reference tone", TR_NOOP ("Ref. tone")));
-    rt (knob (640, 461, 11, "Tone level", nullptr, 461, noCaption | bipolar));
+    rt (knob (618, 461, 13, "Tone level", nullptr, 461, noCaption | bipolar));
     {
         auto io = display (712, 366, 80, 106, "iometer");
         io.steps = 3; // LYNX Tune's input / output peaks are its meter outputs 3 and 4
@@ -1984,12 +1984,12 @@ Layout emberLayout()
     for (int k = 0; k < 5; ++k)
         v.push_back (stepper (12.0f + 64.0f * (float) k, 1132, 60, 20, slopes[k], nullptr, 6));
     v.push_back (tabs (340, 1132, 168, 20, "Processing", TR_NOOP ("Min. phase|Linear"), { 0.0f, 1.0f }));
-    v.push_back (dial (30, 1180, 16, "LFO 1 rate", TR_NOOP ("LFO 1")));
-    v.push_back (stepper (6, 1206, 50, 18, "LFO 1 shape", nullptr, 5));
-    v.push_back (dial (90, 1180, 16, "LFO 2 rate", TR_NOOP ("LFO 2")));
-    v.push_back (stepper (66, 1206, 50, 18, "LFO 2 shape", nullptr, 5));
-    v.push_back (dial (150, 1180, 16, "Env attack", TR_NOOP ("Attack")));
-    v.push_back (dial (200, 1180, 16, "Env release", TR_NOOP ("Release")));
+    v.push_back (dial (30, 1178, 16, "LFO 1 rate", TR_NOOP ("LFO 1")));
+    v.push_back (stepper (6, 1222, 50, 18, "LFO 1 shape", nullptr, 5));
+    v.push_back (dial (90, 1178, 16, "LFO 2 rate", TR_NOOP ("LFO 2")));
+    v.push_back (stepper (66, 1222, 50, 18, "LFO 2 shape", nullptr, 5));
+    v.push_back (dial (150, 1178, 16, "Env attack", TR_NOOP ("Attack")));
+    v.push_back (dial (200, 1178, 16, "Env release", TR_NOOP ("Release")));
     static const char* const mods[4][3] { { "Mod 1 source", "Mod 1 target", "Mod 1 amount" }, { "Mod 2 source", "Mod 2 target", "Mod 2 amount" },
                                           { "Mod 3 source", "Mod 3 target", "Mod 3 amount" }, { "Mod 4 source", "Mod 4 target", "Mod 4 amount" } };
     for (int k = 0; k < 4; ++k)
@@ -1999,6 +1999,7 @@ Layout emberLayout()
         v.push_back (stepper (306, y, 120, 22, mods[k][1], nullptr, 27));
         v.push_back (knob (466, y + 11.0f, 14, mods[k][2], nullptr, y + 11.0f, noCaption | bipolar));
     }
+    v.push_back (toggle (6, 1264, 200, 20, "Effect law", TR_NOOP ("Measured effect characters")));
     return l;
 }
 

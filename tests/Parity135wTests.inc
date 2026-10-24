@@ -284,7 +284,7 @@ TEST (layouts_round135w)
             ++onReal;
             CHECK (plugui::paramIndex (EffectKind::lynxTune, item.param) >= lynxtune::speedLink);
         }
-    CHECK (onReal == 7);
+    CHECK (onReal == 9); // round 152b: + the reference tone and its level
     const auto& gemini = plugui::layoutFor (EffectKind::geminiDoubler);
     CHECK (gemini.pages.size() == 2);
     for (const auto& item : gemini.items)

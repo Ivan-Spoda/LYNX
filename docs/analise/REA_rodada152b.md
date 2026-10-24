@@ -93,7 +93,7 @@ Waves Tune Real-Time's Group Octaves (S1 p.17): off = a key's edit applies to th
 `Group octaves`, on by default, and a 12-value key map: MIDI 24 … 119, eight keys per value as base-6 digits — an
 exact integer / 2^24 in each float): a key's own status (legal, removed, removed up, removed down, bypass) overrides
 its note name's; the correction picks the target per key (`targetNoteKeys`: the nearest allowed key within an
-octave with the hysteresis, a removed-up / -down key goes that way). Keyboard strip: "Group oct." button; with it off
+octave with the hysteresis, a removed-up / -down key goes that way). Keyboard strip: "Group" (octaves) button; with it off
 REMOVE cycles that key's status and BYPASS toggles it, an outline marks keys with their own status; Reset clears them;
 Send / Receive carry the switch and the map. The MIDI reference tone (S1 p.21): `Reference tone` + `Tone level`
 (±18 dB) — the notes held on the MIDI channel play as sines at the reference pitch (0 dB = −12 dBFS peak [model]).

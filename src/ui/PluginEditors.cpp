@@ -1152,14 +1152,15 @@ public:
         const auto s = scale();
         const auto strip = tuneKeysStrip (r).reduced (2.0f * s, 2.0f * s);
         auto at = [&] (float x, float w) { return juce::Rectangle<float> (strip.getX() + x * s, strip.getY(), w * s, strip.getHeight()); };
-        if (which == tbBypass) return at (0.0f, 62.0f);
-        if (which == tbRemove) return at (66.0f, 62.0f);
-        if (which == tbReset) return at (132.0f, 48.0f);
-        if (which == tbSend) return at (184.0f, 42.0f);    // round 150
-        if (which == tbReceive) return at (230.0f, 52.0f);
-        if (which >= tbRange0 && which < tbZoomOut) return at (288.0f + 47.0f * (float) (which - tbRange0), 45.0f);
-        if (which >= tbZoomOut && which <= tbRight) return at (620.0f + 24.0f * (float) (which - tbZoomOut), 22.0f);
-        if (which == tbGroup) return at (716.0f, 56.0f); // round 152
+        // round 152: narrower buttons so Group octaves fits left of LATCH
+        if (which == tbBypass) return at (0.0f, 58.0f);
+        if (which == tbRemove) return at (62.0f, 58.0f);
+        if (which == tbReset) return at (124.0f, 44.0f);
+        if (which == tbSend) return at (172.0f, 40.0f);    // round 150
+        if (which == tbReceive) return at (216.0f, 50.0f);
+        if (which >= tbRange0 && which < tbZoomOut) return at (270.0f + 42.0f * (float) (which - tbRange0), 40.0f);
+        if (which >= tbZoomOut && which <= tbRight) return at (568.0f + 22.0f * (float) (which - tbZoomOut), 20.0f);
+        if (which == tbGroup) return at (658.0f, 46.0f); // round 152
         return strip.withLeft (strip.getRight() - 62.0f * s); // LATCH
     }
     int tuneVisibleWhites() const { return 7 * tuneShownOctaves; }
@@ -1222,7 +1223,7 @@ public:
             else if (b == tbReset) name = tr ("Reset");
             else if (b == tbSend) { lit = tuneSendFlash > 0; name = tr ("Send"); }
             else if (b == tbReceive) { lit = p[lynxtune::receiveScale] >= 0.5f; name = tr ("Receive"); }
-            else if (b == tbGroup) { lit = lynxtune::groupOctavesOn (p.data()); name = tr ("Group oct."); }
+            else if (b == tbGroup) { lit = lynxtune::groupOctavesOn (p.data()); name = tr ("Group"); }
             else if (b >= tbRange0 && b < tbZoomOut)
             {
                 const auto [lo, hi] = lynxtune::rangePresetNotes (b - tbRange0);
