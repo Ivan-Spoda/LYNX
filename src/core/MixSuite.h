@@ -118,6 +118,10 @@ enum Param
     // make-up (the level its compressor gives back for the threshold and ratio, measured in round 123 — the E voicing
     // always has it) and the ANALOG switch (the console emulation's colour)
     autoMakeup, analog,
+    // round 148 (appended, off by default = the old sound): the "4K" voicing — the console measured on the SSL 4K E trial
+    // (core/VoiceMatch.h, echannel model 1: its EQ colours, filters, compressor, gate, mic pre and VCA). It takes the E
+    // voicing's controls (and Auto make-up, Analog = the Analogue VCA, Comp. mix) plus these
+    console4k, k4Colour, k4Pre, k4Mic, k4MakeupOffset,
     count
 };
 // round 147b: the auto make-up (dB) for Ridge's own compressor: the console's for the same threshold (dBFS + 18 = the
@@ -151,6 +155,15 @@ double eGateThresholdDb (float v) noexcept; // -30 .. +10 dB (console scale)
 bool eVoicing (const EffectParams& p) noexcept;
 std::string eParamText (int param, float v);
 bool vocalVoicing (const EffectParams& p) noexcept; // round 145
+// round 148: the 4K voicing and its own scales (dial position 0..1)
+bool k4Voicing (const EffectParams& p) noexcept;
+std::string k4ParamText (int param, float v);
+double k4Q (float v) noexcept;              // mid-band Q 0.5 .. 3 (log; up = narrower)
+float k4QValue (double q) noexcept;
+int k4ColourIndex (float v) noexcept;       // 0 Brown, 1 Black, 2 Orange
+float k4ColourValue (int colour) noexcept;
+double k4MicDb (float v) noexcept;          // 0 .. 50 dB
+double k4OffsetDb (float v) noexcept;       // -12 .. +12 dB
 std::string vocalParamText (int param, float v);
 } // namespace ridge
 
@@ -184,8 +197,12 @@ namespace hush
 // (core/VoiceMatch.h); round 128's controls follow it.
 // round 135 (appended): oversampling (off, 2x, 4x, 8x) — Hush's own voicing applies its gain at the high rate (the
 // measured classic voicing is left as it is); latency + the oversampler's.
+// round 148 (appended): vocalVoicing — the single-vocal de-esser measured on a reference vocal de-esser
+// (core/VoiceMatch.h vocalds: band detector + "stands out" test, look-ahead within a fixed 15 ms latency); uses the
+// threshold, range, frequency (the band's high-pass), low-pass, look-ahead, mode and listen controls
 enum Param { frequency, threshold, range, mode, detector, listen, lookahead, release, output, voicing,
-             allround, lowPass, lookaheadTime, stereoLink, linkMid, external, input, display, oversampling, count };
+             allround, lowPass, lookaheadTime, stereoLink, linkMid, external, input, display, oversampling, vocalVoicing, count };
+bool vocal (const EffectParams& p) noexcept; // round 148
 int oversamplingOf (float v) noexcept; // 1 (off), 2, 4, 8
 double hz (float v) noexcept;          // 2 .. 16 kHz
 double lowPassHz (float v) noexcept;   // 2 .. 20 kHz (v ≥ 0.999 = off)

@@ -443,9 +443,18 @@ TEST (mixsuite_panels_place_every_parameter)
         std::vector<const plugui::LayoutItem*> controls;
         // round 135: two items shown under disjoint ranges of one mode parameter never show together (Horizon's
         // Drive / Detune and Early-late / Attack swap in place by mode, like the reference)
+        // two items never show together when any of their show-conditions on the same parameter are disjoint
+        // (round 148: also the second condition, e.g. Ridge's 4K voicing items inside the Vocal strip wrapper)
         auto exclusive = [] (const plugui::LayoutItem& a, const plugui::LayoutItem& b) {
-            return a.whenParam != nullptr && b.whenParam != nullptr && std::strcmp (a.whenParam, b.whenParam) == 0
-                   && (a.whenMax <= b.whenMin || b.whenMax <= a.whenMin);
+            const char* ap[2] { a.whenParam, a.when2Param };
+            const char* bp[2] { b.whenParam, b.when2Param };
+            const float alo[2] { a.whenMin, a.when2Min }, ahi[2] { a.whenMax, a.when2Max };
+            const float blo[2] { b.whenMin, b.when2Min }, bhi[2] { b.whenMax, b.when2Max };
+            for (int i = 0; i < 2; ++i)
+                for (int j = 0; j < 2; ++j)
+                    if (ap[i] != nullptr && bp[j] != nullptr && std::strcmp (ap[i], bp[j]) == 0 && (ahi[i] <= blo[j] || bhi[j] <= alo[i]))
+                        return true;
+            return false;
         };
         std::vector<std::vector<const plugui::LayoutItem*>> byParam ((std::size_t) count);
         int meters = 0;
