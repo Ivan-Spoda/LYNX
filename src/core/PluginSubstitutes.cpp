@@ -1406,8 +1406,14 @@ int translateWavesCla2a (const std::vector<std::uint8_t>& state, EffectSlot& slo
     slot.params[g::mode] = wavesValue (rw, 112).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
     slot.params[g::emphasis] = (float) std::clamp (wavesValue (rw, 153).value_or (50.0) / 100.0, 0.0, 1.0);
     slot.params[g::trim] = linNorm (wavesValue (rw, 206).value_or (0.0), -18.0, 18.0);
-    slot.params[g::mix] = 1.0f;
-    return 5;
+    // round 152 [EXEC] (REA_rodada152a §2, read back through the trial's own parameters): 204 Mix %, 207 Auto Makeup,
+    // 140 Analog (0 = 50 Hz, 1 = 60 Hz, 2 = off)
+    slot.params[g::mix] = (float) std::clamp (wavesValue (rw, 204).value_or (100.0) / 100.0, 0.0, 1.0);
+    slot.params[g::autoMakeup] = wavesValue (rw, 207).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
+    const auto analog = std::lround (wavesValue (rw, 140).value_or (2.0));
+    slot.params[g::analog] = analog == 0 ? 0.5f : analog == 1 ? 1.0f : 0.0f;
+    slot.params[g::optoLaw] = 1.0f;
+    return 8;
 }
 
 // CLA-76 (106 values): 0 / 1 Input / Output as positive dB magnitudes (−0 … −∞ dB), 2 / 3 Attack / Release knobs

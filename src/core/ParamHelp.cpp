@@ -304,6 +304,8 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::glowLeveler, "limit" }, TR_NOOP ("Limit instead of compress: a harder ratio") },
         { { K::glowLeveler, "emphasis" }, TR_NOOP ("Makes the detector more sensitive to highs (less reduction on bass)") },
         { { K::glowLeveler, "auto makeup" }, TR_NOOP ("Turns the gain up as the peak reduction rises") },
+        { { K::glowLeveler, "analog" }, TR_NOOP ("The reference's analog hum and noise (50 or 60 Hz mains), added after the gain") },
+        { { K::glowLeveler, "opto law" }, TR_NOOP ("Measured: the reference's Limit and Auto makeup; old: the law of projects saved before round 152") },
         // Hush De-esser
         { { K::hushDeEsser, "frequency" }, TR_NOOP ("Where the sibilance is detected and reduced") },
         { { K::hushDeEsser, "threshold" }, TR_NOOP ("Level of sibilance above which the de-esser works") },
@@ -401,6 +403,7 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::compressor, "ratio" }, TR_NOOP ("How strongly the level above the threshold is reduced") },
         { { K::compressor, "attack" }, TR_NOOP ("How fast the compressor reacts to a peak") },
         { { K::compressor, "makeup" }, TR_NOOP ("Gain after the compression") },
+        { { K::compressor, "vintage curve" }, TR_NOOP ("Measured: the reference's static curve at every ratio; old: the curve of projects saved before round 152") },
         // Apex Limiter
         { { K::apexLimiter, "gain" }, TR_NOOP ("Pushes the signal into the limiter: louder, with more limiting") },
         { { K::apexLimiter, "ceiling" }, TR_NOOP ("The output never goes above this level") },

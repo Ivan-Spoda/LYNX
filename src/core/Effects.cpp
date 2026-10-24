@@ -206,7 +206,8 @@ public:
     float controlOutput (int k) const noexcept override
     {
         return k == 0 ? meterGr.load (std::memory_order_relaxed) : k == 2 ? meterIn.load (std::memory_order_relaxed)
-             : k == 3 ? meterOut.load (std::memory_order_relaxed) : k == 4 ? meterLimit.load (std::memory_order_relaxed) : 0.0f;
+             : k == 3 ? meterOut.load (std::memory_order_relaxed) : k == 4 ? meterLimit.load (std::memory_order_relaxed)
+             : k == 5 ? meterChange.load (std::memory_order_relaxed) : 0.0f; // round 152: 5 = the signed gain change in dB
     }
 
     // round 135w: the reference's built-in 0 dBFS output limiter — the gain drops at once to keep every sample at or
@@ -248,6 +249,7 @@ public:
             v.manual = params[9] >= 0.5f;
             v.opto = params[10] >= 0.5f;
             v.smooth = params[11] >= 0.5f;
+            v.measuredStatic = params[18] >= 0.5f; // round 152
             vintage.process (l, r, n, v);
             if (params[12] >= 0.5f)
                 outputLimit (l, r, n);
@@ -257,6 +259,7 @@ public:
                 peakOut = std::max (peakOut, std::max (std::abs (l[i]), std::abs (r[i])));
             useSidechain = false;
             meterGr.store (std::clamp (vintage.reductionDb() / 30.0f, 0.0f, 1.0f), std::memory_order_relaxed);
+            meterChange.store (vintage.changeDb(), std::memory_order_relaxed);
             meterIn.store (std::min (peakIn, 1.0f), std::memory_order_relaxed);
             meterOut.store (std::min (peakOut, 1.0f), std::memory_order_relaxed);
             return;
@@ -325,7 +328,8 @@ public:
             meterLimit.store (0.0f, std::memory_order_relaxed);
         for (int i = 0; i < n; ++i)
             peakOut = std::max (peakOut, std::max (std::abs (l[i]), std::abs (r[i])));
-        meterGr.store (std::clamp (maxGr / 30.0f, 0.0f, 1.0f), std::memory_order_relaxed);
+        meterGr.store (std::clamp ((expand ? 0.0f : maxGr) / 30.0f, 0.0f, 1.0f), std::memory_order_relaxed);
+        meterChange.store (expand ? maxGr : -maxGr, std::memory_order_relaxed); // round 152: signed (the expansion's boost > 0)
         meterIn.store (std::min (peakIn, 1.0f), std::memory_order_relaxed);
         meterOut.store (std::min (peakOut, 1.0f), std::memory_order_relaxed);
     }
@@ -338,7 +342,7 @@ public:
     }
 
 private:
-    std::atomic<float> meterGr { 0.0f }, meterIn { 0.0f }, meterOut { 0.0f }, meterLimit { 0.0f };
+    std::atomic<float> meterGr { 0.0f }, meterIn { 0.0f }, meterOut { 0.0f }, meterLimit { 0.0f }, meterChange { 0.0f };
     float limitGain = 1.0f;
     std::atomic<int> latency { 0 };
     vmatch::progcomp::Compressor vintage;
@@ -2462,7 +2466,10 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                   { "Release mode", 0.0f }, { "Release curve", 0.0f }, { "Character", 0.0f }, { "Limiter", 0.0f },
                                                   // round 150: the RComp role's own ranges (off: LYNX's, older projects unchanged) —
                                                   // ratio 1.00 : 1, gain 0 dB, attack 16 ms, release 160 ms (the reference's defaults)
-                                                  { "Ranges", 0.0f }, { "RC ratio", 0.625f }, { "RC gain", 0.5f }, { "RC attack", 0.5f }, { "RC release", 0.5f } } };
+                                                  { "Ranges", 0.0f }, { "RC ratio", 0.625f }, { "RC gain", 0.5f }, { "RC attack", 0.5f }, { "RC release", 0.5f },
+                                                  // round 152: the vintage voicing's static curve measured at every ratio (on for new
+                                                  // instances; projects saved before keep the round-150 curve: upgradeLoadedEffectParams)
+                                                  { "Vintage curve", 1.0f } } };
     static const EffectInfo delay { "Delay", { { "Time", 0.3f }, { "Feedback", 0.42f }, { "Mix", 0.3f }, { "Ping-pong", 0.0f }, { "Damping", 0.3f } } };
     static const EffectInfo reverb { "Reverb", { { "Room", 0.6f }, { "Damping", 0.5f }, { "Width", 1.0f }, { "Mix", 0.25f }, { "Dry", 1.0f },
                                                  { "Low cut", 0.0f }, { "High cut", 1.0f }, { "Predelay", 0.0f } } };
@@ -2889,7 +2896,7 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::compressor:
             switch (param)
             {
-                case 0: std::snprintf (text, sizeof (text), "%.1f dB", compThresholdDb (v)); break;
+                case 0: std::snprintf (text, sizeof (text), "%.1f dB", std::abs (compThresholdDb (v)) < 0.05f ? 0.0f : compThresholdDb (v)); break;
                 case 1: std::snprintf (text, sizeof (text), "%.1f:1", compRatio (v)); break;
                 case 2: std::snprintf (text, sizeof (text), "%.1f ms", compAttackMs (v)); break;
                 case 3: std::snprintf (text, sizeof (text), "%.0f ms", compReleaseMs (v)); break;
@@ -2906,6 +2913,7 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 case 15: std::snprintf (text, sizeof (text), "%+.1f dB", rcGainDb (v)); break;
                 case 16: std::snprintf (text, sizeof (text), rcAttackMs (v) < 10.0f ? "%.2f ms" : "%.1f ms", rcAttackMs (v)); break;
                 case 17: std::snprintf (text, sizeof (text), rcReleaseMs (v) < 100.0f ? "%.1f ms" : "%.0f ms", rcReleaseMs (v)); break;
+                case 18: return v >= 0.5f ? "measured" : "round 150";
                 default: std::snprintf (text, sizeof (text), "+%.1f dB", compMakeupDb (v)); break;
             }
             return text;
@@ -3364,6 +3372,12 @@ void upgradeLoadedEffectParams (EffectSlot& slot, std::size_t savedCount) noexce
     if (slot.kind == EffectKind::echoform && savedCount <= (std::size_t) echosuite::echoform::voicingStereo
         && slot.params.size() > (std::size_t) echosuite::echoform::voicingStereo)
         slot.params[(std::size_t) echosuite::echoform::voicingStereo] = 0.0f;
+    // round 152: a Glow Leveler saved before the measured opto law keeps the round-123 Limit and no classic auto make-up
+    if (slot.kind == EffectKind::glowLeveler && savedCount <= (std::size_t) mixsuite::glow::optoLaw)
+        slot.params[(std::size_t) mixsuite::glow::optoLaw] = 0.0f;
+    // round 152: a Compressor saved before the measured vintage curve keeps the round-150 curve
+    if (slot.kind == EffectKind::compressor && savedCount <= 18 && slot.params.size() > 18)
+        slot.params[18] = 0.0f;
 }
 
 std::unique_ptr<Effect> makeParallelEffect (const EffectSlot& slot)

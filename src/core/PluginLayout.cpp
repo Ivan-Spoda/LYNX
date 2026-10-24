@@ -1657,7 +1657,8 @@ Layout compressorLayout()
     v.push_back (section (4, 4, 412, 292, TR_NOOP ("Compressor")));
     v.push_back (slider (Item::vslider, 16, 30, 34, 172, "Threshold", TR_NOOP ("Threshold")));
     v.push_back (display (58, 26, 112, 180, "iometer"));
-    v.push_back (meter (184, 26, 66, 180, 0, TR_NOOP ("Reduction")));
+    // round 152: RComp's bipolar gain-change meter (reduction down, the expansion's boost up), the held change under it
+    v.push_back (display (184, 26, 66, 180, "gcmeter"));
     // round 150: with the RComp ranges the RC controls take the places of LYNX's (gain −30 … +30, ratio 0.5 … 50 : 1,
     // attack 0.5 … 500 ms, release 5 … 5000 ms)
     v.push_back (when (slider (Item::vslider, 268, 30, 34, 172, "Makeup", TR_NOOP ("Gain")), "Ranges", 0.0f, 0.5f));
@@ -1679,6 +1680,8 @@ Layout compressorLayout()
     v.push_back (when (dial (140, 252, 34, "RC release", TR_NOOP ("Release")), "Ranges", 0.5f, 1.0f));
     v.push_back (when (dial (217, 252, 34, "RC ratio", TR_NOOP ("Ratio")), "Ranges", 0.5f, 1.0f));
     v.push_back (tabs (318, 7, 90, 16, "Ranges", TR_NOOP ("LYNX|RComp")));
+    // round 152: the vintage voicing's static curve — measured at every ratio (new instances) or round 150's (older projects)
+    v.push_back (when (tabs (196, 7, 116, 16, "Vintage curve", TR_NOOP ("Old|Measured")), "Voicing", 0.5f, 1.0f));
     v.push_back (dial (300, 252, 30, "Mix", TR_NOOP ("Mix")));
     v.push_back (dial (370, 252, 30, "Trim", TR_NOOP ("Trim"), bipolar));
     return l;
@@ -1705,6 +1708,11 @@ Layout glowLeveler()
     v.push_back (toggle (404, 206, 120, 20, "Auto makeup", TR_NOOP ("Auto makeup")));
     // round 123: the voicing — Glow's own engine, or the measured classic opto leveler (substitutes start there)
     v.push_back (tabs (12, 206, 160, 22, "Voicing", TR_NOOP ("Modern|Opto classic")));
+    // round 152: the reference's ANALOG buttons (hum and noise, measured) bottom left, and the opto law of the classic
+    // voicing (Old = a project saved before round 152: the round-123 Limit, no auto make-up there)
+    v.push_back (label (12, 236, 120, 12, TR_NOOP ("Analog")));
+    v.push_back (tabs (12, 250, 120, 20, "Analog", TR_NOOP ("Off|50 Hz|60 Hz"), { 0.0f, 0.5f, 1.0f }));
+    v.push_back (when (tabs (12, 26, 130, 18, "Opto law", TR_NOOP ("Old|Measured")), "Voicing", 0.5f, 1.0f));
     v.push_back (dial (170, 254, 28, "Emphasis", TR_NOOP ("HF emphasis")));
     v.push_back (dial (270, 254, 28, "Mix", TR_NOOP ("Mix")));
     v.push_back (dial (370, 254, 28, "Trim", TR_NOOP ("Trim"), bipolar));

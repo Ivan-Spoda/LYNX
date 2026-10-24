@@ -101,7 +101,7 @@ public:
         const auto& l = activeLayout();
         for (const auto& item : l.items) // live meters and graphs (mixing suite, LYNX Tune's pitch, round 108's dynamics): 30 Hz
             if (item.type == Item::display && item.display != nullptr
-                && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0
+                && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "gcmeter") == 0
                     || std::strcmp (item.display, "pitchgraph") == 0 || std::strcmp (item.display, "panpos") == 0
                     || std::strcmp (item.display, "pitchtrace") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)))
             {
@@ -2122,6 +2122,48 @@ public:
             }
             return;
         }
+        else if (id == "gcmeter") // round 152: RComp's bipolar gain-change meter (+6 … 0 … −12, deeper reductions compressed)
+        {
+            // the engine's control output 5 = the block's signed gain change in dB (negative = reduction, positive = the
+            // upward expansion below 1 : 1); the bar grows from the 0 dB line, the read-out holds the largest change
+            const auto change = liveMeter (5);
+            gcLevel = std::abs (change) > std::abs (gcLevel) ? change : gcLevel + 0.25f * (change - gcLevel);
+            if (std::abs (change) > std::abs (gcHold))
+                gcHold = change;
+            static constexpr float dbs[] { 9.0f, 6.0f, 3.0f, 0.0f, -3.0f, -6.0f, -12.0f, -24.0f, -30.0f };
+            static constexpr float fracs[] { 0.0f, 0.08f, 0.20f, 0.38f, 0.53f, 0.66f, 0.80f, 0.94f, 1.0f };
+            const auto fracOf = [] (float db)
+            {
+                db = juce::jlimit (-30.0f, 9.0f, db);
+                for (int k = 0; k + 1 < 9; ++k)
+                    if (db >= dbs[k + 1])
+                        return fracs[k] + (fracs[k + 1] - fracs[k]) * (dbs[k] - db) / (dbs[k] - dbs[k + 1]);
+                return 1.0f;
+            };
+            const auto readH = 14.0f * s;
+            auto area = r.reduced (2.0f * s);
+            const auto bottom = area.removeFromBottom (readH);
+            g.setColour (colour::bg3);
+            g.fillRoundedRectangle (area, radius::sm * s);
+            const auto scaleW = 20.0f * s;
+            const auto well = area.withTrimmedLeft (scaleW).reduced (3.0f * s, 4.0f * s);
+            g.setFont (font (juce::jmax (7.0f, 8.0f * s)));
+            for (const auto db : { 6, 3, 0, -3, -6, -12, -24 })
+            {
+                const auto y = well.getY() + well.getHeight() * fracOf ((float) db);
+                g.setColour (db == 0 ? colour::textSecondary.withAlpha (0.6f) : colour::gridBeat);
+                g.drawHorizontalLine ((int) y, well.getX(), well.getRight());
+                g.setColour (colour::textSecondary);
+                g.drawText (juce::String (db), juce::Rectangle<float> (area.getX(), y - 5.0f * s, scaleW - 2.0f * s, 10.0f * s), juce::Justification::centredRight, false);
+            }
+            const auto y0 = well.getY() + well.getHeight() * fracOf (0.0f), y1 = well.getY() + well.getHeight() * fracOf (gcLevel);
+            g.setColour ((fx.enabled ? accent : colour::textDisabled).withAlpha (gcLevel > 0.0f ? 0.55f : 0.85f));
+            g.fillRoundedRectangle (juce::Rectangle<float> (well.getX() + well.getWidth() * 0.2f, std::min (y0, y1), well.getWidth() * 0.6f, std::abs (y1 - y0)), radius::sm);
+            g.setColour (colour::textPrimary);
+            g.setFont (font (juce::jmax (7.0f, 9.0f * s)));
+            g.drawText (std::abs (gcHold) > 0.05f ? juce::String (gcHold, 1) : juce::String ("0.0"), bottom, juce::Justification::centred, false);
+            return;
+        }
         else if (id == "limitpill") // round 135w: the output limiter's activity pill (RComp's), lit while it limits
         {
             const auto active = liveMeter (4) > 0.001f;
@@ -2861,6 +2903,7 @@ public:
     }
     int geminiHandle = -1;
     float grHold = 0.0f; // round 137: the tall reduction meter's held value
+    float gcLevel = 0.0f, gcHold = 0.0f; // round 152: the bipolar gain-change meter (dB, signed) and its held change
     bool geminiDragging = false;
 
     void xyMouse (const juce::MouseEvent& e, const LayoutItem& item)
@@ -3002,6 +3045,12 @@ public:
         {
             ioMeters = {};
             ioClip = false;
+            repaint();
+            return;
+        }
+        if (item.type == Item::display && juce::String (item.display) == "gcmeter") // round 152: reset the held change
+        {
+            gcHold = 0.0f;
             repaint();
             return;
         }
@@ -3467,6 +3516,8 @@ public:
             return { tr ("Tap tempo: click in time (two taps or more) to set the delay"), tapBpm > 0.0 ? juce::String (tapBpm, 1) + " BPM" : juce::String(), false, false };
         if (item.type == Item::display && juce::String (item.display) == "iometer")
             return { tr ("Input and output level (peak, dBFS); the numbers hold the highest peak; OUT turns red when the output clips; click to reset"), {}, false, false };
+        if (item.type == Item::display && juce::String (item.display) == "gcmeter")
+            return { tr ("Gain change (dB): down = reduction, up = the expansion's boost below 1:1; the number holds the largest change; click to reset"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "limitpill")
             return { tr ("Output limiter: lit while it keeps the output under 0 dBFS"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "outmeter")
@@ -3679,7 +3730,7 @@ private:
                     pitchHistory.erase (pitchHistory.begin(), pitchHistory.begin() + (std::ptrdiff_t) (pitchHistory.size() - pitchHistoryLength));
                 repaint (rectOf (item).getSmallestIntegerContainer());
             }
-            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)) && visible (item))
+            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "gcmeter") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)) && visible (item))
             {
                 history = history || std::strcmp (item.display, "grhistory") == 0;
                 repaint (rectOf (item).getSmallestIntegerContainer());
