@@ -128,6 +128,7 @@ add_library(lynx_core STATIC
     src/core/MidiControls.cpp
     src/core/FormulaController.cpp
     src/core/VoiceShift.cpp
+    src/core/NativeEngines.cpp
     src/core/FabFilterStates.cpp
     src/core/FlResampler.cpp
     src/core/FlKeys.cpp
@@ -279,6 +280,7 @@ if(LYNX_BUILD_APP)
         src/ui/ExportDialog.cpp
         src/ui/AutomationUi.cpp
         src/ui/ControllerEditors.cpp
+        src/ui/NewtoneEditor.cpp
         src/ui/ChannelSettings.cpp
         src/ui/BrowserComponent.cpp
         src/ui/Theme.cpp

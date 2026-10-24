@@ -18,6 +18,8 @@
 #include "ui/ValueControl.h"
 #include "ui/WaveformView.h"
 #include "ui/AudioEditor.h"
+#include "ui/ChannelRackComponent.h"
+#include "ui/MixerComponent.h"
 
 namespace lynx
 {
@@ -305,7 +307,9 @@ public:
         file,     // a file on disk
         project,  // "Current project"
         category, // one of its sections
-        item      // something of the project (pattern, sample, generator, effect, automation clip, undo step)
+        item,     // something of the project (pattern, sample, generator, effect, automation clip, undo step)
+        plugins,  // the Plugin database and its folders (round 142): built-in, FL engines, installed plugins
+        plugin    // one of its plugins (double-click adds it)
     };
 
     struct Node
@@ -323,6 +327,7 @@ public:
         Category category = Category::samples;
         projectcontents::Item item; // kind == item (history: item.index = the step)
         bool history = false, missing = false, current = false;
+        std::function<void()> activate; // kind == plugin: adds it
     };
 
     // tree mode: the given top-level nodes
@@ -353,6 +358,130 @@ public:
         n->label = label;
         n->colour = colour;
         return n;
+    }
+
+    // FL's "Plugin database", interpreted (round 142, issue #5): Generators and Effects, each with LYNX's built-in ones,
+    // FL's engines (those the user's FL installation provides) and the installed VST3 / CLAP plugins
+    static std::unique_ptr<Node> makePluginDatabase (BrowserComponent& browser, const std::set<juce::String>& open)
+    {
+        auto folder = [&open] (Node* parent, const juce::String& label, Icon icon) {
+            auto n = std::make_unique<Node>();
+            n->kind = Kind::plugins;
+            n->folder = n->loaded = true;
+            n->label = label;
+            n->icon = icon;
+            n->parent = parent;
+            n->depth = parent != nullptr ? parent->depth + 1 : 0;
+            n->expanded = open.count ((parent != nullptr && parent->kind == Kind::plugins ? parent->label + "/" : juce::String()) + label) > 0;
+            return n;
+        };
+        auto entry = [] (Node& parent, const juce::String& label, const juce::String& detail, Icon icon, std::function<void()> activate) {
+            auto n = std::make_unique<Node>();
+            n->kind = Kind::plugin;
+            n->label = label;
+            n->detail = detail;
+            n->icon = icon;
+            n->parent = &parent;
+            n->depth = parent.depth + 1;
+            n->activate = std::move (activate);
+            parent.children.push_back (std::move (n));
+        };
+        auto root = folder (nullptr, tr ("Plugin database"), Icon::plugin);
+        root->colour = theme::colour::info;
+        auto safe = juce::Component::SafePointer<BrowserComponent> (&browser);
+        auto addInstrument = [safe] (ChannelDef c) {
+            if (safe != nullptr && safe->onAddInstrument)
+                safe->onAddInstrument (std::move (c));
+        };
+        auto addEffect = [safe] (EffectSlot fx) {
+            if (safe != nullptr && safe->onAddEffect)
+                safe->onAddEffect (std::move (fx));
+        };
+        const auto bpm = browser.engine.getSong().bpm;
+        const auto& fl = flStudioAccess();
+        auto types = browser.engine.getPluginHost().getKnownPlugins().getTypes();
+        std::sort (types.begin(), types.end(), [] (const auto& a, const auto& b) { return a.name.compareIgnoreCase (b.name) < 0; });
+
+        // Generators
+        {
+            auto gens = folder (root.get(), tr ("Generators"), Icon::keyboard);
+            auto lynxGens = folder (gens.get(), "LYNX", Icon::folder);
+            const std::pair<InstrumentKind, const char*> builtIn[] = { { InstrumentKind::synth, TR_NOOP ("Synth") }, { InstrumentKind::kick, TR_NOOP ("Kick") },
+                                                                       { InstrumentKind::snare, TR_NOOP ("Snare") }, { InstrumentKind::hat, TR_NOOP ("Hat") },
+                                                                       { InstrumentKind::clap, TR_NOOP ("Clap") } };
+            for (const auto& [kind, name] : builtIn)
+                entry (*lynxGens, tr (name), tr ("built-in"), Icon::keyboard, [addInstrument, kind = kind, english = std::string (name)] {
+                    ChannelDef c;
+                    c.name = english;
+                    c.instrument = kind;
+                    addInstrument (c);
+                });
+            auto flGens = folder (gens.get(), tr ("FL engines"), Icon::folder);
+            for (const auto& e : natives::instrumentEngines())
+                if (natives::available (e, fl))
+                    entry (*flGens, flEngineName (e), tr ("built-in FL engine"), Icon::keyboard, [addInstrument, kind = e.kind] {
+                        if (auto c = natives::makeChannel (kind, flStudioAccess()))
+                            addInstrument (*c);
+                    });
+            auto installed = folder (gens.get(), tr ("Installed"), Icon::folder);
+            for (const auto& t : types)
+                if (t.isInstrument)
+                    entry (*installed, t.name, t.manufacturerName + " · " + t.pluginFormatName, Icon::plugin,
+                           [addInstrument, id = t.createIdentifierString().toStdString(), name = t.name.toStdString()] {
+                               ChannelDef c;
+                               c.name = name;
+                               c.instrument = InstrumentKind::plugin;
+                               c.plugin.id = id;
+                               c.plugin.name = name;
+                               addInstrument (c);
+                           });
+            for (auto* f : { &lynxGens, &flGens, &installed })
+                if (! (*f)->children.empty())
+                    gens->children.push_back (std::move (*f));
+            root->children.push_back (std::move (gens));
+        }
+        // Effects
+        {
+            auto fxs = folder (root.get(), tr ("Effects"), Icon::mixer);
+            auto lynxFx = folder (fxs.get(), "LYNX", Icon::folder);
+            auto flFx = folder (fxs.get(), tr ("FL engines"), Icon::folder);
+            for (const auto kind : addableEffects())
+                if (addableEffectAvailable (kind))
+                {
+                    const auto flEngine = natives::effectEngine (kind) != nullptr;
+                    entry (flEngine ? *flFx : *lynxFx, addableEffectName (kind), flEngine ? tr ("built-in FL engine") : tr ("built-in"), Icon::mixer,
+                           [addEffect, kind, bpm] {
+                               if (auto fx = newAddableEffect (kind, bpm))
+                                   addEffect (*fx);
+                           });
+                }
+            auto installed = folder (fxs.get(), tr ("Installed"), Icon::folder);
+            for (const auto& t : types)
+                if (! t.isInstrument)
+                    entry (*installed, t.name, t.manufacturerName + " · " + t.pluginFormatName, Icon::plugin,
+                           [addEffect, id = t.createIdentifierString().toStdString(), name = t.name.toStdString()] {
+                               EffectSlot fx;
+                               fx.kind = EffectKind::plugin;
+                               fx.plugin.id = id;
+                               fx.plugin.name = name;
+                               addEffect (fx);
+                           });
+            for (auto* f : { &lynxFx, &flFx, &installed })
+                if (! (*f)->children.empty())
+                    fxs->children.push_back (std::move (*f));
+            root->children.push_back (std::move (fxs));
+        }
+        // (the counts, dimmed after each folder)
+        std::function<int (Node&)> count = [&count] (Node& n) {
+            int total = 0;
+            for (auto& c : n.children)
+                total += c->kind == Kind::plugin ? 1 : count (*c);
+            if (n.kind == Kind::plugins)
+                n.detail = juce::String (total);
+            return total;
+        };
+        count (*root);
+        return root;
     }
 
     static std::unique_ptr<Node> makeProject (bool open)
@@ -722,6 +851,11 @@ public:
             itemClicked (n);
             return;
         }
+        if (n.kind == Kind::plugin)
+        {
+            select (row, false);
+            return;
+        }
 
         // a click previews, even when the file is already selected (click again: hear it again)
         select (row, true);
@@ -762,6 +896,12 @@ public:
             return;
 
         const auto& n = *rows[(std::size_t) row];
+        if (n.kind == Kind::plugin)
+        {
+            if (n.activate)
+                n.activate();
+            return;
+        }
         if (n.kind != Kind::item)
         {
             browser.openFile (n.file);
@@ -826,6 +966,15 @@ public:
                 break;
             case Kind::item:
                 return itemHint (n);
+            case Kind::plugins:
+                h.text = tr ("Plugin database: LYNX's built-in generators and effects, FL's engines and the installed plugins") + "  "
+                         + (n.expanded ? tr ("[LMB] close") : tr ("[LMB] open"));
+                h.value = n.detail;
+                return h;
+            case Kind::plugin:
+                h.text = n.label + " (" + n.detail + ")  " + tr ("[double-click] add it (generators: a new channel; effects: into the selected insert)");
+                h.hasMenu = true;
+                return h;
             case Kind::file:
                 break;
         }
@@ -1203,7 +1352,17 @@ private:
             });
         };
 
-        if (n.kind == Kind::project || n.kind == Kind::category)
+        if (n.kind == Kind::plugin)
+        {
+            menu.addSectionHeader (n.label);
+            menu.addItem (tr ("Add"), [act = n.activate] {
+                if (act)
+                    act();
+            });
+            menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+            return;
+        }
+        if (n.kind == Kind::project || n.kind == Kind::category || n.kind == Kind::plugins)
         {
             menu.addSectionHeader (n.label);
             expandItems();
@@ -1313,6 +1472,14 @@ private:
     {
         const auto keep = selectionKey();
         n.expanded = ! n.expanded;
+        if (n.kind == Kind::plugins) // (remembered: the database is built again with the tree)
+        {
+            const auto key = (n.parent != nullptr && n.parent->kind == Kind::plugins ? n.parent->label + "/" : juce::String()) + n.label;
+            if (n.expanded)
+                browser.openPluginFolders.insert (key);
+            else
+                browser.openPluginFolders.erase (key);
+        }
         if (n.expanded)
             load (n);
         rebuild();
@@ -1869,6 +2036,8 @@ void BrowserComponent::rebuildTree()
         return;
     }
     top.push_back (FileTree::makeProject (tab == projectTab));
+    if (tab == allTab) // FL's Plugin database, under the project (round 142)
+        top.push_back (FileTree::makePluginDatabase (*this, openPluginFolders));
 
     if (tab == allTab)
         for (int i = 0; i < roots.size(); ++i)
@@ -2141,6 +2310,14 @@ void BrowserComponent::selectFirstSampleForSnapshot()
         strip->show (tree->selectedFile(), false);
         tree->setHovered (row + 1 < tree->numRows() ? row + 1 : -1);
     }
+}
+
+void BrowserComponent::showPluginDatabaseForSnapshot()
+{
+    openPluginFolders = { tr ("Plugin database"), tr ("Plugin database") + "/" + tr ("Generators"), tr ("Generators") + "/" + tr ("FL engines"),
+                          tr ("Plugin database") + "/" + tr ("Effects"), tr ("Effects") + "/" + tr ("FL engines") };
+    setTab (allTab);
+    rebuildTree();
 }
 
 void BrowserComponent::showProjectForSnapshot()

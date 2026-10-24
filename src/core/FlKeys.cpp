@@ -353,7 +353,20 @@ bool importChannel (ChannelDef& def, const std::vector<std::uint8_t>& state, con
     const auto s = parseState (state);
     if (! s || s->wavetable.empty() || s->wavetable.find_first_of ("\\/:") != std::string::npos || ! readFile || ! existing)
         return false;
-    const auto wtiBytes = readFile (wavetables + "\\" + s->wavetable + ".wti");
+    auto wtiBytes = readFile (wavetables + "\\" + s->wavetable + ".wti");
+    if (wtiBytes.empty())
+    {
+        // a wavetable this installation doesn't ship (FL 2026 has no "Piano"): the folder's default.wti names the
+        // wavetable FL Keys loads instead ("[default] file=mda piano.wti", round 142)
+        const auto def = readFile (wavetables + "\\default.wti");
+        const std::string text (def.begin(), def.end());
+        if (const auto at = text.find ("file="); at != std::string::npos)
+        {
+            auto name = text.substr (at + 5, text.find_first_of ("\r\n", at) - at - 5);
+            if (! name.empty() && name.find_first_of ("\\/:") == std::string::npos)
+                wtiBytes = readFile (wavetables + "\\" + name);
+        }
+    }
     std::vector<std::string> names;
     auto table = parseWti (std::string (wtiBytes.begin(), wtiBytes.end()), names);
     if (! table)

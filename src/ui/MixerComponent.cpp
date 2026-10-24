@@ -1662,13 +1662,42 @@ const EffectKind allEffects[] = { EffectKind::eq,     EffectKind::parametricEq, 
                                       EffectKind::fruityFastDist, EffectKind::fruityFlangus, EffectKind::fruityFlanger, EffectKind::fruityPhaser, EffectKind::luxeVerb,
                                       EffectKind::fruityFastLP, EffectKind::fruityFreeFilter, EffectKind::fruityFilter,
                                       EffectKind::hardcore,
-                                      EffectKind::multibandDelay };
+                                      EffectKind::multibandDelay,
+                                      // FL engines that need more than their parameters (round 142, issue #5): a new one starts from
+                                      // the plugin's Default preset of the user's FL installation (core/NativeEngines.h)
+                                      EffectKind::maximus, EffectKind::vocodex, EffectKind::equo, EffectKind::distructor, EffectKind::lovePhilter,
+                                      EffectKind::grossBeat, EffectKind::convolver, EffectKind::flPitchShifter, EffectKind::vintagePhaser,
+                                      EffectKind::squeeze, EffectKind::rhythmGain, EffectKind::newtone, EffectKind::newtime };
 } // namespace
 
 const std::vector<EffectKind>& addableEffects()
 {
     static const std::vector<EffectKind> list (std::begin (allEffects), std::end (allEffects));
     return list;
+}
+
+bool addableEffectAvailable (EffectKind kind)
+{
+    const auto* e = natives::effectEngine (kind);
+    return e == nullptr || natives::available (*e, flStudioAccess());
+}
+
+juce::String addableEffectName (EffectKind kind)
+{
+    const auto name = juce::String::fromUTF8 (effectInfo (kind).name);
+    if (const auto* e = natives::effectEngine (kind))
+    {
+        if (! natives::available (*e, flStudioAccess()))
+            return tr ("{0} (requires FL Studio)", { name });
+        if (e->beta)
+            return tr ("{0} (beta)", { name });
+    }
+    return name;
+}
+
+std::optional<EffectSlot> newAddableEffect (EffectKind kind, double bpm)
+{
+    return natives::newEffect (kind, flStudioAccess(), bpm);
 }
 
 EffectsPanel::EffectsPanel (AudioEngine& e)
@@ -3427,11 +3456,14 @@ void EffectsPanel::showAddMenu (int)
     juce::PopupMenu menu;
 
     for (auto kind : allEffects)
-        menu.addItem (juce::String::fromUTF8 (effectInfo (kind).name), [this, kind] {
-            engine.editSong ([t = track, kind] (Song& song) {
+        menu.addItem (addableEffectName (kind), addableEffectAvailable (kind), false, [this, kind] {
+            const auto made = newAddableEffect (kind, engine.getSong().bpm);
+            if (! made)
+                return;
+            engine.editSong ([t = track, fx = *made] (Song& song) {
                 auto& effects = song.mixer[(std::size_t) t].effects;
                 if ((int) effects.size() < maxEffectSlots)
-                    effects.push_back (makeEffectSlot (kind));
+                    effects.push_back (fx);
             });
             selectedSlot = (int) slots()->size() - 1;
             repaint();
@@ -3482,8 +3514,9 @@ void EffectsPanel::showSlotMenu (int slot)
     juce::PopupMenu replace;
 
     for (auto kind : allEffects)
-        replace.addItem (juce::String::fromUTF8 (effectInfo (kind).name), [this, slot, kind] {
-            engine.editSong ([t = track, slot, kind] (Song& song) { song.mixer[(std::size_t) t].effects[(std::size_t) slot] = makeEffectSlot (kind); });
+        replace.addItem (addableEffectName (kind), addableEffectAvailable (kind), false, [this, slot, kind] {
+            if (const auto made = newAddableEffect (kind, engine.getSong().bpm))
+                engine.editSong ([t = track, slot, fx = *made] (Song& song) { song.mixer[(std::size_t) t].effects[(std::size_t) slot] = fx; });
         });
 
     const auto count = (int) slots()->size();

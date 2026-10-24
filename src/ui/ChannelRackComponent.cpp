@@ -1217,6 +1217,8 @@ int ChannelRackComponent::addChannel (ChannelDef c, bool openEditor)
         openPluginWindow (index);
         openEditorRow = index;
     }
+    else if (openEditor && natives::instrumentEngine (c.instrument) != nullptr) // an FL engine: its editor (round 142)
+        openChannelSettings (engine, index);
 
     return index;
 }
@@ -1233,7 +1235,7 @@ bool ChannelRackComponent::loadSampleIntoSelected (const juce::File& file)
 
     // only channels that play a sample (or the built-in drums, which become samplers) take a file
     if (kind != InstrumentKind::sampler && kind != InstrumentKind::kick && kind != InstrumentKind::snare && kind != InstrumentKind::hat
-        && kind != InstrumentKind::clap)
+        && kind != InstrumentKind::clap && kind != InstrumentKind::granulizer)
         return false;
 
     assignSample (row, file);
@@ -2035,6 +2037,26 @@ void ChannelRackComponent::showChannelMenu (int channel)
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
 }
 
+juce::String flEngineName (const natives::InstrumentEngine& e)
+{
+    const auto name = juce::String::fromUTF8 (e.name);
+    if (! natives::available (e, flStudioAccess()))
+        return tr ("{0} (requires FL Studio)", { name });
+    return e.beta ? tr ("{0} (beta)", { name }) : name;
+}
+
+void addFlEngineItems (juce::PopupMenu& menu, std::function<void (ChannelDef)> add)
+{
+    for (const auto& e : natives::instrumentEngines())
+        menu.addItem (flEngineName (e), natives::available (e, flStudioAccess()), false, [kind = e.kind, add] {
+            if (auto c = natives::makeChannel (kind, flStudioAccess()))
+                add (*c);
+            else
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("FL engines"),
+                                                        tr ("This engine needs the data files of an FL Studio installation, which were not found or could not be read."));
+        });
+}
+
 void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insertAt)
 {
     // a new channel of `kind`, at the end (insertAt < 0) or at a row
@@ -2083,6 +2105,15 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
         const auto added = add (c);
         openChannelSettings (engine, added);
     });
+    // FL's own instrument engines (round 142, issue #5): their editor opens
+    {
+        juce::PopupMenu engines;
+        addFlEngineItems (engines, [this, add] (ChannelDef c) {
+            const auto added = add (c);
+            openChannelSettings (engine, added);
+        });
+        menu.addSubMenu (tr ("FL engines"), engines);
+    }
     // FL's Patcher as a generator (REA_rodada141): an empty graph, its editor opens
     menu.addItem (tr ("Patcher"), [this, add] {
         ChannelDef c;
@@ -2145,8 +2176,10 @@ void ChannelRackComponent::assignSample (int channel, const juce::File& file)
 
         if (isNew)
             c.mixerTrack = freeInsert;
-        c.instrument = InstrumentKind::sampler;
         c.samplePath = path;
+        if (! isNew && c.instrument == InstrumentKind::granulizer) // FL's Granulizer keeps its engine and plays the file (round 142)
+            return;
+        c.instrument = InstrumentKind::sampler;
         c.name = name;
     });
 
