@@ -6,6 +6,8 @@
 #include <cstdio>
 
 #include "core/Effects.h"
+#include "core/Song.h"
+#include <mutex>
 #include "core/VocalPitch.h"
 
 namespace lynx::lynxtune
@@ -143,6 +145,7 @@ const EffectInfo& info()
             e.params.push_back ({ nm, 0.0f });
         e.params.push_back ({ "Range low", 0.0f });
         e.params.push_back ({ "Range high", 1.0f });
+        e.params.push_back ({ "Receive", 1.0f }); // round 150
         return e;
     }();
     return i;
@@ -240,6 +243,8 @@ std::string paramText (int param, float v)
         static const char* const n[3] { "Nearest", "Up", "Down" };
         return n[(int) noteDir (v)];
     }
+    if (param == receiveScale)
+        return onOff();
     if (param == rangeLow || param == rangeHigh)
     {
         static const char* const names[12] { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
@@ -267,6 +272,8 @@ public:
     {
         det.reset();
         psola.reset();
+        activity = 0.0;
+        hpX[0] = hpX[1] = hpY[0] = hpY[1] = 0.0;
         std::fill (dry.begin(), dry.end(), 0.0f);
         dryPos = 0;
         shift = 0.0;
@@ -550,6 +557,23 @@ public:
             const auto d0 = dry[rd], d1 = dry[rd + dryRing];
             ++dryPos;
 
+            // round 148: the overlap-add of shifted grains loses the highs' incoherent part (two-period Hann grains at
+            // half overlap keep 0.75 of their power: -1.25 dB) — [EXEC] her takes at retune 0 / 20: 0.5–1.5 dB darker than
+            // Auto-Tune Pro above 4 kHz. A first-order shelf (+1 dB from 5 kHz) is faded in while a correction of 5 cents or
+            // more is being applied to a voiced sound (about halves the difference: 10 kHz -1.0 -> -0.5 dB, 16 kHz -1.3 -> -0.8 dB) [model]
+            {
+                const double a = std::exp (-2.0 * 3.141592653589793 * 5000.0 / sr);
+                // (voiced only: unvoiced sounds pass as plain overlap-add, untouched)
+                const double want = unvoicedFor > 0.0 ? 0.0 : std::min (1.0, std::abs (semis - trans) / 0.05);
+                activity += (1.0 - std::exp (-1.0 / (0.01 * sr))) * (want - activity);
+                constexpr double lift = 0.12201845430196334; // 10^(1/20) - 1
+                for (int c = 0; c < 2; ++c)
+                {
+                    hpY[c] = a * (hpY[c] + y[c] - hpX[c]);
+                    hpX[c] = y[c];
+                    y[c] = (float) (y[c] + activity * lift * hpY[c]);
+                }
+            }
             if (driveOn)
                 for (auto& v : y)
                     v = (float) (dK * (side (dG * v + 0.341) - sideB));
@@ -615,6 +639,7 @@ private:
     std::atomic<int> latencyNow { 1200 };
     std::atomic<float> meterSung { -1.0f }, meterTarget { -1.0f }, meterShift { 0.0f }, meterHeld { 0.0f };
     std::atomic<float> meterIn { 0.0f }, meterOut { 0.0f };
+    double activity = 0.0, hpX[2] {}, hpY[2] {}; // round 148: the high-frequency make-up
     double candidateTime = 0.0; // round 135w: Tolerance time
     int candidate = -1;
 };
@@ -625,5 +650,93 @@ std::unique_ptr<Effect> make()
     auto e = std::make_unique<Tune>();
     e->prepare (44100.0);
     return e;
+}
+
+// ---- round 150: Send / Receive -------------------------------------------------------------------------------------
+const std::array<int, sharedScaleParams>& sharedScaleList() noexcept
+{
+    static const auto list = [] {
+        std::array<int, sharedScaleParams> l {};
+        int n = 0;
+        l[(std::size_t) n++] = key;
+        l[(std::size_t) n++] = scale;
+        l[(std::size_t) n++] = moreScales;
+        for (int k = 0; k < 12; ++k) l[(std::size_t) n++] = noteC + k;
+        for (int k = 0; k < 12; ++k) l[(std::size_t) n++] = bypassC + k;
+        for (int k = 0; k < 12; ++k) l[(std::size_t) n++] = noteDirC + k;
+        l[(std::size_t) n++] = rangeLow;
+        l[(std::size_t) n++] = rangeHigh;
+        return l;
+    }();
+    return list;
+}
+
+SharedScale captureScale (const float* params) noexcept
+{
+    SharedScale s;
+    const auto& l = sharedScaleList();
+    for (std::size_t i = 0; i < l.size(); ++i) s.values[i] = params[l[i]];
+    return s;
+}
+
+void applyScale (float* params, const SharedScale& s) noexcept
+{
+    const auto& l = sharedScaleList();
+    for (std::size_t i = 0; i < l.size(); ++i) params[l[i]] = std::clamp (s.values[i], 0.0f, 1.0f);
+}
+
+namespace
+{
+std::mutex sharedMutex;
+SharedScale sharedScale;
+bool sharedValid = false;
+
+template <typename Fn>
+void forEachTune (std::vector<EffectSlot>& chain, Fn&& fn)
+{
+    for (auto& fx : chain)
+    {
+        if (fx.kind == EffectKind::lynxTune) fn (fx);
+        for (auto& br : fx.branches) forEachTune (br.chain, fn);
+    }
+}
+} // namespace
+
+void publishScale (const SharedScale& s) noexcept
+{
+    std::lock_guard<std::mutex> g (sharedMutex);
+    sharedScale = s;
+    sharedValid = true;
+}
+
+bool publishedScale (SharedScale& out) noexcept
+{
+    std::lock_guard<std::mutex> g (sharedMutex);
+    if (sharedValid) out = sharedScale;
+    return sharedValid;
+}
+
+void clearPublishedScale() noexcept
+{
+    std::lock_guard<std::mutex> g (sharedMutex);
+    sharedValid = false;
+}
+
+int sendScaleToAll (Song& song, int track, int slot)
+{
+    if (track < 0 || track >= (int) song.mixer.size()) return 0;
+    auto& fx = song.mixer[(std::size_t) track].effects;
+    if (slot < 0 || slot >= (int) fx.size() || fx[(std::size_t) slot].kind != EffectKind::lynxTune) return 0;
+    const auto* source = &fx[(std::size_t) slot];
+    const auto s = captureScale (source->params.data());
+    publishScale (s);
+    int n = 0;
+    for (auto& t : song.mixer)
+        forEachTune (t.effects, [&] (EffectSlot& e) {
+            if (&e == source || e.params[receiveScale] < 0.5f) return;
+            applyScale (e.params.data(), s);
+            ++n;
+        });
+    return n;
 }
 } // namespace lynx::lynxtune

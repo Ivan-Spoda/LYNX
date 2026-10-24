@@ -1591,7 +1591,7 @@ Layout ridgeStrip()
     v.push_back (dial (54, 50, 36, "HPF", TR_NOOP ("High-pass")));
     v.push_back (dial (140, 50, 36, "LPF", TR_NOOP ("Low-pass")));
     v.push_back (toggle (186, 40, 88, 20, "Filters to SC", TR_NOOP ("To sidechain")));
-    v.push_back (toggle (186, 66, 88, 20, "Filter split", TR_NOOP ("Split"))); // round 123: E voicing, filters before dynamics
+    v.push_back (when (toggle (186, 66, 88, 20, "Filter split", TR_NOOP ("Split")), "4K voicing", 0.0f, 0.5f)); // round 123: E voicing, filters before dynamics
     const char* names[] = { TR_NOOP ("HF"), TR_NOOP ("HMF"), TR_NOOP ("LMF"), TR_NOOP ("LF") };
     const char* gains[] = { "HF gain", "HMF gain", "LMF gain", "LF gain" };
     const char* freqs[] = { "HF freq.", "HMF freq.", "LMF freq.", "LF freq." };
@@ -1609,7 +1609,14 @@ Layout ridgeStrip()
     }
     v.push_back (section (4, 520, 276, 192, TR_NOOP ("Equalizer")));
     v.push_back (display (10, 540, 264, 118, "ridgeeq"));
-    v.push_back (tabs (10, 664, 150, 20, "EQ curve", TR_NOOP ("Brown|Black")));
+    v.push_back (when (tabs (10, 664, 150, 20, "EQ curve", TR_NOOP ("Brown|Black")), "4K voicing", 0.0f, 0.5f));
+    // round 148: the 4K voicing (the console measured on the SSL 4K E trial) — its three EQ colours, the mic pre and
+    // its gain, the make-up offset; the rest of the panel drives it with the console's own scales
+    v.push_back (when (tabs (10, 664, 150, 20, "EQ colour", TR_NOOP ("Brown|Black|Orange")), "4K voicing", 0.5f, 1.0f));
+    v.push_back (toggle (170, 688, 104, 20, "4K voicing", TR_NOOP ("4K console")));
+    v.push_back (when (dial (432, 52, 24, "Make-up offset", TR_NOOP ("Offset"), bipolar), "4K voicing", 0.5f, 1.0f));
+    v.push_back (when (toggle (384, 540, 70, 20, "Mic pre", TR_NOOP ("Mic pre")), "4K voicing", 0.5f, 1.0f));
+    v.push_back (when (dial (504, 548, 24, "Mic gain", TR_NOOP ("Mic")), "4K voicing", 0.5f, 1.0f));
     v.push_back (toggle (170, 664, 104, 20, "EQ on", TR_NOOP ("EQ in")));
     // round 123: the voicing — Ridge's own engine, or the measured E-type console (substitutes start there)
     v.push_back (tabs (10, 688, 150, 20, "Voicing", TR_NOOP ("Classic|E console")));
@@ -1658,7 +1665,10 @@ Layout compressorLayout()
     v.push_back (slider (Item::vslider, 16, 30, 34, 172, "Threshold", TR_NOOP ("Threshold")));
     v.push_back (display (58, 26, 112, 180, "iometer"));
     v.push_back (meter (184, 26, 66, 180, 0, TR_NOOP ("Reduction")));
-    v.push_back (slider (Item::vslider, 268, 30, 34, 172, "Makeup", TR_NOOP ("Gain")));
+    // round 150: with the RComp ranges the RC controls take the places of LYNX's (gain −30 … +30, ratio 0.5 … 50 : 1,
+    // attack 0.5 … 500 ms, release 5 … 5000 ms)
+    v.push_back (when (slider (Item::vslider, 268, 30, 34, 172, "Makeup", TR_NOOP ("Gain")), "Ranges", 0.0f, 0.5f));
+    v.push_back (when (slider (Item::vslider, 268, 30, 34, 172, "RC gain", TR_NOOP ("Gain")), "Ranges", 0.5f, 1.0f));
     v.push_back (toggle (314, 30, 94, 20, "Auto gain", TR_NOOP ("Auto gain")));
     // round 123: the voicing — LYNX's classic compressor, or the measured program-dependent one (substitutes start there)
     v.push_back (tabs (314, 60, 94, 40, "Voicing", TR_NOOP ("Classic|Vintage")));
@@ -1669,9 +1679,13 @@ Layout compressorLayout()
     v.push_back (when (tabs (314, 156, 94, 20, "Character", TR_NOOP ("Warm|Smooth")), "Voicing", 0.5f, 1.0f));
     v.push_back (toggle (314, 182, 94, 20, "Limiter", TR_NOOP ("Limiter")));
     v.push_back (display (330, 206, 62, 12, "limitpill"));
-    v.push_back (dial (60, 252, 34, "Attack", TR_NOOP ("Attack")));
-    v.push_back (dial (140, 252, 34, "Release", TR_NOOP ("Release")));
-    v.push_back (dial (217, 252, 34, "Ratio", TR_NOOP ("Ratio")));
+    v.push_back (when (dial (60, 252, 34, "Attack", TR_NOOP ("Attack")), "Ranges", 0.0f, 0.5f));
+    v.push_back (when (dial (140, 252, 34, "Release", TR_NOOP ("Release")), "Ranges", 0.0f, 0.5f));
+    v.push_back (when (dial (217, 252, 34, "Ratio", TR_NOOP ("Ratio")), "Ranges", 0.0f, 0.5f));
+    v.push_back (when (dial (60, 252, 34, "RC attack", TR_NOOP ("Attack")), "Ranges", 0.5f, 1.0f));
+    v.push_back (when (dial (140, 252, 34, "RC release", TR_NOOP ("Release")), "Ranges", 0.5f, 1.0f));
+    v.push_back (when (dial (217, 252, 34, "RC ratio", TR_NOOP ("Ratio")), "Ranges", 0.5f, 1.0f));
+    v.push_back (tabs (318, 7, 90, 16, "Ranges", TR_NOOP ("LYNX|RComp")));
     v.push_back (dial (300, 252, 30, "Mix", TR_NOOP ("Mix")));
     v.push_back (dial (370, 252, 30, "Trim", TR_NOOP ("Trim"), bipolar));
     return l;
@@ -1736,6 +1750,8 @@ Layout hushDeEsser()
     // round 135: oversampling (Hush's own voicing)
     v.push_back (label (12, 286, 90, 20, TR_NOOP ("Oversampling")));
     v.push_back (tabs (104, 286, 176, 20, "Oversampling", TR_NOOP ("Off|2x|4x|8x")));
+    // round 148: the measured single-vocal detector (the role: a vocal de-esser's Single Vocal mode)
+    v.push_back (toggle (290, 286, 158, 20, "Vocal voicing", TR_NOOP ("Vocal detector")));
     return l;
 }
 
@@ -1921,6 +1937,52 @@ Layout emberLayout()
             }
             v.push_back (k);
         }
+    // round 150 (Saturn 2): bands 5 / 6, the global input / output pan, each band's measured character
+    l.height = 1040;
+    v.push_back (section (4, 870, 512, 236, TR_NOOP ("Bands 5 / 6, pans, characters")));
+    v.push_back (tabs (12, 894, 150, 20, "More bands", TR_NOOP ("Off|5|6"), { 0.0f, 0.5f, 1.0f }));
+    v.push_back (dial (200, 904, 18, "Crossover 4", TR_NOOP ("X-over 4")));
+    v.push_back (dial (250, 904, 18, "Crossover 5", TR_NOOP ("X-over 5")));
+    v.push_back (dial (330, 904, 18, "Input pan", TR_NOOP ("In pan"), bipolar));
+    v.push_back (dial (380, 904, 18, "Output pan", TR_NOOP ("Out pan"), bipolar));
+    static const char* const b56[2][6] { { "B5 style", "B5 drive", "B5 mix", "B5 level", "B5 drive pan", "B5 pan" },
+                                         { "B6 style", "B6 drive", "B6 mix", "B6 level", "B6 drive pan", "B6 pan" } };
+    for (int b = 0; b < 2; ++b)
+    {
+        const auto cy = 950.0f + 30.0f * (float) b;
+        auto name = label (12, cy - 8.0f, 24, 16, b == 0 ? TR_NOOP ("B5") : TR_NOOP ("B6"));
+        name.colour = 4 + b;
+        v.push_back (when (name, "More bands", b == 0 ? 0.25f : 0.75f, 1.01f));
+        for (int c = 0; c < 6; ++c)
+        {
+            auto k = knob (60.0f + 50.0f * (float) c, cy, 18, b56[b][c], nullptr, cy + 9.0f, noCaption | (c >= 3 ? bipolar : 0), c == 0 ? 4 : 0);
+            k.colour = 4 + b;
+            v.push_back (when (k, "More bands", b == 0 ? 0.25f : 0.75f, 1.01f));
+        }
+    }
+    // bands 5 / 6's power, solo / mute, tone, feedback and dynamics (the round-128 row's columns)
+    l.height = 1110;
+    static std::array<std::array<std::array<char, 24>, 9>, 2> extra56 {};
+    for (int b = 0; b < 2; ++b)
+    {
+        const auto cy = 1050.0f + 32.0f * (float) b;
+        auto name = label (12, cy - 8.0f, 24, 16, b == 0 ? TR_NOOP ("B5") : TR_NOOP ("B6"));
+        name.colour = 4 + b;
+        v.push_back (when (name, "More bands", b == 0 ? 0.25f : 0.75f, 1.01f));
+        for (int c = 0; c < 9; ++c)
+        {
+            auto& n = extra56[(std::size_t) b][(std::size_t) c];
+            std::snprintf (n.data(), n.size(), "B%d %s", b + 5, extraFieldNames[c]);
+            LayoutItem item;
+            if (c == 0) item = toggle (extraX[0] - 14.0f, cy - 9.0f, 28, 18, n.data(), nullptr);
+            else if (c == 1) item = tabs (extraX[1], cy - 9.0f, 90, 18, n.data(), TR_NOOP ("-|S|M"), { 0.0f, 0.5f, 1.0f });
+            else item = knob (extraX[c], cy, 20, n.data(), nullptr, cy + 10.0f, noCaption | (c >= 2 && c <= 5 ? bipolar : 0) | (c == 8 ? bipolar : 0));
+            v.push_back (when (item, "More bands", b == 0 ? 0.25f : 0.75f, 1.01f));
+        }
+    }
+    static const char* const chars[] { "B1 character", "B2 character", "B3 character", "B4 character", "B5 character", "B6 character" };
+    for (int b = 0; b < 6; ++b)
+        v.push_back (stepper (360.0f + 76.0f * (float) (b % 2), 940.0f + 30.0f * (float) (b / 2), 72, 22, chars[b], nullptr, 29));
     return l;
 }
 
@@ -2103,7 +2165,25 @@ Layout prismMultiband()
     static const char* xsCaption[5] { TR_NOOP ("Slope 1"), TR_NOOP ("Slope 2"), TR_NOOP ("Slope 3"), TR_NOOP ("Slope 4"), TR_NOOP ("Slope 5") };
     for (int k = 0; k < 5; ++k)
         v.push_back (dial (660.0f + 52.0f * (float) k, 630, 16, xs[k], xsCaption[k]));
-    l.height = 668;
+    // round 150: the free layout (each band's own edges and slopes), the band's side-chain input, the detector
+    v.push_back (section (8, 666, 884, 64, TR_NOOP ("Free layout (selected band)"), boxed));
+    static const char* lo[6] { "B1 low", "B2 low", "B3 low", "B4 low", "B5 low", "B6 low" };
+    static const char* hi[6] { "B1 high", "B2 high", "B3 high", "B4 high", "B5 high", "B6 high" };
+    static const char* ls[6] { "B1 low slope", "B2 low slope", "B3 low slope", "B4 low slope", "B5 low slope", "B6 low slope" };
+    static const char* hs[6] { "B1 high slope", "B2 high slope", "B3 high slope", "B4 high slope", "B5 high slope", "B6 high slope" };
+    static const char* sci[6] { "B1 SC input", "B2 SC input", "B3 SC input", "B4 SC input", "B5 SC input", "B6 SC input" };
+    for (int b = 0; b < 6; ++b)
+    {
+        auto add = [&] (LayoutItem i) { i.colour = b; v.push_back (onPage (std::move (i), b)); };
+        add (dial (180, 700, 20, lo[b], TR_NOOP ("Low edge")));
+        add (dial (250, 700, 20, ls[b], TR_NOOP ("Low slope")));
+        add (dial (320, 700, 20, hi[b], TR_NOOP ("High edge")));
+        add (dial (390, 700, 20, hs[b], TR_NOOP ("High slope")));
+        add (tabs (450, 696, 220, 22, sci[b], TR_NOOP ("Global|Plug-in|External"), { 0.0f, 0.5f, 1.0f }));
+    }
+    v.push_back (tabs (16, 696, 140, 22, "Band layout", TR_NOOP ("Split|Free")));
+    v.push_back (tabs (700, 696, 180, 22, "Detector", TR_NOOP ("Classic|Measured")));
+    l.height = 738;
     return l;
 }
 
@@ -2312,6 +2392,18 @@ Layout withRhythmVoicing (Layout l)
     add (dial (676, 80, 36, "Rhythm output", TR_NOOP ("Output"), bipolar));
     add (tabs (610, 216, 132, 22, "Rhythm analog", TR_NOOP ("Digital|Analog|Hot"), { 0.0f, 0.5f, 1.0f }));
     l.items.push_back (toggle (8, 254, 300, 20, "Voicing", TR_NOOP ("Measured rhythm voicing")));
+    // round 150: PanMan's Tweak page role — the input's envelope moves the rate, the offset and the width (its threshold
+    // and range), Feel / Groove of the steps, and the angle past the speakers
+    l.height = 360;
+    add (section (4, 280, 752, 76, TR_NOOP ("Tweak")));
+    add (dial (60, 318, 30, "Rate mod", TR_NOOP ("Rate"), bipolar));
+    add (dial (150, 318, 30, "Offset mod", TR_NOOP ("Offset"), bipolar));
+    add (dial (240, 318, 30, "Width mod", TR_NOOP ("Width"), bipolar));
+    add (dial (340, 318, 30, "Env threshold", TR_NOOP ("Thresh.")));
+    add (dial (430, 318, 30, "Env range", TR_NOOP ("Range")));
+    add (dial (530, 318, 30, "Feel", TR_NOOP ("Feel"), bipolar));
+    add (dial (610, 318, 30, "Groove", TR_NOOP ("Groove"), bipolar));
+    add (toggle (664, 308, 86, 20, "Beyond speakers", TR_NOOP ("Beyond")));
     return l;
 }
 
@@ -2542,6 +2634,8 @@ Layout foilPlateLayout()
     // round 135 (the Little Plate role): the decay's ∞ and a low cut
     v.push_back (toggle (330, 266, 90, 22, "Infinite", TR_NOOP ("Infinite")));
     v.push_back (dial (470, 274, 22, "Low cut", TR_NOOP ("Low cut")));
+    // round 150: the measured plate voicing (the Little Plate role: no plate delay, its decay per band)
+    v.push_back (toggle (560, 266, 150, 22, "Voicing", TR_NOOP ("Measured plate")));
     v.push_back (label (8, 264, 52, 24, TR_NOOP ("Mode"), alignLeft));
     v.push_back (choiceMenu (60, 264, 180, 24, "Type", TR_NOOP ("Type"), TR_NOOP ("Silver|Pewter|Nickel|Bronze|Bismuth|Tin|Zinc|Platinum|Tungsten|Iron|Gold|Lead")));
     return l;
@@ -2850,6 +2944,14 @@ Layout echoformLayout()
                                   TR_NOOP ("Auto|Clean|Tape|Tube|Squash|Grit|Ceiling"), types)));
         v.push_back (off (label (800, 402, 38, 20, TR_NOOP ("Mult."))));
         v.push_back (off (tabs (840, 402, 100, 20, "Multiply", TR_NOOP ("1x|2x|4x|8x"), { 0.0f, 1.0f / 3.0f, 2.0f / 3.0f, 1.0f })));
+        // round 150: the voicing's measured stereo behaviour (L/R offset in Single / Dual, the ping-pong law) and the
+        // offset itself (EchoBoy's Tweak L/R Offset), on the Rhythm row while Rhythm is off and a voicing is chosen
+        const auto withVoicing = [&off] (LayoutItem i) { return off (when (std::move (i), "Echo voicing", 0.5f / 31.0f, 1.0f)); };
+        v.push_back (withVoicing (label (380, 320, 50, 20, TR_NOOP ("Stereo"))));
+        v.push_back (withVoicing (tabs (432, 320, 130, 20, "Voicing stereo", TR_NOOP ("Classic|Measured"), { 0.0f, 1.0f })));
+        v.push_back (withVoicing (label (572, 320, 68, 20, TR_NOOP ("L/R offset"))));
+        v.push_back (withVoicing (slider (Item::hslider, 642, 322, 70, 16, "L/R offset", nullptr, noCaption)));
+        v.push_back (withVoicing (value (714, 320, 52, 20, "L/R offset")));
     }
     return l;
 }

@@ -118,6 +118,10 @@ enum Param
     // make-up (the level its compressor gives back for the threshold and ratio, measured in round 123 — the E voicing
     // always has it) and the ANALOG switch (the console emulation's colour)
     autoMakeup, analog,
+    // round 148 (appended, off by default = the old sound): the "4K" voicing — the console measured on the SSL 4K E trial
+    // (core/VoiceMatch.h, echannel model 1: its EQ colours, filters, compressor, gate, mic pre and VCA). It takes the E
+    // voicing's controls (and Auto make-up, Analog = the Analogue VCA, Comp. mix) plus these
+    console4k, k4Colour, k4Pre, k4Mic, k4MakeupOffset,
     count
 };
 // round 147b: the auto make-up (dB) for Ridge's own compressor: the console's for the same threshold (dBFS + 18 = the
@@ -151,6 +155,15 @@ double eGateThresholdDb (float v) noexcept; // -30 .. +10 dB (console scale)
 bool eVoicing (const EffectParams& p) noexcept;
 std::string eParamText (int param, float v);
 bool vocalVoicing (const EffectParams& p) noexcept; // round 145
+// round 148: the 4K voicing and its own scales (dial position 0..1)
+bool k4Voicing (const EffectParams& p) noexcept;
+std::string k4ParamText (int param, float v);
+double k4Q (float v) noexcept;              // mid-band Q 0.5 .. 3 (log; up = narrower)
+float k4QValue (double q) noexcept;
+int k4ColourIndex (float v) noexcept;       // 0 Brown, 1 Black, 2 Orange
+float k4ColourValue (int colour) noexcept;
+double k4MicDb (float v) noexcept;          // 0 .. 50 dB
+double k4OffsetDb (float v) noexcept;       // -12 .. +12 dB
 std::string vocalParamText (int param, float v);
 } // namespace ridge
 
@@ -181,8 +194,12 @@ namespace hush
 // (core/VoiceMatch.h); round 128's controls follow it.
 // round 135 (appended): oversampling (off, 2x, 4x, 8x) — Hush's own voicing applies its gain at the high rate (the
 // measured classic voicing is left as it is); latency + the oversampler's.
+// round 148 (appended): vocalVoicing — the single-vocal de-esser measured on a reference vocal de-esser
+// (core/VoiceMatch.h vocalds: band detector + "stands out" test, look-ahead within a fixed 15 ms latency); uses the
+// threshold, range, frequency (the band's high-pass), low-pass, look-ahead, mode and listen controls
 enum Param { frequency, threshold, range, mode, detector, listen, lookahead, release, output, voicing,
-             allround, lowPass, lookaheadTime, stereoLink, linkMid, external, input, display, oversampling, count };
+             allround, lowPass, lookaheadTime, stereoLink, linkMid, external, input, display, oversampling, vocalVoicing, count };
+bool vocal (const EffectParams& p) noexcept; // round 148
 int oversamplingOf (float v) noexcept; // 1 (off), 2, 4, 8
 double hz (float v) noexcept;          // 2 .. 16 kHz
 double lowPassHz (float v) noexcept;   // 2 .. 20 kHz (v ≥ 0.999 = off)
@@ -242,11 +259,51 @@ enum Param
     // channels), each band's drive pan (−1 … +1: the far channel's drive × (1 − |pan|)) and each band's pan (−1 … +1:
     // the far channel's gain 1 − |pan|; in mid / side, left = mid)
     channelMode, band1DrivePan, band2DrivePan, band3DrivePan, band4DrivePan, band1Pan, band2Pan, band3Pan, band4Pan,
+    // round 150 (Saturn 2 parity, REA_rodada150b; appended, every default is the old sound): bands 5 and 6 — `bandsMore`
+    // 0 = the Bands parameter (1 … 4), 1 = five, 2 = six bands; crossovers 4 and 5; bands 5 / 6's blocks with the same
+    // fields as bands 2 … 4 (style, drive, mix, level), round 128's nine and round 147's drive pan / pan — then the
+    // global input / output pan (−1 … +1, the far side × (1 − |pan|), measured) and each band's character (0 = the
+    // Style menu, else one of the 28 voicings measured black-box on the trial's styles, core/EmberCharacters.inc)
+    bandsMore, xover4, xover5,
+    band5Style, band5Drive, band5Mix, band5Level,
+    band6Style, band6Drive, band6Mix, band6Level,
+    band5On, band5State, band5Bass, band5Mid, band5Treble, band5Presence, band5Feedback, band5FeedbackFreq, band5Dynamics,
+    band6On, band6State, band6Bass, band6Mid, band6Treble, band6Presence, band6Feedback, band6FeedbackFreq, band6Dynamics,
+    band5DrivePan, band6DrivePan, band5Pan, band6Pan,
+    inputPan, outputPan,
+    band1Character, band2Character, band3Character, band4Character, band5Character, band6Character,
     count
 };
-constexpr int maxBands = 4;
-inline int bandDrivePanParam (int band) noexcept { return band1DrivePan + std::clamp (band, 0, maxBands - 1); }
-inline int bandPanParam (int band) noexcept { return band1Pan + std::clamp (band, 0, maxBands - 1); }
+constexpr int maxBands = 6;   // round 150 (four before)
+constexpr int firstBands = 4; // the bands whose parameters sit in the first blocks
+inline int bandDrivePanParam (int band) noexcept
+{
+    band = std::clamp (band, 0, maxBands - 1);
+    return band < firstBands ? band1DrivePan + band : band5DrivePan + band - firstBands;
+}
+inline int bandPanParam (int band) noexcept
+{
+    band = std::clamp (band, 0, maxBands - 1);
+    return band < firstBands ? band1Pan + band : band5Pan + band - firstBands;
+}
+// round 150: crossover i (0 … 4: between band i and i + 1), a band's character parameter, the active band count
+inline int crossoverParam (int i) noexcept
+{
+    i = std::clamp (i, 0, maxBands - 2);
+    return i < 3 ? xover1 + i : xover4 + i - 3;
+}
+inline int characterParam (int band) noexcept { return band1Character + std::clamp (band, 0, maxBands - 1); }
+int activeBands (const EffectParams& p) noexcept; // 1 … 6 (Bands, or bandsMore when it is set)
+// the two parameter values that select n bands (1 … 6): first = Bands, second = bandsMore
+std::pair<float, float> bandCountValues (int n) noexcept;
+constexpr int characters = 28;               // the measured voicings (1 … 28; 0 = off)
+int characterIndex (float v) noexcept;       // 0 … 28
+const char* characterName (int k) noexcept;  // LYNX's own names ("Off" for 0)
+// the drive dB of Ember (0 … 36) on the reference's 0 … 100 % scale (its translation: % × 30 dB), clamped
+inline double referenceDrive (double driveDb) noexcept { return std::clamp (driveDb / 30.0, 0.0, 1.0); }
+// a voicing's static curve at a drive (0 … 1 on the reference's scale): y = A · g (D · x) / D, g with unit slope at 0
+// (A = the small-signal gain)
+float characterShape (int k, double drive, float x) noexcept;
 double panOf (float v) noexcept;        // −1 … +1 (0.5 = centre)
 // the two channels' scale for a pan of −1 … +1 (the far side's 1 − |pan|): first = channel 0 (left / mid)
 std::pair<float, float> panScales (double pan) noexcept;
@@ -254,7 +311,12 @@ bool midSide (const EffectParams& p) noexcept;
 // a band's round-128 parameters: field 0 power, 1 state, 2 bass, 3 mid, 4 treble, 5 presence, 6 feedback,
 // 7 feedback frequency, 8 dynamics
 constexpr int extraFields = 9;
-inline int bandExtra (int band, int field) noexcept { return band1On + std::clamp (band, 0, maxBands - 1) * extraFields + std::clamp (field, 0, extraFields - 1); }
+inline int bandExtra (int band, int field) noexcept
+{
+    band = std::clamp (band, 0, maxBands - 1);
+    field = std::clamp (field, 0, extraFields - 1);
+    return band < firstBands ? band1On + band * extraFields + field : band5On + (band - firstBands) * extraFields + field;
+}
 enum class BandState { normal, solo, mute };
 BandState bandState (float v) noexcept;
 double inputDb (float v) noexcept;      // ±24 dB before everything
@@ -283,7 +345,7 @@ constexpr double thumpQ = 1.6;          // the low cut's Q with THUMP on [EXEC t
 // the drive on the reference's 0 … 10 scale (the read-out of the single-band mode): 3.6 dB per step
 double driveSteps (float v) noexcept;
 float shape (Style s, float x) noexcept; // the transfer curve (no drive, no DC removal)
-int bandCount (float v) noexcept;      // 1 .. 4
+int bandCount (float v) noexcept;      // 1 .. 4 (the Bands parameter alone; activeBands() adds bandsMore)
 double crossoverHz (float v) noexcept; // 30 Hz .. 18 kHz (log)
 float crossoverValue (double hz) noexcept;
 int slopeDbOct (float v) noexcept;     // 12, 24 or 48 (Linkwitz-Riley)

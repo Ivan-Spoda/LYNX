@@ -25,6 +25,7 @@ namespace lynx
 {
 struct EffectInfo;
 class Effect;
+struct Song;
 
 namespace lynxtune
 {
@@ -80,6 +81,9 @@ enum Param : int
     noteDirC,                // 12 values (C … B)
     rangeLow = noteDirC + 12, // MIDI note = round (127 v); default 0
     rangeHigh,               // default 127
+    // round 150 (appended): the Waves Tune Real-Time role's Receive — on (default) = this instance takes the scales
+    // another instance sends (Send scale to all); off = its scale stays as it is
+    receiveScale,
     count
 };
 enum class NoteDir { nearest, up, down };
@@ -125,6 +129,25 @@ int effectiveScale (float scaleValue, float moreScalesValue) noexcept;
 // controlOutput (5): the pitch classes held on the MIDI channel, a 12-bit mask / 4096 (round 135, LEARN)
 // Latency (samples) for a sample rate and the range / low-latency parameters
 int latencyFor (double sampleRate, int range, bool lowLatency) noexcept;
+
+// round 150: Send / Receive between instances (the reference's "Send Scale to All" / "Receive"). The shared scale is
+// the key, the scale, More scales, the twelve note switches, bypasses and directions, and the keyboard's range.
+constexpr int sharedScaleParams = 3 + 12 * 3 + 2;
+const std::array<int, sharedScaleParams>& sharedScaleList() noexcept;
+struct SharedScale
+{
+    std::array<float, sharedScaleParams> values {};
+    bool operator== (const SharedScale&) const = default;
+};
+SharedScale captureScale (const float* params) noexcept;        // a slot's params (maxEffectParams values)
+void applyScale (float* params, const SharedScale& s) noexcept;
+// the process-wide slot: the scale sent last (by any instance in this LYNX); false = nothing sent yet
+void publishScale (const SharedScale& s) noexcept;
+bool publishedScale (SharedScale& out) noexcept;
+void clearPublishedScale() noexcept; // tests
+// Send: publish the scale of the LYNX Tune at (track, slot) and copy it to every other LYNX Tune in the song whose
+// Receive is on (mixer inserts, including effects inside containers). Returns the number of instances changed.
+int sendScaleToAll (Song& song, int track, int slot);
 
 const EffectInfo& info();
 std::string paramText (int param, float value01);

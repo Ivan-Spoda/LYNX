@@ -55,6 +55,184 @@ inline double bandMagnitude (double wl, double wh, int nl, int nh, double g, dou
 }
 inline double bandMagnitude (double wl, double wh, int n, double g, double w) noexcept { return bandMagnitude (wl, wh, n, n, g, w); }
 
+// ---- round 150: Pro-MB's other slopes in Dynamic phase (REA_rodada150 §1), measured black-box on the trial ----
+// A side's slope (6 … 48 dB/oct, continuous in the reference) runs as one of five shapes: m = 1 (6 dB/oct, below 9),
+// 2 (12, 9 … < 18), 4 (24, 18 … < 30), 6 (36, 30 … < 42), 8 (48) — the exponent of x in the linear-phase shape
+// 1 / (1 + x^m) (every case matched within 0.01 dB). m = 2n runs the construction above (LR order 2n); m = 1 is a
+// first-order design of its own [EXEC]:
+//  - an edge band: the first-order shelf (s + g·ω)/(s + ω) (low band) or (g·s + ω)/(s + ω) (high band), its pole AT
+//    the crossover (exact);
+//  - a middle band with two 6 dB/oct sides: two first-order shelves at ω_l / k and k·ω_h with gain g, i.e. the bell
+//    (s² + a_n·s + ω0²)/(s² + a_d·s + ω0²), ω0² = ω_l·ω_h, whose centre gain a_n / a_d is the linear-phase shape's
+//    T = 1 + (g − 1)·(√r / (1 + √r))², r = ω_h / ω_l: with u = k·√r, u² = (1 − T·g) / (g·(T − g)), a_d = ω0·(u + 1/u),
+//    a_n = ω0·(g·u + 1/(g·u)); in a cut a_n stays ≤ 2.345·ω0 (a_d = a_n / T then) — within 0.02 dB of 60 cases;
+//  - a middle band with one 6 dB/oct side: the first-order shelf at its corner times the other side's Butterworth
+//    shelf squared, both of gain G, the corners moved out by k6 / kn; for boosts G = g and no move (exact), for cuts
+//    G = g^e, e / k6 / kn interpolated in the measured table (ProMbSixDb.inc: levels −30 … 0 dB, r = 2 … 34).
+inline int dynamicSideCode (double dbOct) noexcept
+{
+    return dbOct < 9.0 ? 1 : (dbOct < 18.0 ? 2 : (dbOct < 30.0 ? 4 : (dbOct < 42.0 ? 6 : 8)));
+}
+
+namespace detail
+{
+#include "core/ProMbSixDb.inc"
+// e, k6, kn for a cut of gDb (≤ 0) on a band of edge ratio r, the other side of order n (1 … 4)
+inline void sixParams (double gDb, double r, int n, double& e, double& k6, double& kn) noexcept
+{
+    e = k6 = kn = 1.0;
+    if (gDb >= 0.0)
+        return;
+    const auto lv = std::clamp ((gDb + 30.0) / 2.0, 0.0, 14.0 + 1.0); // index in −30, −28 … −2, 0
+    const int li = std::min ((int) lv, 14);
+    const auto lf = lv - li;
+    const auto lr = std::clamp (std::log (std::max (r, 1.0)), std::log (sixRatio[0]), std::log (sixRatio[3]));
+    int ri = 0;
+    while (ri < 2 && lr > std::log (sixRatio[ri + 1]))
+        ++ri;
+    const auto rf = (lr - std::log (sixRatio[ri])) / (std::log (sixRatio[ri + 1]) - std::log (sixRatio[ri]));
+    const auto& t = sixTable[std::clamp (n, 1, 4) - 1];
+    double v[3];
+    for (int c = 0; c < 3; ++c)
+    {
+        const auto a = t[ri][li][c] + (t[ri][li + 1][c] - t[ri][li][c]) * lf;
+        const auto b = t[ri + 1][li][c] + (t[ri + 1][li + 1][c] - t[ri + 1][li][c]) * lf;
+        v[c] = a + (b - a) * rf;
+    }
+    e = v[0];
+    k6 = v[1];
+    kn = v[2];
+}
+} // namespace detail
+
+// the analog model of a band with a 6 dB/oct side (m = 1 on one side or both; the other m = 2n or absent), as poles,
+// zeros and a high-frequency gain; also used for the editor's curve
+struct SixDbModel
+{
+    std::array<std::complex<double>, 10> zeros {}, poles {};
+    int nz = 0, np = 0;
+    double k = 1.0;        // the leading coefficient (the gain at high frequencies)
+    double dcTarget = 1.0; // the band's gain at DC (g for a low edge band, else 1)
+
+    void addButterworth (std::array<std::complex<double>, 10>& out, int& count, double radius, int order, int times) noexcept
+    {
+        for (int t = 0; t < times; ++t)
+            for (int j = 0; j < order; ++j)
+                out[(std::size_t) count++] = std::polar (radius, pi * (2.0 * j + order + 1.0) / (2.0 * order));
+    }
+    void addQuadratic (std::array<std::complex<double>, 10>& out, int& count, double a, double c) noexcept // s² + a·s + c
+    {
+        const auto d = a * a - 4.0 * c;
+        if (d >= 0.0)
+        {
+            const auto q = -0.5 * (a + std::sqrt (d));
+            out[(std::size_t) count++] = { q, 0.0 };
+            out[(std::size_t) count++] = { c / q, 0.0 };
+        }
+        else
+        {
+            out[(std::size_t) count++] = { -0.5 * a, 0.5 * std::sqrt (-d) };
+            out[(std::size_t) count++] = { -0.5 * a, -0.5 * std::sqrt (-d) };
+        }
+    }
+
+    // wl / wh ≤ 0: absent; ml / mh: the side codes (1 or 2n); at least one side is 1
+    void design (double wl, double wh, int ml, int mh, double g) noexcept
+    {
+        nz = np = 0;
+        k = 1.0;
+        dcTarget = wl <= 0.0 ? g : 1.0;
+        if (wl <= 0.0) // low edge band, 6 dB/oct: (s + g·ω)/(s + ω)
+        {
+            zeros[(std::size_t) nz++] = { -g * wh, 0.0 };
+            poles[(std::size_t) np++] = { -wh, 0.0 };
+            return;
+        }
+        if (wh <= 0.0) // high edge band: (g·s + ω)/(s + ω)
+        {
+            k = g;
+            zeros[(std::size_t) nz++] = { -wl / g, 0.0 };
+            poles[(std::size_t) np++] = { -wl, 0.0 };
+            return;
+        }
+        const auto r = wh / wl;
+        if (ml == 1 && mh == 1) // the bell
+        {
+            const auto w0 = std::sqrt (wl * wh);
+            const auto sr = std::sqrt (r);
+            const auto share = (sr / (1.0 + sr)) * (sr / (1.0 + sr));
+            const auto T = 1.0 + (g - 1.0) * share;
+            double ad = 2.0 * w0, an = 2.0 * w0;
+            if (std::abs (g - 1.0) > 1e-9)
+            {
+                const auto u = std::sqrt (std::max (1e-12, (1.0 - T * g) / (g * (T - g))));
+                ad = w0 * (u + 1.0 / u);
+                an = w0 * (g * u + 1.0 / (g * u));
+                if (g < 1.0 && an > 2.345 * w0)
+                {
+                    an = 2.345 * w0;
+                    ad = an / T;
+                }
+            }
+            addQuadratic (zeros, nz, an, w0 * w0);
+            addQuadratic (poles, np, ad, w0 * w0);
+            return;
+        }
+        // one 6 dB/oct side, the other of order n (m = 2n)
+        const bool sixLow = ml == 1;
+        const int n = std::clamp ((sixLow ? mh : ml) / 2, 1, 4);
+        double e = 1.0, k6 = 1.0, kn = 1.0;
+        if (g < 1.0)
+            detail::sixParams (20.0 * std::log10 (std::max (g, 1e-9)), r, n, e, k6, kn);
+        const auto G = std::pow (std::max (g, 1e-9), e);
+        if (sixLow)
+        {
+            const auto c = wl / k6;               // (G·s + c)/(s + c)
+            k = G;
+            zeros[(std::size_t) nz++] = { -c / G, 0.0 };
+            poles[(std::size_t) np++] = { -c, 0.0 };
+            const auto rp = wh * kn;              // Butterworth shelf squared: DC G, HF 1
+            addButterworth (zeros, nz, rp * std::pow (G, 0.5 / n), n, 2);
+            addButterworth (poles, np, rp, n, 2);
+            k /= G;
+        }
+        else
+        {
+            const auto rp = wl / kn;              // squared Butterworth shelf: DC 1, HF G
+            addButterworth (zeros, nz, rp * std::pow (G, -0.5 / n), n, 2);
+            addButterworth (poles, np, rp, n, 2);
+            k = G;
+            const auto c = wh * k6;               // (s + G·c)/(s + c): DC G, HF 1
+            zeros[(std::size_t) nz++] = { -G * c, 0.0 };
+            poles[(std::size_t) np++] = { -c, 0.0 };
+            k /= G;
+        }
+    }
+
+    double magnitude (double w) const noexcept
+    {
+        const std::complex<double> s { 0.0, w };
+        std::complex<double> h { k, 0.0 };
+        for (int i = 0; i < nz; ++i)
+            h *= s - zeros[(std::size_t) i];
+        for (int i = 0; i < np; ++i)
+            h /= s - poles[(std::size_t) i];
+        return std::abs (h);
+    }
+};
+
+// round 150: one band's magnitude for any side codes (m = 1 … 8): the formula above for 2n / 2n, the first-order
+// models for the 6 dB/oct sides
+inline double bandMagnitudeM (double wl, double wh, int ml, int mh, double g, double w) noexcept
+{
+    const bool lowSix = wl > 0.0 && ml == 1, highSix = wh > 0.0 && mh == 1;
+    if (! lowSix && ! highSix)
+        return bandMagnitude (wl, wh, std::max (1, ml / 2), std::max (1, mh / 2), g, w);
+    SixDbModel m;
+    m.design (wl, wh, ml, mh, g);
+    return m.magnitude (w);
+}
+
 class Band
 {
 public:
@@ -131,6 +309,35 @@ public:
         for (int k = 0; k < m; ++k)
             c[(std::size_t) (m + k)] = c[(std::size_t) k]; // F = S²
         count = 2 * m;
+    }
+
+    // round 150: any side codes (m = 1 … 8, dynamicSideCode); 2n / 2n is the round-147 design above, sample for sample
+    void designM (double wl, double wh, int ml, int mh, double g) noexcept
+    {
+        const bool lowSix = wl > 0.0 && ml == 1, highSix = wh > 0.0 && mh == 1;
+        if (! lowSix && ! highSix)
+        {
+            design (wl, wh, std::max (1, ml / 2), std::max (1, mh / 2), g);
+            return;
+        }
+        gain = 1.0;
+        SixDbModel m;
+        m.design (wl, wh, ml, mh, g);
+        std::array<Analog, maxSections> num {}, den {};
+        const int sn = sections10 (m.zeros.data(), m.nz, num);
+        const int sd = sections10 (m.poles.data(), m.np, den);
+        const int cnt = std::max (sn, sd);
+        for (int i = 0; i < cnt; ++i)
+            c[(std::size_t) i] = bilinear (i < sn ? num[(std::size_t) i] : Analog {}, i < sd ? den[(std::size_t) i] : Analog {});
+        double dc = 1.0;
+        for (int i = 0; i < cnt; ++i)
+        {
+            const auto& q = c[(std::size_t) i];
+            dc *= (q.b0 + q.b1 + q.b2) / (1.0 + q.a1 + q.a2);
+        }
+        const auto k0 = m.dcTarget / dc;
+        c[0].b0 *= k0; c[0].b1 *= k0; c[0].b2 *= k0;
+        count = cnt;
     }
 
     void reset() noexcept
@@ -245,6 +452,30 @@ private:
         for (int i = 0; i + 1 < nr && k < 4; i += 2)
             out[(std::size_t) k++] = { 1.0, -(reals[(std::size_t) i] + reals[(std::size_t) (i + 1)]), reals[(std::size_t) i] * reals[(std::size_t) (i + 1)] };
         if (nr % 2 != 0 && k < 4)
+            out[(std::size_t) k++] = { 0.0, 1.0, -reals[(std::size_t) (nr - 1)] };
+        return k;
+    }
+
+    // round 150: the same pairing for up to 10 roots (≤ 5 sections; the 6 dB/oct models)
+    static int sections10 (const std::complex<double>* roots, int n, std::array<Analog, maxSections>& out) noexcept
+    {
+        int k = 0;
+        std::array<double, 10> reals {};
+        int nr = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            const auto& r = roots[i];
+            if (std::abs (r.imag()) > 1e-9 * std::abs (r))
+            {
+                if (r.imag() > 0.0 && k < maxSections)
+                    out[(std::size_t) k++] = { 1.0, -2.0 * r.real(), std::norm (r) };
+            }
+            else
+                reals[(std::size_t) nr++] = r.real();
+        }
+        for (int i = 0; i + 1 < nr && k < maxSections; i += 2)
+            out[(std::size_t) k++] = { 1.0, -(reals[(std::size_t) i] + reals[(std::size_t) (i + 1)]), reals[(std::size_t) i] * reals[(std::size_t) (i + 1)] };
+        if (nr % 2 != 0 && k < maxSections)
             out[(std::size_t) k++] = { 0.0, 1.0, -reals[(std::size_t) (nr - 1)] };
         return k;
     }

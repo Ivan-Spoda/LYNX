@@ -262,73 +262,36 @@ int fromProMB (const State& s, EffectSlot& slot)
         p[(std::size_t) k] = clamp01 (v);
         ++n;
     };
-    struct Ref { int index; double lo, hi; };
+    // round 150: the free layout — each reference band (enabled or disabled; "unused" ones are left out) keeps its own
+    // edges and slopes (the same value laws), in order of its low edge; the room between bands passes untouched
+    struct Ref { int index; double lo, hi; bool on; };
     std::array<Ref, 6> used {};
     int count = 0;
     for (int b = 0; b < 6; ++b)
-        if (roundIndex (s.at ((std::size_t) (22 * b))) == 1)
+    {
+        const auto state = roundIndex (s.at ((std::size_t) (22 * b)));
+        if (state == 0 || state == 1)
             used[(std::size_t) count++] = { b, std::pow (2.0, (double) s.at ((std::size_t) (22 * b + 1))),
-                                            std::pow (2.0, (double) s.at ((std::size_t) (22 * b + 3))) };
+                                            std::pow (2.0, (double) s.at ((std::size_t) (22 * b + 3))), state == 1 };
+    }
     if (count == 0)
         return 0;
-    std::sort (used.begin(), used.begin() + count, [] (const Ref& a, const Ref& b) { return a.lo * a.hi < b.lo * b.hi; });
-    // our contiguous bands (up to six, round 135): each used reference band in order, with a disabled gap band where the
-    // reference leaves room below / between (gaps are dropped first when there are more than six)
-    struct Seg { int ref; double lo, hi; };
-    std::array<Seg, 16> segs {};
-    int nseg = 0;
-    double edge = 30.0;
-    for (int k = 0; k < count; ++k)
-    {
-        const auto& u = used[(std::size_t) k];
-        if (u.lo > edge * 1.12)
-            segs[(std::size_t) nseg++] = { -1, edge, u.lo };
-        segs[(std::size_t) nseg++] = { u.index, std::max (edge, u.lo), std::max (u.hi, std::max (edge, u.lo) * 1.06) };
-        edge = segs[(std::size_t) (nseg - 1)].hi;
-    }
-    if (edge < 16000.0)
-        segs[(std::size_t) nseg++] = { -1, edge, 30000.0 };
-    while (nseg > bands)
-    {
-        int gap = -1;
-        for (int k = nseg - 1; k >= 0; --k)
-            if (segs[(std::size_t) k].ref < 0)
-            {
-                gap = k;
-                break;
-            }
-        if (gap < 0)
-        {
-            nseg = bands; // more than six reference bands: the six lowest
-            break;
-        }
-        // give the gap to a neighbour
-        if (gap > 0)
-            segs[(std::size_t) (gap - 1)].hi = segs[(std::size_t) gap].hi;
-        else
-            segs[1].lo = segs[0].lo;
-        for (int k = gap; k + 1 < nseg; ++k)
-            segs[(std::size_t) k] = segs[(std::size_t) (k + 1)];
-        --nseg;
-    }
-    // unused bands of ours sit above everything, disabled; round 135: up to six bands (four at least, as before)
-    const int nb = std::max (legacyBands, std::min (nseg, bands));
-    set (Global::bandCountParam, bandCountValue (nb));
+    std::stable_sort (used.begin(), used.begin() + count, [] (const Ref& a, const Ref& b) { return a.lo < b.lo; });
+    set (Global::bandLayout, 1.0f);
+    set (Global::bandCountParam, bandCountValue (count));
     double la = 0.0;
-    for (int b = 0; b < nb; ++b)
+    for (int b = 0; b < count; ++b)
     {
-        if (b < nb - 1)
-        {
-            const auto hz = b + 1 < nseg ? segs[(std::size_t) b].hi : 17000.0 + 300.0 * b;
-            set (crossoverParam (b), crossoverValue (hz));
-        }
-        if (b >= nseg || segs[(std::size_t) b].ref < 0)
-        {
-            set (param (b, fEnabled), 0.0f);
-            continue;
-        }
-        const auto base = (std::size_t) (22 * segs[(std::size_t) b].ref);
-        set (param (b, fEnabled), 1.0f);
+        const auto& u = used[(std::size_t) b];
+        const auto base = (std::size_t) (22 * u.index);
+        set (bandLo0 + b, edgeValue (u.lo));
+        set (bandHi0 + b, edgeValue (u.hi));
+        set (bandLoSlope0 + b, clamp01 (s.at (base + 2)));
+        set (bandHiSlope0 + b, clamp01 (s.at (base + 4)));
+        // the split layout's crossovers follow the bands (for a switch to the split layout in the editor)
+        if (b < count - 1)
+            set (crossoverParam (b), crossoverValue (std::sqrt (u.hi * used[(std::size_t) (b + 1)].lo)));
+        set (param (b, fEnabled), u.on ? 1.0f : 0.0f);
         set (param (b, fMode), s.at (base + 5) >= 0.5f ? 1.0f : 0.0f);
         static constexpr double thresholds[3] { -90.0, -72.0, -48.0 };
         const auto tn = std::clamp ((double) s.at (base + 6), 0.0, 1.0);
@@ -346,34 +309,17 @@ int fromProMB (const State& s, EffectSlot& slot)
         set (bandPanParam (b), (float) ((std::clamp ((double) s.at (base + 14), -1.0, 1.0) + 1.0) * 0.5)); // round 144: mid / side
         // round 147: the expert panel (read black-box from the trial's states; the reference ignores it while its
         // Expert mode, slot 142, is off): 15 side-chain filtering (0 band, 1 free), 16 / 17 its low / high (log2 Hz),
-        // 18 side-chain input (0 plug-in, 1 external), 19 stereo link (the parameter's own value), 20 link mode
-        if (s.at (142) >= 0.5f)
+        // 18 side-chain input (0 plug-in, 1 external; round 150: per band), 19 stereo link, 20 link mode
+        const bool expert = s.at (142) >= 0.5f;
+        set (bandScInput0 + b, expert && s.at (base + 18) >= 0.5f ? 1.0f : 0.5f);
+        if (expert)
         {
             set (bandLink0 + b, clamp01 (s.at (base + 19)));
             set (bandLinkMode0 + b, s.at (base + 20) >= 0.5f ? 1.0f : 0.0f);
             set (bandScFree0 + b, s.at (base + 15) >= 0.5f ? 1.0f : 0.0f);
             set (bandScLow0 + b, scFilterValue (std::pow (2.0, (double) s.at (base + 16))));
             set (bandScHigh0 + b, scFilterValue (std::pow (2.0, (double) s.at (base + 17))));
-            if (s.at (base + 18) >= 0.5f)
-                set (Global::scExternal, 1.0f);
         }
-        if (b == 0)
-        {
-            // the slope: the steeper of the band's sides, to our nearest
-            const auto dbOct = 6.0 + 42.0 * std::max (s.at (base + 2), s.at (base + 4));
-            set (Global::slope, dbOct < 18.0 ? 0.0f : (dbOct < 36.0 ? 0.5f : 1.0f));
-        }
-    }
-    // round 147: each crossover's own slope — the band below's high slope, or the band above's low slope (gaps)
-    for (int k = 0; k + 1 < std::min (nb, nseg); ++k)
-    {
-        const auto& lo = segs[(std::size_t) k];
-        const auto& hi = segs[(std::size_t) (k + 1)];
-        const auto norm = lo.ref >= 0 ? s.at ((std::size_t) (22 * lo.ref + 4)) : (hi.ref >= 0 ? s.at ((std::size_t) (22 * hi.ref + 2)) : -1.0f);
-        if (norm < 0.0f)
-            continue;
-        const auto dbOct = 6.0 + 42.0 * std::clamp ((double) norm, 0.0, 1.0);
-        set (xoverSlope0 + k, crossoverSlopeValue (dbOct < 18.0 ? 12 : (dbOct < 36.0 ? 24 : 48)));
     }
     set (Global::lookahead, s.at (141) >= 0.5f ? linValue (la, 0.0, 20.0) : 0.0f);
     set (Global::mix, clamp01 (s.at (133)));
@@ -443,7 +389,8 @@ int fromProG (const State& s, EffectSlot& slot)
 // layout (FFBS v1, 951 values): 0 input gain dB, 2 output gain dB, 5 mix %, 6 band count, band b at 7 + 17b:
 // 2 dynamics, 3 style, 4 drive (norm), 6 … 9 bass / mid / treble / presence dB, 10 mix %, 11 level, 13 enabled,
 // 15 crossover (log2 Hz, the band's upper edge), 16 crossover slope (6, 12, 24, 36, 48); round 147: 5 drive pan,
-// 12 band pan (−1 … +1), 695 the channel mode (0 left / right, 1 mid / side)
+// 12 band pan (−1 … +1), 695 the channel mode (0 left / right, 1 mid / side); round 150: 1 / 3 input / output pan
+// (−1 … +1), six bands, the style index → Ember's measured character
 int fromSaturn2 (const State& s, EffectSlot& slot)
 {
     if (slot.kind != EffectKind::ember || s.named || s.count != 951 || ! finiteAll (s, 7 + 17 * 6))
@@ -465,19 +412,25 @@ int fromSaturn2 (const State& s, EffectSlot& slot)
         return Style::transistor;
     };
     const int nb = std::clamp (roundIndex (s.at (6)), 1, 6);
-    const int ours = std::min (nb, maxBands);
-    set (bands, (float) (ours - 1) / 3.0f);
+    const int ours = std::min (nb, maxBands); // round 150: all six
+    {
+        const auto [bv, mv] = bandCountValues (ours);
+        set (bands, bv);
+        set (bandsMore, mv);
+    }
     for (int b = 0; b < ours; ++b)
     {
         const auto base = (std::size_t) (7 + 17 * b);
         set (bandParam (b, 0), (float) (int) ourStyle (roundIndex (s.at (base + 3))) / 3.0f);
+        // round 150: the measured character of their style k (character k + 1, REA_rodada150b)
+        set (characterParam (b), (float) (std::clamp (roundIndex (s.at (base + 3)), 0, characters - 1) + 1) / (float) characters);
         // drive 0 … 100 % → 0 … +30 dB of ours (their 50 % already saturates a −6 dBFS tone hard)
         set (bandParam (b, 1), clamp01 (30.0 * std::clamp ((double) s.at (base + 4), 0.0, 1.0) / 36.0));
         set (bandParam (b, 2), clamp01 (s.at (base + 10) / 100.0));
         const auto enabled = s.at (base + 13) >= 0.5f;
         set (bandParam (b, 3), enabled ? linValue (levelDb (s.at (base + 11)), -18.0, 18.0) : 0.0f);
         if (b < ours - 1)
-            set (xover1 + b, crossoverValue (std::pow (2.0, (double) s.at (base + 15))));
+            set (crossoverParam (b), crossoverValue (std::pow (2.0, (double) s.at (base + 15))));
         // round 128 (Ember's per-band controls): feedback amount (%) and frequency (Hz) at 0 / 1, dynamics at 2, tone
         // bass / mid / treble / presence (dB) at 6 … 9, state (normal, solo, mute, solo-mute) at 14. Offsets 0, 1 and
         // 14 follow the order of the plug-in's own VST3 parameter list (17 per band) [model]; Ember's tone stages are
@@ -506,6 +459,9 @@ int fromSaturn2 (const State& s, EffectSlot& slot)
     set (output, linValue (s.at (2), -18.0, 18.0));
     set (autoGain, 1.0f); // Saturn compensates its level as the drive rises (§4)
     set (channelMode, s.at (695) >= 0.5f ? 1.0f : 0.0f); // round 147: the channel mode (0 left / right, 1 mid / side)
+    // round 150 (read back black-box: the trial's state after setting them): 1 input pan, 3 output pan, −1 … +1
+    set (inputPan, (float) (0.5 + 0.5 * std::clamp ((double) s.at (1), -1.0, 1.0)));
+    set (outputPan, (float) (0.5 + 0.5 * std::clamp ((double) s.at (3), -1.0, 1.0)));
     return n;
 }
 
@@ -561,8 +517,48 @@ int fromProQ4 (const State& s, EffectSlot& slot)
     return n;
 }
 
+// ---------------------------------------------------------------- Pro-DS -> Hush De-esser
+// layout (FabF v2, 20 values = the plug-in's 20 parameters, in their own units; [EXEC] read through the official trial's
+// parameter API, round 148): 0 mode (0 single vocal, 1 allround), 1 threshold (norm: -60 + 60 v dB), 2 range dB,
+// 3 band processing (0 wide band, 1 split band), 4 stereo link, 5 link mode (0 mid, 1 side), 6 look-ahead ms,
+// 7 look-ahead enabled, 8 audition triggering, 9 side-chain input, 10 / 11 high-pass / low-pass (norm: 2000 x 10^v Hz),
+// 12 audition side chain, 13 MIDI, 14 oversampling, 15 / 16 input level / pan, 17 / 18 output level / pan, 19 bypass.
+// Single Vocal runs Hush's measured vocal voicing (core/VoiceMatch.h vocalds, fitted to her two states); Allround
+// keeps Hush's own engine in its allround mode.
+int fromProDS (const State& s, EffectSlot& slot)
+{
+    if (slot.kind != EffectKind::hushDeEsser || ! s.named || s.count != 20 || ! finiteAll (s, 20))
+        return 0;
+    using namespace mixsuite::hush;
+    auto& p = slot.params;
+    const bool allroundMode = s.at (0) >= 0.5f;
+    p[vocalVoicing] = allroundMode ? 0.0f : 1.0f;
+    p[voicing] = 0.0f;
+    p[allround] = allroundMode ? 1.0f : 0.0f;
+    p[threshold] = clamp01 (s.at (1));
+    p[range] = linValue (s.at (2), 0.0, 24.0);
+    p[mode] = s.at (3) >= 0.5f ? 0.0f : 1.0f; // wide band = Hush's "wideband" mode
+    p[linkMid] = s.at (5) < 0.5f ? 1.0f : 0.0f;
+    p[stereoLink] = 1.0f;
+    p[lookaheadTime] = lookaheadTimeValue (std::clamp ((double) s.at (6), 0.0, 15.0));
+    p[lookahead] = s.at (7) >= 0.5f ? 1.0f : 0.0f;
+    p[listen] = s.at (8) >= 0.5f ? 1.0f : 0.0f;
+    p[external] = s.at (9) >= 0.5f ? 1.0f : 0.0f;
+    const auto hpHz = 2000.0 * std::pow (10.0, std::clamp ((double) s.at (10), 0.0, 1.0));
+    const auto lpHz = 2000.0 * std::pow (10.0, std::clamp ((double) s.at (11), 0.0, 1.0));
+    p[frequency] = (float) std::clamp (std::log (std::clamp (hpHz, 2000.0, 16000.0) / 2000.0) / std::log (8.0), 0.0, 1.0);
+    p[lowPass] = lpHz >= 19999.0 ? 1.0f : (float) std::clamp (std::log (lpHz / 2000.0) / std::log (10.0), 0.0, 0.998);
+    if (std::abs (s.at (17)) <= 12.0f)
+        p[output] = linValue (s.at (17), -12.0, 12.0);
+    if (s.at (19) >= 0.5f)
+        slot.enabled = false;
+    return 20;
+}
+
 Translator translatorNamed (std::string_view name)
 {
+    if (name == "pro-ds")
+        return fromProDS;
     if (name == "pro-q4")
         return fromProQ4;
     if (name == "pro-c3")
