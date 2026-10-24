@@ -653,6 +653,20 @@ std::vector<int> selectStacked (const Pattern& pattern, const std::vector<int>& 
     return out;
 }
 
+const char* generalMidiDrumName (int key) noexcept
+{
+    // the General MIDI 1 percussion key map (a public standard)
+    static const char* names[] = { "Acoustic Bass Drum", "Bass Drum 1", "Side Stick", "Acoustic Snare", "Hand Clap", "Electric Snare",
+                                   "Low Floor Tom", "Closed Hi-Hat", "High Floor Tom", "Pedal Hi-Hat", "Low Tom", "Open Hi-Hat",
+                                   "Low-Mid Tom", "Hi-Mid Tom", "Crash Cymbal 1", "High Tom", "Ride Cymbal 1", "Chinese Cymbal",
+                                   "Ride Bell", "Tambourine", "Splash Cymbal", "Cowbell", "Crash Cymbal 2", "Vibraslap",
+                                   "Ride Cymbal 2", "Hi Bongo", "Low Bongo", "Mute Hi Conga", "Open Hi Conga", "Low Conga",
+                                   "High Timbale", "Low Timbale", "High Agogo", "Low Agogo", "Cabasa", "Maracas",
+                                   "Short Whistle", "Long Whistle", "Short Guiro", "Long Guiro", "Claves", "Hi Wood Block",
+                                   "Low Wood Block", "Mute Cuica", "Open Cuica", "Mute Triangle", "Open Triangle" };
+    return key >= 35 && key <= 81 ? names[key - 35] : nullptr;
+}
+
 void setColour (Pattern& pattern, const std::vector<int>& indices, int colour)
 {
     const auto c = std::clamp (colour, 0, noteColourCount - 1);

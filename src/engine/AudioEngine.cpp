@@ -1,4 +1,5 @@
 #include "engine/AudioEngine.h"
+#include "engine/AudioLogger.h"
 
 #include "core/Patcher.h"
 #include "core/ValueMath.h"
@@ -223,9 +224,17 @@ AudioEngine::AudioEngine (bool openAudioDevice)
     startTimerHz (30); // recording and collection of retired snapshots
 }
 
+AudioLogger& AudioEngine::getAudioLogger()
+{
+    if (audioLogger == nullptr)
+        audioLogger = std::make_unique<AudioLogger> (meters.logTap);
+    return *audioLogger;
+}
+
 AudioEngine::~AudioEngine()
 {
     stopTimer();
+    audioLogger.reset(); // closes the log file
 
     {
         const juce::SpinLock::ScopedLockType lock (takeLock);

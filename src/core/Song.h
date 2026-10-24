@@ -9,6 +9,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <map>
 #include <vector>
 #include <utility>
 
@@ -448,6 +449,8 @@ struct ChannelDef
     int group = -1;           // the Channel Rack filter group (index into Song::channelGroups); -1 = none
     PatcherDoc patcher;       // instrument == patcher: its graph (REA_rodada141)
     ChannelMisc misc;         // FL's Misc tab: time shift / gate, echo delay, velocity / key tracking (REA round 146b)
+    // Piano Roll key labels (FL 2026's custom key labels, REA round 153): MIDI key -> the name shown on that key
+    std::map<int, std::string> keyLabels;
 
     bool operator== (const ChannelDef&) const = default;
 };

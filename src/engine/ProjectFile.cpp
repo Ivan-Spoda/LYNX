@@ -763,6 +763,13 @@ juce::var channelToVar (const ChannelDef& c)
         o->setProperty ("group", c.group);
     if (c.swingMix != 1.0f)
         o->setProperty ("swingMix", c.swingMix);
+    if (! c.keyLabels.empty())
+    {
+        auto* labels = new juce::DynamicObject();
+        for (const auto& [key, label] : c.keyLabels)
+            labels->setProperty (juce::String (key), juce::String::fromUTF8 (label.c_str()));
+        o->setProperty ("keyLabels", juce::var (labels));
+    }
     if (c.arp.enabled())
     {
         o->setProperty ("arp", juce::Array<juce::var> { c.arp.direction, c.arp.range, c.arp.stepBeats, c.arp.gate, c.arp.repeat });
@@ -983,6 +990,14 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
         def.group = group;
 
     def.swingMix = juce::jlimit (0.0f, 1.0f, (float) (double) c.getProperty ("swingMix", 1.0));
+    if (auto* labels = c.getProperty ("keyLabels", {}).getDynamicObject())
+        for (const auto& p : labels->getProperties())
+        {
+            const auto key = p.name.toString().getIntValue();
+            const auto label = p.value.toString().trim();
+            if (key >= 0 && key < 128 && label.isNotEmpty())
+                def.keyLabels[key] = label.toStdString();
+        }
 
     if (const auto& arp = c["arp"]; arp.isArray() && arp.size() == 5)
     {

@@ -189,3 +189,17 @@ TEST (rea153_playlist_select_overlapping_and_stacked_clips)
     CHECK ((lynx::clipops::stackedClips (song) == std::vector<int> { 1, 2 }));
     CHECK ((lynx::clipops::mutedClips (song) == std::vector<int> { 3 }));
 }
+
+TEST (rea153_general_midi_drum_names_for_key_labels)
+{
+    using lynx::notetools::generalMidiDrumName;
+    CHECK (generalMidiDrumName (34) == nullptr && generalMidiDrumName (82) == nullptr);
+    CHECK (std::string (generalMidiDrumName (36)) == "Bass Drum 1");
+    CHECK (std::string (generalMidiDrumName (38)) == "Acoustic Snare");
+    CHECK (std::string (generalMidiDrumName (42)) == "Closed Hi-Hat");
+    CHECK (std::string (generalMidiDrumName (49)) == "Crash Cymbal 1");
+    CHECK (std::string (generalMidiDrumName (81)) == "Open Triangle");
+    lynx::ChannelDef a, b;
+    b.keyLabels[36] = "Kick";
+    CHECK (! (a == b)); // labels are part of the channel (undo history, project equality)
+}

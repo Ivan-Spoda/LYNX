@@ -30,6 +30,8 @@
 
 namespace lynx
 {
+class AudioLogger;
+
 // Owns the audio device, the processing graph and the document (Song).
 // Sits between the driver and the AudioProcessorPlayer to advance the transport
 // after each block, so every node sees the same start position.
@@ -54,6 +56,8 @@ public:
     Transport& getTransport() noexcept { return transport; }
     SampleLibrary& getSampleLibrary() noexcept { return samples; }
     MeterBank& getMeters() noexcept { return meters; }
+    // Tools > Audio logger (REA round 153): records everything the Master plays to a WAV in the background.
+    AudioLogger& getAudioLogger();
     PluginHost& getPluginHost() noexcept { return plugins; }
 
     // Third-party plugins from the last imported .flp that were not found among the scanned ones.
@@ -547,6 +551,7 @@ private:
     double takeSampleRate = 44100.0;
     int takeLatency = 0;                           // input + output, in samples
     MeterBank meters;
+    std::unique_ptr<AudioLogger> audioLogger; // after `meters` (it reads meters.logTap): destroyed first
     PluginHost plugins;
     juce::StringArray missingPlugins, matchedPlugins, pluginsWithoutState;
     FlpImportReport importReport;

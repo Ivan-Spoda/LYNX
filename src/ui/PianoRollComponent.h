@@ -202,7 +202,9 @@ private:
     // selected notes
     juce::Label chordLabel;
     void updateChordReadout();
+    void showKeyMenu (int key); // right-click on the keyboard: key labels of the channel
     std::vector<int> chordIntervals() const;
+    bool chordTopDown = false; // the chord stamp puts the clicked key on top (FL 2026's top-down mode)
     bool inScale (int key) const;
     int scaleRoot() const;  // 0..11
     int scaleIndex() const; // index into notetools::scales(), 0 = none

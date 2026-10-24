@@ -1,6 +1,7 @@
 #include "ui/ProjectLoading.h"
 #include "core/LoadTrace.h"
 #include "ui/MainComponent.h"
+#include "engine/AudioLogger.h"
 #include "ui/PluginSkin.h"
 #include "platform/Paths.h"
 #include "ui/SetupWizard.h"
@@ -3875,6 +3876,30 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
             juce::PopupMenu recording;
             addRecordOptions (recording);
             menu.addSubMenu (tr ("Recording"), recording);
+        }
+        {
+            // FL 2026's Audio Logger (REA round 153): everything the Master plays goes to a WAV in the background
+            auto& logger = engine.getAudioLogger();
+            menu.addItem (tr ("Audio logger (record everything the Master plays)"), true, logger.isLogging(), [this] {
+                auto& log = engine.getAudioLogger();
+                if (log.isLogging())
+                {
+                    const auto file = log.currentFile();
+                    const auto seconds = log.secondsWritten();
+                    log.stop();
+                    ui::postHint ({ tr ("Audio logger: saved {0} ({1} s)", { file.getFileName(), juce::String (seconds, 1) }), {}, false, false }, 5000);
+                }
+                else if (! log.start (AudioLogger::defaultFolder(), engine.getTransport().sampleRate.load()))
+                    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Audio logger"),
+                                                            tr ("Could not create a file in {0}", { AudioLogger::defaultFolder().getFullPathName() }));
+                else
+                    ui::postHint ({ tr ("Audio logger: recording the Master to {0}", { log.currentFile().getFileName() }), {}, false, false }, 5000);
+            });
+            menu.addItem (tr ("Show the audio logger's files"), [] {
+                const auto folder = AudioLogger::defaultFolder();
+                folder.createDirectory();
+                folder.startAsProcess();
+            });
         }
         menu.addSubMenu (tr ("Toolbar"), makeToolbarMenu());
         menu.addSeparator();

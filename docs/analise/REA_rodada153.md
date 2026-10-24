@@ -95,14 +95,14 @@ user value / effort: **H** high, **M** medium, **L** low. "153" = done in this r
 | Feature | What it does | LYNX | Priority |
 |---|---|---|---|
 | Chord detection panel (26.1) | names the chord of MIDI / typing keyboard / selected notes | ✅ **153** (Piano Roll toolbar readout, `prtools::detectChord`) | H |
-| Chord stamp top-down / bottom-up (26.1) | the clicked key is the chord's top note | ❌ | M |
-| Custom key labels (26.1) | rename piano roll keys (drum maps) | ❌ | M |
+| Chord stamp top-down / bottom-up (26.1) | the clicked key is the chord's top note | ✅ **153** top-down (Piano Roll … menu); bottom-up = the default stamp | M |
+| Custom key labels (26.1) | rename piano roll keys (drum maps) | ✅ **153** (right-click a key; per channel, saved; General MIDI drum map preset) | M |
 | Stretch snaps by default (26.1) | | ⚠️ | L |
 | Per-clip pan, normalise clip gain (26.1) | | ⚠️ normalise; no clip pan | M |
 | Collapse / expand all groups (26.1) | | ⚠️ per group | L |
 | Performance mode markers (26.1) and Performance mode (≤20) | clip launching by columns | ❌ (large) | M |
 | Sort channels by type (26.1) | | ✅ | — |
-| Audio Logger (26.1) | keeps recording the Master output | ❌ | M |
+| Audio Logger (26.1) | keeps recording the Master output | ✅ **153** (Tools menu; `engine/AudioLogger`) | M |
 | FL Cloud backups (26.1) | | ⛔ (online); local backups ✅ | — |
 | Browser inline waveforms (26.1) | | ❌ (preview strip only) | L |
 | MIDI recording follows the tempo map (26.1) | | ✅ (recording in ticks) | — |
@@ -171,8 +171,28 @@ offers: fit the clip to the project tempo (stretch, keep pitch), use it as the p
 BPM (FL 2024's "ignore decimals"). Tests: drum loops at 87 / 100 / 128 / 140 BPM within 0.05 BPM; 8-beat loops at
 93 / 127 / 85.5 exact; silence → none.
 
+### 2.5 Chord stamp top-down [DOC N26] [model]
+Piano Roll … → "Chord stamp: the clicked key is the top note": the stamp's intervals are moved down so the clicked
+(and scale-snapped) key is the chord's highest note; the clicked note leads the drag. Off = the usual stamp, the
+clicked key is the root.
+
+### 2.6 Key labels [DOC N26] [model]
+Right-click a key of the Piano Roll's keyboard: Rename this key… / Remove this key's label / Label the keys with the
+General MIDI drum map (the public GM percussion names, keys 35–81) / Remove all key labels of this channel. Labels
+belong to the channel (`ChannelDef::keyLabels`, saved in `.lynx` as `"keyLabels": {"36": "Kick"}`, part of undo) and
+are drawn on the key instead of the note name. FL keeps label presets globally; LYNX keeps them per channel [model],
+so a drum channel carries its map into every project it is cloned or saved with.
+
+### 2.7 Audio logger [DOC N26] [model]
+Tools → "Audio logger (record everything the Master plays)": while on, the Master's output (after the master fader)
+goes to `Documents/LYNX/Audio logger/LYNX log <date> <time>.wav` (24-bit stereo at the device rate). The audio
+thread copies each Master block into a lock-free ring (`MeterBank::logTap`, the same `AudioCapture` as the audio
+editor's recording tap; one atomic load per block while off); a low-priority thread empties it into the file ten
+times a second. Turning it off closes the file and the hint bar names it; "Show the audio logger's files" opens the
+folder.
+
 ## 3. Next candidates (by priority)
-M: chord stamp top-down mode; custom key labels; note grouping; Audio Logger; per-clip pan; external MIDI clock;
+M: note grouping; per-clip pan; external MIDI clock;
 per-track low-latency monitoring; Patcherize; browser tags; batch render of selected mixer tracks; performance mode.
 ⛔ stays out: FL Cloud (sounds, mastering, backups, Loop Starter content), Gopher and the AI tools; stem separation
 only with a bundled open model (Demucs, MIT) — a separate decision because of the download size.

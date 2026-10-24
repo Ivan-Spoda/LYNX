@@ -175,6 +175,9 @@ std::vector<int> selectOverlapping (const Pattern& pattern, const std::vector<in
 // Notes that lie completely inside another note of the same key (exact duplicates: all but the first), so deleting
 // them leaves what is heard unchanged.
 std::vector<int> selectStacked (const Pattern& pattern, const std::vector<int>& indices);
+// The General MIDI percussion names (keys 35..81; nullptr elsewhere), for the Piano Roll's key labels.
+const char* generalMidiDrumName (int key) noexcept;
+
 // Puts the notes into colour group `colour` (0..15).
 void setColour (Pattern& pattern, const std::vector<int>& indices, int colour);
 } // namespace lynx::notetools
