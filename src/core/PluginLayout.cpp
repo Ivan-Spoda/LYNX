@@ -1591,7 +1591,7 @@ Layout ridgeStrip()
     v.push_back (dial (54, 50, 36, "HPF", TR_NOOP ("High-pass")));
     v.push_back (dial (140, 50, 36, "LPF", TR_NOOP ("Low-pass")));
     v.push_back (toggle (186, 40, 88, 20, "Filters to SC", TR_NOOP ("To sidechain")));
-    v.push_back (toggle (186, 66, 88, 20, "Filter split", TR_NOOP ("Split"))); // round 123: E voicing, filters before dynamics
+    v.push_back (when (toggle (186, 66, 88, 20, "Filter split", TR_NOOP ("Split")), "4K voicing", 0.0f, 0.5f)); // round 123: E voicing, filters before dynamics
     const char* names[] = { TR_NOOP ("HF"), TR_NOOP ("HMF"), TR_NOOP ("LMF"), TR_NOOP ("LF") };
     const char* gains[] = { "HF gain", "HMF gain", "LMF gain", "LF gain" };
     const char* freqs[] = { "HF freq.", "HMF freq.", "LMF freq.", "LF freq." };
@@ -1609,7 +1609,14 @@ Layout ridgeStrip()
     }
     v.push_back (section (4, 520, 276, 192, TR_NOOP ("Equalizer")));
     v.push_back (display (10, 540, 264, 118, "ridgeeq"));
-    v.push_back (tabs (10, 664, 150, 20, "EQ curve", TR_NOOP ("Brown|Black")));
+    v.push_back (when (tabs (10, 664, 150, 20, "EQ curve", TR_NOOP ("Brown|Black")), "4K voicing", 0.0f, 0.5f));
+    // round 148: the 4K voicing (the console measured on the SSL 4K E trial) — its three EQ colours, the mic pre and
+    // its gain, the make-up offset; the rest of the panel drives it with the console's own scales
+    v.push_back (when (tabs (10, 664, 150, 20, "EQ colour", TR_NOOP ("Brown|Black|Orange")), "4K voicing", 0.5f, 1.0f));
+    v.push_back (toggle (170, 688, 104, 20, "4K voicing", TR_NOOP ("4K console")));
+    v.push_back (when (dial (432, 52, 24, "Make-up offset", TR_NOOP ("Offset"), bipolar), "4K voicing", 0.5f, 1.0f));
+    v.push_back (when (toggle (384, 540, 70, 20, "Mic pre", TR_NOOP ("Mic pre")), "4K voicing", 0.5f, 1.0f));
+    v.push_back (when (dial (504, 548, 24, "Mic gain", TR_NOOP ("Mic")), "4K voicing", 0.5f, 1.0f));
     v.push_back (toggle (170, 664, 104, 20, "EQ on", TR_NOOP ("EQ in")));
     // round 123: the voicing — Ridge's own engine, or the measured E-type console (substitutes start there)
     v.push_back (tabs (10, 688, 150, 20, "Voicing", TR_NOOP ("Classic|E console")));
@@ -1736,6 +1743,8 @@ Layout hushDeEsser()
     // round 135: oversampling (Hush's own voicing)
     v.push_back (label (12, 286, 90, 20, TR_NOOP ("Oversampling")));
     v.push_back (tabs (104, 286, 176, 20, "Oversampling", TR_NOOP ("Off|2x|4x|8x")));
+    // round 148: the measured single-vocal detector (the role: a vocal de-esser's Single Vocal mode)
+    v.push_back (toggle (290, 286, 158, 20, "Vocal voicing", TR_NOOP ("Vocal detector")));
     return l;
 }
 

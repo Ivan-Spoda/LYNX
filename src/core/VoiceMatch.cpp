@@ -818,6 +818,126 @@ void DeEsser::process (float* l, float* r, int n, const Settings& s) noexcept
 }
 } // namespace deesser
 
+// ================================================================== round 148: single-vocal de-esser
+// [EXEC] FabFilter Pro-DS, Single Vocal, wide band, her two states (threshold -43.7 / -36 dB, range 6 dB, look-ahead
+// 12 ms, band 7 … 14 kHz): latency 720 samples at 48 kHz (15 ms); the static law GR = range (L - thr + 4.1) /
+// (0.1 - thr) from thr + 3.9 dB on, hysteresis down to thr - 4.1 dB; the band 4th-order high-pass x 4th-order low-pass;
+// pink noise never triggers it, a steady bright tone does unless a lower tone was already there. The relative test,
+// the detector and gain times and the look-ahead were fitted to its gain envelopes on 8 kHz steps and her three takes
+// (tmp/vm124x/pds: pds_fit.py, proto_ds.cpp; 0.06–0.19 dB RMS over all 2 ms frames of her takes). Times in ms.
+namespace vocalds
+{
+namespace
+{
+constexpr double detAttackMs = 0.01, detReleaseMs = 1.71, gainAttackMs = 2.95, gainReleaseMs = 1.765;
+constexpr double extraAheadMs = 0.08, ratioMs = 0.2683, openRatioDb = -7.054, closeRatioDb = -2.263;
+constexpr double openDb = 3.9, closeDb = -4.1;
+double pole (double ms, double sr) noexcept { return ms <= 0.0 ? 0.0 : std::exp (-1.0 / (ms * 0.001 * sr)); }
+} // namespace
+
+void DeEsser::prepare (double sampleRate) noexcept
+{
+    sr = sampleRate > 0.0 ? sampleRate : 48000.0;
+    latency = std::clamp ((int) std::lround (0.015 * sr), 1, ring / 2);
+    designedHp = designedLp = -1.0;
+    reset();
+}
+
+void DeEsser::reset() noexcept
+{
+    for (auto* b : { &hp1, &hp2, &lp1, &lp2, &low1, &low2, &split1, &split2 })
+        b->reset();
+    eh = qh = ql = sm = 0.0;
+    open = false;
+    dl.fill (0.0f);
+    dr.fill (0.0f);
+    level.fill (-300.0f);
+    ratio.fill (-300.0f);
+    pos = 0;
+    last = 0.0f;
+}
+
+void DeEsser::design (const Settings& s) noexcept
+{
+    const double h = std::clamp (s.hpHz, 1000.0, sr * 0.45), lo = std::clamp (s.lpHz, h, sr * 0.45);
+    if (h == designedHp && lo == designedLp)
+        return;
+    designedHp = h;
+    designedLp = lo;
+    // 4th-order Butterworth sections (Q 0.5412 / 1.3066)
+    hp1.filter (sr, 1, h, 0.54119610); hp2.filter (sr, 1, h, 1.30656296);
+    lp1.filter (sr, 0, lo, 0.54119610); lp2.filter (sr, 0, lo, 1.30656296);
+    low1.filter (sr, 0, h, 0.54119610); low2.filter (sr, 0, h, 1.30656296);
+    split1.filter (sr, 0, h, 0.70710678); split2 = split1;
+}
+
+void DeEsser::process (float* l, float* r, int n, const Settings& s) noexcept
+{
+    design (s);
+    const double ca = pole (detAttackMs, sr), cr = pole (detReleaseMs, sr), ga = pole (gainAttackMs, sr), gr = pole (gainReleaseMs, sr);
+    const double cq = pole (ratioMs, sr);
+    const double thr = std::clamp (s.thresholdDb, -60.0, 0.0), range = std::clamp (s.rangeDb, 0.0, 24.0);
+    const int ahead = std::clamp ((int) std::lround ((s.lookahead ? std::clamp (s.lookaheadMs, 0.0, 15.0) + extraAheadMs : 0.0) * 0.001 * sr), 0, latency);
+    constexpr std::int64_t m = ring - 1;
+    float maxGr = 0.0f, maxDet = -300.0f;
+    for (int i = 0; i < n; ++i)
+    {
+        const float a = l[i], b = r[i];
+        const double x = 0.5 * ((double) a + (double) b); // the mid signal (her states: stereo link 100 %, mid)
+        const double h = lp2.process (lp1.process (hp2.process (hp1.process ((float) x, 0), 0), 0), 0);
+        const double lw = low2.process (low1.process ((float) x, 0), 0);
+        const double ph = h * h, pl = lw * lw;
+        eh = ph > eh ? ca * eh + (1.0 - ca) * ph : cr * eh + (1.0 - cr) * ph;
+        qh = cq * qh + (1.0 - cq) * ph;
+        ql = cq * ql + (1.0 - cq) * pl;
+        const auto w = (std::size_t) (pos & m);
+        level[w] = (float) (10.0 * std::log10 (2.0 * eh + 1e-30));
+        ratio[w] = (float) (10.0 * std::log10 ((qh + 1e-30) / (ql + 1e-30)));
+        dl[w] = a;
+        dr[w] = b;
+        // the sample played now entered `latency` samples ago; its gain looks `ahead` samples past it
+        const auto now = pos - latency;
+        double gainDb = 0.0;
+        if (now >= 0)
+        {
+            const double la = level[(std::size_t) ((now + ahead) & m)], rr = ratio[(std::size_t) (now & m)];
+            if (! open && la >= thr + openDb && rr >= openRatioDb)
+                open = true;
+            else if (open && (la < thr + closeDb || rr < closeRatioDb))
+                open = false;
+            const double t = open ? std::clamp (range * (la - thr + 4.1) / (0.1 - thr), 0.0, range) : 0.0;
+            sm = t > sm ? ga * sm + (1.0 - ga) * t : gr * sm + (1.0 - gr) * t;
+            gainDb = -sm;
+            maxDet = std::max (maxDet, (float) la);
+        }
+        const auto rd = (std::size_t) (std::max<std::int64_t> (now, 0) & m);
+        const float da = now >= 0 ? dl[rd] : 0.0f, db = now >= 0 ? dr[rd] : 0.0f;
+        const auto g = (float) std::pow (10.0, gainDb / 20.0);
+        if (s.listen)
+        {
+            l[i] = lp2.process (lp1.process (hp2.process (hp1.process (da, 1), 1), 1), 1); // (the band, on the spare state)
+            r[i] = l[i];
+        }
+        else if (s.wideband)
+        {
+            l[i] = da * g;
+            r[i] = db * g;
+        }
+        else
+        {
+            // split [model]: only the part above the high-pass is turned down (complementary 2nd-order split)
+            const auto la2 = split1.process (da, 0), lb2 = split2.process (db, 1);
+            l[i] = la2 + (da - la2) * g;
+            r[i] = lb2 + (db - lb2) * g;
+        }
+        maxGr = std::max (maxGr, (float) sm);
+        ++pos;
+    }
+    last = maxGr;
+    lastDet = maxDet;
+}
+} // namespace vocalds
+
 // ================================================================== electro-optical leveler
 // [EXEC] Fitted on the official CLA-2A trial (tools/fxmeasure/py/vm123: sine stairs at 100 Hz … 10 kHz, 1 kHz bursts,
 // a 1 kHz tone with a quiet pink probe at five levels, pink noise, her takes; dynfit "cla5"). A feedback leveler: the

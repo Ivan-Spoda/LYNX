@@ -4138,3 +4138,8 @@ countries: br
 "Slope 5" = "Inclinação 5"
 "Auto make-up" = "Make-up automático"
 "Analog" = "Analógico"
+"Brown|Black|Orange" = "Marrom|Preto|Laranja"
+"4K console" = "Console 4K"
+"Mic pre" = "Pré de microfone"
+"Mic" = "Mic"
+"Vocal detector" = "Detector vocal"

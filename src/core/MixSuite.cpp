@@ -829,19 +829,22 @@ double lookaheadTimeMs (float v) noexcept { return std::round (lin (v, 0.0, 15.0
 float lookaheadTimeValue (double ms) noexcept { return (float) std::clamp (ms / 15.0, 0.0, 1.0); }
 double classicThresholdDb (float v) noexcept { return lin (v, -80.0, 0.0); }
 bool classic (const EffectParams& p) noexcept { return on (p[voicing]); }
+bool vocal (const EffectParams& p) noexcept { return on (p[vocalVoicing]) && ! on (p[voicing]); }
 
 namespace
 {
 class DeEsser final : public Effect
 {
 public:
-    explicit DeEsser (const EffectParams* p = nullptr) : primedMs (p != nullptr ? lookaheadTimeMs ((*p)[lookaheadTime]) : lookaheadMs()) {}
+    explicit DeEsser (const EffectParams* p = nullptr)
+        : primedMs (p != nullptr ? lookaheadTimeMs ((*p)[lookaheadTime]) : lookaheadMs()), vocalOn (p != nullptr && vocal (*p)) {}
 
     void prepare (double rate) noexcept override
     {
         sr = rate;
         setDelay (primedMs);
         classicEngine.prepare (rate);
+        vocalEngine.prepare (rate);
         reset();
     }
 
@@ -850,6 +853,7 @@ public:
         delay.reset();
         scDelay.reset();
         classicEngine.reset();
+        vocalEngine.reset();
         detect.reset();
         detectLp.reset();
         listenF.reset();
@@ -868,7 +872,12 @@ public:
         for (auto& o : osGain) o.reset();
     }
 
-    int latencySamples() const noexcept override { return delay.len + (osFactor > 1 ? Oversampler::latency() : 0); }
+    int latencySamples() const noexcept override
+    {
+        if (vocalOn)
+            return vocalEngine.latencySamples();
+        return delay.len + (osFactor > 1 ? Oversampler::latency() : 0);
+    }
     float controlOutput (int k) const noexcept override { return meters.read (k); }
     void setSidechain (const float* l, const float* r) noexcept override { scL = l; scR = r; }
 
@@ -912,6 +921,26 @@ private:
                 for (auto& o : *bank) { o.setFactor (std::max (2, factor)); o.reset(); }
         }
         const bool over = osFactor > 1;
+        vocalOn = vocal (p);
+        if (vocalOn) // round 148: the measured single-vocal de-esser
+        {
+            vmatch::vocalds::Settings v;
+            v.thresholdDb = thresholdDb (p[threshold]);
+            v.rangeDb = rangeDb (p[hush::range]);
+            v.hpHz = hz (p[frequency]);
+            v.lpHz = p[lowPass] < 0.999f ? lowPassHz (p[lowPass]) : 20000.0;
+            v.lookahead = on (p[lookahead]);
+            v.lookaheadMs = lookaheadTimeMs (p[lookaheadTime]);
+            v.wideband = on (p[mode]);
+            v.listen = on (p[listen]);
+            vocalEngine.process (l, r, n, v);
+            const auto out = (float) dbToGain (lin (p[output], -12.0, 12.0));
+            for (int i = 0; i < n; ++i) { l[i] *= out; r[i] *= out; }
+            meters.set (vocalEngine.reductionDb(), 0.0f, inPeak, Meters::peak (l, r, n));
+            meters.setDetector (vocalEngine.detectorDb());
+            scL = scR = nullptr;
+            return;
+        }
         if (classic (p))
         {
             // the measured classic de-esser has no look-ahead; the fixed latency Hush reports is kept as a plain delay
@@ -1137,6 +1166,8 @@ private:
     double primedMs = 2.0, delayMs = 2.0;
     Delay2<4096> delay, scDelay;
     vmatch::deesser::DeEsser classicEngine;
+    vmatch::vocalds::DeEsser vocalEngine;
+    bool vocalOn = false;
     Biquad detect, detectLp, listenF, listenLp, split, bandLp, bandLp2, topHp, topHp2;
     double env = 0.0, gr = 0.0, fullEnv = 0.0;
     double envCh[2] {}, grCh[2] {};
@@ -2148,7 +2179,8 @@ const EffectInfo& hushInfo()
                                      { "Allround", 0.0f }, { "Low-pass freq.", 1.0f }, { "Lookahead time", 2.0f / 15.0f },
                                      { "Stereo link", 1.0f }, { "Link mid", 0.0f }, { "External SC", 0.0f }, { "Input", 0.5f },
                                      { "Display", 1.0f },
-                                     { "Oversampling", 0.0f } } }; // round 135
+                                     { "Oversampling", 0.0f }, // round 135
+                                     { "Vocal voicing", 0.0f } } }; // round 148
     return info;
 }
 

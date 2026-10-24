@@ -612,6 +612,8 @@ product = FabFilter Pro-DS
 vendor = FabFilter
 lynx = Hush De-esser
 names = FabFilter Pro-DS; Pro-DS
+# round 148: her two states (Single Vocal, wide band) -> Hush's measured vocal voicing (REA_rodada148 §3)
+translate = pro-ds
 
 [harrison-deesser]
 product = Harrison De-Esser

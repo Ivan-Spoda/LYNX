@@ -124,6 +124,45 @@ private:
 };
 } // namespace deesser
 
+// ---- round 148: a single-vocal de-esser (Hush De-esser, "Vocal voicing"), fitted black-box on the official FabFilter
+// Pro-DS trial at her two states (REA_rodada124_extras §5, REA_rodada148 §3): the band between the high-pass and the
+// low-pass (4th-order each) feeds a power detector, a second detector compares that band with the signal below it, and
+// the reduction only switches on for a band that is loud AND stands out (a vocal sibilant, not a steady bright tone);
+// the gain follows range x (level - threshold + 4.1) / (0.1 - threshold), looked ahead; out = in (delayed) x gain
+namespace vocalds
+{
+struct Settings
+{
+    double thresholdDb = -20.0, rangeDb = 6.0; // threshold -60 .. 0 dB, range 0 .. 24 dB
+    double hpHz = 7000.0, lpHz = 14000.0;      // the detection band
+    double lookaheadMs = 12.0;                 // 0 .. 15 ms (within the fixed 15 ms latency)
+    bool lookahead = true, wideband = true, listen = false;
+};
+
+class DeEsser
+{
+public:
+    void prepare (double sampleRate) noexcept;
+    void reset() noexcept;
+    void process (float* l, float* r, int n, const Settings& s) noexcept;
+    int latencySamples() const noexcept { return latency; }
+    float reductionDb() const noexcept { return last; }
+    float detectorDb() const noexcept { return lastDet; }
+
+private:
+    void design (const Settings& s) noexcept;
+    static constexpr int ring = 4096;
+    double sr = 48000.0, designedHp = -1.0, designedLp = -1.0;
+    int latency = 720;
+    Biquad hp1, hp2, lp1, lp2, low1, low2, split1, split2;
+    double eh = 0.0, qh = 0.0, ql = 0.0, sm = 0.0;
+    bool open = false;
+    std::array<float, ring> dl {}, dr {}, level {}, ratio {};
+    std::int64_t pos = 0;
+    float last = 0.0f, lastDet = -120.0f;
+};
+} // namespace vocalds
+
 // ---- electro-optical leveler (Glow Leveler, voicing "Opto classic") ----
 namespace opto
 {

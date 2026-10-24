@@ -71,6 +71,101 @@ responses, vibrato, flex-tune and humanize campaigns of round 138 are unchanged 
 Test: `tests/Vox148Tests.inc` (110 / 220 Hz held notes 20 dB above white noise at retune 0 and 100 ms: the output's
 wobble stays at the dry signal's analysis floor, < 1.2 c).
 
+## 2. SSL 4K E (Complete Access) measured; Ridge Strip's 4K voicing [EXEC]
+
+Her corpus has no 4K state ([DATA] the 935 copied projects: "SSLChannel" = the Waves E-Channel, 2193 slots, already
+Ridge's E voicing; "SSL Native Vocalstrip 2", 48 slots, round 145; no 4K B / E / G) — so this is for everyone else's
+projects that used the 4K E, and for Ridge's own users. The trial (v1.7.1, 54 VST3 parameters with their own texts,
+`D:\lynx-work\vox145\k4e_params.txt`) was hosted in `uiview.exe`; raw data `D:\lynx-work\vox148\k4\` (`in\` signals,
+`out\<campaign>\` renders + read-backs, `states\<campaign>\` the trial's own saved state for every configuration,
+`out\lynx_<campaign>\` the same through LYNX from those states, `null_<campaign>.tsv`), scripts `tmp/vox148/k4`
+(`k4camp.py` campaigns, `k4states.py`, `k4eq.py` / `k4fit.py` / `k4fit2.py` / `k4tables.py` EQ, `k4dyn.py` /
+`k4time.py` / `k4dynfit.py` / `k4gendyn.py` / `k4gatefit.py` dynamics, `k4mic.py` mic pre, `k4lynx.py` comparison,
+`c/k4check.cpp`). Campaigns: eq (500: three colours × every band at 8 gains × 4–5 frequencies × 5 Qs, the bell types,
+filters), dyn / dyn2 (210: compressor stairs at 7 thresholds × 5 ratios with and without auto make-up, make-up
+offsets, 1 kHz bursts at 6 settings × fast / slow × 4–8 releases, mix, expander / gate stairs and bursts), drive (32:
+VCA, mic pre 0 … 50 dB, trims, fader, her takes), vcaprobe (15: the VCA on pink / white noise at four levels).
+
+### 2.1 What the 4K E does
+- **EQ**: every band is one second-order section — fitted per render to 0.03 dB rms (median; 90 % under 0.15 dB) with
+  the shelves as bilinear sections at 48 kHz and the bells following the analog prototype's magnitude (a bilinear
+  bell is 0.2–0.4 dB off near Nyquist). The dial's printed gain is not the gain: at "+10" the LMF peaks at +7.8 dB
+  (Brown), +8.4 dB (Black), +11.5 dB (Orange), at "+15" all three reach ±15–16 dB; the bells' Q narrows with the gain
+  (Black most: the "proportional Q" colour), Black's LMF sits at 0.81 × the dial, Brown's at 1.04 ×, Orange 1.0 ×;
+  the shelves' corner moves with the gain (LF "+15" at 100 Hz: 2.3 × (Brown), 3.7 × (Black), 3.5 × (Orange) the dial
+  in the shelf's own midpoint). The bell types (LF / HF Bell) are wide bells (Q 0.27–1.0 by colour).
+- **Filters**: high-pass 12 dB/oct (Q 0.75), its corner 23.7 / 38.1 / 70.2 / 135 / 321 Hz at the dial's 20 / 50 /
+  100 / 200 / 350; low-pass 12 dB/oct (Q 0.72), 3.3 / 6.8 / 11.9 kHz at 3 / 5 / 8.44, almost nothing at 12 and above.
+- **Compressor**: a feedback design like round 123's E-Channel — the threshold dial moves the curve by 0.83 dB per
+  dB, soft knee 1.5–4.7 dB, the steady ratio a little under the dial's; slow attack 100–900 ms depending on the setting
+  (deeper settings slower), fast ≈ instant; release ≈ the knob for short settings with a two-part tail for long ones;
+  the mix blends the reduction **in dB** (50 % = half the dB at every level); the automatic make-up is the gain a
+  signal far below the threshold gets (+0.4 … +9.4 dB over the grid), its offset moves it by 0.19–0.31 dB per dB.
+- **Expander / gate**: threshold 23.3 dB under the console scale, the expander 1.13 dB of reduction per dB, the range
+  dial's 5 / 10 / 20 / 40 = 7.8 / 17.1 / 26.7 / 47.3 dB deep, opening within 0.5 ms, closing over 117 ms × (release /
+  0.1 s)^0.58 (gate) / 21 ms × (…)^0.6 (expander).
+- **Mic pre** (Pre In + Mic): level-compensated drive, 0.744 dB of drive per Mic dB into a curve that first expands
+  slightly (+0.5 … 0.8 dB) then clips at +11.8 dB over full scale (H3 → −10 dBc, square-like), the input trim *after*
+  it; Pre In alone −0.27 dB and −104 dBFS of hiss.
+- **Analogue VCA**: level unchanged, H2 −77 … −57 dBc and H3 −107 … −66 dBc for 1 kHz at −30 … −6 dBFS, −106.6 dBFS of
+  hiss, and a 2nd-order **~3 Hz coupling high-pass** (found on pink noise: its 0.25-s levels moved by up to 4.8 dB
+  while sines and white noise did not change — level-independent, 25° of phase at 10 Hz).
+
+### 2.2 LYNX: Ridge Strip's 4K voicing
+`core/VoiceMatch.h/.cpp` — the E-type channel model gets a `model` (1 = 4K) with its own EQ tables
+(`Console4KTables.inc`), filters, compressor / gate laws (`Console4KDynamics.inc`, round 123's feedback model with the
+fitted grid), mic pre, VCA (colour, hiss, coupling high-pass), compressor mix and auto make-up offset. Ridge Strip gets
+5 appended parameters (4K voicing, EQ colour, Mic pre, Mic gain, Make-up offset; off = the old sound) and reuses the
+E voicing's controls in the console's units plus Auto make-up, Analog (= Analogue VCA) and Comp. mix; the panel shows
+a "4K console" switch, the three colours, Offset, Mic pre and Mic while it is on; the EQ display draws the console's
+own curve (also for the E voicing now). `translate = ssl-vocalstrip-2` reads an SSL 4K E state too (XML, the A or B
+setting that plays): every control except pan, width, the external key and the side-chain routings.
+
+LYNX vs the trial, both from the trial's own saved state (null after the first 0.25 s, `null_*.tsv`):
+
+| Test | null (median / 90 %) |
+|---|---|
+| EQ impulses, 500 settings | −42.6 / −19 dB (the worst: ±15 dB cuts / boosts above 12 kHz, 0.3–2 dB at 20 kHz) |
+| VCA, mic pre, trims, fader (32) | −46.4 / −19 dB (mic pre −27 … −37, VCA on noise −50 … −53, her takes VCA only −48 … −50) |
+| compressor / gate stairs and bursts (210) | −34.6 / −19 dB (gate / expander −33 … −71; compressor at deep settings −12 … −20, 0.5–1.3 dB less reduction) |
+| her takes, compressor + gate + EQ | −15 … −21 dB, level within 0.5–1.2 dB |
+
+The compressor is the open part: round 123's model fits each setting's stairs to 0.1 dB and its bursts to 0.2–1 dB,
+but the fitted attack, release and static trade off against each other (fitted separately they disagree by up to 1 dB
+on the stairs; three joint-fit attempts moved, not removed, the error). Not done: the 4K B and G (other consoles;
+by role only), the external side chain.
+
+## 3. FabFilter in her projects: Pro-DS translated (Pro-Q 4 re-checked) [DATA] [EXEC]
+
+[DATA] FabFilter slots in the 935 copied projects: Pro-Q 4 166 mentions (4 distinct states), Pro-DS 74 (2 states),
+Pro-Q 3 2 (1 state); no Pro-C, Pro-MB or Pro-L — so their stand-ins (Crest, Prism, Apex) carry no residue in her
+projects (their parity is rounds 144 / 147 / 150's).
+- **Pro-Q 4** (Facet EQ, round 124): re-rendered with today's LYNX against the trial's renders of round 124
+  (`D:\lynx-test-archive\vm124x\out\pq_*`): her four states on her three takes null at −108 / −63 / −102 / −84 dB
+  (unchanged since round 124).
+- **Pro-DS** was not translated (round 124 measured it and handed it off; nothing landed): her 74 slots ran Hush at
+  its defaults, **+2.3 … +3.8 dB null** against the trial on her takes (Hush cut 25–29 dB where Pro-DS cut ≤ 3.9 dB;
+  doing nothing at all would have been −41 … −56 dB). Now:
+  - [EXEC] its 20 state values are its 20 VST3 parameters in their own units (read through the trial's parameter
+    API this round: `D:\lynx-work\vox148\pds\st\params.txt`): mode, threshold (−60 + 60 v dB), range dB, band
+    processing, stereo link / mode, look-ahead ms / on, audition, side chain, high-pass / low-pass (2000 × 10^v Hz), …;
+  - Hush De-esser gets a **Vocal voicing** (appended parameter; `core/VoiceMatch.h` `vocalds`): round 124's
+    prototype, fitted on the trial's gain envelopes (8 kHz steps, her takes) — the 7–14 kHz band (4th-order high- and
+    low-pass) into a power detector, a second detector that compares the band with the signal below it so only a band
+    that is loud *and* stands out switches the reduction on (hysteresis 3.9 / −4.1 dB), range × (L − thr + 4.1) /
+    (0.1 − thr), looked ahead by the look-ahead time inside a fixed 15 ms latency (720 samples at 48 kHz, as the
+    trial), wide band = the whole signal × the gain; split band [model]: only the part above the high-pass.
+  - `translate = pro-ds`: Single Vocal → the Vocal voicing, Allround → Hush's own engine in its allround mode.
+
+| her state → take | before (Hush defaults) | now | (doing nothing) | GR frames: rms error / trial max / LYNX max |
+|---|---|---|---|---|
+| −43.7 dB → go / kwe / lu | +3.6 / +3.8 / +2.3 dB | **−51.7 / −56.0 / −49.1 dB** | −44.7 / −53.2 / −41.1 | 0.65–0.92 dB / −2.9 … −3.9 / −1.9 … −3.4 dB |
+| −36.0 dB → go / kwe / lu | +3.6 / +3.8 / +2.3 dB | **−54.1 / −58.3 / −50.4 dB** | −46.1 / −56.0 / −42.5 | 0.53–0.91 dB / −2.1 … −3.4 / −1.2 … −2.9 dB |
+
+(`tmp/vox148/pds/cmp.py`, `pq.py`; LYNX renders `D:\lynx-work\vox148\pds\out`, `pq\out`.) Test
+`pro_ds_translates_onto_hush_vocal_voicing_round148` (her state's values, 720 samples of latency, −5.2 dB on a steady
+8 kHz tone at −10 dBFS, pink noise untouched).
+
 ## Where I stopped
 - Done: §1 (Auto-Tune renders recorded before the trial ends; LYNX Tune's marks).
 - Next: SSL 4K E (Complete Access, until 2026-11-03), FabFilter residue (~11-16), Soundtoys leftovers (11-22).
