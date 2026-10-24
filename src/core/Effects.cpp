@@ -1600,6 +1600,15 @@ public:
             s.phase = std::clamp ((double) p[rb + 9], 0.0, 1.0);
             s.analog = p[rb + 10] < 0.25f ? 0 : (p[rb + 10] < 0.75f ? 1 : 2); // off / analog / hot
             s.outputDb = -24.0 + 48.0 * std::clamp ((double) p[rb + 11], 0.0, 1.0);
+            // round 150: the Tweak page (envelope → rate / offset / width), Feel / Groove, past the speakers (appended)
+            s.rateMod = -3.0 + 6.0 * std::clamp ((double) p[rb + 12], 0.0, 1.0);
+            s.offsetMod = -180.0 + 360.0 * std::clamp ((double) p[rb + 13], 0.0, 1.0);
+            s.widthMod = -180.0 + 360.0 * std::clamp ((double) p[rb + 14], 0.0, 1.0);
+            s.envThresholdDb = -60.0 + 60.0 * std::clamp ((double) p[rb + 15], 0.0, 1.0);
+            s.envRangeDb = 1.0 + 39.0 * std::clamp ((double) p[rb + 16], 0.0, 1.0);
+            s.feel = -0.25 + 0.5 * std::clamp ((double) p[rb + 17], 0.0, 1.0);
+            s.groove = -0.25 + 0.5 * std::clamp ((double) p[rb + 18], 0.0, 1.0);
+            s.beyond = p[rb + 19] >= 0.5f;
             if (! (s == rhythmSet))
             {
                 rhythm.set (s);
@@ -2481,7 +2490,12 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                         { "Voicing", 0.0f }, { "Rhythm rate", 0.4659f /* 0.25 Hz */ }, { "Sync", 0.0f },
                                                         { "Beats", 0.4f /* 1 beat */ }, { "Width", 180.0f / 210.0f }, { "Offset", 0.5f },
                                                         { "Rhythm smoothing", 1.0f }, { "Pattern", 0.0f }, { "Amount", 1.0f }, { "Start phase", 0.0f },
-                                                        { "Rhythm analog", 0.5f }, { "Rhythm output", 0.5f } } };
+                                                        { "Rhythm analog", 0.5f }, { "Rhythm output", 0.5f },
+                                                        // round 150: the Tweak page, Feel / Groove, past the speakers (appended;
+                                                        // a project saved before round 150 keeps the clipped angle)
+                                                        { "Rate mod", 0.5f }, { "Offset mod", 0.5f }, { "Width mod", 0.5f },
+                                                        { "Env threshold", 40.0f / 60.0f }, { "Env range", 10.0f / 39.0f },
+                                                        { "Feel", 0.5f }, { "Groove", 0.5f }, { "Beyond speakers", 1.0f } } };
     static const EffectInfo vocoderInfo { "Vocoder", { { "Bands", 0.4f }, { "Order", 0.5f }, { "Listen", 1.0f }, { "Swap L/R", 0.0f },
                                                        { "Min freq.", 0.0f }, { "Max freq.", 1.0f }, { "Scale", 0.5f }, { "Invert", 0.0f },
                                                        { "Formant", 0.5f }, { "Width", 45.0f / 195.0f }, { "Attack", 10.0f / 990.0f },
@@ -3117,6 +3131,12 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                     case 14: return v > 0.5f ? "8 steps" : "left / right";
                     case 17: return v < 0.25f ? "digital" : (v < 0.75f ? "analog" : "analog (hot)");
                     case 18: std::snprintf (text, sizeof (text), "%+.1f dB", -24.0f + 48.0f * v); break;
+                    case 19: std::snprintf (text, sizeof (text), "%+.2f oct", -3.0f + 6.0f * v); break;
+                    case 20: case 21: std::snprintf (text, sizeof (text), "%+.0f deg", -180.0f + 360.0f * v); break;
+                    case 22: std::snprintf (text, sizeof (text), "%.1f dB", -60.0f + 60.0f * v); break;
+                    case 23: std::snprintf (text, sizeof (text), "%.1f dB", 1.0f + 39.0f * v); break;
+                    case 24: case 25: std::snprintf (text, sizeof (text), "%+.3f", -0.25f + 0.5f * v); break;
+                    case 26: return v >= 0.5f ? "fold" : "clip";
                     default: std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f); break;
                 }
             }
@@ -3306,6 +3326,9 @@ void upgradeLoadedEffectParams (EffectSlot& slot, std::size_t savedCount) noexce
     // round 147: Prism Multiband saved before its measured Dynamic phase engine keeps the round-108 construction
     if (slot.kind == EffectKind::prismMultiband && savedCount <= (std::size_t) dyn::prism::dynamicEngine)
         slot.params[(std::size_t) dyn::prism::dynamicEngine] = 0.0f;
+    // round 150: Auto-pan saved before the Tweak block keeps the Rhythm voicing's clipped angle
+    if (slot.kind == EffectKind::autoPan && savedCount <= (std::size_t) autopan::count + 19)
+        slot.params[(std::size_t) autopan::count + 19] = 0.0f;
     // round 150: Echoform saved before the voicings' measured stereo behaviour keeps the round-147 voicings
     if (slot.kind == EffectKind::echoform && savedCount <= (std::size_t) echosuite::echoform::voicingStereo
         && slot.params.size() > (std::size_t) echosuite::echoform::voicingStereo)

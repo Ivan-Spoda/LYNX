@@ -136,7 +136,7 @@ float decayValue (double sec) noexcept;
 }
 namespace foil
 {
-constexpr int paramCount = 14; // round 135: + Infinite, Low cut
+constexpr int paramCount = 15; // round 135: + Infinite, Low cut; round 150: + Voicing
 constexpr int typeCount = 12;
 const char* typeName (int index) noexcept;
 double decaySec (float v) noexcept;

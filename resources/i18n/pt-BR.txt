@@ -4107,3 +4107,11 @@ countries: br
 # round 150 (parity150a): Echoform's voicings — measured stereo behaviour, EchoBoy's L/R offset
 "L/R offset" = "Desvio L/R"
 "Voicing stereo" = "Estéreo da voz"
+# round 150 (parity150a): Auto-pan's Rhythm voicing — the Tweak page (PanMan's role)
+"Rate mod" = "Mod. da taxa"
+"Offset mod" = "Mod. do deslocamento"
+"Width mod" = "Mod. da largura"
+"Beyond" = "Além"
+# round 150 (parity150a): Foil Plate's measured plate voicing
+"Measured plate" = "Placa medida"
+"Thresh." = "Limiar"
