@@ -373,6 +373,13 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                                          ? previous->arpeggiators[c]
                                          : std::make_shared<Arpeggiator>();
 
+    state->echoes.assign (channels.size(), nullptr);
+    for (std::size_t c = 0; c < channels.size(); ++c)
+        if (channels[c].misc.echo.enabled())
+            state->echoes[c] = previous != nullptr && c < previous->echoes.size() && previous->echoes[c] != nullptr
+                                   ? previous->echoes[c]
+                                   : std::make_shared<channelmisc::NoteEcho>();
+
     for (std::size_t c = 0; c < channels.size(); ++c)
         if (channels[c].cutGroup > 0)
             for (std::size_t d = 0; d < channels.size(); ++d)
@@ -1125,7 +1132,8 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
 
     // idle channel, no notes in this chunk and no PDC: nothing to do (neither clear nor sum into the mixer)
     const auto hasDelay = (std::size_t) i < state.channelDelays.size() && state.channelDelays[(std::size_t) i] != nullptr;
-    const auto hasArp = (std::size_t) i < state.arpeggiators.size() && state.arpeggiators[(std::size_t) i] != nullptr;
+    const auto hasArp = ((std::size_t) i < state.arpeggiators.size() && state.arpeggiators[(std::size_t) i] != nullptr)
+                        || ((std::size_t) i < state.echoes.size() && state.echoes[(std::size_t) i] != nullptr);
     const auto* sources = state.hasMidiRoutes && (std::size_t) i < state.midiSources.size() && ! state.midiSources[(std::size_t) i].empty()
                               ? &state.midiSources[(std::size_t) i] : nullptr;
     const auto routed = [sources] (int channel) {
@@ -1161,6 +1169,23 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         list = arp.output.data();
         listCount = outCount;
     }
+
+    // FL's echo delay (Misc tab): the channel's notes (after the arpeggio) and their echoes
+    const float* gains = nullptr;
+    if ((std::size_t) i < state.echoes.size() && state.echoes[(std::size_t) i] != nullptr)
+    {
+        auto& echo = *state.echoes[(std::size_t) i];
+        int inCount = 0;
+        for (int k = 0; k < listCount; ++k)
+            if (list[k].channel == i && inCount < channelmisc::NoteEcho::maxEvents)
+                echo.input[(std::size_t) inCount++] = list[k];
+        int outCount = 0;
+        echo.process (i, echo.input.data(), inCount, chunkStartTick, chunkTps, n, c.misc.echo, echo.output.data(), echo.outputGains.data(), outCount);
+        list = echo.output.data();
+        listCount = outCount;
+        gains = echo.outputGains.data();
+    }
+    const auto tracking = c.misc.key.pan != 0.0f || c.misc.velocity.pan != 0.0f;
 
     for (int index = 0; index < listCount; ++index)
     {
@@ -1205,17 +1230,22 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
                 if (const auto limit = voiceLimitFor (c.maxPolyphony, c.synth.mono); limit > 0)
                     if (const auto victim = voiceOrders[(std::size_t) i].noteOn (e.key, limit); victim >= 0)
                         instrument.noteOff (victim);
-                instrument.setNextNoteExpression (e.pan, e.cents + state.song.masterPitch, e.porta);
+                const auto pan = tracking ? channelmisc::trackedPan (c.misc, e.key, e.velocity, e.pan) : e.pan;
+                instrument.setNextNoteExpression (pan, e.cents + (c.misc.mainPitch ? state.song.masterPitch : 0.0f), e.porta);
 
                 if (e.fadeIn > 0.0f || e.fadeOut > 0.0f)
                     instrument.setNextClipFades (e.clipElapsed, e.clipRemaining, e.fadeIn, e.fadeOut);
 
-                instrument.noteOnAt (e.key, e.velocity, e.startSeconds);
+                // an echo's volume: the instrument scales the voice, else (engines without it) the velocity
+                auto velocity = e.velocity;
+                if (gains != nullptr && gains[index] != 1.0f && ! instrument.setNextNoteGain (gains[index]))
+                    velocity *= gains[index];
+                instrument.noteOnAt (e.key, velocity, e.startSeconds);
             }
         }
         else if (e.type == NoteEvent::Type::slide)
         {
-            instrument.slideTo (e.key, e.cents + state.song.masterPitch, e.slideSamples);
+            instrument.slideTo (e.key, e.cents + (c.misc.mainPitch ? state.song.masterPitch : 0.0f), e.slideSamples);
         }
         else if (e.type == NoteEvent::Type::choke)
         {
@@ -1549,6 +1579,9 @@ void RackRenderer::process (const RackState* state,
         for (auto& arp : state->arpeggiators)
             if (arp != nullptr)
                 arp->reset();
+        for (auto& echo : state->echoes)
+            if (echo != nullptr)
+                echo->reset();
     }
 
     // FL's MIDI Out sends its bank and program when playback starts (REA_rodada16 §1.3)

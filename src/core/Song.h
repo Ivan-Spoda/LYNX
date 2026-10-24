@@ -207,11 +207,23 @@ struct SamplerSettings
 // Channel arpeggiator (FL's Channel settings).
 struct ArpSettings
 {
-    int direction = 0;       // 0 off, 1 up, 2 down, 3 up and down, 4 random
+    // 0 off, 1 up, 2 down, 3 up and down (bounce: the ends once), 4 random, 5 up and down "sticky" (the ends twice;
+    // FL's 4th direction, REA round 146b [EXEC])
+    int direction = 0;
     int range = 1;           // octaves, 1..4
     float stepBeats = 0.25f; // duration of each step in beats (0.25 = sixteenth note)
-    float gate = 0.5f;       // fraction of the step during which the note sounds
-    int repeat = 1;          // times each note plays before the next one
+    // the note's length as a fraction of the step; above 1 (FL's gate past 100 %, up to 128/48) the next step waits
+    // for the note to end (REA round 146b [EXEC]: FL's step = time · max(1, gate))
+    float gate = 0.5f;
+    int repeat = 1;          // LYNX: times each note plays before the next one
+    // FL's Repeat (REA round 146b [EXEC]): the sequence plays this many times in an octave before the next octave of
+    // the range (1 = once)
+    int octaveRepeat = 1;
+    // FL's Chord (REA round 146b [EXEC]): empty = "Auto" (the held notes); else the chord the arpeggio plays, as
+    // semitones above the lowest held note (FL's index k = line k of its Chords.map: 1 Major, 5 minor, 27 Maj7…)
+    std::vector<int> chord;
+    bool chordSustain = true; // "Auto (sustain)": the arpeggio keeps the notes of the chord while one is held
+    bool slide = false;       // FL's Slide: each arpeggio note glides from the previous one (no retrigger)
 
     bool enabled() const noexcept { return direction > 0; }
     bool operator== (const ArpSettings&) const = default;
@@ -352,6 +364,49 @@ struct PatcherDoc
     bool operator== (const PatcherDoc& o) const; // (Song.cpp: needs PatchNode)
 };
 
+// FL's "Echo delay / fat mode" (REA round 146b [EXEC: FL renders of the Sampler render test with the 0xD1 record
+// changed]): each note repeats `echoes` times, `timeBeats` apart; echo k plays at feedback^k of the note's volume,
+// with k·pan added to the note's pan (clamped) and k·pitch cents.
+struct EchoSettings
+{
+    float feedback = 0.0f;   // 0..1 (FL 0..12800): the volume factor from one echo to the next; 0 = off
+    float pan = 0.0f;        // −1..1 per echo (FL 0..12800, 6400 = centre)
+    float pitch = 0.0f;      // cents per echo (FL ±1200)
+    float modX = 0.0f, modY = 0.0f; // −1..1 per echo (FL 0..256, 128 = none): stored; LYNX's notes do not route mod X / Y
+    int echoes = 4;          // FL 1..10
+    float timeBeats = 0.75f; // the delay between echoes (FL: 1/192 beats; 144 = 3 steps)
+    bool pingPong = false;   // echoes alternate their pan side
+    bool fat = false;        // FL's fat mode (stored; its effect is not confirmed)
+
+    bool enabled() const noexcept { return feedback > 0.0f && echoes > 0; }
+    bool operator== (const EchoSettings&) const = default;
+};
+
+// FL's Vol / Key tracking (record 0xE4, REA round 146b): the note's velocity (or key) away from `mid` moves its pan
+// (and FL's mod X / Y, stored only).
+struct NoteTracking
+{
+    int mid = 0;            // velocity 0..128 (FL default 100) or key 0..131 (FL default 60 = C5)
+    float pan = 0.0f;       // −1..1: the pan at the far end of the range
+    float modX = 0.0f, modY = 0.0f;
+
+    bool operator== (const NoteTracking&) const = default;
+};
+
+// The rest of FL's Misc tab (REA round 146b)
+struct ChannelMisc
+{
+    float shiftBeats = 0.0f; // Time › Shift: every note starts (and ends) this much later
+    float gateBeats = 0.0f;  // Time › Gate: notes last at most this long (0 = off)
+    bool fullPorta = true;   // Time › Full porta: a porta note glides the whole way (off: FL's partial slide)
+    EchoSettings echo;
+    NoteTracking velocity { 100 }, key { 60 };
+    int pitchRange = 2;      // the header's PITCH knob range, semitones (FL default 2)
+    bool mainPitch = true;   // follows the song's main (master) pitch
+
+    bool operator== (const ChannelMisc&) const = default;
+};
+
 struct ChannelDef
 {
     std::string name;
@@ -378,6 +433,7 @@ struct ChannelDef
     std::uint32_t colour = 0; // 0xFFRRGGBB; 0 = theme default
     int group = -1;           // the Channel Rack filter group (index into Song::channelGroups); -1 = none
     PatcherDoc patcher;       // instrument == patcher: its graph (REA_rodada141)
+    ChannelMisc misc;         // FL's Misc tab: time shift / gate, echo delay, velocity / key tracking (REA round 146b)
 
     bool operator== (const ChannelDef&) const = default;
 };

@@ -7,6 +7,7 @@
 #include "core/DrumSynthLive.h"
 #include "core/FlSynths.h"
 #include "core/FlKeys.h"
+#include "core/ChannelMiscFx.h"
 #include "core/FlpImport.h"
 #include "core/Harmor.h"
 #include "core/Gms.h"
@@ -2278,7 +2279,7 @@ class MiscPanel final : public juce::Component,
                         private juce::ChangeListener
 {
 public:
-    static constexpr int preferredWidth = 600, preferredHeight = 300;
+    static constexpr int preferredWidth = 800, preferredHeight = 330;
 
     MiscPanel (AudioEngine& e, int c) : engine (e), channel (c)
     {
@@ -2341,6 +2342,168 @@ public:
         swing = knob ([name] { return ui::percentSpec (name() + " - " + tr ("Swing mix"), 1.0); },
                       [] (const ChannelDef& d) { return (double) d.swingMix; }, [] (ChannelDef& d, double v) { d.swingMix = (float) v; },
                       TR_NOOP ("Swing"));
+        // Levels adjustment: Mod X / Mod Y = the channel filter's cutoff / resonance (sampler, synth)
+        modX = knob ([name] {
+                         ui::ValueSpec s;
+                         s.name = name() + " - " + tr ("Mod X (filter cutoff)");
+                         s.defaultValue = 1.0;
+                         s.toText = [] (double v) { const auto hz = 20.0 * std::pow (1000.0, v); return hz >= 1000.0 ? juce::String (hz / 1000.0, 1) + " kHz" : juce::String (juce::roundToInt (hz)) + " Hz"; };
+                         return s;
+                     },
+                     [] (const ChannelDef& d) {
+                         const auto hz = d.instrument == InstrumentKind::synth ? d.synth.cutoff : d.sampler.cutoff;
+                         return juce::jlimit (0.0, 1.0, std::log ((double) hz / 20.0) / std::log (1000.0));
+                     },
+                     [] (ChannelDef& d, double v) {
+                         const auto hz = (float) (20.0 * std::pow (1000.0, v));
+                         if (d.instrument == InstrumentKind::synth)
+                             d.synth.cutoff = hz;
+                         else if (d.instrument == InstrumentKind::sampler)
+                         {
+                             d.sampler.cutoff = hz;
+                             d.sampler.flChannel.clear(); // an edited filter replaces FL's whole sampler voice (REA_rodada76)
+                         }
+                     },
+                     TR_NOOP ("Mod X"));
+        modY = knob ([name] { return ui::percentSpec (name() + " - " + tr ("Mod Y (filter resonance)"), 0.0); },
+                     [] (const ChannelDef& d) { return (double) (d.instrument == InstrumentKind::synth ? d.synth.resonance : d.sampler.resonance); },
+                     [] (ChannelDef& d, double v) {
+                         if (d.instrument == InstrumentKind::synth)
+                             d.synth.resonance = (float) v;
+                         else if (d.instrument == InstrumentKind::sampler)
+                         {
+                             d.sampler.resonance = (float) v;
+                             d.sampler.flChannel.clear();
+                         }
+                     },
+                     TR_NOOP ("Mod Y"));
+        // Time: Gate and Shift on FL's time-knob scale (REA round 146b)
+        auto timeSpec = [name] (const char* what, int maximum, int defaultValue, bool offAtMax) {
+            ui::ValueSpec s;
+            s.name = name() + " - " + tr (what);
+            s.maximum = maximum;
+            s.defaultValue = defaultValue;
+            s.interval = 1.0;
+            s.pixelsForRange = 300.0;
+            s.toText = [maximum, offAtMax] (double v) {
+                const auto i = juce::roundToInt (v);
+                if (offAtMax && i >= maximum)
+                    return tr ("Off");
+                // steps:ticks, as FL shows them (24 ticks per step)
+                const auto ticks = juce::roundToInt (channelmisc::flTimeKnobBeats (i) * 96.0);
+                return juce::String (ticks / 24) + ":" + juce::String (ticks % 24).paddedLeft ('0', 2);
+            };
+            return s;
+        };
+        timeGate = knob ([timeSpec] { return timeSpec (TR_NOOP ("Gate: long notes are cut to this length (Off = no limit)"), 1446, 1446, true); },
+                         [] (const ChannelDef& d) { return d.misc.gateBeats > 0.0f ? (double) channelmisc::flTimeKnobValue (d.misc.gateBeats) : 1446.0; },
+                         [] (ChannelDef& d, double v) {
+                             const auto i = juce::roundToInt (v);
+                             d.misc.gateBeats = i >= 1446 ? 0.0f : (float) std::max (1.0 / 96.0, channelmisc::flTimeKnobBeats (i));
+                         },
+                         TR_NOOP ("Gate"));
+        timeShift = knob ([timeSpec] { return timeSpec (TR_NOOP ("Fine time shift: delays the notes, up to one step"), 1024, 0, false); },
+                          [] (const ChannelDef& d) { return (double) channelmisc::flTimeKnobValue (d.misc.shiftBeats); },
+                          [] (ChannelDef& d, double v) { d.misc.shiftBeats = (float) channelmisc::flTimeKnobBeats (juce::roundToInt (v)); },
+                          TR_NOOP ("Shift"));
+        fullPorta.setButtonText (tr ("Full porta"));
+        fullPorta.setTooltip (tr ("Full porta: portamento notes ignore the Gate and play their whole length"));
+        fullPorta.onClick = [this] { edit ([on = fullPorta.getToggleState()] (ChannelDef& d) { d.misc.fullPorta = on; }); };
+        // Vol / Key tracking
+        trackVol.setButtonText (tr ("Vol"));
+        trackKey.setButtonText (tr ("Key"));
+        for (auto* b : { &trackVol, &trackKey })
+        {
+            b->setClickingTogglesState (true);
+            b->setRadioGroupId (146);
+            b->onClick = [this] { repaint(); for (auto& k : knobs) k->repaint(); };
+            addAndMakeVisible (b);
+        }
+        trackVol.setTooltip (tr ("Velocity tracking: the note's velocity moves its pan"));
+        trackKey.setTooltip (tr ("Keyboard tracking: the note's key moves its pan"));
+        trackKey.setToggleState (true, juce::dontSendNotification);
+        auto tracking = [this] (ChannelDef& d) -> NoteTracking& { return trackKey.getToggleState() ? d.misc.key : d.misc.velocity; };
+        auto trackingOf = [this] (const ChannelDef& d) -> const NoteTracking& { return trackKey.getToggleState() ? d.misc.key : d.misc.velocity; };
+        trackPan = knob ([name] { return ui::panSpec (name() + " - " + tr ("Tracking: pan")); },
+                         [trackingOf] (const ChannelDef& d) { return (double) trackingOf (d).pan; },
+                         [tracking] (ChannelDef& d, double v) { tracking (d).pan = (float) v; }, TR_NOOP ("Pan"));
+        trackMid = knob ([this, name] {
+                             const auto key = trackKey.getToggleState();
+                             auto s = countSpec (name() + " - " + tr ("Tracking: the middle value (no offset)"), key ? 131 : 128, key ? 60 : 100,
+                                                 [key] (int v) { return key ? juce::MidiMessage::getMidiNoteName (120 - v, true, true, 4) : juce::String (v); });
+                             return s;
+                         },
+                         [trackingOf] (const ChannelDef& d) { return (double) trackingOf (d).mid; },
+                         [tracking] (ChannelDef& d, double v) { tracking (d).mid = juce::roundToInt (v); }, TR_NOOP ("Mid"));
+        // Echo delay / fat mode
+        echoFeed = knob ([name] { return ui::percentSpec (name() + " - " + tr ("Delay feedback (100% = the echoes as loud as the note)"), 0.0); },
+                         [] (const ChannelDef& d) { return (double) d.misc.echo.feedback / 2.0; },
+                         [] (ChannelDef& d, double v) { d.misc.echo.feedback = (float) (2.0 * v); }, TR_NOOP ("Feed"));
+        echoPan = knob ([name] { return ui::panSpec (name() + " - " + tr ("Delay pan: each echo moves this much")); },
+                        [] (const ChannelDef& d) { return (double) d.misc.echo.pan; }, [] (ChannelDef& d, double v) { d.misc.echo.pan = (float) v; },
+                        TR_NOOP ("Pan"));
+        echoPitch = knob ([name] {
+                              ui::ValueSpec s;
+                              s.name = name() + " - " + tr ("Delay pitch: each echo moves this many cents");
+                              s.minimum = -1200.0;
+                              s.maximum = 1200.0;
+                              s.interval = 1.0;
+                              s.toText = [] (double v) { return tr ("{0} cents", { juce::String (juce::roundToInt (v)) }); };
+                              return s;
+                          },
+                          [] (const ChannelDef& d) { return (double) d.misc.echo.pitch; }, [] (ChannelDef& d, double v) { d.misc.echo.pitch = (float) v; },
+                          TR_NOOP ("Pitch"));
+        echoTime = knob ([name] {
+                             ui::ValueSpec s;
+                             s.name = name() + " - " + tr ("Delay time (steps:ticks)");
+                             s.minimum = 1.0;
+                             s.maximum = 192.0 * 4.0;
+                             s.defaultValue = 144.0;
+                             s.interval = 1.0;
+                             s.pixelsForRange = 400.0;
+                             s.toText = [] (double v) { const auto t = juce::roundToInt (v); return juce::String (t / 48) + ":" + juce::String ((t % 48) / 2).paddedLeft ('0', 2); };
+                             return s;
+                         },
+                         [] (const ChannelDef& d) { return (double) d.misc.echo.timeBeats * 192.0; },
+                         [] (ChannelDef& d, double v) { d.misc.echo.timeBeats = (float) (juce::roundToInt (v) / 192.0); }, TR_NOOP ("Time"));
+        echoCount = knob ([name] { return countSpec (name() + " - " + tr ("Delay number of echoes"), 10, 4); },
+                          [] (const ChannelDef& d) { return (double) d.misc.echo.echoes; },
+                          [] (ChannelDef& d, double v) { d.misc.echo.echoes = juce::jlimit (1, 10, juce::roundToInt (v)); }, TR_NOOP ("Echoes"));
+        pingPong.setButtonText (tr ("Ping pong"));
+        pingPong.setTooltip (tr ("Ping pong: the echoes' pan bounces off the left and right ends"));
+        pingPong.onClick = [this] { edit ([on = pingPong.getToggleState()] (ChannelDef& d) { d.misc.echo.pingPong = on; }); };
+        fatMode.setButtonText (tr ("Fat mode"));
+        fatMode.setTooltip (tr ("Fat mode (kept from FL projects; LYNX plays the echoes the same way)"));
+        fatMode.onClick = [this] { edit ([on = fatMode.getToggleState()] (ChannelDef& d) { d.misc.echo.fat = on; }); };
+        // Root note row: main pitch
+        mainPitch.setButtonText (tr ("Enable main pitch"));
+        mainPitch.setTooltip (tr ("The channel follows the main pitch (the toolbar's master pitch)"));
+        mainPitch.onClick = [this] { edit ([on = mainPitch.getToggleState()] (ChannelDef& d) { d.misc.mainPitch = on; }); };
+        // Arpeggiator: FL's Slide and Chord
+        arpSlide.setButtonText (tr ("Slide"));
+        arpSlide.setTooltip (tr ("Slide: the arpeggio glides from note to note (instruments that slide)"));
+        arpSlide.onClick = [this] { edit ([on = arpSlide.getToggleState()] (ChannelDef& d) { d.arp.slide = on; }); };
+        arpChord.addItem (tr ("Auto (sustain)"), 1);
+        arpChord.addItem (tr ("None (octaves)"), 2);
+        for (const auto& [chordName, intervals] : arpChords())
+            arpChord.addItem (tr (chordName), arpChord.getNumItems() + 1);
+        arpChord.setTooltip (tr ("Chord: Auto plays the held notes; a chord plays it on the lowest held note"));
+        arpChord.onChange = [this] {
+            const auto id = arpChord.getSelectedId();
+            if (id <= 0)
+                return;
+            edit ([id] (ChannelDef& d) {
+                if (id == 1)
+                    d.arp.chord.clear();
+                else if (id == 2)
+                    d.arp.chord = { 0 };
+                else if (id - 3 < (int) arpChords().size())
+                    d.arp.chord = arpChords()[(std::size_t) (id - 3)].second;
+            });
+        };
+        for (auto* b : { &fullPorta, &pingPong, &fatMode, &mainPitch, &arpSlide })
+            addAndMakeVisible (b);
+        addAndMakeVisible (arpChord);
         // Group
         cut = knob ([this, name] { return countSpec (name() + " - " + tr ("Cut: notes of this channel stop the channels cut by this group"), 
                                                      juce::jmax (99, current() != nullptr ? current()->cutGroup : 0), 0,
@@ -2357,9 +2520,9 @@ public:
         cutSelf.setTooltip (tr ("Cut self: a new note of this channel stops its own sounding note (hi-hats, 808s)"));
         cutSelf.onClick = [this] { edit ([on = cutSelf.getToggleState(), ch = channel] (ChannelDef& d) { setChannelCutsItself (d, ch, on); }); };
         // Arpeggiator
-        arpDirection.addItemList ({ tr ("Off"), tr ("Up"), tr ("Down"), tr ("Up and down"), tr ("Random") }, 1);
+        arpDirection.addItemList ({ tr ("Off"), tr ("Up"), tr ("Down"), tr ("Up and down"), tr ("Random"), tr ("Up and down (sticky)") }, 1);
         arpDirection.setTooltip (tr ("Arpeggiator direction (Off = the notes play as written)"));
-        arpDirection.onChange = [this] { edit ([d = arpDirection.getSelectedId() - 1] (ChannelDef& c) { c.arp.direction = juce::jlimit (0, 4, d); }); };
+        arpDirection.onChange = [this] { edit ([d = arpDirection.getSelectedId() - 1] (ChannelDef& c) { c.arp.direction = juce::jlimit (0, 5, d); }); };
         for (const auto& [text, beats] : arpSpeeds())
             arpTime.addItem (tr (text), arpTime.getNumItems() + 1);
         arpTime.setTooltip (tr ("Arpeggiator time: the length of each step"));
@@ -2371,12 +2534,17 @@ public:
         arpRange = knob ([name] { return countSpec (name() + " - " + tr ("Arpeggiator range (octaves)"), 4, 1); },
                          [] (const ChannelDef& d) { return (double) d.arp.range; },
                          [] (ChannelDef& d, double v) { d.arp.range = juce::jlimit (1, 4, juce::roundToInt (v)); }, TR_NOOP ("Range"));
-        arpGate = knob ([name] { return ui::percentSpec (name() + " - " + tr ("Arpeggiator gate"), 0.5); },
+        arpGate = knob ([name] {
+                            auto s = ui::percentSpec (name() + " - " + tr ("Arpeggio gate (past 100% the next note waits)"), 0.5);
+                            s.minimum = 0.05;
+                            s.maximum = 128.0 / 48.0;
+                            return s;
+                        },
                         [] (const ChannelDef& d) { return (double) d.arp.gate; },
-                        [] (ChannelDef& d, double v) { d.arp.gate = juce::jlimit (0.05f, 1.0f, (float) v); }, TR_NOOP ("Gate"));
-        arpRepeat = knob ([name] { return countSpec (name() + " - " + tr ("Arpeggiator repeat (times each note plays)"), 4, 1); },
-                          [] (const ChannelDef& d) { return (double) d.arp.repeat; },
-                          [] (ChannelDef& d, double v) { d.arp.repeat = juce::jlimit (1, 4, juce::roundToInt (v)); }, TR_NOOP ("Repeat"));
+                        [] (ChannelDef& d, double v) { d.arp.gate = juce::jlimit (0.05f, 128.0f / 48.0f, (float) v); }, TR_NOOP ("Gate"));
+        arpRepeat = knob ([name] { return countSpec (name() + " - " + tr ("Arpeggiator repeat: times the arpeggio plays in an octave before the next one"), 16, 1); },
+                          [] (const ChannelDef& d) { return (double) d.arp.octaveRepeat; },
+                          [] (ChannelDef& d, double v) { d.arp.octaveRepeat = juce::jlimit (1, 16, juce::roundToInt (v)); }, TR_NOOP ("Repeat"));
 
         for (auto* b : { &porta, &mono })
             addAndMakeVisible (b);
@@ -2411,51 +2579,86 @@ public:
             sections.push_back ({ r, title });
             return r.withTrimmedTop (20).reduced (6, 4);
         };
-        constexpr int knobW = 56;
-        auto top = area.removeFromTop (130);
+        constexpr int knobW = 50, knobH = 64;
+        auto row = [] (juce::Rectangle<int>& r, std::initializer_list<FrameKnob*> ks) {
+            auto line = r.removeFromTop (knobH);
+            for (auto* k : ks)
+                k->setBounds (line.removeFromLeft (knobW));
+        };
+        auto top = area.removeFromTop (118);
         {
-            auto levels = section (top.removeFromLeft (2 * knobW + 16), tr ("Levels adjustment"));
-            pan->setBounds (levels.removeFromLeft (knobW).withHeight (70));
-            volume->setBounds (levels.removeFromLeft (knobW).withHeight (70));
+            auto levels = section (top.removeFromLeft (4 * knobW + 12), tr ("Levels adjustment"));
+            row (levels, { pan, volume, modX, modY });
         }
-        top.removeFromLeft (8);
+        top.removeFromLeft (6);
         {
-            auto poly = section (top.removeFromLeft (2 * knobW + 16), tr ("Polyphony"));
-            auto knobsRow = poly.removeFromTop (70);
-            maxPoly->setBounds (knobsRow.removeFromLeft (knobW));
-            slide->setBounds (knobsRow.removeFromLeft (knobW));
+            auto poly = section (top.removeFromLeft (2 * knobW + 30), tr ("Polyphony"));
+            row (poly, { maxPoly, slide });
             auto toggles = poly.removeFromTop (22);
-            porta.setBounds (toggles.removeFromLeft (knobW));
-            mono.setBounds (toggles.removeFromLeft (knobW));
+            porta.setBounds (toggles.removeFromLeft (64));
+            mono.setBounds (toggles);
         }
-        top.removeFromLeft (8);
+        top.removeFromLeft (6);
         {
-            auto time = section (top.removeFromLeft (knobW + 16), tr ("Time"));
-            swing->setBounds (time.removeFromLeft (knobW).withHeight (70));
+            auto time = section (top.removeFromLeft (3 * knobW + 12), tr ("Time"));
+            row (time, { timeGate, timeShift, swing });
+            fullPorta.setBounds (time.removeFromTop (22));
         }
-        area.removeFromTop (8);
+        top.removeFromLeft (6);
+        {
+            auto track = section (top, tr ("Tracking"));
+            auto tabs = track.removeFromTop (0);
+            juce::ignoreUnused (tabs);
+            const auto title = sections.back().first;
+            trackVol.setBounds (title.getRight() - 84, title.getY() + 2, 38, 16);
+            trackKey.setBounds (title.getRight() - 44, title.getY() + 2, 38, 16);
+            row (track, { trackPan, trackMid });
+        }
+        area.removeFromTop (6);
         auto bottom = area.removeFromTop (130);
         {
             auto group = section (bottom.removeFromLeft (2 * knobW + 16), tr ("Group"));
-            auto row = group.removeFromTop (70);
-            cut->setBounds (row.removeFromLeft (knobW));
-            cutBy->setBounds (row.removeFromLeft (knobW));
+            row (group, { cut, cutBy });
             cutSelf.setBounds (group.removeFromTop (24).reduced (4, 0));
         }
-        bottom.removeFromLeft (8);
+        bottom.removeFromLeft (6);
         {
-            auto arp = section (bottom, tr ("Arpeggiator"));
-            auto boxes = arp.removeFromLeft (130);
-            arpDirection.setBounds (boxes.removeFromTop (24));
-            boxes.removeFromTop (8);
-            arpTime.setBounds (boxes.removeFromTop (24));
-            arp.removeFromLeft (8);
-            for (auto* k : { arpRange, arpGate, arpRepeat })
-                k->setBounds (arp.removeFromLeft (knobW).withHeight (70));
+            auto arp = section (bottom.removeFromLeft (330), tr ("Arpeggiator"));
+            auto boxes = arp.removeFromLeft (118);
+            arpDirection.setBounds (boxes.removeFromTop (22));
+            boxes.removeFromTop (4);
+            arpTime.setBounds (boxes.removeFromTop (22));
+            boxes.removeFromTop (4);
+            arpChord.setBounds (boxes.removeFromTop (22));
+            boxes.removeFromTop (4);
+            arpSlide.setBounds (boxes.removeFromTop (22));
+            arp.removeFromLeft (6);
+            row (arp, { arpRange, arpGate, arpRepeat });
         }
+        bottom.removeFromLeft (6);
+        {
+            auto echo = section (bottom, tr ("Echo delay / fat mode"));
+            row (echo, { echoFeed, echoPan, echoPitch, echoTime, echoCount });
+            auto toggles = echo.removeFromTop (22);
+            pingPong.setBounds (toggles.removeFromLeft (100));
+            fatMode.setBounds (toggles.removeFromLeft (100));
+        }
+        area.removeFromTop (6);
+        mainPitch.setBounds (area.removeFromTop (24).removeFromLeft (200));
     }
 
 private:
+    // LYNX's chord choices for the arpeggiator (the piano roll's chord stamps)
+    static const std::vector<std::pair<const char*, std::vector<int>>>& arpChords()
+    {
+        static const std::vector<std::pair<const char*, std::vector<int>>> chords {
+            { TR_NOOP ("Major"), { 0, 4, 7 } }, { TR_NOOP ("Minor"), { 0, 3, 7 } }, { "Dim", { 0, 3, 6 } }, { "Aug", { 0, 4, 8 } },
+            { "Sus2", { 0, 2, 7 } }, { "Sus4", { 0, 5, 7 } }, { "7", { 0, 4, 7, 10 } }, { "Maj7", { 0, 4, 7, 11 } },
+            { "m7", { 0, 3, 7, 10 } }, { "m9", { 0, 3, 7, 10, 14 } }, { TR_NOOP ("Octave"), { 0, 12 } },
+        };
+        return chords;
+    }
+
     static const std::vector<std::pair<const char*, float>>& arpSpeeds()
     {
         static const std::vector<std::pair<const char*, float>> speeds { { "1/4", 1.0f },  { "1/8", 0.5f },
@@ -2492,7 +2695,24 @@ private:
         mono.setToggleState (channelMono (*c), juce::dontSendNotification);
         mono.setEnabled (channelHasMono (*c));
         cutSelf.setToggleState (channelCutsItself (*c), juce::dontSendNotification);
-        arpDirection.setSelectedId (juce::jlimit (0, 4, c->arp.direction) + 1, juce::dontSendNotification);
+        arpDirection.setSelectedId (juce::jlimit (0, 5, c->arp.direction) + 1, juce::dontSendNotification);
+        fullPorta.setToggleState (c->misc.fullPorta, juce::dontSendNotification);
+        pingPong.setToggleState (c->misc.echo.pingPong, juce::dontSendNotification);
+        fatMode.setToggleState (c->misc.echo.fat, juce::dontSendNotification);
+        mainPitch.setToggleState (c->misc.mainPitch, juce::dontSendNotification);
+        arpSlide.setToggleState (c->arp.slide, juce::dontSendNotification);
+        const auto filter = c->instrument == InstrumentKind::synth || c->instrument == InstrumentKind::sampler;
+        modX->setEnabled (filter);
+        modY->setEnabled (filter);
+        {
+            auto chordId = c->arp.chord.empty() ? 1 : (c->arp.chord == std::vector<int> { 0 } ? 2 : 0);
+            for (int i = 0; chordId == 0 && i < (int) arpChords().size(); ++i)
+                if (arpChords()[(std::size_t) i].second == c->arp.chord)
+                    chordId = i + 3;
+            arpChord.setSelectedId (chordId, juce::dontSendNotification);
+            if (chordId == 0)
+                arpChord.setText (tr ("Chord from FL"), juce::dontSendNotification);
+        }
         int speed = 0;
         for (int i = 0; i < (int) arpSpeeds().size(); ++i)
             if (std::abs (arpSpeeds()[(std::size_t) i].second - c->arp.stepBeats) < 1e-4f)
@@ -2511,8 +2731,12 @@ private:
     bool updating = false;
     std::vector<std::unique_ptr<FrameKnob>> knobs;
     FrameKnob *pan = nullptr, *volume = nullptr, *maxPoly = nullptr, *slide = nullptr, *swing = nullptr, *cut = nullptr, *cutBy = nullptr,
-              *arpRange = nullptr, *arpGate = nullptr, *arpRepeat = nullptr;
-    juce::ToggleButton porta, mono;
+              *arpRange = nullptr, *arpGate = nullptr, *arpRepeat = nullptr, *modX = nullptr, *modY = nullptr, *timeGate = nullptr,
+              *timeShift = nullptr, *trackPan = nullptr, *trackMid = nullptr, *echoFeed = nullptr, *echoPan = nullptr, *echoPitch = nullptr,
+              *echoTime = nullptr, *echoCount = nullptr;
+    juce::ToggleButton porta, mono, fullPorta, pingPong, fatMode, mainPitch, arpSlide;
+    juce::TextButton trackVol, trackKey;
+    juce::ComboBox arpChord;
     juce::TextButton cutSelf;
     juce::ComboBox arpDirection, arpTime;
     std::vector<std::pair<juce::Rectangle<int>, juce::String>> sections;
@@ -2545,7 +2769,7 @@ public:
             addPage (std::move (instrumentPage), tr ("Plugin"), tr ("The instrument's own settings"));
         if (envelopePage != nullptr)
             addPage (std::move (envelopePage), tr ("Envelope / instrument"), tr ("Envelope / instrument settings: the filter and pitch envelopes and the LFOs"));
-        addPage (std::make_unique<MiscPanel> (engine, channel), tr ("Misc"), tr ("Miscellaneous functions: levels, polyphony, time, cut groups, arpeggiator"));
+        addPage (std::make_unique<MiscPanel> (engine, channel), tr ("Misc"), tr ("Miscellaneous functions: levels, polyphony, time, tracking, cut groups, arpeggiator, echo delay"));
 
         on.setButtonText (tr ("On"));
         on.setTooltip (tr ("Channel on / off (mute)"));
@@ -2587,6 +2811,23 @@ public:
                     },
                     [] (const ChannelDef& d) { return (double) d.volume; },
                     [] (Song& s, int ch, double v) { s.channels[(std::size_t) ch].volume = (float) v; }, TR_NOOP ("Vol"));
+        // FL's PITCH knob and its RANGE (REA round 146b): the channel's pitch, within ± range semitones
+        headerKnob ([this, name] {
+                        ui::ValueSpec s;
+                        s.name = name() + " - " + tr ("Pitch (semitones, within the range)");
+                        const auto range = channel < (int) engine.getSong().channels.size() ? engine.getSong().channels[(std::size_t) channel].misc.pitchRange : 2;
+                        s.minimum = -juce::jmax (1, range);
+                        s.maximum = juce::jmax (1, range);
+                        s.toText = [] (double v) { return tr ("{0} cents", { juce::String (juce::roundToInt (v * 100.0)) }); };
+                        return s;
+                    },
+                    [] (const ChannelDef& d) { return (double) d.sampler.pitch; },
+                    [] (Song& s, int ch, double v) { s.channels[(std::size_t) ch].sampler.pitch = (float) juce::jlimit (-24.0, 24.0, v); }, TR_NOOP ("Pitch"));
+        headerKnob ([name] { return countSpec (name() + " - " + tr ("Pitch knob range (semitones)"), 48, 2,
+                                               [] (int v) { return juce::String (v); }); },
+                    [] (const ChannelDef& d) { return (double) d.misc.pitchRange; },
+                    [] (Song& s, int ch, double v) { s.channels[(std::size_t) ch].misc.pitchRange = juce::jlimit (0, 48, juce::roundToInt (v)); },
+                    TR_NOOP ("Range"));
         headerKnob ([this, name] {
                         return countSpec (name() + " - " + tr ("Target mixer track"), juce::jmax (1, (int) engine.getSong().mixer.size() - 1), 0,
                                           [] (int t) { return t == 0 ? tr ("Master") : juce::String (t); });

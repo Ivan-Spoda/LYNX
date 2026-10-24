@@ -92,7 +92,11 @@ struct ScheduleIndex
 {
     std::int64_t songLength = 0;
     std::vector<std::int64_t> maxNoteLength; // per pattern
+    std::int64_t maxShift = 0;               // the largest channel time shift (FL's Misc › Shift), ticks
 };
+
+// The largest Misc › Shift of the channels, in ticks.
+std::int64_t maxChannelShift (const std::vector<ChannelDef>& channels) noexcept;
 
 ScheduleIndex makeScheduleIndex (const Song& song);
 
