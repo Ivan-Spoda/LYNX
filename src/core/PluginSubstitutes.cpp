@@ -488,8 +488,9 @@ vendor = Solid State Logic
 lynx = Ridge Strip
 names = SSL Native Channel Strip 2; SSL Native Channel Strip; SSL 4K E; SSL 4K B; Vocalstrip 2; SSL Native Vocalstrip 2
 # round 145: a Vocalstrip 2 state (XML, the original's own units) is translated to Ridge's Vocal strip voicing, measured
-# black-box on the official trial (de-esser, de-ploser, EQ, compander, order; REA_rodada145 §2); the other strips'
-# states are not read (Ridge at its defaults)
+# black-box on the official trial (de-esser, de-ploser, EQ, compander, order; REA_rodada145 §2); round 148: a 4K E state
+# (the same XML form) to Ridge's 4K voicing, measured on the 4K E trial (REA_rodada148 §2); the other strips' states are
+# not read (Ridge at its defaults)
 translate = ssl-vocalstrip-2
 
 # round 145: the rest of Complete Access (Slate Digital, Solid State Logic, LiquidSonics, sonible, Harrison; official
@@ -612,6 +613,8 @@ product = FabFilter Pro-DS
 vendor = FabFilter
 lynx = Hush De-esser
 names = FabFilter Pro-DS; Pro-DS
+# round 148: her two states (Single Vocal, wide band) -> Hush's measured vocal voicing (REA_rodada148 §3)
+translate = pro-ds
 
 [harrison-deesser]
 product = Harrison De-Esser
@@ -1461,7 +1464,9 @@ int translateSslVocalstrip2 (const std::vector<std::uint8_t>& state, EffectSlot&
     if (root == std::string::npos || slot.kind != EffectKind::ridgeStrip)
         return 0;
     const std::string text (state.begin() + (std::ptrdiff_t) root, state.end());
-    if (attributeIn (text, 0, "PluginName").find ("Vocalstrip 2") == std::string::npos)
+    const auto plugin = attributeIn (text, 0, "PluginName");
+    const bool k4e = plugin.find ("4K E") != std::string::npos;
+    if (plugin.find ("Vocalstrip 2") == std::string::npos && ! k4e)
         return 0;
     const bool useB = attributeIn (text, 0, "StateASelected") == "0";
     const auto block = text.find (useB ? "<B" : "<A");
@@ -1484,6 +1489,59 @@ int translateSslVocalstrip2 (const std::vector<std::uint8_t>& state, EffectSlot&
     };
     auto sw = [&at] (const char* id, bool fallback) { return at (id, fallback ? 1.0 : 0.0) >= 0.5 ? 1.0f : 0.0f; };
     auto& p = slot.params;
+    if (k4e)
+    {
+        // round 148: SSL 4K E -> Ridge's 4K voicing, the controls in the original's units through Ridge's own laws
+        // (EQ and filter frequencies: LF in Hz, the others in kHz; HighPassFreq 10 = out, LowPassFreq 35 = out; CompRatio
+        // 40 = infinity; EqColour 0 / 1 / 2 = Brown / Black / Orange; SaturationIn / Amount = the mic pre and its gain).
+        // Not read: pan, width, the external key, filters / EQ to the side chain, filters to input, high quality
+        p[r::console4k] = 1.0f;
+        p[r::voicing] = 0.0f;
+        p[r::vocal] = 0.0f;
+        p[r::input] = linNorm (at ("InputTrim", 0.0), -20.0, 20.0);
+        const auto fader = at ("FaderLevel", 0.0);
+        p[r::output] = linNorm (at ("OutputTrim", 0.0) + std::max (fader, -20.0), -20.0, 20.0);
+        p[r::phase] = sw ("PhaseInvert", false);
+        const auto hp = at ("HighPassFreq", 10.0), lp = at ("LowPassFreq", 35.0);
+        p[r::hpf] = hp < 16.5 ? 0.0f : std::max (1e-4f, logNorm (hp, 16.0, 350.0));
+        p[r::lpf] = lp > 15.95 ? 0.0f : std::max (1e-4f, logNorm (lp * 1000.0, 22000.0, 3000.0));
+        auto gain = [] (double db) { return linNorm (db, -15.0, 15.0); };
+        p[r::lfGain] = gain (at ("LowEqGain", 0.0));
+        p[r::lfFreq] = logNorm (at ("LowEqFreq", 200.0), 30.0, 450.0);
+        p[r::lfBell] = sw ("LowEqBell", false);
+        p[r::lmfGain] = gain (at ("LowMidEqGain", 0.0));
+        p[r::lmfFreq] = logNorm (at ("LowMidEqFreq", 1.0) * 1000.0, 200.0, 2500.0);
+        p[r::lmfQ] = r::k4QValue (at ("LowMidEqQ", 1.5));
+        p[r::hmfGain] = gain (at ("HighMidEqGain", 0.0));
+        p[r::hmfFreq] = logNorm (at ("HighMidEqFreq", 3.0) * 1000.0, 600.0, 7000.0);
+        p[r::hmfQ] = r::k4QValue (at ("HighMidEqQ", 1.5));
+        p[r::hfGain] = gain (at ("HighEqGain", 0.0));
+        p[r::hfFreq] = logNorm (at ("HighEqFreq", 8.0) * 1000.0, 1500.0, 16000.0);
+        p[r::hfBell] = sw ("HighEqBell", false);
+        p[r::eqOn] = sw ("EqIn", true);
+        p[r::k4Colour] = r::k4ColourValue ((int) std::lround (at ("EqColour", 0.0)));
+        const auto ratio = at ("CompRatio", 1.0);
+        p[r::compRatio] = ratio <= 1.0005 ? 0.0f : (ratio >= 30.0 ? 1.0f : (float) std::sqrt (std::clamp ((ratio - 1.0) / 19.0, 0.0, 0.996)));
+        p[r::compThreshold] = linNorm (at ("CompThreshold", 10.0), -20.0, 10.0);
+        p[r::compRelease] = logNorm (at ("CompRelease", 0.4), 0.1, 4.0);
+        p[r::compFastAttack] = sw ("CompFastAttack", false);
+        p[r::compMix] = (float) std::clamp (at ("CompMix", 100.0) / 100.0, 0.0, 1.0);
+        p[r::autoMakeup] = sw ("CompAutoMakeUp", true);
+        p[r::k4MakeupOffset] = linNorm (at ("CompAutoMakeUpCompensation", 0.0), -12.0, 12.0);
+        p[r::gateRange] = linNorm (at ("GateRange", 0.0), 0.0, 40.0);
+        p[r::gateThreshold] = linNorm (at ("GateThreshold", -30.0), -30.0, 10.0);
+        p[r::gateRelease] = logNorm (at ("GateRelease", 0.4), 0.1, 4.0);
+        p[r::gateFastAttack] = sw ("GateFastAttack", false);
+        p[r::expander] = sw ("GateExpander", false);
+        p[r::dynOn] = sw ("DynamicsIn", true);
+        p[r::order] = sw ("DynamicsPreEq", false);
+        p[r::k4Pre] = sw ("SaturationIn", false);
+        p[r::k4Mic] = linNorm (at ("SaturationAmount", 0.0), 0.0, 50.0);
+        p[r::analog] = sw ("AnalogueVca", true);
+        if (at ("Bypass", 0.0) >= 0.5)
+            slot.enabled = false;
+        return (int) v.size();
+    }
     p[r::vocal] = 1.0f;
     p[r::vInput] = vs::gainValue (at ("inputGain", 0.0));
     p[r::vOutput] = vs::gainValue (at ("outputGain", 0.0));
