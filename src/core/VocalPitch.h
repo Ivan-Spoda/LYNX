@@ -145,7 +145,8 @@ public:
     // One frame: `in` / `out` hold `channels` samples (1 or 2). The output is the input delayed by latency(), shifted.
     void process (const float* in, float* out, int channels) noexcept;
 
-    // Marks align to the waveform's strongest peak near the predicted position (pitch-synchronous). Default on.
+    // Marks align to the waveform near the predicted position (pitch-synchronous): where it best repeats the period at
+    // the previous mark (round 148), the strongest peak for a phrase's first mark. Default on.
     void setPeakAlign (bool on) noexcept { peakAlign = on; }
     // Marks are placed this many samples behind the newest input (the centre of the pitch detector's window, so the
     // period and shift given with setPitch / setShift describe the signal where the mark lies). Clamped so that the
@@ -169,6 +170,7 @@ private:
     std::int64_t now = 0;        // samples written so far
     double nextMark = 0.0;       // next analysis mark (absolute)
     double nextSynth = 0.0;      // next synthesis mark (absolute, output timeline = input timeline)
+    double lastMark = 0.0;       // the last voiced mark placed (absolute; 0 = none): the next one correlates with it
     double period = 0.0, ratio = 1.0, formant = 1.0;
     bool voiced = false, peakAlign = true, lastVoiced = false;
     std::array<Mark, maxMarks> marks {};
