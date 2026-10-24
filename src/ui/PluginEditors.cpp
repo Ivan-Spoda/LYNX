@@ -1,5 +1,6 @@
 #include "ui/PatcherEditor.h"
 #include "ui/ControllerEditors.h"
+#include "ui/NewtoneEditor.h"
 #include "ui/PluginEditors.h"
 
 #include <cstring>
@@ -3625,6 +3626,11 @@ void open (AudioEngine& engine, int track, int slot)
         FormulaControllerWindows::open (engine, track, slot);
         return;
     }
+    if (NewtoneWindows::handles (kind)) // load a sample, edit its notes / warp markers, hear it (round 142)
+    {
+        NewtoneWindows::open (engine, track, slot);
+        return;
+    }
     if (kind == EffectKind::parametricEq) // its own editor (response curve with handles)
     {
         ParametricEqWindows::open (engine, track, slot);
@@ -3664,6 +3670,7 @@ void closeAll()
 {
     windows().clear();
     FormulaControllerWindows::closeAll();
+    NewtoneWindows::closeAll();
     FacetEqWindows::closeAll();
     ProEditorWindows::closeAll();
 }

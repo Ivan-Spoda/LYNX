@@ -15798,3 +15798,4 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Parity144Tests.inc"
 #include "Parity144aTests.inc"
 #include "Patcher141Tests.inc"
+#include "Natives142Tests.inc"

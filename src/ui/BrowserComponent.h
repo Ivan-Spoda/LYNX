@@ -1,5 +1,7 @@
 #pragma once
 
+#include <set>
+
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include "engine/AudioEngine.h"
@@ -43,6 +45,9 @@ public:
     std::function<void (int, int)> onOpenEffect; // double-click an effect (insert, slot): its editor
     std::function<void (int)> onShowInsert;      // an effect's / generator's insert in the Mixer
     std::function<void (int)> onOpenAutomation;  // double-click an automation clip: its editor
+    // The Plugin database (round 142): double-click a generator = a new channel, an effect = into the selected insert
+    std::function<void (ChannelDef)> onAddInstrument;
+    std::function<void (EffectSlot)> onAddEffect;
     std::function<void (const juce::File&)> onSendToPlaylist; // a sample's "Send to the Playlist as an audio clip"
     std::function<void()> onPreviewVolumeChanged;             // the preview volume knob moved (the main window saves it)
 
@@ -71,6 +76,7 @@ public:
     void selectFirstSampleForSnapshot();
     // --snapshot: the PROJECT tab with the patterns, generators and samples open, a sample selected
     void showProjectForSnapshot();
+    void showPluginDatabaseForSnapshot(); // its Generators / Effects FL engines open (round 142)
     // --snapshot: shows this audio file in the preview strip (without playing it)
     void showPreviewForSnapshot (const juce::File& file);
     // Up/Down (load = false) or Shift+Up/Down (load = true); Enter = loadSelected()
@@ -141,6 +147,7 @@ private:
     int tab = allTab;
     bool searchPending = false, projectDirty = false;
     juce::File projectFile;
+    std::set<juce::String> openPluginFolders; // the Plugin database folders the user opened (round 142)
 
     AudioEngine& engine;
     juce::Array<juce::File> roots;
