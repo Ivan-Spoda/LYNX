@@ -801,7 +801,9 @@ void PlaylistComponent::paint (juce::Graphics& g)
 
             const auto width = (float) juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), label) + 8.0f;
             const auto tag = juce::Rectangle<float> (x, (float) timelineHeight - 11.0f, width, 11.0f);
-            g.setColour (m.isSignature() ? colour::info : colour::warning);
+            // recording markers (Start / Stop recording) in the accent colour, as the record button
+            const auto punch = m.action == Marker::punchIn || m.action == Marker::punchOut;
+            g.setColour (m.isSignature() ? colour::info : punch ? colour::accent : colour::warning);
             g.fillRoundedRectangle (tag, 2.0f);
             g.drawVerticalLine ((int) x, 0.0f, (float) timelineHeight);
             g.setColour (colour::bg0);
@@ -2539,11 +2541,44 @@ void PlaylistComponent::showRulerMenu (int x)
             engine.editSong ([tick, n, d] (Song& s) { s.addMarker ({ tick, {}, n, d }); });
         });
     menu.addSubMenu (tr ("Time signature change here"), signatures);
+    // FL's marker actions "Start recording" / "Stop recording" (punch in / out; Record menu › Enable recording markers)
+    menu.addItem (tr ("Add a Start recording marker here"), [this, tick] {
+        engine.editSong ([tick] (Song& s) {
+            Marker m;
+            m.tick = tick;
+            m.name = tr ("Start recording").toStdString();
+            m.action = Marker::punchIn;
+            s.addMarker (m);
+        });
+    });
+    menu.addItem (tr ("Add a Stop recording marker here"), [this, tick] {
+        engine.editSong ([tick] (Song& s) {
+            Marker m;
+            m.tick = tick;
+            m.name = tr ("Stop recording").toStdString();
+            m.action = Marker::punchOut;
+            s.addMarker (m);
+        });
+    });
 
     if (near >= 0)
     {
         menu.addSeparator();
         menu.addItem (tr ("Rename marker..."), [this, near] { editMarkerName (0, near); });
+        if (! song.markers()[(std::size_t) near].isSignature())
+        {
+            juce::PopupMenu action;
+            const auto current = song.markers()[(std::size_t) near].action;
+            for (auto [value, text] : { std::pair { 0, TR_NOOP ("None (plain marker)") }, { Marker::punchIn, TR_NOOP ("Start recording") },
+                                        { Marker::punchOut, TR_NOOP ("Stop recording") } })
+                action.addItem (tr (text), true, current == value, [this, near, value = value] {
+                    engine.editSong ([near, value] (Song& s) {
+                        if (near < (int) s.markers().size())
+                            s.markers()[(std::size_t) near].action = value;
+                    });
+                });
+            menu.addSubMenu (tr ("Marker action"), action);
+        }
         menu.addItem (tr ("Remove marker"), [this, near] {
             engine.editSong ([near] (Song& s) {
                 if (near < (int) s.markers().size())

@@ -196,6 +196,27 @@ int oversamplingOf (float v) noexcept { return 1 << pick (v, 4); }
 double panOf (float v) noexcept { return std::clamp ((double) v * 2.0 - 1.0, -1.0, 1.0); }
 double trimDb (float v) noexcept { return lin (v, -36.0, 36.0); }
 LinkMode linkModeOf (float v) noexcept { return (LinkMode) pick (v, linkModes); }
+Trigger triggerOf (float v) noexcept { return (Trigger) pick (v, 3); }
+double triggerBeats (float v) noexcept { return 4.0 / (double) (1 << pick (v, 5)); }
+double triggerRateOf (float v) noexcept { return std::pow (2.0, 2.0 * (double) std::clamp (v, 0.0f, 1.0f) - 1.0); }
+double triggerLengthOf (float v) noexcept { return (double) std::clamp (v, 0.0f, 1.0f); }
+int triggerChannelOf (float v) noexcept
+{
+    const auto k = (int) std::lround (std::clamp (v, 0.0f, 1.0f) * 128.0f);
+    return k <= 0 ? -1 : k - 1;
+}
+// [EXEC] Pro-C 3 hosted at 120 BPM, a steady sine under the threshold: with Host Sync the gain reduction starts on
+// every note × rate (1/4 at 100 % = every 500 ms, 50 % = 250 ms, 200 % = 1 s; 1/8 at 100 % = 250 ms) and holds for
+// Length of that period (10 % = 50 ms, 50 % = 250 ms); its depth follows a 0 dBFS key (threshold −18 / −40 / 0 dB,
+// ratio 4:1, knee 18 dB: 14 / 32 / 2 dB of reduction)
+float hostTrigger (const EffectParams& p, double beats) noexcept
+{
+    const auto period = triggerBeats (p[triggerSync]) * triggerRateOf (p[triggerRate]);
+    if (period <= 0.0 || beats < 0.0)
+        return 0.0f;
+    const auto phase = beats / period - std::floor (beats / period);
+    return phase < triggerLengthOf (p[triggerLength]) ? 1.0f : 0.0f;
+}
 float linkModeValue (LinkMode m) noexcept { return (float) (int) m / (float) (linkModes - 1); }
 double dryDb (float v) noexcept
 {
@@ -439,12 +460,21 @@ public:
         scL = l;
         scR = r;
     }
+    // round 137: the trigger's clock and notes
+    void setSongPosition (double ticks) noexcept override { songBeats = ticks / (double) ppq; }
+    void setPlaying (bool playing) noexcept override { transportPlaying = playing; }
+    void setHeldNotes (const NoteMask* channels, int count) noexcept override
+    {
+        held = channels;
+        heldCount = count;
+    }
 
-    void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
+    void process (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept override
     {
         lastParams = p;
         configure (p);
         designScEq (p);
+        blockBpm = bpm > 1.0 ? bpm : 120.0;
         for (int off = 0; off < n; off += maxBlock)
             chunk (l + off, r + off, std::min (maxBlock, n - off), p, off);
         scL = scR = nullptr;
@@ -610,6 +640,13 @@ private:
         const auto drv = (float) dbToGain (driveDb (p[drive]));
         const auto scGain = (float) dbToGain (scLevelDb (p[scLevel]));
         const bool external = on (p[scExternal]) && scL != nullptr && scR != nullptr;
+        // round 137: the trigger replaces the detector's signal (a 0 dBFS key × the side-chain level)
+        const auto trig = triggerOf (p[trigger]);
+        float midiKey = 0.0f;
+        if (trig == Trigger::midi)
+            if (const auto c = triggerChannelOf (p[triggerChannel]); c >= 0 && held != nullptr && c < heldCount)
+                midiKey = (held[c][0] | held[c][1]) != 0 ? 1.0f : 0.0f;
+        const auto beat0 = songBeats + (double) offset * blockBpm / 60.0 / sr, beatStep = blockBpm / 60.0 / sr;
         const auto link = (double) std::clamp (p[stereoLink], 0.0f, 1.0f);
         const auto inGain = (float) dbToGain (trimDb (p[input]));
         const auto outGain = (float) dbToGain (trimDb (p[output]));
@@ -665,6 +702,8 @@ private:
                         sa = f.process (sa, 0);
                         sb = f.process (sb, 1);
                     }
+            if (trig != Trigger::off)
+                sa = sb = scGain * (trig == Trigger::midi ? midiKey : (transportPlaying ? hostTrigger (p, beat0 + beatStep * (double) i) : 0.0f));
             sideL[(std::size_t) i] = sa;
             sideR[(std::size_t) i] = sb;
             if (autoThr)
@@ -835,6 +874,11 @@ private:
     DcBlock dc;
     const float* scL = nullptr;
     const float* scR = nullptr;
+    // round 137: the trigger's clock (quarter notes at the block start) and the held notes
+    double songBeats = 0.0, blockBpm = 120.0;
+    bool transportPlaying = false;
+    const NoteMask* held = nullptr;
+    int heldCount = 0;
     std::array<float, maxBlock> wl {}, wr {}, gl {}, gr {}, dl {}, dr {}, sideL {}, sideR {};
     std::array<float, maxBlock * maxFactor> upL {}, upR {}, upGl {}, upGr {};
     LiveMeters meters;
@@ -1504,7 +1548,10 @@ const EffectInfo& crestInfo()
                                      { "Oversampling", 0.0f }, { "Auto gain", 1.0f }, { "Mix", 1.0f }, { "Input", 0.5f }, { "Output", 0.5f },
                                      { "Dry", 0.0f }, { "Auto threshold", 0.0f }, { "Link mode", 0.0f }, { "Meter scale", 0.75f },
                                      { "Input meter", 1.0f },
-                                     { "Wet pan", 0.5f }, { "Dry pan", 0.5f } } }; // round 135
+                                     { "Wet pan", 0.5f }, { "Dry pan", 0.5f }, // round 135
+                                     // round 137: the side-chain trigger (off), 1/4 note, rate 100 %, length 10 %, no channel
+                                     { "Trigger", 0.0f }, { "Trigger sync", 0.5f }, { "Trigger rate", 0.5f }, { "Trigger length", 0.1f },
+                                     { "Trigger channel", 0.0f } } };
     return info;
 }
 
@@ -1643,6 +1690,20 @@ std::string paramText (EffectKind kind, int param, float v)
                 const auto x = panOf (v);
                 return std::abs (x) < 0.005 ? std::string ("C") : fmt (x < 0 ? "%.0f%% L" : "%.0f%% R", std::abs (x) * 100.0);
             }
+            case trigger:
+            {
+                static const char* names[3] { "Off", "Host sync", "MIDI" };
+                return names[(int) triggerOf (v)];
+            }
+            case triggerSync:
+            {
+                static const char* names[5] { "1/1", "1/2", "1/4", "1/8", "1/16" };
+                return names[pick (v, 5)];
+            }
+            case triggerRate: return fmt ("%.0f%%", 100.0 * triggerRateOf (v));
+            case triggerLength: return fmt ("%.0f%%", 100.0 * triggerLengthOf (v));
+            case triggerChannel:
+                return triggerChannelOf (v) < 0 ? std::string ("Off") : fmt ("Channel %.0f", (double) (triggerChannelOf (v) + 1));
             default: return on (v) ? "on" : "off";
         }
     }

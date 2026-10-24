@@ -1389,8 +1389,9 @@ public:
     {
         using namespace theme;
         const auto s = scale();
-        skin::well (g, r, radius::md * s, fx.enabled ? accent : juce::Colours::transparentBlack);
         const juce::String id (item.display != nullptr ? item.display : "");
+        if (id != "faderscale") // round 137: the fader scale is bare text beside its fader
+            skin::well (g, r, radius::md * s, fx.enabled ? accent : juce::Colours::transparentBlack);
         const auto curveColour = fx.enabled ? accent : colour::textDisabled;
         const auto inner = r.reduced (6.0f * s);
         if (dynui::paint (g, id, r, s, fx, [this] (int k) { return liveMeter (k); }, dynHistory)) // the dynamics suite
@@ -1556,6 +1557,11 @@ public:
             for (int k = 0; k <= 5; ++k)
                 g.drawText (juce::String (k * 20), juce::Rectangle<float> (inner.getX() + inner.getWidth() * (float) k / 5.0f - 12.0f * s, inner.getBottom() - 11.0f * s, 24.0f * s, 10.0f * s),
                             juce::Justification::centred, false);
+            // round 137: the detune scale up the left side (+100 / 0 / −100 cents)
+            static const std::pair<float, const char*> centsMarks[] { { 0.0f, "+100" }, { 0.5f, "0" }, { 1.0f, "-100" } };
+            for (const auto& [frac, text] : centsMarks)
+                g.drawText (text, juce::Rectangle<float> (inner.getX() + 1.0f * s, inner.getY() + inner.getHeight() * frac - (frac > 0.9f ? 22.0f : frac > 0.1f ? 5.0f : 0.0f) * s, 30.0f * s, 10.0f * s),
+                            juce::Justification::centredLeft, false);
             for (int k = 0; k < 4; ++k) // round 135w: four voices (3 and 4 only when on)
             {
                 const juce::String pre = "V" + juce::String (k + 1) + " ";
@@ -1586,6 +1592,27 @@ public:
                 const auto h = hg / (1.0 + std::pow (hf / f, 2.0));
                 return (float) ((l + h + 30.0) / 42.0);
             }, inner, true);
+            // round 137: the L / H markers (drag: frequency / gain; double-click: on / off) and the frequency labels
+            g.setFont (font (8.5f * s));
+            g.setColour (colour::textSecondary);
+            static const std::pair<double, const char*> freqMarks[] { { 62.0, "62" }, { 250.0, "250" }, { 1000.0, "1K" }, { 4000.0, "4K" } };
+            for (const auto& [hz, text] : freqMarks)
+            {
+                const auto x = inner.getX() + inner.getWidth() * (float) (std::log (hz / 20.0) / std::log (1000.0));
+                g.drawText (text, juce::Rectangle<float> (x - 12.0f * s, inner.getBottom() - 11.0f * s, 24.0f * s, 10.0f * s), juce::Justification::centred, false);
+            }
+            const auto zero = inner.getBottom() - inner.getHeight() * 30.0f / 42.0f;
+            g.drawText ("0", juce::Rectangle<float> (inner.getX() + 1.0f * s, zero - 5.0f * s, 14.0f * s, 10.0f * s), juce::Justification::centredLeft, false);
+            for (const auto& h : geminiHandles (item))
+            {
+                const bool isLow = h.on == lowOn, onNow = valueOf (h.on) >= 0.5f;
+                const auto box = juce::Rectangle<float> (14.0f * s, 14.0f * s).withCentre (h.at);
+                g.setColour (onNow ? curveColour : colour::textDisabled);
+                g.fillEllipse (box);
+                g.setColour (colour::bg0);
+                g.setFont (font (9.0f * s, true));
+                g.drawText (isLow ? "L" : "H", box, juce::Justification::centred, false);
+            }
         }
         else if (id == "xy") // a pad: `param` across, `param2` up (drag the point)
         {
@@ -1802,8 +1829,10 @@ public:
                 }
                 g.setColour ((fx.enabled ? accent : colour::textDisabled).withAlpha (0.85f));
                 g.fillRoundedRectangle (well.withTrimmedLeft (well.getWidth() * 0.35f).withHeight (well.getHeight() * amount), radius::sm);
+                // round 137: the read-out holds the deepest reduction (the reference's peak box; click the meter = reset)
+                grHold = juce::jmax (grHold, amount);
                 g.setColour (colour::textSecondary);
-                g.drawText ((amount > 0.0005f ? juce::String (-amount * 30.0f, 1) : juce::String ("0.0")) + " dB", bar.withTop (bar.getBottom() - 14.0f * s), juce::Justification::centred, false);
+                g.drawText ((grHold > 0.0005f ? juce::String (-grHold * 30.0f, 1) : juce::String ("0.0")) + " dB", bar.withTop (bar.getBottom() - 14.0f * s), juce::Justification::centred, false);
                 return;
             }
             g.setColour (colour::gridBeat);
@@ -1817,6 +1846,21 @@ public:
                 g.setFont (font (juce::jmax (7.0f, juce::jmin (10.0f * s, bar.getHeight() * 0.95f)), true));
                 g.drawText (caps (tr (item.label)) + "  " + juce::String (amount * 30.0f, 1) + " dB", bar.reduced (3.0f * s, 0.0f),
                             juce::Justification::centredLeft, false);
+            }
+            return;
+        }
+        else if (id == "faderscale") // round 137: a 0 … 100 scale beside a tall fader (the reference prints it on both sides)
+        {
+            auto area = r.withTrimmedBottom (13.0f * s);
+            const auto top = area.getY() + 5.0f * s, bottom = area.getBottom() - 5.0f * s;
+            g.setFont (font (juce::jmax (7.0f, 8.5f * s)));
+            for (int k = 0; k <= 100; k += 10)
+            {
+                const auto y = bottom - (bottom - top) * (float) k / 100.0f;
+                g.setColour (colour::gridBeat);
+                g.drawHorizontalLine ((int) y, area.getRight() - 6.0f * s, area.getRight());
+                g.setColour (colour::textSecondary);
+                g.drawText (juce::String (k), juce::Rectangle<float> (area.getX(), y - 5.0f * s, area.getWidth() - 8.0f * s, 10.0f * s), juce::Justification::centredRight, false);
             }
             return;
         }
@@ -2062,7 +2106,23 @@ public:
                     tR = tL * (0.01 + 0.99 * (double) params[ratio]);
                 const auto gain = juce::jlimit (0.0, 1.0, feedbackGain (params[feedback]));
                 window = juce::jmax (50.0, 4.5 * juce::jmax (tL, tR));
-                if (st == Style::pingPong)
+                if (params[rhythm] >= 0.5f) // round 137: the Rhythm pattern, three passes of it (left and right alike)
+                {
+                    double slot0 = 0.0;
+                    const auto taps = rhythmTaps (params, bpm, &slot0);
+                    const auto length = rhythmLengthMs (params, bpm);
+                    window = 3.0 * length * 1.02;
+                    auto level = 1.0;
+                    for (int pass = 0; pass < 3; ++pass, level *= gain)
+                        for (int c = 0; c < 2; ++c)
+                        {
+                            if (pass > 0)
+                                ticks.push_back ({ length * pass, slot0 * level, c == 1 });
+                            for (const auto& t : taps)
+                                ticks.push_back ({ length * pass + t.ms, t.level * level, c == 1 });
+                        }
+                }
+                else if (st == Style::pingPong)
                 {
                     auto t = tL, level = 1.0;
                     for (int k = 0; k < 24 && t <= window; ++k)
@@ -2115,7 +2175,19 @@ public:
             g.setColour (colour::textDisabled);
             g.setFont (font (juce::jmax (8.0f, 9.0f * s), true));
             g.drawText (juce::String (window >= 1000.0 ? juce::String (window / 1000.0, 2) + " s" : juce::String ((int) window) + " ms"),
-                        inner.reduced (2.0f * s), juce::Justification::bottomRight);
+                        inner.reduced (2.0f * s), juce::Justification::bottomRight);            if (id == "echotrain") // round 137: the delay read-out (H-Delay's central display): the note and its tempo, or the ms
+            {
+                using namespace echosuite::echoform;
+                const auto kindL = syncKind (params[syncL]);
+                juce::String text;
+                if (kindL == 0)
+                    text = juce::String (juce::roundToInt (sideMs (params, false, bpm))) + " ms";
+                else
+                    text = juce::String (formatEffectParam (EffectKind::echoform, noteL, params[noteL], bpm)) + (kindL == 2 ? " D" : kindL == 3 ? " T" : "")
+                           + "  " + juce::String (tempoFor (params, bpm), 1) + " BPM";
+                g.setColour (colour::textSecondary);
+                g.drawText (text, inner.reduced (2.0f * s), juce::Justification::topRight);
+            }
         }
         else if (paintFxDisplay (g, id, item, inner, fx))
         {
@@ -2498,6 +2570,108 @@ public:
     }
 
     // a pad sets two parameters at once
+    // --- round 137: Gemini Doubler's graphs are editable (the reference: "Gain, Pan, Delay and Detune can be controlled
+    // using the graphs"): drag a voice on the pan / gain half circle or on the delay / detune map, drag the EQ's L / H
+    // markers (frequency across, gain up), double-click a marker = that shelf on / off
+    static bool isGeminiGraph (const LayoutItem& item)
+    {
+        return item.type == Item::display && item.display != nullptr
+               && (std::strcmp (item.display, "geminipan") == 0 || std::strcmp (item.display, "geminimap") == 0 || std::strcmp (item.display, "geminieq") == 0);
+    }
+    // the handles of a graph: (parameter across / around, parameter up / out, position on screen)
+    struct GeminiHandle { int px = -1, py = -1, on = -1; juce::Point<float> at; };
+    std::vector<GeminiHandle> geminiHandles (const LayoutItem& item) const
+    {
+        using namespace voicetools::gemini;
+        std::vector<GeminiHandle> out;
+        const auto s = scale();
+        const auto inner = rectOf (item).reduced (6.0f * s);
+        const juce::String id (item.display);
+        if (id == "geminipan")
+        {
+            const auto c = juce::Point<float> (inner.getCentreX(), inner.getBottom() - 4.0f * s);
+            const auto radius = juce::jmin (inner.getWidth() * 0.5f, inner.getHeight()) - 8.0f * s;
+            auto add = [&] (int panP, int gainP, int onP) {
+                const auto a = juce::degreesToRadians ((float) panDegrees (valueOf (panP)));
+                const auto rr = radius * juce::jlimit (0.05f, 1.0f, valueOf (gainP));
+                out.push_back ({ panP, gainP, onP, { c.x + rr * std::sin (a), c.y - rr * std::cos (a) } });
+            };
+            add (directPan, directGain, directOn);
+            for (int v = 0; v < voices; ++v)
+                if (v < 2 || valueOf (voiceParam (v, vOn)) >= 0.5f)
+                    add (voiceParam (v, vPan), voiceParam (v, vGain), voiceParam (v, vOn));
+        }
+        else if (id == "geminimap")
+        {
+            for (int v = 0; v < voices; ++v)
+                if (v < 2 || valueOf (voiceParam (v, vOn)) >= 0.5f)
+                    out.push_back ({ voiceParam (v, vDelay), voiceParam (v, vDetune), voiceParam (v, vOn),
+                                     { inner.getX() + inner.getWidth() * valueOf (voiceParam (v, vDelay)),
+                                       inner.getBottom() - inner.getHeight() * valueOf (voiceParam (v, vDetune)) } });
+        }
+        else
+        {
+            auto add = [&] (int freqP, int gainP, int onP) {
+                const auto hz = freqHz (valueOf (freqP));
+                const auto x = (float) (std::log (juce::jlimit (20.0, 20000.0, hz) / 20.0) / std::log (1000.0));
+                const auto db = valueOf (onP) >= 0.5f ? shelfDb (valueOf (gainP)) : 0.0;
+                out.push_back ({ freqP, gainP, onP, { inner.getX() + inner.getWidth() * x, inner.getBottom() - inner.getHeight() * (float) ((db + 30.0) / 42.0) } });
+            };
+            add (lowFreq, lowGain, lowOn);
+            add (highFreq, highGain, highOn);
+        }
+        return out;
+    }
+    int geminiNearest (const LayoutItem& item, juce::Point<float> p) const
+    {
+        const auto handles = geminiHandles (item);
+        int best = -1;
+        auto bestD = 18.0f * scale();
+        for (int k = 0; k < (int) handles.size(); ++k)
+            if (const auto d = handles[(std::size_t) k].at.getDistanceFrom (p); d < bestD)
+                best = k, bestD = d;
+        return best;
+    }
+    void geminiMouse (const juce::MouseEvent& e, const LayoutItem& item)
+    {
+        using namespace voicetools::gemini;
+        const auto handles = geminiHandles (item);
+        if (geminiHandle < 0 || geminiHandle >= (int) handles.size())
+            return;
+        const auto& h = handles[(std::size_t) geminiHandle];
+        const auto s = scale();
+        const auto inner = rectOf (item).reduced (6.0f * s);
+        const juce::String id (item.display);
+        float x = 0.0f, y = 0.0f;
+        if (id == "geminipan")
+        {
+            const auto c = juce::Point<float> (inner.getCentreX(), inner.getBottom() - 4.0f * s);
+            const auto radius = juce::jmax (1.0f, juce::jmin (inner.getWidth() * 0.5f, inner.getHeight()) - 8.0f * s);
+            const auto deg = juce::jlimit (-45.0f, 45.0f, juce::radiansToDegrees (std::atan2 (e.position.x - c.x, juce::jmax (0.001f, c.y - e.position.y))));
+            x = (deg + 45.0f) / 90.0f;
+            y = juce::jlimit (0.0f, 1.0f, e.position.getDistanceFrom (c) / radius);
+        }
+        else if (id == "geminimap")
+        {
+            x = juce::jlimit (0.0f, 1.0f, (e.position.x - inner.getX()) / juce::jmax (1.0f, inner.getWidth()));
+            y = juce::jlimit (0.0f, 1.0f, (inner.getBottom() - e.position.y) / juce::jmax (1.0f, inner.getHeight()));
+        }
+        else
+        {
+            const auto fx = juce::jlimit (0.0f, 1.0f, (e.position.x - inner.getX()) / juce::jmax (1.0f, inner.getWidth()));
+            x = freqValue (20.0 * std::pow (1000.0, (double) fx));
+            y = juce::jlimit (0.0f, 1.0f, (inner.getBottom() - e.position.y) / juce::jmax (1.0f, inner.getHeight()));
+        }
+        std::vector<std::pair<int, float>> changes { { h.px, x }, { h.py, y } };
+        if (id == "geminieq" && valueOf (h.on) < 0.5f) // dragging a marker turns its shelf on
+            changes.push_back ({ h.on, 1.0f });
+        setParams (changes);
+        ui::showValueTip (*this, rectOf (item).toNearestInt(), valueText (h.px, x) + " / " + valueText (h.py, y));
+    }
+    int geminiHandle = -1;
+    float grHold = 0.0f; // round 137: the tall reduction meter's held value
+    bool geminiDragging = false;
+
     void xyMouse (const juce::MouseEvent& e, const LayoutItem& item)
     {
         const auto inner = rectOf (item).reduced (6.0f * scale());
@@ -2640,6 +2814,12 @@ public:
             repaint();
             return;
         }
+        if (item.type == Item::display && juce::String (item.display) == "grmeter") // round 137: reset the held reduction
+        {
+            grHold = 0.0f;
+            repaint();
+            return;
+        }
         if (item.type == Item::display && juce::String (item.display) == "outmeter") // round 135w: reset the peak and the clip lamp
         {
             outMax = 0.0f;
@@ -2710,6 +2890,17 @@ public:
             {
                 page = juce::jlimit (0, (int) activeLayout().pages.size() - 1, dynui::bandAt (*fx, r, e.position.x));
                 repaint();
+            }
+            return;
+        }
+        if (isGeminiGraph (item)) // round 137
+        {
+            geminiHandle = geminiNearest (item, e.position);
+            if (geminiHandle >= 0)
+            {
+                dragItem = index;
+                geminiDragging = true;
+                bar.beginGesture();
             }
             return;
         }
@@ -2887,6 +3078,11 @@ public:
             xyMouse (e, activeLayout().items[(std::size_t) dragItem]);
             return;
         }
+        if (geminiDragging && dragItem >= 0) // round 137
+        {
+            geminiMouse (e, activeLayout().items[(std::size_t) dragItem]);
+            return;
+        }
         if (barsDragging && dragItem >= 0)
         {
             barsMouse (e, activeLayout().items[(std::size_t) dragItem], false);
@@ -2919,6 +3115,13 @@ public:
             dragItem = -1;
             ui::hideValueTip();
         }
+        if (geminiDragging) // round 137
+        {
+            geminiDragging = false;
+            geminiHandle = -1;
+            dragItem = -1;
+            ui::hideValueTip();
+        }
         if (xyDragging || sgDragging || barsDragging)
         {
             xyDragging = sgDragging = barsDragging = false;
@@ -2940,6 +3143,16 @@ public:
         if (index < 0)
             return;
         const auto& item = activeLayout().items[(std::size_t) index];
+        if (isGeminiGraph (item)) // round 137: an EQ marker = its shelf on / off
+        {
+            if (juce::String (item.display) == "geminieq")
+                if (const auto k = geminiNearest (item, e.position); k >= 0)
+                {
+                    const auto h = geminiHandles (item)[(std::size_t) k];
+                    setParams ({ { h.on, valueOf (h.on) >= 0.5f ? 0.0f : 1.0f } });
+                }
+            return;
+        }
         if (item.type == Item::display) // EQ graph: the band under the mouse back to 0 dB
         {
             if (const auto* fx = current(); fx != nullptr)

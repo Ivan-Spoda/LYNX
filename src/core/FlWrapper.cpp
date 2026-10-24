@@ -148,6 +148,10 @@ void applyFlWrapperOptions (const ForeignPlugin& w, PluginRef& ref)
         ref.threaded = (w.wrapperFlags & 0x1000u) != 0;
     if (w.wrapperVersion >= 8)
         ref.separateProcess = (w.wrapperFlags & 0x40000u) != 0;
+    if (w.wrapperVersion >= 10)
+        ref.allowSmartDisable = (w.wrapperFlags & 0x20000000u) != 0;
+    // "Use maximum buffer size from host" (fixed-buffer options bit 1): the plugin is told the host's maximum block
+    ref.hostMaxBuffer = ref.fixedBuffers && (w.fixedOptions & 0x2u) != 0;
 }
 
 bool splitFlVst3State (const std::vector<std::uint8_t>& state, std::vector<std::uint8_t>& component,

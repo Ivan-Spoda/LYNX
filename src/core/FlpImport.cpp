@@ -844,6 +844,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.sampler.cut = true;
 
         def.synth.mono = c.monoFlag || c.maxVoices == 1;
+        def.maxPolyphony = std::clamp (c.maxVoices, 0, 128); // FL's Polyphony › Max (0 = unlimited)
 
         // channel porta and slide time: n = round((27^(v/1024) - 1) * 48/26) ticks of 1/192 beat
         // (REA_rodada6 §4); the time also applies to notes with their own porta
@@ -2363,6 +2364,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 }
 
                 auto fx = std::move (*made);
+                // FL's per-plugin "Smart disable" (0xD4 flag 0x20, REA round 139): off = processed even in silence
+                if (slot.wrapperFlags >= 0)
+                    fx.smartDisable = (slot.wrapperFlags & 0x20) != 0;
 
                 // sidechain (REA_rodada22 §1): Fruity Limiter (i32 at 0xA4, v ≥ 6; only the compressor detector and only
                 // with Comp threshold < 0 dB) and Fruity Compressor (i32 at 0x20, v3)
@@ -2990,6 +2994,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             marker.name.erase (0, marker.name.find_first_not_of (' '));
             marker.name.erase (marker.name.find_last_not_of (' ') + 1);
 
+            if (m.type != 8 && m.type > 0 && m.type < 256)
+                marker.action = m.type; // FL's marker action (9 Start recording, 10 Stop recording, ...)
             if (m.type == 8 && m.numerator >= 1 && m.numerator <= 32 && m.denominator >= 1 && m.denominator <= 32)
             {
                 marker.numerator = m.numerator;

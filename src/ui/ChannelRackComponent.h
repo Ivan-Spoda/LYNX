@@ -113,6 +113,8 @@ public:
 
     // The menu of instruments and plugins to add as a new channel (also the toolbar's plugin picker).
     void showAddChannelMenu (int insertAt = -1);
+    // The same items into `menu` (also the main window's Add menu, REA round 139).
+    void addInstrumentItems (juce::PopupMenu& menu, int insertAt);
 
     // Channel filter groups (FL's "All" dropdown in the rack's title, REA round 104): -1 shows every channel,
     // otherwise only the channels of that group (Song::channelGroups). New channels join the group shown.
@@ -171,7 +173,6 @@ private:
     bool cellHasNote (int channel, int step) const;
     void applyPaint (const juce::MouseEvent& e);
     void showChannelMenu (int channel);
-    void addInstrumentItems (juce::PopupMenu& menu, int insertAt);
     void chooseSample (int channel); // channel < 0 = new channel
     void assignSample (int channel, const juce::File& file);
     void rename (int channel);

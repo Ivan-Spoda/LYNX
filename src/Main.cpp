@@ -3,6 +3,7 @@
 
 #include "core/LoadTrace.h"
 #include "core/Effects.h"
+#include "core/EchoSuite.h"
 #include "core/LynxTune.h"
 #include "core/FlEffects.h"
 #include "core/FlpImport.h"
@@ -2589,6 +2590,37 @@ private:
                     if (auto stream = file.createOutputStream())
                         png.writeImageToStream (image, *stream);
                 }
+            }
+
+            // round 137: Echoform in its Rhythm mode (EchoBoy's role) with the Present era
+            {
+                namespace ef = lynx::echosuite::echoform;
+                auto fx = lynx::makeEffectSlot (lynx::EffectKind::echoform);
+                fx.params[ef::rhythm] = 1.0f;
+                fx.params[ef::rhythmRepeats] = 5.0f / 15.0f;
+                fx.params[ef::rhythmDecay] = 0.25f;
+                fx.params[ef::rhythmTap1 + 2] = 0.45f;
+                fx.params[ef::feedback] = 0.25f;
+                fx.params[ef::era] = 0.5f;
+                lynx::Song song;
+                song.mixer.resize (2);
+                song.mixer[0].name = "Master";
+                song.mixer[1].name = "Insert 1";
+                song.mixer[1].effects.push_back (fx);
+                offline.setSong (std::move (song));
+                offline.dispatchPendingMessages();
+                auto editor = lynx::makeNativeEffectEditor (offline, 1, 0, 1.0f, 0);
+                juce::Image image (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
+                {
+                    juce::Graphics g (image);
+                    g.fillAll (lynx::theme::panel);
+                    editor->paintEntireComponent (g, false);
+                }
+                const auto file = out.getChildFile ("Echoform-rhythm.png");
+                file.deleteFile();
+                juce::PNGImageFormat png;
+                if (auto stream = file.createOutputStream())
+                    png.writeImageToStream (image, *stream);
             }
 
             // LYNX's own editors with live displays (round 103): Facet EQ (a mixing curve, one dynamic band, demo analyser)

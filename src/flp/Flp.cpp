@@ -346,6 +346,51 @@ const Channel* Project::findChannel (int index) const noexcept
     return it != channels.end() ? &*it : nullptr;
 }
 
+std::string readSavedVersion (std::span<const std::uint8_t> head)
+{
+    auto u32 = [&head] (std::size_t at) {
+        return (std::uint32_t) head[at] | (std::uint32_t) head[at + 1] << 8 | (std::uint32_t) head[at + 2] << 16 | (std::uint32_t) head[at + 3] << 24;
+    };
+    if (head.size() < 22 || std::memcmp (head.data(), "FLhd", 4) != 0)
+        return {};
+    std::size_t p = 8 + (std::size_t) u32 (4);
+    if (p + 8 > head.size() || std::memcmp (head.data() + p, "FLdt", 4) != 0)
+        return {};
+    p += 8;
+    for (int count = 0; count < 64 && p < head.size(); ++count)
+    {
+        const auto id = head[p++];
+        if (id < 0x40)
+            p += 1;
+        else if (id < 0x80)
+            p += 2;
+        else if (id < 0xC0)
+            p += 4;
+        else
+        {
+            std::size_t n = 0;
+            for (int shift = 0; p < head.size() && shift < 35; shift += 7)
+            {
+                const auto b = head[p++];
+                n |= (std::size_t) (b & 0x7F) << shift;
+                if ((b & 0x80) == 0)
+                    break;
+            }
+            if (p + n > head.size())
+                return {};
+            if (id == evVersion)
+            {
+                std::string v;
+                for (std::size_t i = 0; i < n && head[p + i] != 0; ++i)
+                    v += (char) head[p + i];
+                return v;
+            }
+            p += n;
+        }
+    }
+    return {};
+}
+
 Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
 {
     EventReader reader (file);
@@ -371,15 +416,17 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
     std::string pendingSlotPlugin;
     std::vector<std::uint8_t> pendingSlotState;
     int pendingSlotIndex = -1; // from 0xD4: FL <= 11 files have no 0x62, the next slot/route/insert closes the slot
+    int pendingSlotFlags = -1; // from 0xD4: the wrapper flags (u16 at +16)
     auto closeOldSlot = [&] {
         if (pendingSlotIndex >= 0 && ! pendingSlotPlugin.empty() && ! project.mixer.empty())
-            project.mixer.back().slots.push_back ({ pendingSlotIndex, pendingSlotPlugin, std::move (pendingSlotState) });
+            project.mixer.back().slots.push_back ({ pendingSlotIndex, pendingSlotPlugin, std::move (pendingSlotState), pendingSlotFlags });
         if (pendingSlotIndex >= 0)
         {
             pendingSlotPlugin.clear();
             pendingSlotState.clear();
         }
         pendingSlotIndex = -1;
+        pendingSlotFlags = -1;
     };
     std::uint32_t pendingInsertColour = 0;
 
@@ -587,8 +634,15 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                 break;
 
             case evPluginNew:
+                // 13 × u32; the u16 at +16 holds the wrapper flags (PyFLP's WrapperEvent; REA round 139: 0x10 generator,
+                // 0x20 "Smart disable", 0x40 threaded, 0x100 hide settings)
                 if (section == Section::mixer && e.data.size() >= 8)
+                {
                     pendingSlotIndex = readLE<std::int32_t> (e.data, 4);
+                    pendingSlotFlags = e.data.size() >= 18 ? (int) readLE<std::uint16_t> (e.data, 16) : -1;
+                }
+                else if (section == Section::channel && e.data.size() >= 18)
+                    channel().wrapperFlags = (int) readLE<std::uint16_t> (e.data, 16);
                 break;
 
             case evChannelType:
@@ -629,10 +683,11 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
 
             case evMixerSlotIndex:
                 if (section == Section::mixer && ! project.mixer.empty() && ! pendingSlotPlugin.empty())
-                    project.mixer.back().slots.push_back ({ (int) e.value, pendingSlotPlugin, std::move (pendingSlotState) });
+                    project.mixer.back().slots.push_back ({ (int) e.value, pendingSlotPlugin, std::move (pendingSlotState), pendingSlotFlags });
                 pendingSlotPlugin.clear();
                 pendingSlotState.clear();
                 pendingSlotIndex = -1;
+                pendingSlotFlags = -1;
                 break;
 
             case evPluginState:

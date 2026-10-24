@@ -94,6 +94,15 @@ public:
         // disarmed when a take stops
         bool startsPlayback = false;
         bool disarmOnStop = false;
+        // FL's record menu "Quantize" section (REA round 139); `quantise` is the grid. quantiseStarts = "Note start
+        // time", noteEnd = "Note end time" (quantize) / "Leave note duration" (keepLength) / neither (keepEnd),
+        // toStepSequencer = "Record to step sequencer"
+        bool quantiseStarts = true;
+        NoteEnd noteEnd = NoteEnd::keepLength;
+        bool toStepSequencer = false;
+        // FL's "Enable recording markers": the Playlist's "Start recording" / "Stop recording" markers limit what a
+        // take keeps in song mode (notes started outside are dropped, audio clips are cut to the ranges)
+        bool recordingMarkers = false;
     };
     const RecordOptions& getRecordOptions() const noexcept { return recordOptions; }
     void setRecordOptions (const RecordOptions& options);
