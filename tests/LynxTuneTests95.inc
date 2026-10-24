@@ -566,6 +566,7 @@ TEST (lynx_tune_editor_layout_round95)
                 placed[(std::size_t) (lynx::lynxtune::noteC + k)] = placed[(std::size_t) (lynx::lynxtune::bypassC + k)] = true;
                 placed[(std::size_t) (lynx::lynxtune::noteDirC + k)] = true; // round 147b: the note directions
                 placed[(std::size_t) lynx::lynxtune::rangeLow] = placed[(std::size_t) lynx::lynxtune::rangeHigh] = true; // and the range bar
+                placed[(std::size_t) lynx::lynxtune::receiveScale] = true; // round 150b: the strip's Receive switch
             }
         if (item.type == lynx::plugui::Item::menu && item.param != nullptr && std::string (item.param) == "Scale")
             placed[(std::size_t) lynx::lynxtune::moreScales] = true;

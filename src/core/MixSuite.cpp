@@ -1431,8 +1431,21 @@ int bandParam (int band, int field) noexcept
         static constexpr int first[] { style, drive, band1Mix, band1Level };
         return first[std::clamp (field, 0, 3)];
     }
-    return band2Style + (band - 1) * 4 + std::clamp (field, 0, 3);
+    if (band < firstBands)
+        return band2Style + (band - 1) * 4 + std::clamp (field, 0, 3);
+    return band5Style + (std::min (band, maxBands - 1) - firstBands) * 4 + std::clamp (field, 0, 3); // round 150
 }
+int activeBands (const EffectParams& p) noexcept
+{
+    const auto more = std::clamp ((int) std::lround (std::clamp (p[bandsMore], 0.0f, 1.0f) * 2.0f), 0, 2);
+    return more > 0 ? firstBands + more : bandCount (p[bands]);
+}
+std::pair<float, float> bandCountValues (int n) noexcept
+{
+    n = std::clamp (n, 1, maxBands);
+    return { (float) (std::min (n, firstBands) - 1) / 3.0f, n <= firstBands ? 0.0f : (float) (n - firstBands) / 2.0f };
+}
+int characterIndex (float v) noexcept { return std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * characters), 0, characters); }
 
 float shape (Style s, float x) noexcept
 {
@@ -1470,6 +1483,125 @@ float shape (Style s, float x) noexcept
             return std::tanh (1.5f * x) / 1.5f;
     }
 }
+
+// ---- round 150: the measured characters (REA_rodada150b) ----
+namespace
+{
+struct CharacterData
+{
+    const char* name;
+    int family;              // 0 soft knee u / (1 + |u|^p)^(1/p) around a bias, 1 sine fold, 2 full-wave rectifier
+    float p, bias;
+    float driveDb[6], gainDb[6]; // at the reference's drive 0, 20, 40, 60, 80, 100 %: the curve's input / output gain
+    int highPasses, lowPasses;   // identical cookbook sections (n × the same filter)
+    float hpHz, hpQ, lpHz, lpQ;
+    float bellHz[3], bellDb[3], bellQ[3];
+    float eqDb;                  // the EQ's gain (0 dB at 1 kHz overall)
+};
+constexpr CharacterData characterTable[characters] {
+#include "core/EmberCharacters.inc"
+};
+
+float softKnee (float u, float p) noexcept
+{
+    const auto a = std::abs (u);
+    if (p == 2.0f) return u / std::sqrt (1.0f + a * a);
+    if (p == 1.0f) return u / (1.0f + a);
+    return u / std::pow (1.0f + std::pow (a, p), 1.0f / p);
+}
+
+double interpDrive (const float* table, double drive) noexcept
+{
+    const auto x = std::clamp (drive, 0.0, 1.0) * 5.0;
+    const auto i = std::min ((int) x, 4);
+    return table[i] + (table[i + 1] - table[i]) * (x - i);
+}
+} // namespace
+
+const char* characterName (int k) noexcept
+{
+    if (k <= 0 || k > characters) return "Off";
+    return characterTable[k - 1].name;
+}
+
+float characterShape (int k, double drive, float x) noexcept
+{
+    if (k <= 0 || k > characters) return x;
+    const auto& c = characterTable[k - 1];
+    const auto d = (float) dbToGain (interpDrive (c.driveDb, drive));
+    const auto a = (float) dbToGain (interpDrive (c.gainDb, drive)) / d; // A is the small-signal gain: A · g (D x) / D
+    const auto u = d * x;
+    if (c.family == 1) return a * std::sin (u);
+    if (c.family == 2) return a * std::abs (u);
+    const auto f0 = softKnee (c.bias, c.p);
+    const auto slope = std::pow (1.0f + std::pow (std::abs (c.bias), c.p), -1.0f / c.p - 1.0f);
+    return a * (softKnee (u + c.bias, c.p) - f0) / slope;
+}
+
+namespace
+{
+// a band's character: the curve (run oversampled by the caller), its input / output gain from the drive and the EQ after
+// it (at the base rate, after the band's DC blocker)
+struct CharacterStage
+{
+    int k = 0, lastK = -1, sections = 0;
+    double lastSr = 0.0;
+    int family = 0;
+    float p = 2.0f, bias = 0.0f, f0 = 0.0f, slope = 1.0f, eqGain = 1.0f;
+    std::array<Biquad, 9> eq;
+
+    void reset() noexcept { for (auto& q : eq) q.reset(); }
+
+    void configure (int kk, double sr) noexcept
+    {
+        k = std::clamp (kk, 0, characters);
+        if (k == 0 || (k == lastK && sr == lastSr)) return;
+        const auto& c = characterTable[k - 1];
+        family = c.family;
+        p = c.p;
+        bias = c.bias;
+        f0 = softKnee (bias, p);
+        slope = std::pow (1.0f + std::pow (std::abs (bias), p), -1.0f / p - 1.0f);
+        sections = 0;
+        for (int i = 0; i < c.highPasses && sections < 9; ++i) eq[(std::size_t) sections++].filter (sr, 1, c.hpHz, c.hpQ);
+        for (int i = 0; i < c.lowPasses && sections < 9; ++i) eq[(std::size_t) sections++].filter (sr, 0, c.lpHz, c.lpQ);
+        for (int i = 0; i < 3 && sections < 9; ++i)
+            if (std::abs (c.bellDb[i]) > 0.01f)
+                eq[(std::size_t) sections++].peaking (sr, std::min ((double) c.bellHz[i], sr * 0.45), c.bellQ[i], c.bellDb[i]);
+        eqGain = (float) dbToGain (c.eqDb);
+        if (k != lastK) reset();
+        lastK = k;
+        lastSr = sr;
+    }
+
+    // the input (drive) and output gains for Ember's drive in dB on one channel (+ PUNISH's extra input gain)
+    std::pair<float, float> gains (double driveDb, double extraDb) const noexcept
+    {
+        const auto& c = characterTable[std::max (k, 1) - 1];
+        const auto d = referenceDrive (driveDb);
+        const auto dDb = interpDrive (c.driveDb, d);
+        return { (float) dbToGain (dDb + extraDb), (float) dbToGain (interpDrive (c.gainDb, d) - dDb) }; // A · g (D x) / D
+    }
+
+    float curve (float u) const noexcept
+    {
+        if (family == 1) return std::sin (u);
+        if (family == 2) return std::abs (u);
+        return (softKnee (u + bias, p) - f0) / slope;
+    }
+
+    void post (float& a, float& b) noexcept
+    {
+        for (int i = 0; i < sections; ++i)
+        {
+            a = eq[(std::size_t) i].process (a, 0);
+            b = eq[(std::size_t) i].process (b, 1);
+        }
+        a *= eqGain;
+        b *= eqGain;
+    }
+};
+} // namespace
 
 namespace
 {
@@ -1525,7 +1657,13 @@ struct BandExtras
     // the shaper with the feedback loop: the band-passed last output added to the input (channel ch)
     float shapeWithFeedback (Style s, float x, int ch) noexcept
     {
-        const auto y = shape (s, x + (float) fbGain * fbLast[ch]);
+        return feedbackShape ([s] (float u) noexcept { return shape (s, u); }, x, ch);
+    }
+
+    template <typename Curve>
+    float feedbackShape (Curve&& curve, float x, int ch) noexcept
+    {
+        const auto y = curve (x + (float) fbGain * fbLast[ch]);
         fbLast[ch] = fbBand.process (y, ch);
         return y;
     }
@@ -1594,9 +1732,12 @@ public:
             d.reset();
         for (auto& d : bandDc)
             d.reset();
-        for (auto* x : { &split[0], &split[1], &split[2], &ap2Low, &ap3Low, &ap3Mid })
-            x->reset();
+        for (auto& x : split) x.reset();
+        for (auto& row : ap)
+            for (auto& x : row) x.reset();
         for (auto& x : extras)
+            x.reset();
+        for (auto& x : chars)
             x.reset();
     }
 
@@ -1615,8 +1756,16 @@ public:
                 l[i] = m;
                 r[i] = sd;
             }
+        // round 150 (measured): the global input pan before everything and the output pan after the dry / wet mix,
+        // the far channel × (1 − |pan|), on left / right or (in mid / side) on mid / side like the band pan
+        const auto [inA, inB] = panScales (panOf (p[inputPan]));
+        if (inA != 1.0f || inB != 1.0f)
+            for (int i = 0; i < n; ++i) { l[i] *= inA; r[i] *= inB; }
         for (int off = 0; off < n; off += maxBlock)
             chunk (l + off, r + off, std::min (maxBlock, n - off), p);
+        const auto [outA, outB] = panScales (panOf (p[outputPan]));
+        if (outA != 1.0f || outB != 1.0f)
+            for (int i = 0; i < n; ++i) { l[i] *= outA; r[i] *= outB; }
         if (ms)
             for (int i = 0; i < n; ++i)
             {
@@ -1640,7 +1789,7 @@ private:
             const auto g = (float) dbToGain (inDb);
             for (int i = 0; i < n; ++i) { l[i] *= g; r[i] *= g; }
         }
-        if (bandCount (p[bands]) > 1)
+        if (activeBands (p) > 1)
         {
             chunkBands (l, r, n, p);
             return;
@@ -1650,7 +1799,10 @@ private:
         for (auto& o : os)
             o.setFactor (factor);
         // round 135: a voicing replaces the Style menu's curve and adds its own EQ; PUNISH adds 20 dB before the drive
-        const auto vk = voiceIndex (p[voice]);
+        // round 150: band 1's character (when set) replaces the Style menu and the voicing
+        auto& chr = chars[0];
+        chr.configure (characterIndex (p[characterParam (0)]), sr);
+        const auto vk = chr.k > 0 ? 0 : voiceIndex (p[voice]);
         const auto s = vk > 0 ? voiceStyle (vk) : styleOf (p[style]);
         const auto drv = (float) dbToGain (driveDb (p[drive]) + (on (p[punish]) ? punishDb : 0.0));
         // round 147: the drive pan — the far channel's drive × (1 − |pan|) (in dB, the trial's 0 … 100 % scale)
@@ -1659,7 +1811,7 @@ private:
         const auto drvA = drivePanned ? (float) dbToGain (driveDb (p[drive]) * dsA + (on (p[punish]) ? punishDb : 0.0)) : drv;
         const auto drvB = drivePanned ? (float) dbToGain (driveDb (p[drive]) * dsB + (on (p[punish]) ? punishDb : 0.0)) : drv;
         const auto [panA, panB] = panScales (panOf (p[bandPanParam (0)]));
-        const bool tape = s == Style::tape && vk == 0;
+        const bool tape = s == Style::tape && vk == 0 && chr.k == 0;
         const auto [lc, hc] = configureCuts (p);
         configureVoice (vk);
         // tape: pre-emphasis before the drive and the inverse after it, so the highs saturate first (DAFX 4.3)
@@ -1678,7 +1830,17 @@ private:
         }
         const auto comp = on (p[autoGain]) ? makeup : 1.0f;
         const auto compA = drivePanned && on (p[autoGain]) ? autoMakeup (s, drvA) : comp;
-        const auto compB = drivePanned && on (p[autoGain]) ? autoMakeup (s, drvB) : comp;
+        auto compB = drivePanned && on (p[autoGain]) ? autoMakeup (s, drvB) : comp;
+        auto drvA2 = drvA, drvB2 = drvB, compA2 = compA;
+        if (chr.k > 0)
+        {
+            const auto extra = on (p[punish]) ? punishDb : 0.0;
+            const auto ga = chr.gains (driveDb (p[drive]) * dsA, extra), gb = chr.gains (driveDb (p[drive]) * dsB, extra);
+            drvA2 = ga.first;
+            compA2 = ga.second;
+            drvB2 = gb.first;
+            compB = gb.second;
+        }
 
         for (int i = 0; i < n; ++i)
         {
@@ -1698,8 +1860,8 @@ private:
                 a = emphasis.process (a, 0);
                 b = emphasis.process (b, 1);
             }
-            wl[(std::size_t) i] = a * drvA;
-            wr[(std::size_t) i] = b * drvB;
+            wl[(std::size_t) i] = a * drvA2;
+            wr[(std::size_t) i] = b * drvB2;
         }
 
         // round 128: band 1's power, mute, feedback, dynamics and tone (single-band mode)
@@ -1707,7 +1869,23 @@ private:
         ex.configure (p, 0, sr, factor);
         const bool powered = on (p[bandExtra (0, 0)]);
         const bool muted = bandState (p[bandExtra (0, 1)]) == BandState::mute;
-        if (ex.fbGain > 0.0)
+        if (chr.k > 0)
+        {
+            if (ex.fbGain > 0.0)
+            {
+                auto left = [&ex, &chr] (float x) noexcept { return ex.feedbackShape ([&chr] (float u) noexcept { return chr.curve (u); }, x, 0); };
+                auto right = [&ex, &chr] (float x) noexcept { return ex.feedbackShape ([&chr] (float u) noexcept { return chr.curve (u); }, x, 1); };
+                os[0].process (wl.data(), n, left);
+                os[1].process (wr.data(), n, right);
+            }
+            else
+            {
+                auto curve = [&chr] (float x) noexcept { return chr.curve (x); };
+                os[0].process (wl.data(), n, curve);
+                os[1].process (wr.data(), n, curve);
+            }
+        }
+        else if (ex.fbGain > 0.0)
         {
             auto left = [&ex, s] (float x) noexcept { return ex.shapeWithFeedback (s, x, 0); };
             auto right = [&ex, s] (float x) noexcept { return ex.shapeWithFeedback (s, x, 1); };
@@ -1724,7 +1902,8 @@ private:
 
         for (int i = 0; i < n; ++i)
         {
-            auto a = dc.process (wl[(std::size_t) i], 0) * compA, b = dc.process (wr[(std::size_t) i], 1) * compB;
+            auto a = dc.process (wl[(std::size_t) i], 0) * compA2, b = dc.process (wr[(std::size_t) i], 1) * compB;
+            if (chr.k > 0) chr.post (a, b);
             if (tape)
             {
                 a = deemphasis.process (a, 0);
@@ -1761,23 +1940,29 @@ private:
     void chunkBands (float* l, float* r, int n, const EffectParams& p) noexcept
     {
         const auto inPeak = Meters::peak (l, r, n);
-        const int nb = bandCount (p[bands]);
+        const int nb = activeBands (p);
         const auto factor = oversampling (p[quality]);
-        std::array<double, 3> f { crossoverHz (p[xover1]), crossoverHz (p[xover2]), crossoverHz (p[xover3]) };
-        f[1] = std::max (f[1], f[0] * 1.05);
-        f[2] = std::max (f[2], f[1] * 1.05);
+        // round 150: up to five crossovers (each at least 5 % above the one below)
+        std::array<double, maxBands - 1> f {};
+        for (int k = 0; k < maxBands - 1; ++k)
+        {
+            f[(std::size_t) k] = crossoverHz (p[(std::size_t) crossoverParam (k)]);
+            if (k > 0) f[(std::size_t) k] = std::max (f[(std::size_t) k], f[(std::size_t) k - 1] * 1.05);
+        }
         const auto slope = slopeDbOct (p[xoverSlope]);
         if (f != splitHz || slope != splitSlope || nb != splitBands)
         {
-            for (int k = 0; k < 3; ++k)
+            for (int k = 0; k < maxBands - 1; ++k)
+            {
                 split[(std::size_t) k].design (sr, f[(std::size_t) k], slope);
-            ap2Low.design (sr, f[1], slope);
-            ap3Low.design (sr, f[2], slope);
-            ap3Mid.design (sr, f[2], slope);
+                for (int j = 0; j < k; ++j) // the bands below split k pass its all-pass copy, so the sum stays flat
+                    ap[(std::size_t) k][(std::size_t) j].design (sr, f[(std::size_t) k], slope);
+            }
             if (nb != splitBands)
             {
-                for (auto* x : { &split[0], &split[1], &split[2], &ap2Low, &ap3Low, &ap3Mid })
-                    x->reset();
+                for (auto& x : split) x.reset();
+                for (auto& row : ap)
+                    for (auto& x : row) x.reset();
                 for (auto& d : bandDry)
                     d.reset();
             }
@@ -1818,6 +2003,17 @@ private:
                 comp[(std::size_t) b] = autoOn ? autoMakeup (st[(std::size_t) b], drv[(std::size_t) b]) : 1.0f;
                 compB[(std::size_t) b] = autoOn ? autoMakeup (st[(std::size_t) b], drvB[(std::size_t) b]) : 1.0f;
             }
+            // round 150: a character replaces the style's curve, its drive law and the level (no auto gain on top)
+            chars[(std::size_t) b].configure (characterIndex (p[(std::size_t) characterParam (b)]), sr);
+            if (chars[(std::size_t) b].k > 0)
+            {
+                const auto extra = on (p[punish]) ? punishDb : 0.0;
+                const auto ga = chars[(std::size_t) b].gains (dDb * dsA, extra), gb = chars[(std::size_t) b].gains (dDb * dsB, extra);
+                drv[(std::size_t) b] = ga.first;
+                comp[(std::size_t) b] = ga.second;
+                drvB[(std::size_t) b] = gb.first;
+                compB[(std::size_t) b] = gb.second;
+            }
             const auto [pa, pb] = panScales (panOf (p[(std::size_t) bandPanParam (b)]));
             panA[(std::size_t) b] = pa;
             panB[(std::size_t) b] = pb;
@@ -1833,28 +2029,19 @@ private:
                 auto v = x[c];
                 if (lc > 0.0)
                     v = lowcut.process (v, c);
-                float b0, rest, b1, rest2, b2, b3;
-                split[0].run (v, c, b0, rest);
-                if (nb == 2)
+                // the bands from the bottom up: split k cuts the rest in two, the bands already cut pass its all-pass
+                // (the same filters in the same order as the four-band version before round 150)
+                auto rest = v;
+                for (int k = 0; k < nb - 1; ++k)
                 {
-                    band (0, c, i) = b0;
-                    band (1, c, i) = rest;
-                    continue;
+                    float lo, hi;
+                    split[(std::size_t) k].run (rest, c, lo, hi);
+                    for (int j = 0; j < k; ++j)
+                        band (j, c, i) = ap[(std::size_t) k][(std::size_t) j].allpass (band (j, c, i), c);
+                    band (k, c, i) = lo;
+                    rest = hi;
                 }
-                split[1].run (rest, c, b1, rest2);
-                b0 = ap2Low.allpass (b0, c);
-                if (nb == 3)
-                {
-                    band (0, c, i) = b0;
-                    band (1, c, i) = b1;
-                    band (2, c, i) = rest2;
-                    continue;
-                }
-                split[2].run (rest2, c, b2, b3);
-                band (0, c, i) = ap3Low.allpass (b0, c);
-                band (1, c, i) = ap3Mid.allpass (b1, c);
-                band (2, c, i) = b2;
-                band (3, c, i) = b3;
+                band (nb - 1, c, i) = rest;
             }
         }
 
@@ -1876,7 +2063,24 @@ private:
             // round 128: the band's feedback, dynamics, tone, power and solo / mute
             auto& ex = extras[(std::size_t) b];
             ex.configure (p, b, sr, factor);
-            if (ex.fbGain > 0.0)
+            auto& chr = chars[(std::size_t) b];
+            if (chr.k > 0)
+            {
+                if (ex.fbGain > 0.0)
+                {
+                    auto left = [&ex, &chr] (float v) noexcept { return ex.feedbackShape ([&chr] (float u) noexcept { return chr.curve (u); }, v, 0); };
+                    auto right = [&ex, &chr] (float v) noexcept { return ex.feedbackShape ([&chr] (float u) noexcept { return chr.curve (u); }, v, 1); };
+                    bandOs[(std::size_t) b][0].process (bl, n, left);
+                    bandOs[(std::size_t) b][1].process (br, n, right);
+                }
+                else
+                {
+                    auto curve = [&chr] (float v) noexcept { return chr.curve (v); };
+                    bandOs[(std::size_t) b][0].process (bl, n, curve);
+                    bandOs[(std::size_t) b][1].process (br, n, curve);
+                }
+            }
+            else if (ex.fbGain > 0.0)
             {
                 auto left = [&ex, s] (float v) noexcept { return ex.shapeWithFeedback (s, v, 0); };
                 auto right = [&ex, s] (float v) noexcept { return ex.shapeWithFeedback (s, v, 1); };
@@ -1898,6 +2102,7 @@ private:
             for (int i = 0; i < n; ++i)
             {
                 auto wa = bandDc[(std::size_t) b].process (bl[i], 0) * k, wb = bandDc[(std::size_t) b].process (br[i], 1) * kB;
+                if (chr.k > 0) chr.post (wa, wb);
                 if (post) ex.post (wa, wb, dryBand[0][(std::size_t) i], dryBand[1][(std::size_t) i]);
                 auto ya = (dryBand[0][(std::size_t) i] + (wa - dryBand[0][(std::size_t) i]) * m) * gA;
                 auto yb = (dryBand[1][(std::size_t) i] + (wb - dryBand[1][(std::size_t) i]) * m) * gB;
@@ -2046,9 +2251,9 @@ private:
         meters.set (0.0f, 0.0f, inPeak, Meters::peak (l, r, n));
     }
     // multiband mode
-    std::array<LrSplit, 3> split;
-    LrSplit ap2Low, ap3Low, ap3Mid;
-    std::array<double, 3> splitHz {};
+    std::array<LrSplit, maxBands - 1> split;
+    std::array<std::array<LrSplit, maxBands - 2>, maxBands - 1> ap; // ap[k][j]: split k's all-pass for band j < k
+    std::array<double, maxBands - 1> splitHz {};
     int splitSlope = 0, splitBands = 0;
     std::array<std::array<Oversampler, 2>, maxBands> bandOs;
     std::array<Delay2<256>, maxBands> bandDry;
@@ -2056,6 +2261,7 @@ private:
     std::array<std::array<std::array<float, maxBlock>, 2>, maxBands> bandBuf {};
     std::array<std::array<float, maxBlock>, 2> dryBand {};
     std::array<BandExtras, maxBands> extras;
+    std::array<CharacterStage, maxBands> chars; // round 150
     Meters meters;
 };
 } // namespace
@@ -2155,7 +2361,19 @@ const EffectInfo& emberInfo()
                                      // round 147 (Saturn 2's channel mode, drive pan and band pan)
                                      { "Channel mode", 0.0f },
                                      { "B1 drive pan", 0.5f }, { "B2 drive pan", 0.5f }, { "B3 drive pan", 0.5f }, { "B4 drive pan", 0.5f },
-                                     { "B1 pan", 0.5f }, { "B2 pan", 0.5f }, { "B3 pan", 0.5f }, { "B4 pan", 0.5f } } };
+                                     { "B1 pan", 0.5f }, { "B2 pan", 0.5f }, { "B3 pan", 0.5f }, { "B4 pan", 0.5f },
+                                     // round 150 (Saturn 2: bands 5 / 6, input / output pan, the measured characters)
+                                     { "More bands", 0.0f }, { "Crossover 4", 0.97f }, { "Crossover 5", 0.99f },
+                                     { "B5 style", 0.0f }, { "B5 drive", 0.0f }, { "B5 mix", 1.0f }, { "B5 level", 0.5f },
+                                     { "B6 style", 0.0f }, { "B6 drive", 0.0f }, { "B6 mix", 1.0f }, { "B6 level", 0.5f },
+                                     { "B5 on", 1.0f }, { "B5 state", 0.0f }, { "B5 bass", 0.5f }, { "B5 mid", 0.5f }, { "B5 treble", 0.5f }, { "B5 presence", 0.5f },
+                                     { "B5 feedback", 0.0f }, { "B5 fb freq.", 0.6990f }, { "B5 dynamics", 0.5f },
+                                     { "B6 on", 1.0f }, { "B6 state", 0.0f }, { "B6 bass", 0.5f }, { "B6 mid", 0.5f }, { "B6 treble", 0.5f }, { "B6 presence", 0.5f },
+                                     { "B6 feedback", 0.0f }, { "B6 fb freq.", 0.6990f }, { "B6 dynamics", 0.5f },
+                                     { "B5 drive pan", 0.5f }, { "B6 drive pan", 0.5f }, { "B5 pan", 0.5f }, { "B6 pan", 0.5f },
+                                     { "Input pan", 0.5f }, { "Output pan", 0.5f },
+                                     { "B1 character", 0.0f }, { "B2 character", 0.0f }, { "B3 character", 0.0f },
+                                     { "B4 character", 0.0f }, { "B5 character", 0.0f }, { "B6 character", 0.0f } } };
     return info;
 }
 
@@ -2388,16 +2606,19 @@ std::string paramText (EffectKind kind, int param, float v)
             case autoGain: return onOff (v);
             case quality: return std::to_string (oversampling (v)) + "x";
             case bands: return bandCount (v) == 1 ? "1 band" : std::to_string (bandCount (v)) + " bands";
-            case xover1: case xover2: case xover3: return hzText (crossoverHz (v));
+            case xover1: case xover2: case xover3: case xover4: case xover5: return hzText (crossoverHz (v));
+            case bandsMore: { const auto m = (int) std::lround (std::clamp (v, 0.0f, 1.0f) * 2.0f); return m == 0 ? std::string ("off") : std::to_string (firstBands + m) + " bands"; }
+            case band1Character: case band2Character: case band3Character: case band4Character: case band5Character: case band6Character:
+                return characterName (characterIndex (v));
             case xoverSlope: return std::to_string (slopeDbOct (v)) + " dB/oct";
-            case band2Style: case band3Style: case band4Style:
+            case band2Style: case band3Style: case band4Style: case band5Style: case band6Style:
             {
                 static const char* names[] = { "tube", "tape", "transistor", "fuzz" };
                 return names[(int) styleOf (v)];
             }
-            case band2Drive: case band3Drive: case band4Drive: return fmt ("%+.1f dB", driveDb (v));
-            case band1Mix: case band2Mix: case band3Mix: case band4Mix: return fmt ("%.0f%%", v * 100.0);
-            case band1Level: case band2Level: case band3Level: case band4Level: return fmt ("%+.1f dB", bandLevelDb (v));
+            case band2Drive: case band3Drive: case band4Drive: case band5Drive: case band6Drive: return fmt ("%+.1f dB", driveDb (v));
+            case band1Mix: case band2Mix: case band3Mix: case band4Mix: case band5Mix: case band6Mix: return fmt ("%.0f%%", v * 100.0);
+            case band1Level: case band2Level: case band3Level: case band4Level: case band5Level: case band6Level: return fmt ("%+.1f dB", bandLevelDb (v));
             case inputGain: return fmt ("%+.1f dB", inputDb (v));
             // round 136: the Classic voicing, in the reference's own units
             case voicing: return on (v) ? "Classic" : "Ember";
@@ -2412,20 +2633,20 @@ std::string paramText (EffectKind kind, int param, float v)
             case classicOutput: return fmt ("%+.1f dB", emberclassic::outputDb (v));
             // round 147
             case channelMode: return on (v) ? "Mid/Side" : "Left/Right";
-            case band1DrivePan: case band2DrivePan: case band3DrivePan: case band4DrivePan:
+            case band1DrivePan: case band2DrivePan: case band3DrivePan: case band4DrivePan: case band5DrivePan: case band6DrivePan:
             {
                 const auto pan = panOf (v);
                 return std::abs (pan) < 0.005 ? std::string ("centre") : fmt ("%.0f%% ", std::abs (pan) * 100.0) + (pan < 0.0 ? "L/M" : "R/S");
             }
-            case band1Pan: case band2Pan: case band3Pan: case band4Pan:
+            case band1Pan: case band2Pan: case band3Pan: case band4Pan: case band5Pan: case band6Pan: case inputPan: case outputPan:
             {
                 const auto [a, b] = panScales (panOf (v));
                 const auto db = [] (float g) { return g <= 0.0f ? std::string ("-inf") : fmt ("%.1f", gainToDb (g)); };
                 return std::abs (panOf (v)) < 0.005 ? std::string ("centre") : db (a) + " / " + db (b) + " dB";
             }
             default:
-                if (param >= band1On && param < band1On + maxBands * extraFields)
-                    switch ((param - band1On) % extraFields)
+                if ((param >= band1On && param < band1On + firstBands * extraFields) || (param >= band5On && param < band5On + (maxBands - firstBands) * extraFields))
+                    switch ((param - (param >= band5On ? (int) band5On : (int) band1On)) % extraFields)
                     {
                         case 0: return onOff (v);
                         case 1: { static const char* names[] = { "normal", "solo", "mute" }; return names[(int) bandState (v)]; }
