@@ -2636,6 +2636,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             note.muted = n.muted();
             note.slide = n.slide();
             note.porta = n.porta();
+            note.colour = n.extra & 0x0F;
             p.notes.push_back (note);
         }
 

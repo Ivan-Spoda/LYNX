@@ -763,6 +763,13 @@ juce::var channelToVar (const ChannelDef& c)
         o->setProperty ("group", c.group);
     if (c.swingMix != 1.0f)
         o->setProperty ("swingMix", c.swingMix);
+    if (! c.keyLabels.empty())
+    {
+        auto* labels = new juce::DynamicObject();
+        for (const auto& [key, label] : c.keyLabels)
+            labels->setProperty (juce::String (key), juce::String::fromUTF8 (label.c_str()));
+        o->setProperty ("keyLabels", juce::var (labels));
+    }
     if (c.arp.enabled())
     {
         o->setProperty ("arp", juce::Array<juce::var> { c.arp.direction, c.arp.range, c.arp.stepBeats, c.arp.gate, c.arp.repeat });
@@ -983,6 +990,14 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
         def.group = group;
 
     def.swingMix = juce::jlimit (0.0f, 1.0f, (float) (double) c.getProperty ("swingMix", 1.0));
+    if (auto* labels = c.getProperty ("keyLabels", {}).getDynamicObject())
+        for (const auto& p : labels->getProperties())
+        {
+            const auto key = p.name.toString().getIntValue();
+            const auto label = p.value.toString().trim();
+            if (key >= 0 && key < 128 && label.isNotEmpty())
+                def.keyLabels[key] = label.toStdString();
+        }
 
     if (const auto& arp = c["arp"]; arp.isArray() && arp.size() == 5)
     {
@@ -1339,7 +1354,8 @@ juce::String toJson (const Song& song)
                                           juce::roundToInt (n.velocity * 1000.0f) / 1000.0 };
 
             // [.., pan, fine pitch, muted] only when not default
-            const auto extra = n.release != 0.5f || n.modX != 0.5f || n.modY != 0.5f; // [.., release, mod X, mod Y]
+            // [.., release, mod X, mod Y (, colour)]
+            const auto extra = n.release != 0.5f || n.modX != 0.5f || n.modY != 0.5f || n.colour != 0;
             if (n.pan != 0.0f || n.finePitch != 0.0f || n.muted || n.slide || n.porta || extra)
             {
                 note.add (juce::roundToInt (n.pan * 1000.0f) / 1000.0);
@@ -1351,6 +1367,8 @@ juce::String toJson (const Song& song)
                 if (extra)
                     for (auto v : { n.release, n.modX, n.modY })
                         note.add (juce::roundToInt (v * 1000.0f) / 1000.0);
+                if (n.colour != 0)
+                    note.add (n.colour);
             }
 
             notes.add (note);
@@ -1617,6 +1635,8 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                             note.modX = juce::jlimit (0.0f, 1.0f, (float) (double) n[11]);
                             note.modY = juce::jlimit (0.0f, 1.0f, (float) (double) n[12]);
                         }
+                        if (n.size() >= 14)
+                            note.colour = juce::jlimit (0, noteColourCount - 1, (int) n[13]);
                     }
 
                     if (note.channel >= 0 && note.channel < (int) song.channels.size())

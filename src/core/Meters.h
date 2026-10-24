@@ -34,6 +34,8 @@ public:
 
     // the audio editor's recording tap (round 86): input, Master (0) or a mixer insert
     AudioCapture capture;
+    // the audio logger's tap (REA round 153): the Master, while Tools > Audio logger is on
+    AudioCapture logTap;
 
 private:
     static void raise (std::atomic<float>& slot, float value) noexcept
