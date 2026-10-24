@@ -132,6 +132,13 @@ enum Global { xover1 = legacyBands * fieldsPerBand, xover2, xover3, slope, looka
               // of each band's output (6), the external side chain
               band5 = bandLookahead0 + legacyBands, xover4 = band5 + 2 * fieldsPerBand, xover5, bandLookahead4, bandLookahead5,
               bandCountParam, bandPan0, scExternal = bandPan0 + bands,
+              // round 144 (Pro-MB's bottom bar, measured black-box, REA_rodada144b): the processing mode (the
+              // reference's value law: 0 linear, 0.5 dynamic = the old engine, 1 minimum phase) and the oversampling
+              // (0 off, 0.5 2x, 1 4x); appended, the defaults are the old sound
+              processingMode, oversampling,
+              // round 144: what each band's PAN balances — left / right (0, as before) or mid / side (1, the reference's
+              // band pan: mid gain = 1 − pan right of centre, side gain = 1 + pan left of it)
+              panMode,
               count };
 inline int param (int band, int field) noexcept
 {
@@ -161,6 +168,14 @@ float crossoverValue (double hz) noexcept;
 int slopeDbOct (float v) noexcept;       // 12, 24 or 48
 double lookaheadMs (float v) noexcept;   // 0 .. 20 ms (0 = off: no latency)
 double trimDb (float v) noexcept;        // ±36 dB
+// round 144: Dynamic phase (the old engine: the input plus each band's gain change, bit-exact when no band works),
+// Linear phase (FIR crossovers with the same magnitudes: no phase change, latency linearLatency()), Minimum phase (the
+// classic crossover sum, all-pass compensated: the crossovers' phase is always there)
+enum class Phase { linear, dynamic, minimum };
+Phase phaseOf (float v) noexcept;
+int oversamplingOf (float v) noexcept;   // 1 (off), 2 or 4
+int linearFftSize (double sampleRate) noexcept; // 4096 up to 50 kHz, ×2 per doubling of the rate
+int linearLatency (double sampleRate) noexcept; // 3/4 of the FFT size (3072 samples at 48 kHz, as measured)
 
 // Static gain change of band `b` (dB) for a steady sine of `inputDb` inside the band.
 double bandStaticDb (const EffectParams& p, int b, double inputDb);

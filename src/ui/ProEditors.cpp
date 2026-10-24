@@ -1665,6 +1665,10 @@ private:
             add (knob ({ a.getX() + 366.0f, a.getY() + 112.0f, 66.0f, 54.0f }, bp (b, fKnee), tr ("Knee"), 0));
             add (knob ({ a.getX() + 446.0f, a.getY() + 112.0f, 66.0f, 54.0f }, bandLookaheadParam (b), tr ("Lookahead"), 0));
             add (knob ({ a.getX() + 522.0f, a.getY() + 112.0f, 66.0f, 54.0f }, bandPanParam (b), tr ("Pan"), 0, true)); // round 135: the band's output balance
+            // round 144: the crossover slope (one for every band) and the side-chain input, in the band panel
+            out.push_back (menu ({ a.getX() + 522.0f, a.getY() + 36.0f, 70.0f, 22.0f }, slope, tr ("Slope"), "12 dB|24 dB|48 dB"));
+            out.push_back (menu ({ a.getX() + 522.0f, a.getY() + 76.0f, 70.0f, 22.0f }, scExternal, tr ("Side chain"), "Int|Ext"));
+            out.push_back (tabs ({ a.getX() + 12.0f, a.getY() + 72.0f, 64.0f, 22.0f }, panMode, "L/R|M/S")); // round 144: what PAN balances
             out.push_back (button ({ a.getRight() - 72.0f, a.getY() + 8.0f, 20.0f, 20.0f }, idPrev, "<", false, tr ("Previous / next band")));
             out.push_back (button ({ a.getRight() - 50.0f, a.getY() + 8.0f, 20.0f, 20.0f }, idNext, ">", false, tr ("Previous / next band")));
             out.push_back (button ({ a.getRight() - 26.0f, a.getY() + 8.0f, 20.0f, 20.0f }, idClose, "x", false, tr ("Close the band panel (click on the empty display does the same)")));
@@ -1672,15 +1676,16 @@ private:
         const auto bar = barArea();
         const auto cy = bar.getCentreY();
         static const char* const analyzerNames[] { TR_NOOP ("Off"), TR_NOOP ("Pre"), TR_NOOP ("Post"), TR_NOOP ("Pre + Post") };
-        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 150.0f, 22.0f }, slope, tr ("Crossover"), "12 dB/oct|24 dB/oct|48 dB/oct"));
-        out.push_back (barValue ({ 166.0f, cy - 11.0f, 130.0f, 22.0f }, lookahead, tr ("Lookahead")));
-        out.push_back (button ({ 302.0f, cy - 11.0f, 150.0f, 22.0f }, idAnalyzer, tr ("Analyzer:") + " " + tr (analyzerNames[analyzer]) + (specFrozen ? " *" : ""), false,
+        // round 144: the reference's bottom bar order — processing mode, oversampling, look-ahead, analyser; the
+        // crossover slope and the side-chain input moved into the band panel (where the reference has them)
+        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 150.0f, 22.0f }, processingMode, tr ("Phase"), "Linear|Dynamic|Minimum"));
+        out.push_back (barMenu ({ 166.0f, cy - 11.0f, 134.0f, 22.0f }, oversampling, tr ("Oversampling"), "Off|2x|4x"));
+        out.push_back (barValue ({ 306.0f, cy - 11.0f, 124.0f, 22.0f }, lookahead, tr ("Lookahead")));
+        out.push_back (button ({ 436.0f, cy - 11.0f, 150.0f, 22.0f }, idAnalyzer, tr ("Analyzer:") + " " + tr (analyzerNames[analyzer]) + (specFrozen ? " *" : ""), false,
                                tr ("Spectrum analyzer: off, pre, post or pre + post; speed; freeze")));
-        // round 135: the detectors on the slot's side chain (mixer: right-click the slot - Side chain)
-        out.push_back (barMenu ({ 458.0f, cy - 11.0f, 116.0f, 22.0f }, scExternal, tr ("Side chain"), "Int|Ext"));
-        out.push_back (barValue ({ bar.getRight() - 340.0f, cy - 11.0f, 96.0f, 22.0f }, mix, tr ("Mix")));
-        out.push_back (barValue ({ bar.getRight() - 238.0f, cy - 11.0f, 110.0f, 22.0f }, input, tr ("In")));
-        out.push_back (barValue ({ bar.getRight() - 122.0f, cy - 11.0f, 112.0f, 22.0f }, output, tr ("Out")));
+        out.push_back (barValue ({ bar.getRight() - 312.0f, cy - 11.0f, 92.0f, 22.0f }, mix, tr ("Mix")));
+        out.push_back (barValue ({ bar.getRight() - 216.0f, cy - 11.0f, 100.0f, 22.0f }, input, tr ("In")));
+        out.push_back (barValue ({ bar.getRight() - 112.0f, cy - 11.0f, 104.0f, 22.0f }, output, tr ("Out")));
     }
 
     void buttonPressed (const Ctl& c, const juce::MouseEvent&) override
@@ -1710,6 +1715,16 @@ private:
         for (int k = 0; k < 5; ++k)
             sp.addItem (tr (speeds[k]), true, specFall == falls[k], [this, k] { specFall = falls[k]; });
         m.addSubMenu (tr ("Speed"), sp);
+        // round 144: the reference's resolution and tilt choices
+        static const char* const resolutions[] { TR_NOOP ("Low"), TR_NOOP ("Medium"), TR_NOOP ("High"), TR_NOOP ("Maximum") };
+        juce::PopupMenu res;
+        for (int k = 0; k < 4; ++k)
+            res.addItem (tr (resolutions[k]), true, specResolution == k, [this, k] { specResolution = k; });
+        m.addSubMenu (tr ("Resolution"), res);
+        juce::PopupMenu tilt;
+        for (const double t : { 0.0, 1.5, 3.0, 4.5, 6.0 })
+            tilt.addItem (juce::String (t, 1) + " dB/oct", true, specTilt == t, [this, t] { specTilt = t; });
+        m.addSubMenu (tr ("Tilt"), tilt);
         m.addItem (tr ("Freeze"), true, specFrozen, [this] { specFrozen = ! specFrozen; repaint(); });
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
     }

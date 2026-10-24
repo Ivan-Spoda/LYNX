@@ -3745,6 +3745,9 @@ countries: br
 "Very high resolution" = "Resolução muito alta"
 "Maximum resolution" = "Resolução máxima"
 "Sets the delay to a note value at the project tempo: straight, dotted or triplet (up to 2.75 s)" = "Ajusta o delay a um valor de nota no andamento do projeto: normal, pontuada ou tercina (até 2,75 s)"
+"Dynamic phase: the crossovers' phase only where a band works; linear phase: no phase change (more latency); minimum phase: the classic crossover sum" = "Fase dinâmica: a fase dos crossovers só onde uma banda atua; fase linear: sem mudança de fase (mais latência); fase mínima: a soma clássica dos crossovers"
+"Resolution" = "Resolução"
+"What each band's pan balances: left / right, or mid / side" = "O que o pan de cada banda equilibra: esquerda / direita, ou meio / lados"
 
 # Round 142: FL engines in native projects, Newtone / Newtime editors
 "FL engines" = "Motores do FL"
@@ -3773,3 +3776,4 @@ countries: br
 "Installed" = "Instalados"
 "Plugin database: LYNX's built-in generators and effects, FL's engines and the installed plugins" = "Banco de plugins: geradores e efeitos embutidos do LYNX, motores do FL e os plugins instalados"
 "[double-click] add it (generators: a new channel; effects: into the selected insert)" = "[duplo clique] adicionar (geradores: um novo canal; efeitos: no insert selecionado)"
+"Linear|Dynamic|Minimum" = "Linear|Dinâmica|Mínima"
