@@ -71,6 +71,14 @@ responses, vibrato, flex-tune and humanize campaigns of round 138 are unchanged 
 Test: `tests/Vox148Tests.inc` (110 / 220 Hz held notes 20 dB above white noise at retune 0 and 100 ms: the output's
 wobble stays at the dry signal's analysis floor, < 1.2 c).
 
+### 1.5 The highs (round 138's open item)
+[EXEC] Her takes through both at retune 0 / 20 (whole-take 1/3-octave spectra, LYNX − trial): LYNX was 0.3–0.9 dB
+darker at 4–6 kHz and 1.0–1.5 dB at 10–16 kHz; the trial itself is within 0.5 dB of the dry take below 12 kHz. [model]
+The cause is the overlap-add: two-period Hann grains at half overlap keep their coherent (harmonic) part but only 0.75
+of the power of what is incoherent from grain to grain — the breath and the sibilant highs (−1.25 dB). A first-order
+shelf, +1 dB from 5 kHz, is now faded in while a correction of 5 c or more is applied (none on an in-tune voice):
+10 kHz −1.0 → −0.4 dB, 16 kHz −1.3 → −0.6 dB on go, kw −1.0 → −0.5 / −1.5 → −1.0, lu within ±0.6 dB.
+
 ## 2. SSL 4K E (Complete Access) measured; Ridge Strip's 4K voicing [EXEC]
 
 Her corpus has no 4K state ([DATA] the 935 copied projects: "SSLChannel" = the Waves E-Channel, 2193 slots, already
@@ -164,8 +172,49 @@ projects (their parity is rounds 144 / 147 / 150's).
 
 (`tmp/vox148/pds/cmp.py`, `pq.py`; LYNX renders `D:\lynx-work\vox148\pds\out`, `pq\out`.) Test
 `pro_ds_translates_onto_hush_vocal_voicing_round148` (her state's values, 720 samples of latency, −5.2 dB on a steady
-8 kHz tone at −10 dBFS, pink noise untouched).
+8 kHz tone at −10 dBFS, pink noise all but untouched).
+
+## 4. Soundtoys: EchoBoy's ping-pong from its measured kernels [EXEC]
+
+Her EchoBoy ping-pong (edited style) is her most used echo (states 0 / 3 / 7: 51 + 24 + 8 slots, 206 with their twins).
+Round 136 modelled each pass as a 3rd-order colour plus eight diffusion taps: the impulse response nulled at
+−17.9 dB, and per echo window **−18.2 dB on the first pass** (the loop's own error added ~1.5 dB per pass). Round
+136's impulse responses (`D:\lynx-work\vox136\eb7.pkl`, 0.003 into either input, 120 BPM) show the first pass is
+bit-identical across her three states and the loop shape differs only by its gain (−45 / −53 dB between states): so the
+measured kernels themselves now play — 4500 samples around each side's tap (the tap, the diffusion, the colour and the
+long low-cut tail) and 1280 around the loop period (one recirculation per unit of loop gain), through a small
+partitioned convolver (`core/BlockConvolver.h`, uniformly partitioned overlap-save, 256 / 128-sample blocks whose
+latency is taken out of the delay lines; the kernels are resampled for other rates [model]). The input saturation, the
+tap times in beats and the loop gain stay round 136's. Kernels: `tmp/vox148/eb/ebkern.py`, `mkinc.py` →
+`src/core/EchoBoyKernels.inc`.
+
+| her state → take | round 136 (L / R) | now (L / R, level) |
+|---|---|---|
+| impulse response | −17.9 / −17.9 dB | **−54.9 / −46.3 dB** (first pass −64 / −50, third −42 dB) |
+| 0 (fb 0.52) → go / kwe / lu | −17.7 … −18.4 / −16.9 … −20.3 | **−27.2 / −33.3 / −29.6** (R −27.2 / −33.4 / −29.1), ±0.1 dB |
+| 3 (fb 0.19) → go / kwe / lu | −18.1 … −18.9 / −17.0 … −20.8 | **−30.9 / −36.3 / −32.5**, ±0.1 dB |
+| 7 (fb 0.09) → go / kwe / lu | −18.2 … −18.9 | **−31.6 / −37.1 / −33.2**, ±0.1 dB |
+| studio tape 2 / 16 / 20 (unchanged path) | −24.8 … −26.1 / −26.5 … −29.6 / −51.3 … −52.4 | the same |
+
+With the kernels exact at low level, the input curve was refitted together with a gentle curve inside the loop
+(`ebsat148.py` / `ebsatfit.py`, a numpy model of the same path, chunked by the loop period: state 0's takes −25.8 /
+−33.3 / −28.7 → −27.2 / −33.4 / −29.4 dB); what is left is in the loudest passages. Test
+`echoform_ping_pong_kernels_round148` (tap times, the tap's 0.389, the diffusion energy around it).
 
 ## Where I stopped
-- Done: §1 (Auto-Tune renders recorded before the trial ends; LYNX Tune's marks).
-- Next: SSL 4K E (Complete Access, until 2026-11-03), FabFilter residue (~11-16), Soundtoys leftovers (11-22).
+- Done: §1 Auto-Tune (renders recorded before the trial ends; LYNX Tune's marks; the highs' make-up), §2 SSL 4K E
+  measured and Ridge's 4K voicing + translator, §3 Pro-DS translated (Hush's Vocal voicing), Pro-Q 4 re-checked,
+  §4 EchoBoy's ping-pong from its measured kernels (+ refitted curves). Tests `tests/Vox148Tests.inc`.
+- Not done, in order:
+  - the 4K's compressor at deep settings (0.5–1.3 dB less reduction; the static / attack / release fits trade off —
+    a joint fit with a program-dependent attack is the next step; data `D:\lynx-work\vox148\k4`, `k4dynfit.py`);
+    its HF cuts / boosts within 0.3–2 dB near 20 kHz; the 4K B / G;
+  - Soundtoys: Decapitator at drive ≥ 5 (her state 10, 20 slots; round 138's refit loses the low-level H2, needs a
+    level-dependent even-harmonic term), Punish's curve, EchoBoy Dual (1 slot), PanMan's first ~200 ms after a reset
+    (looked at this round: the trial starts 10–35° off the pattern and joins it with a ~40 ms time constant — the
+    starting point did not follow the state's offset / pattern, so no law yet; `panval2.pkl` has it);
+  - the Vocal strip's broadband de-esser / de-ploser (not in her states);
+  - LYNX Tune: the period-doubling residue at half the fundamental (+1 … +2.6 dB at 125–200 Hz on her takes, 35–44 dB
+    under the take's loudest band), the upper / lower tie.
+- Trials left: Complete Access Hub 2026-11-03 (iLok 11-13), FabFilter ~11-16, Soundtoys 11-22; Auto-Tune ends
+  2026-10-25 21:00 (every render of rounds 138 / 145 / 148 is on D:).

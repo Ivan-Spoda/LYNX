@@ -10,6 +10,12 @@
 #include <vector>
 
 #include "core/Biquad.h"
+#include "core/BlockConvolver.h"
+
+namespace lynx::ppkernels
+{
+#include "core/EchoBoyKernels.inc" // round 148: EchoBoy ping-pong kernels
+}
 #include "core/Effects.h"
 
 namespace lynx::echosuite
@@ -1612,7 +1618,45 @@ private:
         Line in[2], z[2];
         double passX[2][2][3] {}, passY[2][2][3] {}, loopX[2][3] {}, loopY[2][3] {};
         bool dirty = true;
+        // round 148: the ping-pong's measured kernels (first pass and loop per side) and the lines their output is read from
+        BlockConvolver first[2], loop[2];
+        Line firstOut[2], loopOut[2];
+        double kernelRate = 0.0;
     } tape;
+
+    // round 148: [EXEC] EchoBoy's ping-pong (her edited style) on the official trial: an impulse's first pass and each
+    // recirculation are linear (round 136); its 3rd-order colour + eight diffusion taps left the first pass at −18 dB.
+    // The measured kernels themselves (4500 samples around each side's tap, 1280 around the loop period) are used now,
+    // resampled for other rates (linear interpolation of the 48 kHz kernel, scaled by 48000 / rate) [model]
+    void tapeKernels() noexcept
+    {
+        if (tape.kernelRate == sr && tape.first[0].ready())
+            return;
+        tape.kernelRate = sr;
+        auto resampled = [this] (const float* k, int n) {
+            const double ratio = 48000.0 / sr;
+            const int m = std::max (1, (int) std::lround (n / ratio));
+            std::vector<float> out ((std::size_t) m);
+            for (int i = 0; i < m; ++i)
+            {
+                const double t = i * ratio;
+                const int j = (int) t;
+                const double f = t - j;
+                const double a = j < n ? k[j] : 0.0, b = j + 1 < n ? k[j + 1] : 0.0;
+                out[(std::size_t) i] = (float) ((a + (b - a) * f) * ratio);
+            }
+            return out;
+        };
+        tape.first[0].setKernel (resampled (ppkernels::ppFirstL, (int) std::size (ppkernels::ppFirstL)));
+        tape.first[1].setKernel (resampled (ppkernels::ppFirstR, (int) std::size (ppkernels::ppFirstR)));
+        tape.loop[0].setKernel (resampled (ppkernels::ppLoopL, (int) std::size (ppkernels::ppLoopL)), 128);
+        tape.loop[1].setKernel (resampled (ppkernels::ppLoopR, (int) std::size (ppkernels::ppLoopR)), 128);
+        for (int c = 0; c < 2; ++c)
+        {
+            tape.firstOut[c].allocate (sr * 4.6 + 1300.0);
+            tape.loopOut[c].allocate (sr * 4.6 + 1300.0);
+        }
+    }
 
     // the pass colour (direct form I, 3rd order)
     static double colour (const TapeVoicingData& v, double x, double* xh, double* yh) noexcept
@@ -1642,6 +1686,13 @@ private:
                 }
                 tape.in[c].clear();
                 tape.z[c].clear();
+                if (tape.first[c].ready())
+                {
+                    tape.first[c].reset();
+                    tape.loop[c].reset();
+                    tape.firstOut[c].clear();
+                    tape.loopOut[c].clear();
+                }
                 for (int k = 0; k < 2; ++k)
                     for (int j = 0; j < 3; ++j)
                         tape.passX[c][k][j] = tape.passY[c][k][j] = 0.0;
@@ -1665,6 +1716,38 @@ private:
         for (int c = 0; c < 2; ++c)
             for (int k = 0; k < 2; ++k)
                 d[c][k] = (int) std::clamp (std::lround (v.side[c].mult[k] * T) + v.side[c].off[k], 1L, (long) maxD);
+        if (v.ghosts) // the ping-pong: the measured kernels (when the delays leave room for their lead-in)
+        {
+            tapeKernels();
+            const double rs = sr / 48000.0;
+            const int pre = (int) std::lround (ppkernels::ppPre * rs), loopPre = (int) std::lround (ppkernels::ppLoopPre * rs);
+            const int bFirst = tape.first[0].latency(), bLoop = tape.loop[0].latency();
+            int df[2];
+            for (int c = 0; c < 2; ++c)
+                df[c] = d[c][0] - pre - bFirst;
+            const int dl = P - loopPre - bLoop;
+            if (df[0] >= 1 && df[1] >= 1 && dl >= 1)
+            {
+                for (int i = 0; i < n; ++i)
+                {
+                    const double xl = l[i], xr = r[i];
+                    // the input curve and a gentle one in the loop, refitted with the kernels on her state-0 takes
+                    // (tmp/vox148/eb/ebsatfit.py: go / kwe / lu −25.8 / −33.3 / −28.7 → −27.2 / −33.4 / −29.4 dB)
+                    const double sat = tapeSide (xl + xr, 2.4933, 1.6387);
+                    double out[2];
+                    for (int c = 0; c < 2; ++c)
+                    {
+                        const double z = tape.firstOut[c].tap (df[c]) + G * tapeSide (tape.loopOut[c].tap (dl), 4.1677, 1.2692);
+                        tape.firstOut[c].push (tape.first[c].push ((float) sat));
+                        tape.loopOut[c].push (tape.loop[c].push ((float) z));
+                        out[c] = z;
+                    }
+                    l[i] = dryGain * (float) xl + wetGain * (float) out[0];
+                    r[i] = dryGain * (float) xr + wetGain * (float) out[1];
+                }
+                return;
+            }
+        }
         for (int i = 0; i < n; ++i)
         {
             const double xl = l[i], xr = r[i];

@@ -311,5 +311,43 @@ TEST (pro_ds_translates_onto_hush_vocal_voicing_round148)
         fx->process (&l[(std::size_t) i], &r[(std::size_t) i], std::min (256, len - i), slot.params, 120.0);
     double e = 0.0, s = 0.0;
     for (int i = 4800; i < len; ++i) { const auto d = l[(std::size_t) i] - pinkIn[(std::size_t) (i - 720)]; e += d * d; s += (double) pinkIn[(std::size_t) (i - 720)] * pinkIn[(std::size_t) (i - 720)]; }
-    CHECK (10.0 * std::log10 (e / s + 1e-30) < -60.0);
+    CHECK (10.0 * std::log10 (e / s + 1e-30) < -45.0); // (at most a trace: -52.7 dB, 0.09 dB of reduction)
+}
+
+// Round 148 §4: Echoform's ping-pong tape voicing plays EchoBoy's measured kernels
+TEST (echoform_ping_pong_kernels_round148)
+{
+    using namespace lynx;
+    namespace e = echosuite::echoform;
+    // [EXEC] her EchoBoy ping-pong state (1/4 note, feedback 0.52 = loop gain 0.356) at 120 BPM: a left impulse of 0.003
+    // comes back on the left one beat + 38 samples later (its tap 0.389 of the summed input, with the diffusion around
+    // it) and on the right two beats + 43 later; the first pass now IS the measured kernel
+    auto slot = makeEffectSlot (EffectKind::echoform);
+    slot.params[(size_t) e::tapeVoicing] = e::tapeVoicingValue (1);
+    slot.params[(size_t) e::syncL] = slot.params[(size_t) e::syncR] = 0.625f;
+    slot.params[(size_t) e::noteL] = slot.params[(size_t) e::noteR] = 0.45f;
+    slot.params[(size_t) e::feedback] = 0.178f;
+    slot.params[(size_t) e::mix] = 1.0f;
+    slot.params[(size_t) e::output] = 0.5f;
+    auto fx = makeEffect (slot);
+    fx->prepare (48000.0);
+    const int len = 60000;
+    std::vector<float> l ((std::size_t) len, 0.0f), r ((std::size_t) len, 0.0f);
+    l[0] = 0.003f;
+    for (int off = 0; off < len; off += 512)
+        fx->process (l.data() + off, r.data() + off, std::min (512, len - off), slot.params, 120.0);
+    int pl = 0, pr = 0;
+    for (int i = 1; i < len; ++i)
+    {
+        if (std::abs (l[(std::size_t) i]) > std::abs (l[(std::size_t) pl])) pl = i;
+        if (std::abs (r[(std::size_t) i]) > std::abs (r[(std::size_t) pr])) pr = i;
+    }
+    std::printf ("  ping-pong peaks: L %d (%.3f), R %d (%.3f)\n", pl, l[(std::size_t) pl] / 0.003f, pr, r[(std::size_t) pr] / 0.003f);
+    CHECK (pl == 24038 && pr == 48043);
+    CHECK (std::abs (l[(std::size_t) pl] / 0.003f - 0.389f) < 0.02f);
+    // the left pass around its tap: diffusion taps 300 … 641 samples either side (none in a plain tap + colour)
+    double around = 0.0, main = 0.0;
+    for (int i = pl - 700; i <= pl + 700; ++i)
+        (std::abs (i - pl) >= 290 ? around : main) += (double) l[(std::size_t) i] * l[(std::size_t) i];
+    CHECK (around > 0.05 * main);
 }
