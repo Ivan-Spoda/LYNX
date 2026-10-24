@@ -2174,7 +2174,10 @@ Layout prismMultiband()
     }
     v.push_back (tabs (16, 696, 140, 22, "Band layout", TR_NOOP ("Split|Free")));
     v.push_back (tabs (700, 696, 180, 22, "Detector", TR_NOOP ("Classic|Measured")));
-    l.height = 738;
+    // round 152: the measured model's revision (gain-stage attack, narrow Dynamic-phase bands, 0.8-octave minimum)
+    v.push_back (label (620, 736, 76, 22, TR_NOOP ("Model")));
+    v.push_back (tabs (700, 736, 180, 22, "Revision", TR_NOOP ("Round 150|Round 152")));
+    l.height = 766;
     return l;
 }
 
@@ -2641,7 +2644,7 @@ Layout foilPlateLayout()
     plate (dial (556, 70, 36, "Mod depth", TR_NOOP ("Mod")));
     plate (dial (556, 176, 44, "Mix", TR_NOOP ("Mix")));
     plate (toggle (24, 222, 150, 22, "Voicing", TR_NOOP ("Measured plate")));
-    v.push_back (tabs (530, 264, 182, 24, "View", TR_NOOP ("Full|Plate")));
+    v.push_back (tabs (560, 292, 150, 20, "View", TR_NOOP ("Full|Plate")));
     return l;
 }
 

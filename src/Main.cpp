@@ -2691,6 +2691,32 @@ private:
                     png.writeImageToStream (image, *stream);
             }
 
+            // round 152: Foil Plate's one-knob Plate view (the Little Plate role)
+            {
+                auto fx = lynx::makeEffectSlot (lynx::EffectKind::foilPlate);
+                fx.params[14] = 1.0f; // the measured plate voicing
+                fx.params[15] = 1.0f; // View = Plate
+                lynx::Song song;
+                song.mixer.resize (2);
+                song.mixer[0].name = "Master";
+                song.mixer[1].name = "Insert 1";
+                song.mixer[1].effects.push_back (fx);
+                offline.setSong (std::move (song));
+                offline.dispatchPendingMessages();
+                auto editor = lynx::makeNativeEffectEditor (offline, 1, 0, 1.0f, 0);
+                juce::Image image (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
+                {
+                    juce::Graphics g (image);
+                    g.fillAll (lynx::theme::panel);
+                    editor->paintEntireComponent (g, false);
+                }
+                const auto file = out.getChildFile ("Foil Plate-plate.png");
+                file.deleteFile();
+                juce::PNGImageFormat png;
+                if (auto stream = file.createOutputStream())
+                    png.writeImageToStream (image, *stream);
+            }
+
             // LYNX's own editors with live displays (round 103): Facet EQ (a mixing curve, one dynamic band, demo analyser)
             // and LYNX Tune (demo pitch phrase)
             {

@@ -317,6 +317,8 @@ lookahead on, expert mode, display range, analyser options.
 
 **After round 150** (REA_rodada150): configuration **10**/10, design 9 → **10**/10 — the free layout with gaps (bands placed anywhere, as the reference), slopes 6 … 48 dB/oct with the reference's laws per processing mode, a side-chain input per band, the narrow free side-chain filter, and the **measured detector** (the range's 12 dB soft knee, the release after the curve: a range-limited band recovers at once; release trajectories within 0.1 – 0.7 dB of the trial where the old detector was 1 – 4 dB off; projects saved before keep the old one). Left: the slow attacks' tail (50 – 100 %: 0.5 – 1.3 dB rms), narrow even-order bands in Dynamic phase (0.3 dB at their edges), Linear phase on LYNX's prewarped axis (≤ 0.35 dB at high crossovers).
 
+**After round 152** (REA_rodada152 §1–2): configuration **10**/10, design **10**/10 (sound closer) — the attack in the gain stage (slow attacks 50 – 100 % now within 0.4 dB of the reference over the first 400 ms; round 150 was up to 3 dB off), Dynamic phase's own band shapes for narrow bands and cuts (edges moved out, gain moved — the measured table, ≤ 0.05 dB), the 0.8-octave minimum band width in every mode. Left: Linear phase on LYNX's prewarped axis (≤ 0.35 dB at a 3 kHz edge, 6 dB/oct), mixed 6 / n sides beyond the measured table.
+
 ## Sentry Gate ← Pro-G
 
 Parameters of the original: Threshold, Ratio, Range, Style (Classic, Clean, Vocal, Guitar, Upward; Ducking as an
@@ -1677,10 +1679,10 @@ Mod on / off; screenshot); `foilInfo` / `FoilFx` in src/core/LynxVerbs.cpp. The 
 | Mix | 0–100 %, default 100 % | Mix (the substitute: 100 % wet at the slot's 25 %) | ✅ | |
 | Mod | on / off | Mod rate / depth | ✅ | [EXEC] round 150: Mod on leaves the decay per band unchanged (≤ 0.1 s at 3 s); its tail tone is narrower, not wider (spectral spread 5.4 → 2.4 Hz on a 1 kHz tail) — not modelled |
 | Plate character | one EMT-style plate | 12 plate types | ✅ | **round 150**: **Measured plate** switch [EXEC] (impulses at Decay 0.5 / 1 / 2 / 3 / 5 / 10 / 20 s and ∞): the plate speaks after 0.7 ms (Foil's types after 1 … 81 ms), the decay per octave against the label (20 s: 35 s at 125 Hz, 14 s at 1 kHz, 5.5 s at 8 kHz; short labels ring a little longer in the presence band; ∞ ≈ 80 s), fitted through Foil's engine: mid / bass / high RT within 5 % at every label up to 20 s (∞: the highs die sooner than on the trial), the tail's energy within ±0.5 dB; the Little Plate substitute plays it |
-| Extras (predelay, size, width, EQ) | none on the panel | yes | ➕ | a fuller panel than the 3-knob original |
+| Extras (predelay, size, width, EQ) | none on the panel | yes | ➕ | a fuller panel than the 3-knob original; round 152: the **Plate view** shows only the reference's controls (Full \| Plate tabs) |
 | Presets | Soundtoys strip | LYNX preset bar | ✅ | |
 
-**Scores**: configuration 6/10 → **8/10**, design 5/10 → **6/10** (round 135). **After round 150a**: configuration **9/10**, design **6/10** — the measured plate voicing (onset, decay per band, level); left: Mod's narrowing of the tail, the single-knob panel (Foil keeps its fuller layout).
+**Scores**: configuration 6/10 → **8/10**, design 5/10 → **6/10** (round 135). **After round 150a**: configuration **9/10**, design **6/10** — the measured plate voicing (onset, decay per band, level); left: Mod's narrowing of the tail, the single-knob panel (Foil keeps its fuller layout). **After round 152**: configuration **9/10**, design 6 → **8/10** — the **Plate view** (View: Full \| Plate; the Little Plate substitute opens in it): Low Cut · the big Decay with its ∞ · Mod · Mix, the reference's one-knob panel; left: Mod's narrowing of the tail.
 
 ---
 

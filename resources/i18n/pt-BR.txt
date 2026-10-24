@@ -4213,3 +4213,6 @@ countries: br
 "Thresh." = "Limiar"
 # round 152 (parity152): Foil Plate's one-knob Plate view
 "Full|Plate" = "Completo|Placa"
+# round 152 (parity152): Prism's model revision
+"Model" = "Modelo"
+"Round 150|Round 152" = "Rodada 150|Rodada 152"
