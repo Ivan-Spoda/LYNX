@@ -810,6 +810,7 @@ public:
         for (auto& s : buffer)
             s.assign ((std::size_t) Graph::capacity, 0.0f);
         accumulated.resize ((std::size_t) graph.auxOutputs());
+        tracks = std::make_unique<std::atomic<int>[]> ((std::size_t) std::max (1, graph.auxOutputs()));
         for (auto& a : accumulated)
             for (auto& side : a)
                 side.assign (auxCapacity, 0.0f);
@@ -826,17 +827,19 @@ public:
     void setNextNoteExpression (float pan, float cents, bool porta) noexcept override { graph.setNextNoteExpression (pan, cents, porta); }
     void setSongPosition (double ticks) noexcept override { graph.setSongPosition (ticks); }
     int latencySamples() const noexcept override { return graph.latencySamples(); }
-    bool idle() const noexcept override { return idleWhenQuiet && graph.instrumentsIdle(); }
+    bool idle() const noexcept override { return idleWhenQuiet.load (std::memory_order_relaxed) && graph.instrumentsIdle(); }
 
+    // (UI thread, while the audio thread renders: only atomics change here; the graph swaps its values itself)
     void configure (const ChannelDef& channel, double bpm) noexcept override
     {
-        tempo = bpm;
+        tempo.store (bpm, std::memory_order_relaxed);
         graph.takeValues (channel.patcher, bpm);
-        tracks.clear();
-        for (int k = 1; k <= graph.auxOutputs(); ++k)
-            tracks.push_back (patcher::auxOutputTrack (channel, k));
-        // only instruments (no effects that ring on) and no extra outputs: silent when its instruments are
-        idleWhenQuiet = std::all_of (channel.patcher.nodes.begin(), channel.patcher.nodes.end(), [] (const PatchNode& n) { return n.generator; });
+        if (tracks != nullptr)
+            for (int k = 1; k <= graph.auxOutputs(); ++k)
+                tracks[(std::size_t) k - 1].store (patcher::auxOutputTrack (channel, k), std::memory_order_relaxed);
+        // only instruments (no effects that ring on): silent when its instruments are
+        idleWhenQuiet.store (std::all_of (channel.patcher.nodes.begin(), channel.patcher.nodes.end(), [] (const PatchNode& n) { return n.generator; }),
+                             std::memory_order_relaxed);
     }
 
     void render (float* left, float* right, int n, float gainLeft, float gainRight) noexcept override
@@ -845,7 +848,8 @@ public:
         for (int done = 0; done < n; done += Graph::capacity)
         {
             const auto piece = std::min (Graph::capacity, n - done);
-            graph.process (silence.data(), silence.data(), nullptr, nullptr, buffer[0].data(), buffer[1].data(), piece, tempo);
+            graph.process (silence.data(), silence.data(), nullptr, nullptr, buffer[0].data(), buffer[1].data(), piece,
+                          tempo.load (std::memory_order_relaxed));
             for (int i = 0; i < piece; ++i)
             {
                 left[done + i] += buffer[0][(std::size_t) i] * gainLeft;
@@ -874,7 +878,10 @@ public:
                 std::fill (side.begin(), side.begin() + std::min<std::ptrdiff_t> (n, (std::ptrdiff_t) side.size()), 0.0f);
     }
     int auxOutputCount() const noexcept override { return (int) accumulated.size(); }
-    int auxOutputTrack (int k) const noexcept override { return k >= 0 && k < (int) tracks.size() ? tracks[(std::size_t) k] : -1; }
+    int auxOutputTrack (int k) const noexcept override
+    {
+        return k >= 0 && k < graph.auxOutputs() && tracks != nullptr ? tracks[(std::size_t) k].load (std::memory_order_relaxed) : -1;
+    }
     const float* auxOutputData (int k, int side) const noexcept override
     {
         return k >= 0 && k < (int) accumulated.size() ? accumulated[(std::size_t) k][(std::size_t) (side & 1)].data() : nullptr;
@@ -886,10 +893,10 @@ private:
     static constexpr std::size_t auxCapacity = 16384;
     std::array<std::vector<float>, 2> buffer;
     std::vector<std::array<std::vector<float>, 2>> accumulated;
-    std::vector<int> tracks;
+    std::unique_ptr<std::atomic<int>[]> tracks; // [extra output] its insert
     int cursor = 0;
-    bool idleWhenQuiet = true;
-    double tempo = 140.0;
+    std::atomic<bool> idleWhenQuiet { true };
+    std::atomic<double> tempo { 140.0 };
 };
 } // namespace
 
