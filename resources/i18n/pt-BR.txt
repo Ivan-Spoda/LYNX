@@ -3638,3 +3638,5 @@ countries: br
 "This Patcher is gone." = "Este Patcher não existe mais."
 "This node has no editor of its own here." = "Este nó não tem editor próprio aqui."
 "To LYNX" = "Para o LYNX"
+"MIDI port {0}" = "Porta MIDI {0}"
+"+ MIDI port" = "+ porta MIDI"

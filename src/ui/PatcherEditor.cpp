@@ -312,6 +312,16 @@ private:
         return k;
     }
 
+    static std::vector<int> midiPorts (const PatcherDoc& d)
+    {
+        std::vector<int> ports;
+        for (const auto& w : d.wires)
+            if (w.kind == PatchWire::Kind::midi && w.to == patchToHost && std::find (ports.begin(), ports.end(), w.toPort) == ports.end())
+                ports.push_back (w.toPort);
+        std::sort (ports.begin(), ports.end());
+        return ports;
+    }
+
     std::vector<Pin> hostPins (const PatcherDoc& d, bool input) const
     {
         std::vector<Pin> pins;
@@ -348,6 +358,13 @@ private:
                 add (PatchWire::Kind::audio, k, track > 0 ? tr ("Insert {0}", { juce::String (track) }) : tr ("Output {0}", { juce::String (k + 1) }));
             }
             add (PatchWire::Kind::audio, extraOutputs (d) + 1, tr ("+ output"), true);
+            if (target.channel) // the notes out to the plugins on a MIDI port (FL's "MIDI port N")
+            {
+                const auto ports = midiPorts (d);
+                for (const auto port : ports)
+                    add (PatchWire::Kind::midi, port, tr ("MIDI port {0}", { juce::String (port) }));
+                add (PatchWire::Kind::midi, ports.empty() ? 1 : ports.back() + 1, tr ("+ MIDI port"), true);
+            }
         }
         return pins;
     }
@@ -406,7 +423,7 @@ private:
         if (n == patchFromHost)
             rows = target.channel ? 1 : 2;
         else if (n == patchToHost)
-            rows = extraOutputs (d) + 2;
+            rows = extraOutputs (d) + 2 + (target.channel ? (int) midiPorts (d).size() + 1 : 0);
         else
         {
             const auto ports = patcher::nodePorts (d.nodes[(std::size_t) n]);

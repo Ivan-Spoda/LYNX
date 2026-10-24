@@ -2065,8 +2065,15 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             else if (c.kind == 1)
             {
                 w.kind = PatchWire::Kind::midi;
-                if (w.from != patchFromHost || w.to < 0)
-                    continue; // (MIDI between nodes / out of the Patcher: not passed yet)
+                if (w.from != patchFromHost)
+                    continue; // (MIDI out of a node: not passed yet)
+                if (w.to == patchToHost) // "MIDI port N": the notes go to the plugins on that MIDI port
+                {
+                    const auto number = dst->name.rfind ("MIDI port ", 0) == 0 ? std::atoi (dst->name.c_str() + 10) : dst->index;
+                    if (number < 0 || number > 255)
+                        continue;
+                    w.toPort = number;
+                }
             }
             else
             {

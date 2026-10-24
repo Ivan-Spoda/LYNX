@@ -485,3 +485,27 @@ TEST (patcher_demo_graphs_import_and_run)
     CHECK (slots == flSlots && slots >= 20 && finite == slots && sounding >= slots - 2);
     CHECK (channels >= 2 && notes >= channels && controls > 0);
 }
+
+TEST (patcher_midi_port_output_reaches_plugins_on_that_port)
+{
+    // a generator Patcher's "MIDI port 3" output: its notes go to the plugin channels whose MIDI input port is 3
+    auto song = lynx::Song::makeDefault();
+    song.channels.resize (3);
+    song.channels[0] = {};
+    song.channels[0].instrument = lynx::InstrumentKind::patcher;
+    lynx::PatchWire out;
+    out.kind = lynx::PatchWire::Kind::midi;
+    out.from = lynx::patchFromHost;
+    out.to = lynx::patchToHost;
+    out.toPort = 3;
+    song.channels[0].patcher.wires = { out };
+    for (int c : { 1, 2 })
+    {
+        song.channels[(std::size_t) c] = {};
+        song.channels[(std::size_t) c].instrument = lynx::InstrumentKind::plugin;
+        song.channels[(std::size_t) c].plugin.id = "test";
+        song.channels[(std::size_t) c].plugin.midiInPort = c == 1 ? 3 : 4;
+    }
+    const auto state = lynx::RackState::build (song, nullptr, 48000.0);
+    CHECK (state->hasMidiRoutes && state->midiTargets[0] == std::vector<int> { 1 } && state->midiOutChannel[0] == 0);
+}
