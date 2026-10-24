@@ -41,7 +41,8 @@ Round 152 (`docs/analise/REA_rodada152.md`, sub-rounds `REA_rodada152a.md` / `15
 | Glow Leveler | CLA-2A | 7 → 9 | 7 → 8 | the reference's fresh instance, ANALOG 50 / 60 Hz, measured Limit and AUTO MAKEUP; translated (152a) |
 | Auto-pan (stand-in) | PanMan | 8 → 9 | 7 → 8 | trigger sources Ping-pong / Random step (threshold, divider, detector filter, manual trigger), Random steps |
 | Foil Plate | Little Plate | 9 → 9 | 6 → 8 | the one-knob Plate view (the substitute opens in it) |
-| Crest Compressor / Echoform | Pro-C 3 / EchoBoy | — | — | stale ❌ rows re-checked: Host sync / MIDI trigger and audition (round 137), EchoBoy state recognition (round 136) |
+| Facet EQ | Pro-Q 4 | 9 → 9 | 8 → 8 | spectral dynamics (Spectral / Density / Tilt per band, measured per-bin law, 5120-sample latency) and EQ match (capture reference + track, Match 25 … 100 %) (152c) |
+| Crest Compressor / Echoform | Pro-C 3 / EchoBoy | — | — | stale ❌ rows re-checked: Host sync / MIDI trigger and audition (round 137), EchoBoy state recognition (round 136), EchoBoy ping-pong start side (round 135w); no ❌ row is left |
 
 ### Sub-round 152b
 
@@ -215,7 +216,7 @@ range.
 | Band panel: stereo placement (L / R / Stereo / M / S) | ✅ | round 128: placement button in the panel and the band menu, an L / R / M / S tag beside the node; in the natural / linear phase modes a placed band runs minimum phase after the FIR |
 | Dynamic EQ: range, threshold, attack, release | ⚠️ | attack / release are global (original: per band); no "auto" threshold |
 | Dynamic EQ: external side chain per band, side-chain filtering | ⚠️ | one detector switch (input / side chain) for all bands |
-| Spectral dynamics (density, tilt) | ❌ | Pro-Q 4 feature |
+| Spectral dynamics (density, tilt) | ✅ | **round 152c** [EXEC] (Pro-Q 4 trial, black-box: Spectral / Density / Tilt host parameters, partials and pink noise through a dynamic bell): **Spectral** in the band panel (beside Dynamic; right-click: density 0 … 100 %) and **Tilt** — an STFT stage (4096 points, latency 5120 samples = the trial's): each bin's level weighted by the band's shape, a threshold 30.5 dB under the knob and never lower than the band's loudest bin − 11.6 dB, 1.07 dB per dB up to the range × shape^2.18 (0.33 dB rms over 22 measured cases); density blurs the gains (100 %: a pure tone −11.2 dB, as the trial), tilt slopes the threshold 4.5 dB/oct [model] |
 | Solo band (audition) | ✅ | |
 | Hover tooltip next to a node (freq, gain, Q, power, solo) | ✅ | read-out box at the node with power (round 128), solo and remove |
 | Right-click a node: shape, slope, dynamic range, solo, reset, remove | ✅ | |
@@ -229,12 +230,14 @@ range.
 | Analyser: off / pre / post / pre+post | ✅ | |
 | Analyser range, resolution, speed, tilt, freeze, collisions, spectrum grab | ⚠️ | round 128: range 60 / 90 / 120 dB, speed (5 steps), tilt 0 – 6 dB/oct, freeze in the analyser menu (saved with the slot); no resolution, collisions or spectrum grab |
 | Display range 3 / 6 / 12 / 30 dB | ✅ | saved with the slot since round 128 |
-| EQ match (external spectrum) | ❌ | |
+| EQ match (external spectrum) | ⚠️ | **round 152c**: **EQ match** in the bottom bar — capture a reference (played through the slot) and this track from the analyser, then Match 25 … 100 % with up to 2 … 8 bands and 1/12 … 1 octave smoothing: LYNX's own fit (bells, shelves at the ends, in the unused bands; one undo step) [model]; Pro-Q 4's match is not reachable through host parameters, so its rules are not measured; no live side-chain / other-instance reference |
 | Piano display (note names on the frequency axis) | ✅ | piano strip toggle at the bottom left; note name of the mouse position |
 | Output meter with peak hold | ✅ | |
 | Window size | ✅ | resizable |
 
 **After round 144**: configuration 9/10, design 8/10 (the linear-phase resolution row closed; left: 24 bands, spectral dynamics, EQ match, per-band attack / release).
+
+**After round 152c**: configuration 9/10, design 8/10 — spectral dynamics (Spectral / Density / Tilt, measured per-bin law and latency) and LYNX's EQ match close the two ❌ rows; left: 24 bands, per-band attack / release and side chain, brickwall slopes, a live reference for the match.
 
 ## Apex Limiter ← Pro-L 2
 
@@ -1020,7 +1023,7 @@ delay display → an echo-train picture (not the note/BPM read-out).
 | Sync MS | button | menu entry "ms" | ✅ | |
 | Central display | note value (e.g. "1/8 D") and tempo "120 BPM" (or ms); click-drag / type to edit | value text under the knob + echo-train picture (echoes on a time axis); round 137: the picture's top right reads the note and its tempo ("1/8 D  120.0 BPM") or the ms | ✅ | echotrain ➕; edited with the knob / sync menu, not by dragging the read-out |
 | Tap pad | big pad far left; last two taps; Host: snaps to a note, BPM: sets BPM, MS: sets ms | — | ✅ | round 129: TAP pad (sets the left time) |
-| Ping Pong | button above the display; Off; start-side value | STYLE = "Ping-pong" (5th of 5) + "Pairs" toggle (alternate / H-Delay pairs) | ⚠️ | no button; start side ❌ |
+| Ping Pong | button above the display; Off; start-side value | STYLE = "Ping-pong" (5th of 5) + "Pairs" toggle (alternate / H-Delay pairs) | ⚠️ | no separate button; start side ✅ (next row, round 135w; stale ❌ re-checked round 152) |
 | Ping-pong start side (L→R / R→L) | value box | — | ✅ | translator ignores RealWorld 45; round 135w: "Start left / Start right" (ping-pong); translated from RealWorld 45 (0 left, 1 right [EXEC] round 119 probe) |
 | Dual (independent L/R times) | button; drag L or R in display | STYLE = "Dual" + Delay R / Sync R | ✅ | |
 | Phase L / Phase R (ØL ØR) | two buttons beside Ping Pong / Dual; Off | — | ✅ | new params; round 129 |
