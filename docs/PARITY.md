@@ -41,6 +41,8 @@ Round 150 (`docs/analise/REA_rodada150.md`, sub-rounds `REA_rodada150a.md` / `RE
 | Echoform | EchoBoy / PrimalTap | 10 → 10 | 8 → 8 | voicings in Dual / Ping-Pong (measured), L/R offset, wobble shapes / depths from delay tracks (no style has several voices on the trial) |
 | Ember Saturator | Saturn 2 | 7 → 8 | 7 → 8 | six bands, global input / output pan, 28 measured characters (LYNX names); translated |
 | LYNX Tune | Waves Tune Real-Time | 9 → 9 | 7 → 8 | Send / Receive of the scale between instances |
+| Auto-pan (stand-in) | PanMan | 7 → 8 | 6 → 7 | Tweak page (rate / offset / width modulation by the measured envelope law, Feel / Groove, beyond the speakers) |
+| Foil Plate | Little Plate | 8 → 9 | 6 → 6 | measured Little Plate voicing (band decays, 0.7 ms onset, ∞ ≈ 80 s) |
 
 ## Round 147: what changed (config / design, after 144 → after 147)
 
