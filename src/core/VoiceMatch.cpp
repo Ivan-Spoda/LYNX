@@ -262,6 +262,11 @@ double compStaticGainDb (const Settings& s, double sineDbfs)
     return law.makeup - gr;
 }
 
+double compMakeupDb (const Settings& s) noexcept
+{
+    return s.compRatio > 1.0 ? compLaw (s).makeup : 0.0;
+}
+
 void Channel::prepare (double sampleRate) noexcept
 {
     sr = sampleRate;

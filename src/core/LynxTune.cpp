@@ -137,9 +137,53 @@ const EffectInfo& info()
         e.params.push_back ({ "Drive", 0.0f });
         e.params.push_back ({ "Wide formant", 0.0f });
         e.params.push_back ({ "Output", 0.5f });
+        // round 147: an illegal note's direction (C … B) and the keyboard's range
+        static const char* const dirNames[12] { "C dir", "C# dir", "D dir", "D# dir", "E dir", "F dir", "F# dir", "G dir", "G# dir", "A dir", "A# dir", "B dir" };
+        for (const auto* nm : dirNames)
+            e.params.push_back ({ nm, 0.0f });
+        e.params.push_back ({ "Range low", 0.0f });
+        e.params.push_back ({ "Range high", 1.0f });
         return e;
     }();
     return i;
+}
+
+NoteDir noteDir (float v) noexcept { return (NoteDir) stepped (v, 3); }
+int rangeNote (float v) noexcept { return std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * 127.0f), 0, 127); }
+float rangeNoteValue (int note) noexcept { return (float) std::clamp (note, 0, 127) / 127.0f; }
+const char* rangePresetName (int k) noexcept
+{
+    static const char* const n[rangePresets] { "Bass", "Baritone", "Tenor", "Alto", "Mezzo", "Soprano", "Generic" };
+    return n[std::clamp (k, 0, rangePresets - 1)];
+}
+std::pair<int, int> rangePresetNotes (int k) noexcept
+{
+    // [model] the classical voice ranges (bass E2–E4, baritone A2–A4, tenor C3–C5, alto F3–F5, mezzo A3–A5, soprano
+    // C4–C6) widened by a third on each side; Generic = the whole keyboard (no note bypassed)
+    static constexpr std::pair<int, int> r[rangePresets] { { 36, 68 }, { 41, 73 }, { 44, 76 }, { 49, 81 }, { 53, 85 }, { 56, 88 }, { 0, 127 } };
+    return r[std::clamp (k, 0, rangePresets - 1)];
+}
+int targetNote (double sung, std::uint16_t legal, int previous, double hysteresis, const NoteDir* dirs) noexcept
+{
+    const auto t = vocal::nearestNote (sung, legal, previous, hysteresis);
+    legal &= 0xfff;
+    if (dirs == nullptr || legal == 0 || t == previous)
+        return t;
+    const auto base = (int) std::lround (sung);
+    const auto pc = ((base % 12) + 12) % 12;
+    if ((legal >> pc) & 1u)
+        return t;
+    const auto d = dirs[pc];
+    if (d == NoteDir::nearest)
+        return t;
+    const int step = d == NoteDir::up ? 1 : -1;
+    for (int k = 1; k <= 12; ++k)
+    {
+        const auto n = base + step * k;
+        if ((legal >> (((n % 12) + 12) % 12)) & 1u)
+            return n;
+    }
+    return t;
 }
 
 std::string paramText (int param, float v)
@@ -191,6 +235,17 @@ std::string paramText (int param, float v)
     }
     if ((param >= noteC && param < noteC + 12) || (param >= bypassC && param < bypassC + 12))
         return onOff();
+    if (param >= noteDirC && param < noteDirC + 12)
+    {
+        static const char* const n[3] { "Nearest", "Up", "Down" };
+        return n[(int) noteDir (v)];
+    }
+    if (param == rangeLow || param == rangeHigh)
+    {
+        static const char* const names[12] { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        const auto k = rangeNote (v);
+        return std::string (names[k % 12]) + std::to_string (k / 12 - 1);
+    }
     std::snprintf (t, sizeof t, "%.2f", (double) v);
     return t;
 }
@@ -278,6 +333,16 @@ public:
         const auto vibDelay = vibratoOnsetMs (p[vibratoDelay]) * 0.001;
         const auto vibOnset = vibratoOnsetMs (p[vibratoOnset]) * 0.001;
         auto mask = (std::uint16_t) (vocal::scaleMask (sc, keyIndex (p[key]), notes) & notes);
+        // round 147: the illegal notes' directions and the keyboard range (outside it: uncorrected)
+        std::array<NoteDir, 12> dirs {};
+        bool anyDir = false;
+        for (int k = 0; k < 12; ++k)
+        {
+            dirs[(std::size_t) k] = noteDir (p[(std::size_t) (noteDirC + k)]);
+            anyDir = anyDir || dirs[(std::size_t) k] != NoteDir::nearest;
+        }
+        const auto lowNote = rangeNote (p[rangeLow]), highNote = rangeNote (p[rangeHigh]);
+        const bool ranged = lowNote > 0 || highNote < 127;
 
         // MIDI targets: the pitch classes held on the source channel (none held: the scale)
         const auto ch = midiChannelIndex (p[midiChannel]);
@@ -375,7 +440,8 @@ public:
                         // the first notes of the next one, by up to half a semitone the wrong way)
                         shift = 0.0;
                     }
-                    const auto t = vocal::nearestNote (ignoreVib ? center2 : sung, mask, target, hysteresis);
+                    const auto t = anyDir ? targetNote (ignoreVib ? center2 : sung, mask, target, hysteresis, dirs.data())
+                                          : vocal::nearestNote (ignoreVib ? center2 : sung, mask, target, hysteresis);
                     // round 135w: Tolerance time — a new note must last that long before the target moves to it
                     if (t != target && holdTime > 0.0 && target >= 0)
                     {
@@ -406,6 +472,8 @@ public:
                     wanted = (double) target - heard;
                     if (((bypass >> (((target % 12) + 12) % 12)) & 1u) != 0)
                         wanted = 0.0; // a bypassed note passes as sung
+                    if (ranged && (sung < (double) lowNote - 0.5 || sung > (double) highNote + 0.5))
+                        wanted = 0.0; // round 147: outside the keyboard's range: passes as sung
                     // flex-tune: a note far from its target is left as sung. [EXEC] Auto-Tune Pro (round 120 §5): the
                     // correction of a note d cents from its target is min (d, (1 − F) / F · (50 − d)) cents, d measured
                     // in hundredths of the gap to the next target on the sung side (a semitone in chromatic)

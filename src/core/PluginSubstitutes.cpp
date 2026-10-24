@@ -1521,8 +1521,8 @@ int translateSslVocalstrip2 (const std::vector<std::uint8_t>& state, EffectSlot&
 // 30 output dB, 31 analog, 39 phase, 40 input dB). Round 123: Ridge Strip's "E" voicing (core/VoiceMatch.h) is the
 // console measured black-box on the official trial — every EQ band and filter from its impulse responses, the
 // feedback compressor and expander from sine stairs, tone bursts, noise and her takes — so the controls map one to
-// one in the console's own units (docs/analise/REA_rodada123.md). Not translated: analog (off in every state of her
-// corpus), EQ to the dynamics side chain.
+// one in the console's own units (docs/analise/REA_rodada123.md). Round 147b: analog translated (off in every state of
+// her corpus). Not translated: EQ to the dynamics side chain.
 int translateWavesSslChannel (const std::vector<std::uint8_t>& state, EffectSlot& slot)
 {
     namespace r = mixsuite::ridge;
@@ -1570,7 +1570,8 @@ int translateWavesSslChannel (const std::vector<std::uint8_t>& state, EffectSlot
     p[r::filterSplit] = at (29, 1.0) == 1.0 ? 1.0f : 0.0f;
     p[r::filtersToSidechain] = 0.0f;
     p[r::compMix] = 1.0f;
-    return 30;
+    p[r::analog] = at (31, 0.0) > 0.5 ? 1.0f : 0.0f; // round 147b: ANALOG (its noise floor, measured on the trial)
+    return 31;
 }
 
 // H-Delay (RealWorld list, round 119): 1 sync (0 BPM, 1 host, 2 ms), 2 BPM, 3 delay ms, 4 note (3 per length: triplet,
