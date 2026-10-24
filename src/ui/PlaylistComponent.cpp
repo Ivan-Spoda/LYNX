@@ -174,11 +174,13 @@ struct PlaylistComponent::SmallClips
 
     void fill (juce::Graphics& g)
     {
+        // (rectangle by rectangle: the GPU renderer turns a rectangle list into a geometry, which costs more)
         for (auto* layer : { &bodies, &contents })
             for (auto& [argb, list] : *layer)
             {
                 g.setColour (juce::Colour (argb));
-                g.fillRectList (list);
+                for (const auto& r : list)
+                    g.fillRect (r);
             }
         const uitrace::Part tally (uitrace::part::batchWaves);
         for (auto& [argb, path] : waves)
@@ -189,7 +191,8 @@ struct PlaylistComponent::SmallClips
         for (auto& [argb, list] : edges)
         {
             g.setColour (juce::Colour (argb));
-            g.fillRectList (list);
+            for (const auto& r : list)
+                g.fillRect (r);
         }
     }
 };

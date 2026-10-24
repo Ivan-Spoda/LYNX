@@ -2794,7 +2794,13 @@ public:
         bottom.removeFromLeft (6);
         {
             auto echo = section (bottom, tr ("Echo delay / fat mode"));
-            row (echo, { echoFeed, echoPan, echoModX, echoModY, echoPitch, echoTime, echoCount });
+            {
+                // seven knobs (round 151 added Mod X / Y): narrower when the window is
+                auto line = echo.removeFromTop (knobH);
+                const auto w = juce::jmin (knobW, line.getWidth() / 7);
+                for (auto* k : { echoFeed, echoPan, echoModX, echoModY, echoPitch, echoTime, echoCount })
+                    k->setBounds (line.removeFromLeft (w));
+            }
             auto toggles = echo.removeFromTop (22);
             pingPong.setBounds (toggles.removeFromLeft (100));
             fatMode.setBounds (toggles.removeFromLeft (100));
@@ -2808,7 +2814,8 @@ public:
             auto line = toggles.removeFromTop (22);
             rootReset.setBounds (line.removeFromRight (50).reduced (0, 1));
             addToKey.setBounds (line);
-            row (rootRow.removeFromLeft (64), { fineTune });
+            auto fine = rootRow.removeFromLeft (58);
+            row (fine, { fineTune });
             rootKeys.setBounds (rootRow.reduced (4, 2));
         }
     }

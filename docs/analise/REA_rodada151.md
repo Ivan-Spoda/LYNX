@@ -70,6 +70,86 @@ own start-up (one after another in both).
 
 ---
 
+## Part B — the plugin picker **[EXEC FL 2026: Add › More plugins… = "Select generator plugin"; F8 = Plugin picker]**
+
+FL's channel / slot menus list the favourite plugins and **More plugins…**: a list of every generator (or effect) with
+a favourite star, Name, Format, Bits, Vendor, a *Find* box and *Manage plugins*; its Plugin picker (F8) groups them
+by category tabs (generators: Controller, Drum, MIDI, Misc, Patcher, Sampler, Synth classic, Synth special, Visual;
+effects: Controller, Delay reverb, Distortion, Dynamics, Filter, Flanger, Gain, Misc, Patcher, Visual).
+
+LYNX's menus listed every scanned plugin in one submenu (hundreds of items in four columns on this PC). Now
+(`addPluginItems`): the favourites, then **More plugins… (N instruments / effects)**, which opens the **Plugin picker**
+(src/ui/PluginPicker.cpp): Instruments / Effects tabs, a search box (every word must match name, vendor, format or
+category), the categories down the left (All, ★ Favourites, LYNX's categories with counts, then the vendors), the
+list with the favourite star (click it: the Plugin manager's favourites), name, vendor, format and category;
+double-click / Enter adds, *Manage plugins…*, *Scan for new plugins*. The categories (src/core/PluginCatalog.cpp,
+LYNX's own names: Synth, Sampler, Drum, Piano & keys, Other / Delay & reverb, Distortion, Dynamics, EQ & filter,
+Modulation, Pitch & vocal, Analyzer, Utility, Other) come from what the plugin declares (VST3 sub-categories) and,
+when it declares nothing useful (VST2's bare "Effect" / "Synth"), from words in its name. Tests
+`rea151_plugin_catalog_categories`, `rea151_plugin_catalog_search_and_favourites`.
+
+## Part C — the wrapper options with a LYNX behaviour **[DATA: FL 2026, each option toggled on an FL Studio VSTi, saved, compared]**
+
+| FL option (default) | Saved as | LYNX now |
+|---|---|---|
+| Settings › MIDI › Send note release velocity (on) | wrapper record 0x02 flags (+9) **0x20 set = off** | note offs carry the note's release velocity (`Note::release`, through `NoteEvent::release`); off: velocity 0 |
+| Send pitch bend range (off), value 12 | flags **0x1**; record 0x01 **+8** = semitones | a pitch-bend-sensitivity RPN (101/100 = 0, 6 = range) before the plugin's first notes |
+| Send MOD X as polyphonic aftertouch (off) | flags **0x20000** | each note's Mod X (0..1 → 0..127) as poly aftertouch right after its note on |
+| Send All Notes Off when playback stops (on) | second flags word (+21) **0x1000 set = off** | on stop: All Notes Off + All Sound Off; off: only the notes still held get a note off |
+| Troubleshooting › Reset plugin when FL Studio resets (on) | flags **0x02000000 set = off** | `AudioProcessor::reset()` before an export and on the panic button |
+| Send loop position (on) | flags **0x800** | the play head reports the loop (start / end, looping) when the song has a loop region |
+
+Imported from the .flp (wrapper version ≥ 10), saved in .lynx, shown on the wrapper page (the MIDI ones under
+Settings › MIDI with the range box, the others under Troubleshooting); a change re-creates the plugin with its state.
+Not done (no LYNX behaviour yet): Use time offset, Fast idle, Process inactive inputs and outputs, the GUI options.
+Test `rea151_fl_wrapper_midi_and_compatibility_flags`.
+
+## Part D — Mod X / Y through the echo delay and the tracking; Fine tune
+
+- The notes' Mod X / Y now travel with them (`NoteEvent::modX / modY`): the **echo delay**'s Mod X / Y knobs move each
+  echo k steps (FL's −1..1 knob = a step of half the note's 0..1 range, **[model]**; fat mode mirrors only pan and
+  pitch), the **Vol / Key tracking**'s Mod X / Y knobs move them by the same velocity / key distance as the pan
+  (**[model]**). They reach hosted plugins ("Send MOD X as polyphonic aftertouch"); LYNX's own instruments do not use
+  them yet. The Misc tab shows the new knobs (tracking: Pan, Mod X, Mod Y, Mid; echo: Feed, Pan, Mod X, Mod Y, Pitch,
+  Time, Echoes).
+- **Fine tune** (Misc › Root note) **[DATA: FL saves +15 / +78 cents as the channel event 0x8E = 15 / 78]**: every note
+  of the channel this many cents away (±100); imported, saved, a knob on the Root note row.
+Tests `rea151_echo_and_tracking_move_mod_x_y`, `rea151_scheduled_notes_carry_release_and_mod_x`, `rea151_flp_fine_tune_imported`.
+
+## Part E — drawing on an instrument track **[EXEC FL 2026]**
+
+FL: *Track mode › Instrument track* offers *Use existing channel*, *More plugins…* and the generators (a new channel).
+With the pencil on an instrument track, the first click makes a pattern named after the channel (empty, one bar,
+the channel's colour; its piano roll is the channel's) and places it; every later click places the same pattern.
+LYNX now does the same (`trackmodes::instrumentTrackPattern`: the pattern named after the channel whose notes are all
+that channel's, else a new one; the pencil places it and selects the channel). Test
+`rea151_instrument_track_draws_its_own_pattern`. Not done: making a new channel from the Track mode menu.
+
+## Part F — the Patcher's minimap and Surface **[EXEC FL 2026: Patcher › Map / Surface]**
+
+- **Minimap**: FL shows the whole map in a small box at the bottom right. LYNX: every node as a block (the selected one
+  in the accent colour) and the visible part as a frame; click / drag in it moves the view there.
+- **Surface**: FL's Surface tab takes controls (Bevel, Button, CheckBox, Digits, Label, Keyboard, Knob, Slider, XY,
+  each with skins); each becomes a control output of the Map's **Surface** node. LYNX: Map / Surface tabs; on the
+  Surface "+" (or right-click) adds a **Knob, Slider, Button, Check box or XY pad** ("Knob 1"…), *Edit* moves them,
+  right-click renames / deletes; turning one moves what its cables reach (the graph reads the values without being
+  rebuilt). The Map shows the Surface node with one output per control (an XY pad two). Saved in .lynx. Not done:
+  FL's other control kinds and skins, importing FL's Surface from a .flp, automating a Surface control.
+  Test `rea151_patcher_surface_controls`.
+
+---
+
 ## Where I stopped
 
-(in progress)
+- Done: the performance pass (Part A: the UI trace; the hidden Playlist under a maximised Mixer, 1 000+ small clips,
+  re-shaped text, the Missing files re-import that re-created every plugin and crashed, the timed backup on the
+  message thread; load times beside FL's — LYNX opens every measured project sooner); the plugin picker (B); six FL
+  wrapper options with LYNX behaviour, read from FL's own saved flags (C); Mod X / Y through the echo delay and the
+  tracking, Fine tune from .flp 0x8E (D); drawing on an instrument track (E); the Patcher's minimap and Surface (F).
+  Every screen above was used in the running app (screenshots tmp/flrea151/shots g01–g29, FL's in tmp/flrea151/flref).
+- Still above 16 ms: Thief's Playlist scrolled with ~1 400 clips on screen, 17–40 ms a frame depending on the PC's load
+  (other rounds were compiling; 16–22 ms when the PC was quiet): the batched small waveforms (one path per colour) are
+  now most of it. Next idea: cache each clip's small waveform as an image per zoom level.
+- Not done: FL's other Surface controls / skins and its .flp Surface import; a new channel from Track mode › Instrument
+  track; LYNX's own instruments reading Mod X / Y; the wrapper's time offset / fast idle / process inactive I/O.
+- Not confirmed: FL's exact Mod X / Y step law for the echo and tracking knobs (LYNX: [model] above).

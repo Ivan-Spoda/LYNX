@@ -72,7 +72,7 @@ std::string effectCategory (const std::string& declared, const std::string& name
         if (has (t, { "pitch", "tune", "tuning", "vocal", "voice", "formant", "alterboy", "harmon" }))
             return pitch;
         if (has (t, { "compress", "limit", "dynamic", "gate", "expander", "de-ess", "deess", "transient", "clipper", "maxim", "leveler", "cla-2a",
-                      "la-2a", "1176", "comp " }))
+                      "la-2a", "1176" }) || hasToken (t, { "comp" }))
             return dynamics;
         if (has (t, { "filter", "equal", "channel strip", "channelstrip", "sslchannel", "pro-q" }) || hasToken (t, { "eq" }))
             return eqFilter;
