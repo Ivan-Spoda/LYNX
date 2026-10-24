@@ -15815,6 +15815,7 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Parity150Tests.inc"
 #include "Parity150aTests.inc"
 #include "Parity150bTests.inc"
+#include "Parity152cTests.inc"
 #include "Patcher141Tests.inc"
 #include "Vox138Tests.inc"
 #include "Vox145Tests.inc"

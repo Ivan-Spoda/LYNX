@@ -247,7 +247,8 @@ public:
 
     enum class Ctl { none, shapeMenu, freq, gain, q, slopeMenu, range, threshold, solo, dynamic, remove, attack, release,
                      phase, analyzer, detector, output, scale, scaleDb, prevBand, nextBand, close, piano, tipSolo, tipRemove,
-                     power, placementMenu, tipPower, autoGain, pan };
+                     power, placementMenu, tipPower, autoGain, pan,
+                     spectral, spectralTilt, match }; // round 152
     struct Control { Ctl type; juce::Rectangle<float> r; int param = -1; int index = 0; };
 
     std::vector<Control> controls() const
@@ -260,6 +261,7 @@ public:
         out.push_back ({ Ctl::phase, { 44.0f, cy - 11.0f, 150.0f, 22.0f }, phaseParam });
         out.push_back ({ Ctl::analyzer, { 202.0f, cy - 11.0f, 170.0f, 22.0f }, analyzerParam });
         out.push_back ({ Ctl::detector, { 380.0f, cy - 11.0f, 150.0f, 22.0f }, detectorParam });
+        out.push_back ({ Ctl::match, { 538.0f, cy - 11.0f, 150.0f, 22.0f } }); // round 152: EQ match
         out.push_back ({ Ctl::output, { bar.getRight() - 100.0f, cy - 11.0f, 92.0f, 22.0f }, outputParam });
         out.push_back ({ Ctl::scale, { bar.getRight() - 190.0f, cy - 11.0f, 84.0f, 22.0f }, scaleParam });
         out.push_back ({ Ctl::pan, { bar.getRight() - 282.0f, cy - 11.0f, 86.0f, 22.0f }, panParam });
@@ -297,6 +299,13 @@ public:
                 out.push_back ({ Ctl::gain, { x, y + 2.0f, 96.0f, 112.0f }, param (b, 2) });
                 x += 104.0f;
                 out.push_back ({ Ctl::dynamic, { x + 4.0f, y + 8.0f, 86.0f, 20.0f }, rangeParam0 + b });
+                // round 152: Pro-Q 4's spectral dynamics (right-click: density) and its tilt
+                if (isDynamic (current()->params, b))
+                {
+                    out.push_back ({ Ctl::spectral, { x + 94.0f, y + 8.0f, 70.0f, 20.0f }, spectralParam0 + b });
+                    if (isSpectral (current()->params, b))
+                        out.push_back ({ Ctl::spectralTilt, { x + 168.0f, y + 8.0f, 46.0f, 20.0f }, spectralTiltParam0 + b });
+                }
                 if (isDynamic (current()->params, b))
                 {
                     out.push_back ({ Ctl::range, { x - 2.0f, y + 34.0f, 56.0f, 80.0f }, rangeParam0 + b });
@@ -463,6 +472,90 @@ public:
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
     }
 
+    // round 152: the spectral band's density (right-click on Spectral)
+    void showDensityMenu (int b)
+    {
+        if (b < 0) return;
+        juce::PopupMenu menu;
+        const auto now = param01 (densityParam0 + b);
+        for (const int pct : { 0, 25, 50, 75, 100 })
+            menu.addItem (tr ("Density {0} %", { juce::String (pct) }), true, std::abs (now - pct / 100.0f) < 0.01f,
+                          [this, b, pct] { set ({ { densityParam0 + b, pct / 100.0f } }); });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    }
+
+    // round 152: EQ match — capture the reference (play it through this slot), capture this track, then match
+    enum class Capture { none, reference, current };
+    juce::String matchStateText() const
+    {
+        const auto secs = [] (int frames) { return juce::String (frames / 30); }; // the editor's 30 Hz frames
+        if (capture == Capture::reference) return tr ("reference {0} s", { secs (refFrames) });
+        if (capture == Capture::current) return tr ("this track {0} s", { secs (curFrames) });
+        if (refFrames > 0 && curFrames > 0) return tr ("ready");
+        if (refFrames > 0) return tr ("reference captured");
+        return tr ("off");
+    }
+    void showMatchMenu()
+    {
+        juce::PopupMenu menu;
+        if (analyzer (param01 (analyzerParam)) == Analyzer::off)
+            menu.addItem (tr ("(turn the analyzer on to capture spectra)"), false, false, [] {});
+        menu.addItem (capture == Capture::reference ? tr ("Stop capturing the reference") : tr ("Capture the reference (play it through this slot now)"), true,
+                      capture == Capture::reference, [this] {
+                          if (capture == Capture::reference) capture = Capture::none;
+                          else { capture = Capture::reference; matchRef.clear(); refFrames = 0; }
+                          repaint();
+                      });
+        menu.addItem (capture == Capture::current ? tr ("Stop capturing this track") : tr ("Capture this track (play it now)"), true,
+                      capture == Capture::current, [this] {
+                          if (capture == Capture::current) capture = Capture::none;
+                          else { capture = Capture::current; matchCur.clear(); curFrames = 0; }
+                          repaint();
+                      });
+        menu.addSeparator();
+        const bool ready = refFrames > 0 && curFrames > 0 && capture == Capture::none;
+        for (const int amount : { 100, 75, 50, 25 })
+            menu.addItem (tr ("Match {0} %", { juce::String (amount) }), ready, false, [this, amount] { runMatch (amount / 100.0); });
+        juce::PopupMenu bandsMenu;
+        for (const int nb : { 2, 4, 6, 8 })
+            bandsMenu.addItem (tr ("Up to {0} bands", { juce::String (nb) }), true, matchBands == nb, [this, nb] { matchBands = nb; });
+        menu.addSubMenu (tr ("Bands"), bandsMenu);
+        juce::PopupMenu smooth;
+        for (const int den : { 12, 6, 3, 1 })
+            smooth.addItem (tr ("Smoothing 1/{0} octave", { juce::String (den) }), true, matchSmoothing == den, [this, den] { matchSmoothing = den; });
+        menu.addSubMenu (tr ("Smoothing"), smooth);
+        menu.addItem (tr ("Clear the captures"), refFrames > 0 || curFrames > 0, false, [this] {
+            capture = Capture::none; matchRef.clear(); matchCur.clear(); refFrames = curFrames = 0; repaint();
+        });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    }
+    void runMatch (double amount)
+    {
+        const auto* fx = current();
+        if (fx == nullptr || matchRef.size() != (std::size_t) (fftSize / 2) || matchCur.size() != matchRef.size()) return;
+        const auto sr = displayRate();
+        constexpr int n = 240;
+        std::vector<double> f (n), cur (n), ref (n);
+        for (int i = 0; i < n; ++i)
+        {
+            f[(std::size_t) i] = 20.0 * std::pow (1000.0, (double) i / (n - 1));
+            // the averaged power over the bins of this point's 1/24 octave
+            const auto band = [&] (const std::vector<double>& acc, int frames) {
+                const auto k0 = juce::jlimit (1, fftSize / 2 - 1, (int) std::floor (f[(std::size_t) i] * std::pow (2.0, -1.0 / 48.0) * fftSize / sr));
+                const auto k1 = juce::jlimit (k0, fftSize / 2 - 1, (int) std::ceil (f[(std::size_t) i] * std::pow (2.0, 1.0 / 48.0) * fftSize / sr));
+                double s = 0.0;
+                for (int k = k0; k <= k1; ++k) s += acc[(std::size_t) k];
+                return 10.0 * std::log10 (s / (k1 - k0 + 1) / juce::jmax (1, frames) + 1e-20);
+            };
+            cur[(std::size_t) i] = band (matchCur, curFrames);
+            ref[(std::size_t) i] = band (matchRef, refFrames);
+        }
+        std::vector<std::pair<int, float>> changes;
+        if (facet::matchEq (fx->params, f.data(), cur.data(), ref.data(), n, amount, matchBands, 1.0 / matchSmoothing, changes) > 0)
+            set (changes); // one undo step
+        repaint();
+    }
+
     void showAnalyzerMenu()
     {
         juce::PopupMenu menu;
@@ -618,6 +711,9 @@ public:
                 if (type == Ctl::phase) { showPhaseMenu(); return; }
                 if (type == Ctl::output) { showOutputMenu(); return; }
                 if (type == Ctl::placementMenu) { showPlacementMenu (selected); return; }
+                if (type == Ctl::spectral) { showDensityMenu (selected); return; }
+                if (type == Ctl::match) { showMatchMenu(); return; }
+                if (type == Ctl::spectralTilt) return;
                 if (prm >= 0 && type != Ctl::solo && type != Ctl::dynamic && type != Ctl::shapeMenu && type != Ctl::slopeMenu && type != Ctl::power
                     && type != Ctl::autoGain)
                     ui::showValueMenu (*this, &engine, specFor (prm), param01 (prm), [this, prm] (double v) { set ({ { prm, (float) v } }); });
@@ -639,6 +735,8 @@ public:
                 case Ctl::close: selected = -1; repaint(); return;
                 case Ctl::piano: piano = ! piano; repaint(); return;
                 case Ctl::dynamic: set ({ { prm, isDynamic (current()->params, selected) ? 0.5f : rangeValue (-6.0) } }); return;
+                case Ctl::spectral: case Ctl::spectralTilt: set ({ { prm, param01 (prm) >= 0.5f ? 0.0f : 1.0f } }); return;
+                case Ctl::match: showMatchMenu(); return;
                 case Ctl::phase: showPhaseMenu(); return;
                 case Ctl::analyzer: showAnalyzerMenu(); return;
                 case Ctl::detector: showDetectorMenu(); return;
@@ -751,7 +849,7 @@ public:
     {
         std::vector<Control> all;
         if (const auto* c = controlAt (e.position, all); c != nullptr && c->param >= 0 && c->type != Ctl::phase && c->type != Ctl::power
-            && c->type != Ctl::autoGain && c->type != Ctl::placementMenu)
+            && c->type != Ctl::autoGain && c->type != Ctl::placementMenu && c->type != Ctl::spectral && c->type != Ctl::spectralTilt && c->type != Ctl::match)
         {
             const auto prm = c->param;
             const auto spec = specFor (prm);
@@ -844,6 +942,9 @@ public:
                 case Ctl::remove: h.text = tr ("Remove the band (Delete)"); return h;
                 case Ctl::solo: h.text = tr ("Solo: hear only this band's region (S)"); return h;
                 case Ctl::dynamic: h.text = tr ("Dynamic EQ: the band's gain moves by up to its range when its region goes over the threshold"); return h;
+                case Ctl::spectral: h.text = tr ("Spectral dynamics: the band works frequency by frequency, only where the sound goes over the threshold (adds 5120 samples of latency) - right-click: density"); h.hasMenu = true; return h;
+                case Ctl::spectralTilt: h.text = tr ("Tilt: the spectral threshold slopes 4.5 dB/oct so the band treats a natural (pink) spectrum evenly"); return h;
+                case Ctl::match: h.text = tr ("EQ match: capture a reference spectrum and this track's, then let Facet place bands that make this track sound like the reference"); h.hasMenu = true; return h;
                 case Ctl::shapeMenu: h.text = tr ("Band shape"); h.hasMenu = true; return h;
                 case Ctl::slopeMenu: h.text = tr ("Slope"); h.hasMenu = true; return h;
                 default: break;
@@ -927,7 +1028,7 @@ public:
                 for (int i = 1; i < 4; ++i)
                     g.fillRect (juce::Rectangle<float> (k.getX() + k.getWidth() * (float) i / 4.0f - 1.5f, k.getY(), 3.0f, k.getHeight() * 0.55f));
             }
-            else if (c.type == Ctl::phase || c.type == Ctl::analyzer || c.type == Ctl::detector)
+            else if (c.type == Ctl::phase || c.type == Ctl::analyzer || c.type == Ctl::detector || c.type == Ctl::match)
             {
                 juce::String caption, value;
                 if (c.type == Ctl::phase)
@@ -940,6 +1041,7 @@ public:
                     if (phase (param01 (phaseParam)) == Phase::linear) value << juce::String::fromUTF8 (" · ") << tr (resShort[facet::resolution (param01 (resolutionParam))]); // round 144
                 }
                 else if (c.type == Ctl::analyzer) { caption = tr ("Analyzer:"); value = tr (analyzerShort[(int) analyzer (param01 (analyzerParam))]); }
+                else if (c.type == Ctl::match) { caption = tr ("EQ match:"); value = matchStateText(); }
                 else
                 {
                     caption = tr ("Detector:");
@@ -986,12 +1088,14 @@ public:
             }
         }
         // latency of the processing mode (PDC compensates it)
-        const auto lat = latencyFor (phase (param01 (phaseParam)), displayRate(), facet::resolution (param01 (resolutionParam)));
+        auto lat = latencyFor (phase (param01 (phaseParam)), displayRate(), facet::resolution (param01 (resolutionParam)));
+        for (int b = 0; b < bands; ++b) // round 152: a spectral band adds the STFT's latency
+            if (isSpectral (fx.params, b)) { lat += spectralLatency (displayRate()); break; }
         if (lat > 0)
         {
             g.setColour (colour::textDisabled);
             g.setFont (font (type::caption));
-            g.drawFittedText (tr ("{0} smp", { juce::String (lat) }), juce::Rectangle<float> (534.0f, bar.getY(), bar.getRight() - 376.0f - 534.0f, bar.getHeight()).toNearestInt(),
+            g.drawFittedText (tr ("{0} smp", { juce::String (lat) }), juce::Rectangle<float> (692.0f, bar.getY(), bar.getRight() - 376.0f - 692.0f, bar.getHeight()).toNearestInt(),
                               juce::Justification::centred, 1, 0.7f);
         }
     }
@@ -1396,6 +1500,8 @@ public:
                     drawButton (c.r, placementLabel (bandPlacement (selected)) + juce::String::fromUTF8 (" \xe2\x96\xbe"), bandPlacement (selected) != Placement::stereo, colourB);
                     break;
                 case Ctl::dynamic: drawButton (c.r, tr ("Dynamic"), isDynamic (fx.params, selected), colourB); break;
+                case Ctl::spectral: drawButton (c.r, tr ("Spectral"), isSpectral (fx.params, selected), colourB); break;
+                case Ctl::spectralTilt: drawButton (c.r, tr ("Tilt"), param01 (c.param) >= 0.5f, colourB); break;
                 case Ctl::prevBand: drawArrow (c.r, true); break;
                 case Ctl::nextBand: drawArrow (c.r, false); break;
                 case Ctl::close:
@@ -1538,6 +1644,13 @@ private:
                 fftData[(std::size_t) i] = ring[(std::size_t) ((written - (std::uint32_t) fftSize + (std::uint32_t) i) & (ProcessTimes::AnalyzerTap::size - 1))]
                                                .load (std::memory_order_relaxed) * window[(std::size_t) i];
             fft.performFrequencyOnlyForwardTransform (fftData.data(), true);
+            if (which == 0 && capture != Capture::none) // round 152: EQ match — the input's long-term spectrum
+            {
+                auto& acc = capture == Capture::reference ? matchRef : matchCur;
+                if (acc.size() != (std::size_t) (fftSize / 2)) acc.assign ((std::size_t) (fftSize / 2), 0.0);
+                for (int k = 0; k < fftSize / 2; ++k) acc[(std::size_t) k] += (double) fftData[(std::size_t) k] * fftData[(std::size_t) k];
+                ++(capture == Capture::reference ? refFrames : curFrames);
+            }
             auto& out = which == 0 ? specPre : specPost;
             const auto norm = 4.0f / (float) fftSize; // Hann (coherent gain ½) and one side
             for (int i = 0; i < columns; ++i)
@@ -1578,6 +1691,9 @@ private:
     int selected = -1, hover = -1, tipBand = -1, dragBand = -1, dragParam = -1;
     bool piano = false;
     bool frozen = false; // analyser freeze (editor only)
+    Capture capture = Capture::none; // round 152: EQ match
+    std::vector<double> matchRef, matchCur;
+    int refFrames = 0, curFrames = 0, matchBands = 8, matchSmoothing = 6;
     pluginheader::PresetBar bar { engine, track, slot };
     Drag dragging = Drag::none;
     juce::Point<float> dragOffset, dragStart, mouse { -1.0f, -1.0f };

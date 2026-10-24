@@ -35,6 +35,8 @@
 #include <array>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "core/Effects.h"
 
@@ -64,7 +66,11 @@ constexpr int specTiltParam = 86;   // editor only
 constexpr int displayRangeParam = 87; // editor only
 constexpr int characterParam = 88; // round 135
 constexpr int resolutionParam = 89; // round 144: the linear-phase resolution (Low … Maximum, Pro-Q 4's list)
-constexpr int paramCount = 90;
+// round 152 (parity152c, Pro-Q 4's spectral dynamics): [90 + b] spectral on, [98 + b] density, [106 + b] tilt
+constexpr int spectralParam0 = 90;  // + band
+constexpr int densityParam0 = 98;   // + band (default 50 %)
+constexpr int spectralTiltParam0 = 106; // + band
+constexpr int paramCount = 114;
 constexpr int maxSections = 8; // 96 dB/oct = 16th order
 
 enum class Shape { off, bell, lowShelf, highShelf, lowCut, highCut, notch, bandPass, tiltShelf, flatTilt, allPass };
@@ -144,6 +150,27 @@ const char* resolutionName (int r) noexcept;
 int linearHalfTaps (int resolution, double sampleRate) noexcept; // h
 // Latency (samples) of a phase mode at a sample rate (linear phase: at the given resolution; Medium by default)
 int latencyFor (Phase p, double sampleRate, int resolution = 1) noexcept;
+
+// Round 152 (REA_rodada152c, measured black-box on the Pro-Q 4 trial): a dynamic band with Spectral on works per
+// frequency (an STFT, 4096 points at 48 kHz, hop 1024; latency 5120 samples = the trial's): each bin's level (time-
+// smoothed by the band's attack / release) is weighted by the band's shape, compared with the threshold — and with the
+// band's loudest bin 11.6 dB down (so a loud partial does not drag the quieter ones in) — and moved 1.07 dB per dB, up
+// to the range × the shape^2.18 at that frequency. Density smooths the gains across bins; Tilt slopes the threshold
+// 4.5 dB/oct around the band frequency (pink-noise balance) [model].
+bool isSpectral (const EffectParams& params, int band) noexcept;
+double density (float v) noexcept;     // 0 … 1
+int spectralLatency (double sampleRate) noexcept;
+// the steady-state gain (dB) of a spectral band on a spectrum of partials: levelDb = each partial's sine-peak level
+// at hz (one per STFT bin); writes the gain of each
+void spectralGainsDb (const EffectParams& params, int band, double sampleRate, const double* hz, const double* levelDb, int n, double* outDb) noexcept;
+
+// Round 152: EQ match [model] — LYNX's own: the difference between a reference spectrum and the current one (dB at
+// log-spaced `hz`), its mean level removed, smoothed by `smoothingOct` and scaled by `amount`, fitted greedily with up to
+// `maxBands` bells (shelves at the ends) in the EQ's unused bands; writes the parameter changes (index, value) and
+// returns the bands placed. The editor captures both spectra from the analyser (Pro-Q 4's match is not reachable
+// through host parameters, so its rules are not measured).
+int matchEq (const EffectParams& params, const double* hz, const double* currentDb, const double* referenceDb, int n, double amount,
+             int maxBands, double smoothingOct, std::vector<std::pair<int, float>>& changes);
 
 const EffectInfo& info();
 std::string paramText (int param, float v);
