@@ -1086,6 +1086,10 @@ juce::var mixerTrackToVar (const MixerTrack& t)
     o->setProperty ("solo", t.solo);
     if (! t.threaded)
         o->setProperty ("threaded", false);
+    if (t.separator)
+        o->setProperty ("separator", true);
+    if (t.dock != MixerDock::middle)
+        o->setProperty ("dock", t.dock == MixerDock::left ? "left" : "right");
 
     if (! t.toMaster)
         o->setProperty ("toMaster", false);
@@ -1141,6 +1145,8 @@ MixerTrack mixerTrackFromVar (const juce::var& t)
     track.muted = (bool) t.getProperty ("muted", false);
     track.solo = (bool) t.getProperty ("solo", false);
     track.threaded = (bool) t.getProperty ("threaded", true);
+    track.separator = (bool) t.getProperty ("separator", false);
+    track.dock = t["dock"].toString() == "left" ? MixerDock::left : t["dock"].toString() == "right" ? MixerDock::right : MixerDock::middle;
     track.toMaster = (bool) t.getProperty ("toMaster", true);
     track.masterLevel = juce::jlimit (0.0f, maxFaderGain, (float) (double) t.getProperty ("masterLevel", 1.0));
     track.stereo = juce::jlimit (-1.0f, 1.0f, (float) (double) t.getProperty ("stereo", 0.0));
@@ -1364,6 +1370,15 @@ juce::String toJson (const Song& song)
 
         if (! groups.isEmpty())
             root->setProperty ("playlistTrackGroups", groups);
+
+        // track modes (round 146a): [index, "audio" | "instrument", mixer track, channel]
+        juce::Array<juce::var> modes;
+        for (std::size_t i = 0; i < song.playlistTracks.size(); ++i)
+            if (const auto& t = song.playlistTracks[i]; t.mode != PlaylistTrackMode::unassigned)
+                modes.add (juce::Array<juce::var> { (int) i, t.mode == PlaylistTrackMode::audio ? "audio" : "instrument", t.mixerTrack, t.channel });
+
+        if (! modes.isEmpty())
+            root->setProperty ("playlistTrackModes", modes);
     }
 
     const auto anyMarkers = std::any_of (song.arrangements.begin(), song.arrangements.end(), [] (const Arrangement& a) { return ! a.markers.empty(); });
@@ -1617,6 +1632,25 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
                 song.playlistTracks[index].grouped = index > 0 && (int) t[1] != 0;
                 song.playlistTracks[index].collapsed = (int) t[2] != 0;
+            }
+
+    if (auto* modes = root["playlistTrackModes"].getArray())
+        for (const auto& t : *modes)
+            if (t.isArray() && t.size() == 4 && (int) t[0] >= 0 && (int) t[0] < 500)
+            {
+                const auto index = (std::size_t) (int) t[0];
+                const auto mixer = (int) t[2], channel = (int) t[3];
+                const auto audio = t[1].toString() == "audio";
+                if (audio ? (mixer <= 0 || mixer >= (int) song.mixer.size()) : (channel < 0 || channel >= (int) song.channels.size()))
+                    continue;
+
+                if (song.playlistTracks.size() <= index)
+                    song.playlistTracks.resize (index + 1);
+
+                auto& track = song.playlistTracks[index];
+                track.mode = audio ? PlaylistTrackMode::audio : PlaylistTrackMode::instrument;
+                track.mixerTrack = mixer > 0 && mixer < (int) song.mixer.size() ? mixer : -1;
+                track.channel = audio ? -1 : channel;
             }
 
     if (auto* arrangements = root["arrangements"].getArray(); arrangements != nullptr && ! arrangements->isEmpty())

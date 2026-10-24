@@ -599,6 +599,8 @@ enum class InputMonitor : std::uint8_t
     on
 };
 
+enum class MixerDock : std::uint8_t { left, middle, right };
+
 struct MixerTrack
 {
     std::string name;
@@ -623,6 +625,12 @@ struct MixerTrack
     // FL's mixer track menu "CPU › Allow threaded processing" (REA round 134): off = this insert always runs on the
     // audio thread itself (as do inserts holding a plugin whose own option is off)
     bool threaded = true;
+    // FL's mixer track menu "Group › Separator" (REA round 146a; .flp insert flag 0x400): a gap is drawn on the left of
+    // this track; a run of tracks between two separators is a group ("Create group", "Select › Group", "Auto color group")
+    bool separator = false;
+    // FL's "Layout › Dock to" (.flp insert flags bits 6-7 = dock 0 left / 1 middle / 2 right): the strip is shown in the
+    // left block, the middle or the right block of the mixer
+    MixerDock dock = MixerDock::middle;
 };
 
 struct Note
@@ -779,6 +787,8 @@ struct MidiLink
     AutomationTarget target;
 };
 
+enum class PlaylistTrackMode : std::uint8_t { unassigned, audio, instrument };
+
 // Header of a Playlist track.
 struct PlaylistTrack
 {
@@ -790,6 +800,12 @@ struct PlaylistTrack
     // ungrouped track above it (the group's header). `collapsed` on a header folds its members into thin rows.
     bool grouped = false;
     bool collapsed = false;
+    // FL's "Track mode" (REA round 146a; .flp record 0xEE: u32 mode at byte 49 = 0 / 1 audio / 3 instrument, i32 mixer
+    // track at 53, i32 channel at 57). An audio track is linked to a mixer track: audio clips placed on it play through
+    // that track (their channel is routed there). An instrument track belongs to a channel (and its mixer track).
+    PlaylistTrackMode mode = PlaylistTrackMode::unassigned;
+    int mixerTrack = -1; // audio / instrument tracks: the linked mixer track (-1 = none)
+    int channel = -1;    // instrument tracks: the channel
 };
 
 // Splits a clip at `tick` (absolute): the original keeps the start and the return value is the rest.

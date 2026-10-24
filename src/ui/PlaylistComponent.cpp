@@ -8,6 +8,8 @@
 #include "core/RackOps.h"
 
 #include "core/NoteEdit.h"
+#include "core/PlaylistOps.h"
+#include "ui/ExportDialog.h"
 #include "engine/Text.h"
 #include "ui/BrowserComponent.h"
 #include "ui/AutomationUi.h"
@@ -1253,7 +1255,10 @@ void PlaylistComponent::setSelection (std::vector<int> indices)
 void PlaylistComponent::sortClips()
 {
     auto tracked = selection;
-    engine.editSong ([&tracked] (Song& s) { noteedit::sortByStartTracking (s.playlist, tracked); }, false);
+    engine.editSong ([&tracked] (Song& s) {
+        noteedit::sortByStartTracking (s.playlist, tracked);
+        trackmodes::followAudioTracks (s); // audio clips on an audio track play through its mixer track (round 146a)
+    }, false);
     setSelection (tracked);
 }
 
@@ -2330,8 +2335,8 @@ void PlaylistComponent::editTrack (int track, std::function<void (PlaylistTrack&
 }
 
 // The track menu in FL's order (REA round 104): name and colour, size, grouping, its clips, insert / clone /
-// delete, move. FL items LYNX has no counterpart for (icons, track modes, performance settings, ghost notes,
-// consolidate) are left out.
+// delete, move; track modes and Consolidate since round 146a. FL items LYNX has no counterpart for (icons, performance
+// settings, ghost notes) are left out.
 void PlaylistComponent::showTrackMenu (int track)
 {
     buildTrackMenu (track).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
@@ -2395,6 +2400,37 @@ juce::PopupMenu PlaylistComponent::buildTrackMenu (int track)
             t.muted = false;
         });
     });
+    menu.addSeparator();
+    {
+        // FL's "Track mode" (round 146a): unassigned, an audio track (linked to a free mixer track) or an instrument
+        // track (a channel and its mixer track)
+        juce::PopupMenu modes, instruments;
+        modes.addItem (tr ("Unassigned"), true, info.mode == PlaylistTrackMode::unassigned,
+                       [this, track] { engine.editSong ([track] (Song& s) { trackmodes::unassign (s, track); }); });
+        modes.addItem (tr ("Audio track"), true, info.mode == PlaylistTrackMode::audio, [this, track] {
+            bool ok = false;
+            engine.editSong ([track, &ok] (Song& s) { ok = trackmodes::makeAudioTrack (s, track); });
+            if (! ok)
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Can't create new audio track"),
+                                                        tr ("There are no available mixer tracks."));
+        });
+        for (int c = 0; c < (int) song.channels.size(); ++c)
+        {
+            const auto kind = song.channels[(std::size_t) c].instrument;
+            if (kind == InstrumentKind::audioClip || kind == InstrumentKind::controller)
+                continue;
+            instruments.addItem (juce::String::fromUTF8 (song.channels[(std::size_t) c].name.c_str()), true,
+                                 info.mode == PlaylistTrackMode::instrument && info.channel == c, [this, track, c] {
+                                     bool ok = false;
+                                     engine.editSong ([track, c, &ok] (Song& s) { ok = trackmodes::makeInstrumentTrack (s, track, c); });
+                                     if (! ok)
+                                         juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Can't create new instrument track"),
+                                                                                 tr ("There are no available mixer tracks."));
+                                 });
+        }
+        modes.addSubMenu (tr ("Instrument track"), instruments, instruments.getNumItems() > 0, nullptr, info.mode == PlaylistTrackMode::instrument);
+        menu.addSubMenu (tr ("Track mode"), modes);
+    }
     menu.addSeparator();
     {
         // FL's sizes are relative to the default row; dragging the divider under a header sets any size (P18)
@@ -2468,6 +2504,13 @@ juce::PopupMenu PlaylistComponent::buildTrackMenu (int track)
             });
         };
         const auto hasClips = ! seen.empty();
+        {
+            // FL's "Consolidate track(s)" (round 146a): the track's clips rendered into one audio clip
+            juce::PopupMenu consolidate;
+            consolidate.addItem (tr ("From track start"), hasClips, false, [this, track] { consolidatePlaylistTrack (engine, track, false); });
+            consolidate.addItem (tr ("From song start"), hasClips, false, [this, track] { consolidatePlaylistTrack (engine, track, true); });
+            menu.addSubMenu (tr ("Consolidate track"), consolidate, hasClips);
+        }
         menu.addItem (tr ("Merge clips"), hasClips, false, [this, track] {
             setSelection ({});
             engine.editSong ([track] (Song& s) { clipops::mergeTrackClips (s, track); });
@@ -3543,6 +3586,9 @@ ui::Hint PlaylistComponent::hintAt (juce::Point<int> p)
                     : h.arrow ? tr ("Track group: [LMB] collapse / expand the grouped tracks")
                               : tr ("Track: [LMB] select  [RMB] menu  [2xLMB] open the clip source  [Shift][Wheel] move up / down");
         hint.value = trackName (h.track);
+        if (const auto mode = trackmodes::describe (song, h.track); ! mode.empty()) // FL's "(Instrument track)" / "(Audio track, ...)"
+            hint.value += " " + (mode.rfind ("(Audio", 0) == 0 ? tr ("(Audio track, linked to mixer track {0})", { juce::String (song.playlistTracks[(std::size_t) h.track].mixerTrack) })
+                                                                 : tr ("(Instrument track)"));
         hint.hasMenu = ! h.led && ! h.arrow;
         return hint;
     }

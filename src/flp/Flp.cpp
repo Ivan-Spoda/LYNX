@@ -861,6 +861,9 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                     {
                         t.grouped = e.data[46] != 0;
                         t.expanded = e.data[61] != 0;
+                        t.mode = (int) readLE<std::uint32_t> (e.data, 49);
+                        t.mixerTrack = readLE<std::int32_t> (e.data, 53);
+                        t.channel = readLE<std::int32_t> (e.data, 57);
                     }
                     arrangement().tracks.push_back (t);
                 }
