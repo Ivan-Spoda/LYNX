@@ -325,6 +325,20 @@ public:
         addButton.setBounds (buttons.removeFromTop (26));
         buttons.removeFromTop (6);
         removeButton.setBounds (buttons.removeFromTop (26));
+        if (extraButton != nullptr)
+        {
+            buttons.removeFromTop (6);
+            extraButton->setBounds (buttons.removeFromTop (26));
+        }
+    }
+
+    // A third button under Add / Remove (the plugin folders' "Plugin manager...", as FL's File page has it).
+    void addExtraButton (const juce::String& text, std::function<void()> onClick)
+    {
+        extraButton = std::make_unique<juce::TextButton> (text);
+        extraButton->onClick = std::move (onClick);
+        addAndMakeVisible (*extraButton);
+        resized();
     }
 
 private:
@@ -392,13 +406,14 @@ private:
     juce::StringArray folders;
     juce::ListBox list;
     juce::TextButton addButton { tr ("Add...") }, removeButton { tr ("Remove") };
+    std::unique_ptr<juce::TextButton> extraButton;
     std::unique_ptr<juce::FileChooser> chooser;
 };
 
 class FilesPage final : public juce::Component
 {
 public:
-    FilesPage (AudioEngine& engine, bool persistent, std::function<void()> browserChanged)
+    FilesPage (AudioEngine& engine, bool persistent, std::function<void()> browserChanged, std::function<void()> managePlugins = {})
     {
         auto sample = [persistent] (juce::StringArray real, std::initializer_list<const char*> fake) {
             if (persistent)
@@ -460,6 +475,10 @@ public:
                 host.setPluginFolders (path);
             }, persistent);
 
+        // FL's File page has "Manage plugins" next to the plugin settings (REA round 143b)
+        if (managePlugins)
+            pluginFolders->addExtraButton (tr ("Plugin manager..."), managePlugins);
+
         addAndMakeVisible (*searchFolders);
         addAndMakeVisible (*browserFolders);
         addAndMakeVisible (*pluginFolders);
@@ -499,7 +518,7 @@ public:
                 case SettingsPage::audio: content = makeAudioPage (engine, persistent).release(); break;
                 case SettingsPage::midi: content = makeMidiPage (engine, hooks, persistent).release(); break;
                 case SettingsPage::general: content = makeGeneralPage (engine, hooks, persistent).release(); break;
-                case SettingsPage::files: content = new FilesPage (engine, persistent, hooks.browserFoldersChanged); break;
+                case SettingsPage::files: content = new FilesPage (engine, persistent, hooks.browserFoldersChanged, hooks.managePlugins); break;
                 case SettingsPage::project: content = new ProjectPage (engine); break;
                 case SettingsPage::info: content = new InfoPage (engine); break;
             }

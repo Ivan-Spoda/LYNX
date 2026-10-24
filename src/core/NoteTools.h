@@ -112,4 +112,51 @@ struct LimitOptions
 };
 
 void limit (Pattern& pattern, const std::vector<int>& indices, const LimitOptions& options);
+
+// --- LYNX's own versions of the tools FL ships as piano roll scripts (REA round 143: Tools › Scripts) -----------
+
+// Euclidean rhythm: `pulses` hits spread as evenly as possible over `steps` steps of `stepTicks` (rotated by
+// `rotation` steps), repeated for `length` ticks from `start`, on `key` of `channel`. True at a step that hits.
+bool euclideanHit (int steps, int pulses, int rotation, int step) noexcept;
+struct EuclideanOptions
+{
+    int steps = 16, pulses = 5, rotation = 0;
+    std::int64_t stepTicks = ticksPerStep;
+    std::int64_t start = 0, length = 4 * 4 * ticksPerStep;
+    int channel = 0, key = 60;
+    float velocity = 0.78f;
+    float gate = 1.0f;     // note length as a fraction of a step
+    float accent = 0.0f;   // extra velocity on the first hit of each cycle
+};
+// Removes `replace` (note indices) and writes the rhythm; returns the new notes' indices.
+std::vector<int> euclidean (Pattern& pattern, const std::vector<int>& replace, const EuclideanOptions& options);
+
+// Humanize: small, musical irregularities. Timing moves each start by up to `timing` ticks (both ways, never
+// before 0), with notes of one chord moving together; velocity varies by up to `velocity` (the off-beat notes a
+// bit softer when `softerOffbeats`); length by up to `length` (relative).
+struct HumanizeOptions
+{
+    std::int64_t timing = 6;
+    float velocity = 0.08f;
+    float length = 0.05f;
+    bool softerOffbeats = true;
+    std::uint32_t seed = 1;
+};
+void humanize (Pattern& pattern, const std::vector<int>& indices, const HumanizeOptions& options);
+
+// Note repeater: each note becomes repeats every `rate` ticks over its length (gate = repeat length / rate),
+// the velocity multiplied by `decay` at each repeat. Returns the indices of all the resulting notes.
+struct RepeatOptions
+{
+    std::int64_t rate = ticksPerStep;
+    float gate = 0.5f;
+    float decay = 0.9f;
+    int pitchStep = 0; // semitones added at each repeat (0 = same key)
+};
+std::vector<int> repeatNotes (Pattern& pattern, const std::vector<int>& indices, const RepeatOptions& options);
+
+// Select by velocity: the notes of `indices` whose velocity is within [low, high].
+std::vector<int> selectByVelocity (const Pattern& pattern, const std::vector<int>& indices, float low, float high);
+// The loudest / quietest `fraction` (0..1) of `indices` (at least one note when there are any).
+std::vector<int> selectLoudest (const Pattern& pattern, const std::vector<int>& indices, float fraction, bool loudest);
 } // namespace lynx::notetools

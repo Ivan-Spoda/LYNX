@@ -17,6 +17,9 @@ void open (std::shared_ptr<void> owner, juce::AudioPluginInstance& plugin, const
 void closeAll();
 bool isOpen (const juce::AudioPluginInstance& plugin);
 void close (const juce::AudioPluginInstance& plugin);
+// A parameter gesture in an open plugin editor (`starting` = begin, else end), on the UI thread; the plugin is only
+// compared, it may be gone (REA round 143: Last tweaked, automation recording).
+extern std::function<void (const juce::AudioPluginInstance&, int, bool)> onGesture;
 } // namespace PluginWindows
 
 // Scans the VST3 folders with a progress window. `onDone(newCount)` runs on the UI thread.

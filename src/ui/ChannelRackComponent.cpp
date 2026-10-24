@@ -18,6 +18,7 @@
 #include "ui/PluginWindow.h"
 #include "ui/Theme.h"
 #include "ui/AudioEditor.h"
+#include "core/RackOps.h"
 
 namespace lynx
 {
@@ -658,7 +659,7 @@ ui::ValueSpec ChannelRackComponent::specFor (Area area, int row) const
 
     // route box: the mixer insert, as a number
     ui::ValueSpec spec;
-    spec.name = name + " - " + tr ("Mixer insert");
+    spec.name = name + " - " + tr ("Target mixer track");
     spec.maximum = juce::jmax (0, (int) engine.getSong().mixer.size() - 1);
     spec.interval = 1.0;
     spec.pixelsForRange = 6.0 * juce::jmax (1.0, spec.maximum);
@@ -1729,6 +1730,13 @@ ui::Hint ChannelRackComponent::hintAt (juce::Point<int> p)
         case Area::name:
             h.text = name + " - " + tr ("[LMB] open/close the editor  [Alt]+[LMB] keep others open  [Ctrl]+[LMB] audition  [2xLMB] Piano Roll  [LMB] drag up/down reorders  [RMB] channel menu");
             h.hasMenu = true;
+            // FL's hint bar names what the channel is ("Audio Clip", the plugin's name) on the right (REA round 143b)
+            if (row >= 0 && row < (int) song.channels.size())
+            {
+                const auto& c = song.channels[(std::size_t) row];
+                h.value = c.instrument == InstrumentKind::plugin && ! c.plugin.name.empty() ? juce::String::fromUTF8 (c.plugin.name.c_str())
+                                                                                             : instrumentLabel (c.instrument);
+            }
             break;
         case Area::select:
             h.text = name + " - " + tr ("Select: [LMB] one  [Ctrl]+[LMB] or [RMB] add/remove  [Shift]+[LMB] range  [LMB] drag range  [RMB] drag adds  [2xLMB] all  [Alt]+[Up]/[Down] moves the selection");
@@ -1738,6 +1746,9 @@ ui::Hint ChannelRackComponent::hintAt (juce::Point<int> p)
                 h.text = name + " - " + tr ("Piano Roll notes: [LMB] opens them in the Piano Roll");
             else
                 h.text = name + " - " + tr ("Steps: [LMB] drag draws (starting on a lit step erases)  [RMB] drag erases");
+            // and the step's position as bar:step:tick, like FL's hint bar
+            if (hoverStep >= 0)
+                h.value = juce::String (stepPositionText ((std::int64_t) hoverStep * ticksPerStep, song.beatsPerBar));
             break;
         case Area::addRow:
             h.text = tr ("Add a channel (or drop audio files on the rack)");
@@ -1900,6 +1911,8 @@ void ChannelRackComponent::showChannelMenu (int channel)
         menu.addItem (tr ("Synth settings (oscillators, envelope, filter)..."), [this, channel] { openChannelSettings (engine, channel); });
     else if (hasChannelSettings (c.instrument))
         menu.addItem (tr ("Channel settings..."), [this, channel] { openChannelSettings (engine, channel); });
+    // FL's wrench tab of the channel window, for every channel (REA round 143b)
+    menu.addItem (tr ("Miscellaneous functions (polyphony, cut groups, arpeggiator)..."), [this, channel] { openChannelMisc (engine, channel); });
 
     if (c.instrument == InstrumentKind::plugin)
     {

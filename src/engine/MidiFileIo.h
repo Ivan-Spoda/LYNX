@@ -14,6 +14,23 @@ namespace MidiFileIo
 // New project: one channel (built-in synth) per MIDI track with notes, all in one pattern.
 std::optional<Song> loadSong (const juce::File& file, juce::String& error);
 
+// FL's File › Import › "MIDI file..." (REA round 143: the "Import MIDI data" window, TMIDIImportForm): the file's
+// notes into a new pattern of `song` (it becomes the current one), one new channel per MIDI track, or per MIDI
+// channel. FL's options and defaults: Start new project (off), Create one channel per track (on), Realign events
+// (off: removes the silence at the start), Import time signatures (on; LYNX: the project's time signature, new
+// project only), Set mixer tracks for new channels (on), Channel type (LYNX: its synth, or MIDI Out on the note's
+// MIDI channel).
+struct ImportOptions
+{
+    bool newProject = false;
+    bool perTrack = true;
+    bool realign = false;
+    bool timeSignatures = true;
+    bool mixerTracks = true;
+    bool midiOut = false;
+};
+bool importInto (Song& song, const juce::File& file, const ImportOptions& options, juce::String& error);
+
 // All notes in the file (tracks merged) into `channel`, starting at tick 0.
 std::optional<std::vector<Note>> loadNotes (const juce::File& file, int channel, juce::String& error);
 

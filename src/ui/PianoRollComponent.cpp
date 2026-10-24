@@ -2429,21 +2429,68 @@ void PianoRollComponent::showMoreMenu()
 
 juce::PopupMenu PianoRollComponent::toolsMenu()
 {
+    // FL's piano roll Tools menu (REA round 143, EXEC capture): its groups and keys, in its order
     juce::PopupMenu menu;
-    const std::pair<NoteTool, const char*> items[] = { { NoteTool::arpeggiate, "Alt+A" }, { NoteTool::strum, "Alt+S" },
-                                                       { NoteTool::flip, "Alt+Y" },       { NoteTool::randomise, "Alt+R" },
-                                                       { NoteTool::scaleLevels, "Alt+X" }, { NoteTool::limit, "Alt+K" } };
-
-    for (const auto& [tool, key] : items)
-        menu.addItem (tr (noteToolTitle (tool)) + "...\t" + key, [this, tool = tool] { openNoteTool (tool); });
-
-    // round 83: FL's quantizer, chopper, flamer, LFO, claw machine, articulator; riff machine, chord progression
+    const auto grid = gridTicks();
+    auto tool = [this, &menu] (NoteTool t, const char* key) {
+        menu.addItem (tr (noteToolTitle (t)) + "..." + (key != nullptr ? juce::String ("\t") + key : juce::String()), [this, t] { openNoteTool (t); });
+    };
+    menu.addSectionHeader (tr ("Built-in"));
+    tool (NoteTool::riffMachine, "Alt+E");
+    menu.addItem (tr ("Generate chord progression...") + "\tAlt+P", [this] { openNoteTool (NoteTool::chordProgression); });
     menu.addSeparator();
-    for (auto tool : { NoteTool::quantize, NoteTool::chop, NoteTool::flam, NoteTool::lfo, NoteTool::claw, NoteTool::articulate })
-        menu.addItem (tr (noteToolTitle (tool)) + "...", [this, tool] { openNoteTool (tool); });
+    menu.addItem (tr ("Quick legato") + "\tCtrl+L", [this] { runOperation ([] (Pattern& p, const std::vector<int>& t) { noteedit::legato (p, t); return t; }); });
+    tool (NoteTool::articulate, "Alt+L");
     menu.addSeparator();
-    for (auto tool : { NoteTool::riffMachine, NoteTool::chordProgression })
-        menu.addItem (tr (noteToolTitle (tool)) + "...", [this, tool] { openNoteTool (tool); });
+    menu.addItem (tr ("Quick quantize") + "\tCtrl+Q", [this, grid] { runOperation ([grid] (Pattern& p, const std::vector<int>& t) { noteedit::quantizeFull (p, t, grid); return t; }); });
+    menu.addItem (tr ("Quick quantize start times") + "\tShift+Q", [this, grid] { runOperation ([grid] (Pattern& p, const std::vector<int>& t) { noteedit::quantize (p, t, grid); return t; }); });
+    tool (NoteTool::quantize, "Alt+Q");
+    menu.addSeparator();
+    menu.addItem (tr ("Quick chop") + "\tCtrl+U", [this, grid] { runOperation ([grid] (Pattern& p, const std::vector<int>& t) { return noteedit::chop (p, t, grid); }); });
+    tool (NoteTool::chop, "Alt+U");
+    menu.addSeparator();
+    menu.addItem (tr ("Glue notes") + "\tCtrl+G", [this] { runOperation ([] (Pattern& p, const std::vector<int>& t) { noteedit::join (p, t); return std::vector<int> {}; }); });
+    menu.addSeparator();
+    tool (NoteTool::arpeggiate, "Alt+A");
+    tool (NoteTool::strum, "Alt+S");
+    tool (NoteTool::flam, "Alt+F");
+    tool (NoteTool::claw, "Alt+W");
+    tool (NoteTool::limit, "Alt+K");
+    tool (NoteTool::flip, "Alt+Y");
+    tool (NoteTool::randomise, "Alt+R");
+    menu.addSeparator();
+    tool (NoteTool::scaleLevels, "Alt+X");
+    tool (NoteTool::lfo, "Alt+O");
+
+    // FL's second column ("Scripts": Python tools shipped with FL); LYNX has its own built-in versions
+    menu.addSectionHeader (tr ("More tools"));
+    tool (NoteTool::euclidean, nullptr);
+    tool (NoteTool::humanize, nullptr);
+    tool (NoteTool::noteRepeat, nullptr);
+    {
+        juce::PopupMenu velocity;
+        auto choose = [this] (std::function<std::vector<int> (const Pattern&, const std::vector<int>&)> pick) {
+            const auto& song = engine.getSong();
+            setSelection (pick (song.patterns[(std::size_t) song.currentPattern], channelNotes()));
+        };
+        velocity.addItem (tr ("Loudest quarter"), [choose] { choose ([] (const Pattern& p, const std::vector<int>& t) { return notetools::selectLoudest (p, t, 0.25f, true); }); });
+        velocity.addItem (tr ("Quietest quarter"), [choose] { choose ([] (const Pattern& p, const std::vector<int>& t) { return notetools::selectLoudest (p, t, 0.25f, false); }); });
+        velocity.addSeparator();
+        for (const auto& [label, lo, hi] : { std::tuple { "75-100%", 0.75f, 1.0f }, { "50-75%", 0.5f, 0.75f }, { "25-50%", 0.25f, 0.5f }, { "0-25%", 0.0f, 0.25f } })
+            velocity.addItem (tr ("Velocity {0}", { juce::String (label) }), [choose, lo = lo, hi = hi] {
+                choose ([lo, hi] (const Pattern& p, const std::vector<int>& t) { return notetools::selectByVelocity (p, t, lo, hi); });
+            });
+        if (! selection.empty())
+        {
+            const auto& notes = engine.getSong().patterns[(std::size_t) engine.getSong().currentPattern].notes;
+            const auto v = selection.front() < (int) notes.size() ? notes[(std::size_t) selection.front()].velocity : 0.0f;
+            velocity.addSeparator();
+            velocity.addItem (tr ("Same velocity as the selected note ({0}%)", { juce::String (juce::roundToInt (v * 100.0f)) }), [choose, v] {
+                choose ([v] (const Pattern& p, const std::vector<int>& t) { return notetools::selectByVelocity (p, t, v - 0.005f, v + 0.005f); });
+            });
+        }
+        menu.addSubMenu (tr ("Select by velocity"), velocity);
+    }
     menu.addSeparator();
     menu.addItem (tr ("Edit events..."), [this] {
         openEventEditor (engine, { AutomationTargetKind::channelVolume, engine.getSelectedChannel() });
@@ -2535,6 +2582,14 @@ bool PianoRollComponent::runAction (const std::string& id)
     else if (is ("pianoRoll.randomise")) openNoteTool (NoteTool::randomise);
     else if (is ("pianoRoll.scaleLevels")) openNoteTool (NoteTool::scaleLevels);
     else if (is ("pianoRoll.limit")) openNoteTool (NoteTool::limit);
+    else if (is ("pianoRoll.quantize")) openNoteTool (NoteTool::quantize);
+    else if (is ("pianoRoll.chop")) openNoteTool (NoteTool::chop);
+    else if (is ("pianoRoll.flam")) openNoteTool (NoteTool::flam);
+    else if (is ("pianoRoll.claw")) openNoteTool (NoteTool::claw);
+    else if (is ("pianoRoll.lfo")) openNoteTool (NoteTool::lfo);
+    else if (is ("pianoRoll.articulate")) openNoteTool (NoteTool::articulate);
+    else if (is ("pianoRoll.riffMachine")) openNoteTool (NoteTool::riffMachine);
+    else if (is ("pianoRoll.chordProgression")) openNoteTool (NoteTool::chordProgression);
     else if (is ("pianoRoll.zoomIn")) zoomAroundCentre (1.25);
     else if (is ("pianoRoll.zoomOut")) zoomAroundCentre (1.0 / 1.25);
     else if (is ("pianoRoll.zoom1")) zoomToBars (1);

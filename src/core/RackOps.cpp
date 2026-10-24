@@ -1,6 +1,7 @@
 #include "core/RackOps.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cctype>
 #include <cmath>
 #include <functional>
@@ -672,5 +673,85 @@ std::vector<int> sendChannelsToFreeInserts (Song& song, const std::vector<int>& 
     }
 
     return result;
+}
+
+// --- Channel settings "Misc" tab ------------------------------------------------------------------------------
+
+bool channelHasMono (const ChannelDef& c) noexcept
+{
+    return c.instrument == InstrumentKind::synth;
+}
+
+bool channelHasPortamento (const ChannelDef& c) noexcept
+{
+    return c.instrument == InstrumentKind::synth || c.instrument == InstrumentKind::sampler;
+}
+
+bool channelMono (const ChannelDef& c) noexcept
+{
+    return c.instrument == InstrumentKind::synth && c.synth.mono;
+}
+
+void setChannelMono (ChannelDef& c, bool on) noexcept
+{
+    if (c.instrument == InstrumentKind::synth)
+        c.synth.mono = on;
+}
+
+bool channelPortamento (const ChannelDef& c) noexcept
+{
+    return c.instrument == InstrumentKind::synth ? c.synth.porta : c.instrument == InstrumentKind::sampler && c.sampler.porta;
+}
+
+float channelPortamentoBeats (const ChannelDef& c) noexcept
+{
+    return c.instrument == InstrumentKind::sampler ? c.sampler.portaBeats : c.synth.portaBeats;
+}
+
+void setChannelPortamento (ChannelDef& c, bool on, float beats) noexcept
+{
+    beats = std::clamp (beats, 0.0f, 4.0f);
+    if (c.instrument == InstrumentKind::synth)
+    {
+        c.synth.porta = on;
+        c.synth.portaBeats = beats;
+    }
+    else if (c.instrument == InstrumentKind::sampler)
+    {
+        c.sampler.porta = on;
+        c.sampler.portaBeats = beats;
+    }
+}
+
+bool channelCutsItself (const ChannelDef& c) noexcept
+{
+    return c.cutGroup != 0 && c.cutGroup == c.cutBy;
+}
+
+void setChannelCutsItself (ChannelDef& c, int channel, bool on) noexcept
+{
+    c.cutGroup = c.cutBy = on ? 1000 + channel : 0;
+}
+
+std::string cutGroupText (int group, int channel)
+{
+    if (group <= 0)
+        return "--";
+    if (group == 1000 + channel)
+        return "self";
+    return std::to_string (group);
+}
+
+std::string stepPositionText (std::int64_t tick, int beatsPerBar)
+{
+    tick = std::max<std::int64_t> (0, tick);
+    const auto barTicks = (std::int64_t) ppq * std::max (1, beatsPerBar);
+    const auto bar = tick / barTicks + 1;
+    const auto inBar = tick % barTicks;
+    const auto step = inBar / ticksPerStep + 1;
+    const auto flTick = (inBar % ticksPerStep) * 24 / ticksPerStep; // FL's 96 PPQ: 24 ticks per step
+    char text[32];
+    std::snprintf (text, sizeof (text), "%lld:%02lld:%02lld", (long long) bar, (long long) step, (long long) flTick);
+    return text;
 }
 } // namespace lynx

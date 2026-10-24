@@ -256,7 +256,7 @@ private:
 
     bool hasExtraButton() const noexcept
     {
-        return tool == NoteTool::randomise || tool == NoteTool::riffMachine || tool == NoteTool::chordProgression;
+        return tool == NoteTool::randomise || tool == NoteTool::humanize || tool == NoteTool::riffMachine || tool == NoteTool::chordProgression;
     }
 
     // --- controls ------------------------------------------------------------------------------
@@ -601,6 +601,37 @@ private:
                 add ({ Control::choice, tr ("Scale"), 0, 0, 1, 0, {}, scaleNames });
                 break;
             }
+            case NoteTool::euclidean:
+            {
+                const auto count = [] (double v) { return juce::String (juce::roundToInt (v)); };
+                add ({ Control::slider, tr ("Steps"), 1.0, 32.0, 1.0, 16.0, count });
+                add ({ Control::slider, tr ("Pulses"), 0.0, 32.0, 1.0, 5.0, count });
+                add ({ Control::slider, tr ("Rotation"), 0.0, 31.0, 1.0, 0.0, count });
+                add ({ Control::choice, tr ("Step"), 0, 3, 1, 2, {}, { "1/4", "1/8", "1/16", "1/32" } });
+                add ({ Control::slider, tr ("Length"), 1.0, 16.0, 1.0, 1.0, [] (double v) { return juce::String (juce::roundToInt (v)) + " " + tr ("bars"); } });
+                add ({ Control::slider, tr ("Key"), 0.0, 127.0, 1.0, 60.0, [] (double v) { return keyName (juce::roundToInt (v)); } });
+                add ({ Control::slider, tr ("Velocity"), 0.0, 1.0, 0.01, 0.78, percent });
+                add ({ Control::slider, tr ("Gate"), 0.05, 1.0, 0.01, 0.5, percent });
+                add ({ Control::slider, tr ("Accent on the first hit"), 0.0, 0.5, 0.01, 0.0, signedPercent });
+                if (! indices.empty() && indices.front() >= 0 && indices.front() < (int) originals.size())
+                    setValue (5, originals[(std::size_t) indices.front()].key); // the rhythm on the key that was there
+                break;
+            }
+            case NoteTool::humanize:
+                add ({ Control::slider, tr ("Timing"), 0.0, 60.0, 1.0, 12.0, [] (double v) { return stepsText (v / ticksPerStep); } });
+                add ({ Control::slider, tr ("Velocity"), 0.0, 0.5, 0.01, 0.08, percent });
+                add ({ Control::slider, tr ("Length"), 0.0, 0.5, 0.01, 0.05, percent });
+                add ({ Control::toggle, tr ("Softer off-beat notes"), 0, 1, 1, 1 });
+                break;
+            case NoteTool::noteRepeat:
+                add ({ Control::choice, tr ("Rate"), 0, 5, 1, 3, {}, { "1/4", "1/8", tr ("1/8 triplet"), "1/16", tr ("1/16 triplet"), "1/32" } });
+                add ({ Control::slider, tr ("Gate"), 0.05, 1.0, 0.01, 0.5, percent });
+                add ({ Control::slider, tr ("Velocity per repeat"), 0.5, 1.2, 0.01, 0.9, percent });
+                add ({ Control::slider, tr ("Pitch per repeat"), -12.0, 12.0, 1.0, 0.0, [] (double v) {
+                           const auto st = juce::roundToInt (v);
+                           return (st > 0 ? "+" : "") + juce::String (st) + " " + tr ("semitones");
+                       } });
+                break;
             case NoteTool::chordProgression:
             {
                 juce::StringArray presets { tr ("(typed or generated)") };
@@ -847,6 +878,46 @@ private:
                 prtools::riffMachine (p, indices, o, beatsPerBar);
                 break;
             }
+            case NoteTool::euclidean:
+            {
+                static const std::int64_t stepTicks[] = { ppq, ppq / 2, ppq / 4, ppq / 8 };
+                EuclideanOptions o;
+                o.steps = intValue (0);
+                o.pulses = intValue (1);
+                o.rotation = intValue (2);
+                o.stepTicks = stepTicks[juce::jlimit (0, 3, intValue (3))];
+                o.start = generatorStart();
+                o.length = (std::int64_t) intValue (4) * ppq * juce::jmax (1, beatsPerBar);
+                o.key = intValue (5);
+                o.velocity = (float) value (6);
+                o.gate = (float) value (7);
+                o.accent = (float) value (8);
+                o.channel = channel;
+                euclidean (p, indices, o);
+                break;
+            }
+            case NoteTool::humanize:
+            {
+                HumanizeOptions o;
+                o.timing = intValue (0);
+                o.velocity = (float) value (1);
+                o.length = (float) value (2);
+                o.softerOffbeats = on (3);
+                o.seed = seed;
+                humanize (p, indices, o);
+                break;
+            }
+            case NoteTool::noteRepeat:
+            {
+                static const std::int64_t rates[] = { ppq, ppq / 2, ppq / 3, ppq / 4, ppq / 6, ppq / 8 };
+                RepeatOptions o;
+                o.rate = rates[juce::jlimit (0, 5, intValue (0))];
+                o.gate = (float) value (1);
+                o.decay = (float) value (2);
+                o.pitchStep = intValue (3);
+                repeatNotes (p, indices, o);
+                break;
+            }
             case NoteTool::chordProgression:
             {
                 const auto tonic = intValue (0);
@@ -1055,13 +1126,16 @@ const char* noteToolTitle (NoteTool tool)
         case NoteTool::articulate: return TR_NOOP ("Articulate");
         case NoteTool::riffMachine: return TR_NOOP ("Riff machine");
         case NoteTool::chordProgression: return TR_NOOP ("Chord progression");
+        case NoteTool::euclidean: return TR_NOOP ("Euclidean rhythm");
+        case NoteTool::humanize: return TR_NOOP ("Humanize");
+        case NoteTool::noteRepeat: return TR_NOOP ("Note repeater");
     }
     return "";
 }
 
 bool noteToolGenerates (NoteTool tool) noexcept
 {
-    return tool == NoteTool::riffMachine || tool == NoteTool::chordProgression;
+    return tool == NoteTool::riffMachine || tool == NoteTool::chordProgression || tool == NoteTool::euclidean;
 }
 
 std::unique_ptr<juce::Component> makeNoteToolPanel (AudioEngine& engine, NoteTool tool, std::vector<int> indices, std::int64_t grid)

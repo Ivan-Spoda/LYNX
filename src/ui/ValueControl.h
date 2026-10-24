@@ -65,6 +65,11 @@ private:
     bool fine = false, active = false;
 };
 
+// FL's "Last tweaked" (REA round 143): drags and wheel steps of a control with a target report it here (the main
+// window passes it to AudioEngine::noteTweaked). Other controls call reportTweak themselves.
+extern std::function<void (const AutomationTarget&)> onTweak;
+void reportTweak (const ValueSpec& spec);
+
 // Alt+left-click or middle-click.
 bool isResetClick (const juce::MouseEvent& e) noexcept;
 
