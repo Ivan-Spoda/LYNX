@@ -641,6 +641,19 @@ void Compressor::process (float* l, float* r, int n, const Settings& s) noexcept
     const double shape = s.opto ? -slowShape : slowShape;
     const double dR = coefMs (detectorReleaseMs, sr), relK = 160.0 / std::max (1.0, s.releaseMs), dt = 1.0 / sr;
     const double makeup = s.gainDb, trim = dbToGain (s.trimDb);
+    // round 150: below 1 : 1 the reference expands — the slope per ratio measured at 0.90 / 0.79 / 0.50 : 1 (0.18 / 0.40 /
+    // 0.90 dB per dB over the threshold), interpolated on the ratio control's own scale (1.00 at 0.625, 0.5 at 1)
+    const bool expand = s.ratio < 0.999;
+    double expSlope = 0.0;
+    if (expand)
+    {
+        const double v = 0.625 + 0.375 * std::log (std::max (0.5, s.ratio)) / std::log (0.5);
+        static constexpr double at[4] { 0.625, 0.68, 0.75, 1.0 }, sl[4] { 0.0, 0.179, 0.403, 0.902 };
+        int k = 0;
+        while (k < 2 && v > at[k + 1]) ++k;
+        expSlope = sl[k] + (sl[k + 1] - sl[k]) * std::clamp ((v - at[k]) / (at[k + 1] - at[k]), 0.0, 1.0);
+    }
+    const double Te = s.thresholdDb - 2.28, We = 4.55;
     const int N = (int) dl.size();
     double maxGr = 0.0;
     for (int i = 0; i < n; ++i)
@@ -648,6 +661,17 @@ void Compressor::process (float* l, float* r, int n, const Settings& s) noexcept
         const double a = std::max (std::abs ((double) l[i]), std::abs ((double) r[i]));
         env = a > env ? a : env + dR * (a - env);
         const double x = gainToDb (env), o = x - T;
+        if (expand)
+        {
+            // round 150 [EXEC] the reference's ratios below 1: an upward expansion above the threshold (2.3 dB lower,
+            // a 4.6 dB knee), its slope measured per ratio (REA_rodada150 §6); the boost grows with the attack
+            const double oe = x - Te;
+            const double b = 2.0 * oe < -We ? 0.0 : (2.0 * std::abs (oe) <= We ? expSlope * (oe + We / 2.0) * (oe + We / 2.0) / (2.0 * We) : expSlope * oe);
+            grf += (-b < grf ? aA : fR) * (-b - grf);
+            grs = 0.0;
+        }
+        else
+        {
         double y;
         if (2.0 * o < -W) y = x;
         else if (2.0 * std::abs (o) <= W) y = x + (1.0 / R - 1.0) * (o + W / 2.0) * (o + W / 2.0) / (2.0 * W);
@@ -665,7 +689,8 @@ void Compressor::process (float* l, float* r, int n, const Settings& s) noexcept
             grs = gs >= 1.0 ? 0.0 : -gainToDb (gs);
             grs = std::max (grs, grf);
         }
-        const double gr = std::max (grf, grs);
+        }
+        const double gr = expand ? grf : std::max (grf, grs);
         maxGr = std::max (maxGr, gr);
         const double g = (dbToGain (makeup - gr) * s.mix + (1.0 - s.mix)) * trim;
         dl[(std::size_t) pos] = l[i];

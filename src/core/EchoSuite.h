@@ -110,6 +110,12 @@ enum Param
                    // (output tone, loop tone, saturation, wobble, diffusion; EchoBoy's styles measured black-box [EXEC])
     satType,       // the saturation curve: 0 = auto (the voicing's own, or the mode's), 1 … satTypeCount = a measured family
     multiply,      // 1x / 2x / 4x / 8x the echo time, the bandwidth divided by the same (PrimalTap's Multiply [EXEC])
+    // ---- round 150 (docs/PARITY.md: EchoBoy's styles in Dual / Ping-Pong, its L/R offset), appended; a project saved
+    // before round 150 loads with voicingStereo off (upgradeLoadedEffectParams), i.e. the round-147 sound
+    voicingStereo, // with a voicing: the reference's measured stereo behaviour — Single / Dual: the L/R offset on the
+                   // repeats (odd repeats left early / right late, even ones the other way round), Ping-Pong: the
+                   // summed input, the right echo a copy of the left one, the pair tone once per left-right pair
+    lrOffset,      // that offset, 0 … 25 ms (EchoBoy's L/R Offset; default 8 ms, the trial's default)
     paramCount
 };
 enum class Style { single, ratio, quad, dual, pingPong }; // the two-time styles last (the panel shows the right time for both)
@@ -203,6 +209,15 @@ const char* satTypeName (int k) noexcept;
 int multiplyOf (float v) noexcept;       // 1, 2, 4 or 8
 float multiplyValue (int factor) noexcept;
 double multiplyCutoffHz (int factor) noexcept; // the bandwidth at that factor (0 for 1x: no filter)
+// round 150: EchoBoy's L/R offset (0 … 25 ms) and the repeat times it gives side `right` (ms added to n · T): odd
+// repeats −offset / 2 (left) / +offset / 2 (right), even ones +¾ offset (left) / −¾ offset (right) — measured at the
+// default 8 ms: −4 / +6 ms left, +4 / −6 ms right, the same for every style and echo time [EXEC]
+double lrOffsetMs (float v) noexcept;
+float lrOffsetValue (double ms) noexcept;
+double lrOddMs (double offsetMs, bool right) noexcept;
+double lrEvenMs (double offsetMs, bool right) noexcept;
+// the static magnitude (dB) of voicing k's ping-pong pair tone at `hz` (applied once per left-right pair)
+double voicingPairToneDb (int k, double hz, double sampleRate);
 // the static magnitude (dB) of voicing k's output tone (loop = false) or loop tone (loop = true) at `hz`
 double voicingToneDb (int k, bool loop, double hz, double sampleRate);
 // the steady-sine fundamental gain (dB) of saturation curve `type` (1 … satTypeCount) or of voicing k's own curve

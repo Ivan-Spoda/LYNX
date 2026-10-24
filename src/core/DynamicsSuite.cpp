@@ -941,10 +941,123 @@ int linearFftSize (double sampleRate) noexcept
 int linearLatency (double sampleRate) noexcept { return 3 * linearFftSize (sampleRate) / 4; }
 
 
+// round 150 (REA_rodada150 §1–3): the free layout, Pro-MB's edge / slope laws, the detector law
+bool freeLayout (const EffectParams& p) noexcept { return on (p[bandLayout]); }
+double edgeHz (float v) noexcept { return 30.0 * std::pow (1000.0, (double) std::clamp (v, 0.0f, 1.0f)); }
+float edgeValue (double hz) noexcept { return (float) std::clamp (std::log (std::max (hz, 1.0) / 30.0) / std::log (1000.0), 0.0, 1.0); }
+double slopeOfValue (float v) noexcept
+{
+    const auto x = (double) std::clamp (v, 0.0f, 1.0f);
+    return x < 0.25 ? 6.0 + 24.0 * x : 48.0 * x;
+}
+float slopeValue (double dbOct) noexcept
+{
+    const auto d = std::clamp (dbOct, 6.0, 48.0);
+    return (float) (d < 12.0 ? (d - 6.0) / 24.0 : d / 48.0);
+}
+int iirSlope (double dbOct) noexcept
+{
+    static constexpr int s[5] { 6, 12, 24, 36, 48 };
+    const auto code = minphase::dynamicSideCode (dbOct);
+    return s[code == 1 ? 0 : code / 2];
+}
+bool measuredDetector (const EffectParams& p) noexcept { return on (p[detectorLaw]); }
+
+Layout layoutOf (const EffectParams& p) noexcept
+{
+    Layout L;
+    L.segmentOf.fill (-1);
+    const auto nb = bandCount (p);
+    if (! freeLayout (p))
+    {
+        // the split layout: band b between crossovers b − 1 and b (the old engine)
+        const auto f = crossovers (p);
+        L.segments = nb;
+        for (int k = 0; k < nb - 1; ++k)
+        {
+            L.xoverHz[(std::size_t) k] = f[(std::size_t) k];
+            L.xoverSlope[(std::size_t) k] = crossoverSlopeDbOct (p, k);
+        }
+        for (int b = 0; b < nb; ++b)
+        {
+            L.bandOf[(std::size_t) b] = b;
+            L.segmentOf[(std::size_t) b] = b;
+            L.loHz[(std::size_t) b] = b > 0 ? f[(std::size_t) (b - 1)] : 0.0;
+            L.hiHz[(std::size_t) b] = b < nb - 1 ? f[(std::size_t) b] : 0.0;
+            L.loSlope[(std::size_t) b] = b > 0 ? L.xoverSlope[(std::size_t) (b - 1)] : 24.0;
+            L.hiSlope[(std::size_t) b] = b < nb - 1 ? L.xoverSlope[(std::size_t) b] : 24.0;
+        }
+        return L;
+    }
+    // the free layout: the bands in order of their low edge, no overlap (a band starts at least where the one below
+    // ends), the room between them passes untouched; an edge at 30 Hz (30 kHz) or beyond is no edge
+    std::array<int, bands> order {};
+    for (int b = 0; b < nb; ++b)
+        order[(std::size_t) b] = b;
+    std::stable_sort (order.begin(), order.begin() + nb, [&] (int a, int c) {
+        return edgeHz (p[(std::size_t) (bandLo0 + a)]) < edgeHz (p[(std::size_t) (bandLo0 + c)]);
+    });
+    int seg = 0, nx = 0;
+    double cursor = 0.0; // the upper edge of what is laid out (0 = nothing yet)
+    bool open = false;   // a band reached 30 kHz: nothing fits above it
+    for (int k = 0; k < nb && ! open; ++k)
+    {
+        const auto b = order[(std::size_t) k];
+        auto lo = edgeHz (p[(std::size_t) (bandLo0 + b)]);
+        auto hi = edgeHz (p[(std::size_t) (bandHi0 + b)]);
+        const auto ls = slopeOfValue (p[(std::size_t) (bandLoSlope0 + b)]), hs = slopeOfValue (p[(std::size_t) (bandHiSlope0 + b)]);
+        lo = lo <= 30.5 ? 0.0 : lo;
+        if (cursor > 0.0)
+            lo = std::max (lo, cursor);
+        const bool hasHi = hi < 29500.0;
+        if (hasHi && lo > 0.0)
+            hi = std::max (hi, lo * 1.05);
+        if (lo > 0.0 && (seg == 0 || lo > cursor * 1.0001))
+        {
+            L.bandOf[(std::size_t) seg++] = -1; // the gap below the band
+            L.xoverHz[(std::size_t) nx] = lo;
+            L.xoverSlope[(std::size_t) nx++] = ls;
+        }
+        L.segmentOf[(std::size_t) b] = seg;
+        L.bandOf[(std::size_t) seg++] = b;
+        L.loHz[(std::size_t) b] = lo;
+        L.loSlope[(std::size_t) b] = ls;
+        L.hiSlope[(std::size_t) b] = hs;
+        if (hasHi)
+        {
+            L.hiHz[(std::size_t) b] = hi;
+            L.xoverHz[(std::size_t) nx] = hi;
+            L.xoverSlope[(std::size_t) nx++] = hs;
+            cursor = hi;
+        }
+        else
+            open = true;
+    }
+    if (! open)
+        L.bandOf[(std::size_t) seg++] = -1; // the room above the last band
+    L.segments = std::max (1, seg);
+    return L;
+}
+
 namespace
 {
-// gain change (dB) of a band for a detector level x (dB)
-double bandCurve (const EffectParams& p, int b, double x) noexcept
+// round 150 [EXEC] Pro-MB's range has a soft knee of 12 dB around it (a 9 dB change under a 12 dB range gives 8.61 dB,
+// 9 under 6 gives 5.62): x − (x − R + W/2)² / (2W) inside R ± W/2 (W = 12, at most 2R)
+double softRange (double x, double range) noexcept
+{
+    const auto w = std::min (12.0, 2.0 * range);
+    if (w <= 0.0)
+        return 0.0;
+    if (x <= range - 0.5 * w)
+        return x;
+    if (x >= range + 0.5 * w)
+        return range;
+    const auto d = x - range + 0.5 * w;
+    return x - d * d / (2.0 * w);
+}
+
+// gain change (dB) of a band for a detector level x (dB); round 150: `soft` = the measured detector's range knee
+double bandCurve (const EffectParams& p, int b, double x, bool soft = false) noexcept
 {
     const auto at = [&] (int f) { return p[(std::size_t) param (b, f)]; };
     const auto thr = thresholdDb (at (fThreshold));
@@ -954,15 +1067,49 @@ double bandCurve (const EffectParams& p, int b, double x) noexcept
     if (std::abs (rng) < 0.01)
         return 0.0;
     const bool expand = on (at (fMode));
+    const auto limit = [&] (double v) { return soft ? softRange (v, std::abs (rng)) : std::min (std::abs (rng), v); };
     if (! expand)
     {
         if (rng < 0.0) // downward compression above the threshold
-            return -std::min (-rng, kneeCurve (x - thr, 1.0 - 1.0 / r, kn));
-        return std::min (rng, kneeCurve (thr - x, 1.0 - 1.0 / r, kn)); // upward compression below it
+            return -limit (kneeCurve (x - thr, 1.0 - 1.0 / r, kn));
+        return limit (kneeCurve (thr - x, 1.0 - 1.0 / r, kn)); // upward compression below it
     }
     if (rng < 0.0) // downward expansion below the threshold
-        return -std::min (-rng, kneeCurve (thr - x, r - 1.0, kn));
-    return std::min (rng, kneeCurve (x - thr, 1.0 - 1.0 / r, kn)); // upward expansion above it
+        return -limit (kneeCurve (thr - x, r - 1.0, kn));
+    return limit (kneeCurve (x - thr, 1.0 - 1.0 / r, kn)); // upward expansion above it
+}
+
+// round 150 [EXEC] the measured detector's time constants (fitted to Pro-MB's gain on 1 kHz steps −30 → −6 → −30 →
+// −18 → −30 dBFS, threshold −30, REA_rodada150 §3): the level follower's attack and release (dB domain) and the gain's
+// own release after the curve (so a range-limited band recovers at once); table over 0 / 10 / 20 / 35 / 50 / 75 / 100 %
+double measuredLaw (const double* table, float v) noexcept
+{
+    static constexpr double at[7] { 0.0, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0 };
+    const auto x = (double) std::clamp (v, 0.0f, 1.0f);
+    int k = 0;
+    while (k < 5 && x > at[k + 1])
+        ++k;
+    const auto t = (x - at[k]) / (at[k + 1] - at[k]);
+    return std::exp (std::log (table[k]) + (std::log (table[k + 1]) - std::log (table[k])) * t);
+}
+constexpr double measuredAttack[7] { 0.065, 0.081, 0.166, 1.22, 8.35, 35.2, 99.4 };
+constexpr double measuredRelease1[7] { 8.5, 9.2, 56.0, 123.0, 172.0, 298.0, 905.0 };
+constexpr double measuredRelease2[7] { 103.0, 104.0, 125.0, 176.0, 243.0, 681.0, 2449.0 };
+
+// round 150 [EXEC] Pro-MB's linear-phase band shape for any slope: |high pass| = x^ml / (1 + x^ml) at the low edge,
+// |low pass| = 1 / (1 + x^mh) at the high edge, m = slope / 6 (continuous; every slope 6 … 48 matched within 0.01 dB);
+// x on LYNX's prewarped axis (the reference's analog axis differs by ≤ 0.35 dB at a 3 kHz crossover)
+double linearShare (double wl, double wh, double ml, double mh, double w) noexcept
+{
+    double a = 1.0;
+    if (wh > 0.0)
+        a /= 1.0 + std::pow (w / wh, mh);
+    if (wl > 0.0)
+    {
+        const auto x = std::pow (w / wl, ml);
+        a *= x / (1.0 + x);
+    }
+    return a;
 }
 
 using Split = LrSplit;
@@ -989,69 +1136,96 @@ double bandStaticDb (const EffectParams& p, int b, double inputDb)
 {
     if (! on (p[(std::size_t) param (b, fEnabled)]))
         return 0.0;
-    return bandCurve (p, b, inputDb) + levelDb (p[(std::size_t) param (b, fLevel)]);
+    return bandCurve (p, b, inputDb, measuredDetector (p)) + levelDb (p[(std::size_t) param (b, fLevel)]);
 }
 
 double responseDb (const EffectParams& p, const double* bandGainDb, double sampleRate, double hz)
 {
-    const auto f = crossovers (p);
-    const auto nb = bandCount (p);
+    // round 150: the bands' segments (the split layout: band b = segment b; the free layout: gaps between)
+    const auto L = layoutOf (p);
+    const auto ns = L.segments;
     const auto w = 2.0 * pi * hz / sampleRate;
-    // bands of the tree: B0 = L1, B1 = H1·L2, B2 = H1·H2·L3, …, the last = H1·…·H(n−1); out = x + Σ (g − 1)·Bk
-    std::array<std::complex<double>, bands> band {};
+    const auto segGain = [&] (int k) { return L.bandOf[(std::size_t) k] >= 0 ? bandGainDb[L.bandOf[(std::size_t) k]] : 0.0; };
+    // segments of the tree: S0 = L1, S1 = H1·L2, S2 = H1·H2·L3, …, the last = H1·…·H(n−1); out = x + Σ (g − 1)·Sk
+    std::array<std::complex<double>, maxSegments> band {};
     std::complex<double> rest { 1.0, 0.0 };
-    for (int k = 0; k < nb - 1; ++k)
+    for (int k = 0; k < ns - 1; ++k)
     {
         Split s;
-        s.design (sampleRate, f[(std::size_t) k], crossoverSlopeDbOct (p, k));
+        s.design (sampleRate, L.xoverHz[(std::size_t) k], iirSlope (L.xoverSlope[(std::size_t) k]));
         band[(std::size_t) k] = rest * s.response (false, w);
         rest *= s.response (true, w);
     }
-    band[(std::size_t) (nb - 1)] = rest;
+    band[(std::size_t) (ns - 1)] = rest;
     // round 144: the processing mode — linear phase: the same magnitudes, no phase; minimum phase: the lower bands
     // pass the all-passes of the crossovers above them, the output is the sum of the bands
     const auto mode = phaseOf (p[processingMode]);
+    const auto nb = bandCount (p);
+    bool solo = false;
+    for (int b = 0; b < nb; ++b)
+        solo = solo || on (p[(std::size_t) param (b, fSolo)]);
+    const auto om = minphase::warp (hz, sampleRate);
+    const auto wOf = [&] (double edge) { return edge > 0.0 ? minphase::warp (std::min (edge, sampleRate * 0.45), sampleRate) : 0.0; };
+    if (mode == Phase::linear && freeLayout (p))
+    {
+        // round 150: each band's own linear-phase shape (Pro-MB's 1 / (1 + x^m), m = slope / 6, continuous)
+        std::complex<double> y = solo ? std::complex<double> {} : std::complex<double> { 1.0, 0.0 };
+        for (int b = 0; b < nb; ++b)
+        {
+            if (L.segmentOf[(std::size_t) b] < 0)
+                continue;
+            const auto a = linearShare (wOf (L.loHz[(std::size_t) b]), wOf (L.hiHz[(std::size_t) b]), L.loSlope[(std::size_t) b] / 6.0, L.hiSlope[(std::size_t) b] / 6.0, om);
+            const auto g = dbToGain (bandGainDb[b]);
+            if (solo)
+            {
+                if (on (p[(std::size_t) param (b, fSolo)]))
+                    y += g * a;
+            }
+            else
+                y += (g - 1.0) * a;
+        }
+        return gainToDb (std::abs (y)) + trimDb (p[output]);
+    }
     if (mode == Phase::linear)
         for (auto& b : band)
             b = std::abs (b);
     else if (mode == Phase::minimum)
-        for (int k = 0; k < nb - 2; ++k)
-            for (int j = k + 1; j < nb - 1; ++j)
+        for (int k = 0; k < ns - 2; ++k)
+            for (int j = k + 1; j < ns - 1; ++j)
             {
                 Split s;
-                s.design (sampleRate, f[(std::size_t) j], crossoverSlopeDbOct (p, j));
+                s.design (sampleRate, L.xoverHz[(std::size_t) j], iirSlope (L.xoverSlope[(std::size_t) j]));
                 band[(std::size_t) k] *= s.response (false, w) + s.response (true, w);
             }
-    bool solo = false;
-    for (int b = 0; b < nb; ++b)
-        solo = solo || on (p[(std::size_t) param (b, fSolo)]);
     if (mode == Phase::dynamic && measuredDynamic (p) && ! solo)
     {
-        // round 147: the measured engine — the product of each band's 1 + (g − 1)·A (its own crossovers' magnitudes)
-        const auto om = minphase::warp (hz, sampleRate);
+        // round 147: the measured engine — the product of each band's 1 + (g − 1)·A (its own crossovers' magnitudes);
+        // round 150: any slope (the 6 dB/oct models), each band's own edges
         double m = 1.0;
         for (int b = 0; b < nb; ++b)
         {
-            const auto wl = b > 0 ? minphase::warp (f[(std::size_t) (b - 1)], sampleRate) : 0.0;
-            const auto wh = b < nb - 1 ? minphase::warp (f[(std::size_t) b], sampleRate) : 0.0;
-            const auto nl = b > 0 ? slopeOrder (crossoverSlopeDbOct (p, b - 1)) : 1, nh = b < nb - 1 ? slopeOrder (crossoverSlopeDbOct (p, b)) : 1;
-            m *= minphase::bandMagnitude (wl, wh, nl, nh, dbToGain (bandGainDb[b]), om);
+            if (L.segmentOf[(std::size_t) b] < 0)
+                continue;
+            m *= minphase::bandMagnitudeM (wOf (L.loHz[(std::size_t) b]), wOf (L.hiHz[(std::size_t) b]),
+                                           minphase::dynamicSideCode (L.loSlope[(std::size_t) b]), minphase::dynamicSideCode (L.hiSlope[(std::size_t) b]),
+                                           dbToGain (bandGainDb[b]), om);
         }
         return gainToDb (std::abs (m)) + trimDb (p[output]);
     }
     std::complex<double> y = solo || mode == Phase::minimum ? std::complex<double> {} : std::complex<double> { 1.0, 0.0 };
-    for (int b = 0; b < nb; ++b)
+    for (int k = 0; k < ns; ++k)
     {
-        const auto g = dbToGain (bandGainDb[b]);
+        const auto bi = L.bandOf[(std::size_t) k];
+        const auto g = dbToGain (segGain (k));
         if (solo)
         {
-            if (on (p[(std::size_t) param (b, fSolo)]))
-                y += g * band[b];
+            if (bi >= 0 && on (p[(std::size_t) param (bi, fSolo)]))
+                y += g * band[(std::size_t) k];
         }
         else if (mode == Phase::minimum)
-            y += g * band[b];
+            y += g * band[(std::size_t) k];
         else
-            y += (g - 1.0) * band[b];
+            y += (g - 1.0) * band[(std::size_t) k];
     }
     return gainToDb (std::abs (y)) + trimDb (p[output]);
 }
@@ -1088,28 +1262,62 @@ struct LongDelay
 struct ScFilter
 {
     std::array<Biquad, 4> s;
+    Biquad bell;
     double lo = -1.0, hi = -1.0, rate = 0.0;
-    bool useHp = false, useLp = false;
-    void design (double sampleRate, double loHz, double hiHz) noexcept
+    bool useHp = false, useLp = false, useBell = false, law = false;
+    // round 150 (REA_rodada150 §4, the round-147 sweeps refitted): with the measured detector the free filter is the
+    // 4th-order Butterworth high / low pass (section Q × a) times a bell at the band's centre whose gain grows as the
+    // band narrows (the reference's +13.7 dB for 2 – 2.5 kHz): fitted per width (0.32 / 0.58 / 1 / 1.58 octaves, rms
+    // 0.09 / 0.10 / 0.21 / 0.28 dB), interpolated, none from 3 octaves up
+    static void narrowLaw (double octaves, double& a, double& gainDb, double& q) noexcept
     {
-        if (loHz == lo && hiHz == hi && sampleRate == rate)
+        static constexpr double w[5] { 0.32, 0.58, 1.0, 1.58, 3.0 };
+        static constexpr double av[5] { 0.993, 0.992, 1.058, 0.984, 1.0 };
+        static constexpr double gv[5] { 16.94, 12.63, 4.85, 1.36, 0.0 };
+        static constexpr double qv[5] { 4.811, 2.567, 0.762, 0.195, 0.195 };
+        const auto x = std::clamp (octaves, w[0], w[4]);
+        int k = 0;
+        while (k < 3 && x > w[k + 1])
+            ++k;
+        const auto t = (x - w[k]) / (w[k + 1] - w[k]);
+        a = av[k] + (av[k + 1] - av[k]) * t;
+        gainDb = gv[k] + (gv[k + 1] - gv[k]) * t;
+        q = std::exp (std::log (qv[k]) + (std::log (qv[k + 1]) - std::log (qv[k])) * t);
+    }
+    void design (double sampleRate, double loHz, double hiHz, bool measured = false) noexcept
+    {
+        if (loHz == lo && hiHz == hi && sampleRate == rate && measured == law)
             return;
         lo = loHz;
         hi = hiHz;
         rate = sampleRate;
-        static constexpr double q[2] { 0.54119610 * 1.25, 1.30656296 * 1.25 };
+        law = measured;
+        static constexpr double bw[2] { 0.54119610, 1.30656296 };
         useHp = loHz > 30.5;
         useLp = hiHz < sampleRate * 0.45;
+        useBell = false;
+        double scale = 1.25; // round 147: Q 1.25 × Butterworth (the fit to bands of one octave and wider)
+        if (measured)
+        {
+            double g = 0.0, bq = 1.0;
+            narrowLaw (useHp && useLp ? std::log2 (std::max (hiHz, loHz * 1.001) / loHz) : 3.0, scale, g, bq);
+            if (useHp && useLp && g > 0.01)
+            {
+                useBell = true;
+                bell.peaking (sampleRate, std::min (std::sqrt (loHz * hiHz), sampleRate * 0.45), bq, g);
+            }
+        }
         for (int k = 0; k < 2; ++k)
         {
-            s[(std::size_t) k].filter (sampleRate, 1, loHz, q[k]);
-            s[(std::size_t) (2 + k)].filter (sampleRate, 0, hiHz, q[k]);
+            s[(std::size_t) k].filter (sampleRate, 1, loHz, bw[k] * scale);
+            s[(std::size_t) (2 + k)].filter (sampleRate, 0, hiHz, bw[k] * scale);
         }
     }
     void reset() noexcept
     {
         for (auto& b : s)
             b.reset();
+        bell.reset();
     }
     void run (float& l, float& r) noexcept
     {
@@ -1119,6 +1327,11 @@ struct ScFilter
                 l = s[(std::size_t) k].process (l, 0);
                 r = s[(std::size_t) k].process (r, 1);
             }
+        if (useBell)
+        {
+            l = bell.process (l, 0);
+            r = bell.process (r, 1);
+        }
     }
 };
 
@@ -1185,6 +1398,8 @@ public:
         dynWorks.fill (false);
         env.fill (-120.0);
         env2.fill (-120.0);
+        held.fill (0.0);
+        held2.fill (0.0);
         gains.fill (1.0f);
     }
 
@@ -1223,46 +1438,73 @@ private:
 
     void processChunk (float* l, float* r, const float* scl, const float* scr, int n, const EffectParams& p) noexcept
     {
-        const auto f = crossovers (p);
-        std::array<int, bands - 1> slope {};
-        for (int k = 0; k < bands - 1; ++k)
-            slope[(std::size_t) k] = crossoverSlopeDbOct (p, k);
+        // round 150: the layout's segments (the split layout: band b = segment b, the old engine; the free layout: the
+        // gaps between the bands are segments that pass untouched)
+        const auto L = layoutOf (p);
+        const auto ns = L.segments;
+        std::array<int, maxSegments - 1> slope {};
+        for (int k = 0; k < ns - 1; ++k)
+            slope[(std::size_t) k] = iirSlope (L.xoverSlope[(std::size_t) k]);
         const auto nb = bandCount (p);
         const auto md = (Phase) mode;
         const bool linear = md == Phase::linear, minimum = md == Phase::minimum;
-        if (! designed || f != lastF || slope != lastSlope)
+        const bool freeLin = linear && freeLayout (p); // round 150: each band its own linear-phase FIR
+        if (! designed || L.xoverHz != lastF || slope != lastSlope || ns != lastNs)
         {
-            for (int k = 0; k < bands - 1; ++k)
+            for (int k = 0; k < ns - 1; ++k)
             {
-                split[(std::size_t) k].design (sr, f[(std::size_t) k], slope[(std::size_t) k]);
-                scSplit[(std::size_t) k].design (sr, f[(std::size_t) k], slope[(std::size_t) k]);
-                for (int j = 0; j < bands - 1; ++j)
-                    comp[(std::size_t) j][(std::size_t) k].design (sr, f[(std::size_t) k], slope[(std::size_t) k]);
+                split[(std::size_t) k].design (sr, L.xoverHz[(std::size_t) k], slope[(std::size_t) k]);
+                scSplit[(std::size_t) k].design (sr, L.xoverHz[(std::size_t) k], slope[(std::size_t) k]);
+                for (int j = 0; j < ns - 1; ++j)
+                    comp[(std::size_t) j][(std::size_t) k].design (sr, L.xoverHz[(std::size_t) k], slope[(std::size_t) k]);
             }
-            lastF = f;
+            lastF = L.xoverHz;
             lastSlope = slope;
+            lastNs = ns;
             designed = true;
             kernelsDirty = true;
         }
-        if (nb != lastNb)
+        const auto key = kernelKey (L, freeLin, nb);
+        if (key != lastKernelKey)
         {
-            lastNb = nb;
+            lastKernelKey = key;
             kernelsDirty = true;
             for (auto& c : lin)
                 if (c.n > 0)
                     c.clear();
         }
         if (linear && kernelsDirty)
-            designKernels (nb);
-        // round 135: the detectors hear the slot's side chain, split by the same crossovers
-        const bool external = on (p[scExternal]) && scl != nullptr && scr != nullptr;
+        {
+            if (freeLin)
+                designFreeKernels (L, nb);
+            else
+                designKernels (ns);
+        }
+        // the units the output sums: the segments, or (free linear phase) the bands' own FIR outputs
+        const int nu = freeLin ? nb : ns;
+        std::array<int, maxSegments> unitBand {};
+        for (int u = 0; u < nu; ++u)
+            unitBand[(std::size_t) u] = freeLin ? (L.segmentOf[(std::size_t) u] >= 0 ? u : -1) : L.bandOf[(std::size_t) u];
+        // round 135: the detectors hear the slot's side chain, split by the same crossovers; round 150: each band chooses
+        // the plug-in input or the side chain (or follows the global switch)
+        const bool haveSc = scl != nullptr && scr != nullptr;
+        const bool globalExt = on (p[scExternal]) && haveSc;
+        std::array<bool, bands> bandExt {};
+        bool external = false;
+        for (int b = 0; b < nb; ++b)
+        {
+            const auto v = p[(std::size_t) (bandScInput0 + b)];
+            bandExt[(std::size_t) b] = v < 0.25f ? globalExt : (v >= 0.75f && haveSc);
+            external = external || bandExt[(std::size_t) b];
+        }
         const auto inGain = (float) dbToGain (trimDb (p[input]));
         const auto outGain = (float) dbToGain (trimDb (p[output]));
         const auto mx = std::clamp (p[mix], 0.0f, 1.0f);
         const bool msPan = on (p[panMode]);
+        const bool measuredDet = measuredDetector (p);
 
-        std::array<double, bands> aA {}, aR {}, level {};
-        std::array<bool, bands> enabled {}, soloed {};
+        std::array<double, bands> aA {}, aR {}, aR2 {}, level {};
+        std::array<bool, bands> enabled {}, soloed {}, growsWithLevel {};
         std::array<float, bands> panL {}, panR {};
         bool anySolo = false;
         for (int b = 0; b < nb; ++b)
@@ -1270,11 +1512,22 @@ private:
             const auto pan = (float) panOf (p[(std::size_t) bandPanParam (b)]);
             panL[(std::size_t) b] = pan > 0.0f ? 1.0f - pan : 1.0f;
             panR[(std::size_t) b] = pan < 0.0f ? 1.0f + pan : 1.0f;
-            aA[(std::size_t) b] = coef (attackMs (p[(std::size_t) param (b, fAttack)]), sr);
-            aR[(std::size_t) b] = coef (releaseMs (p[(std::size_t) param (b, fRelease)]), sr);
+            if (measuredDet) // round 150: the measured detector's three time constants
+            {
+                aA[(std::size_t) b] = coef (measuredLaw (measuredAttack, p[(std::size_t) param (b, fAttack)]), sr);
+                aR[(std::size_t) b] = coef (measuredLaw (measuredRelease1, p[(std::size_t) param (b, fRelease)]), sr);
+                aR2[(std::size_t) b] = coef (measuredLaw (measuredRelease2, p[(std::size_t) param (b, fRelease)]), sr);
+            }
+            else
+            {
+                aA[(std::size_t) b] = coef (attackMs (p[(std::size_t) param (b, fAttack)]), sr);
+                aR[(std::size_t) b] = coef (releaseMs (p[(std::size_t) param (b, fRelease)]), sr);
+            }
             level[(std::size_t) b] = levelDb (p[(std::size_t) param (b, fLevel)]);
-            enabled[(std::size_t) b] = on (p[(std::size_t) param (b, fEnabled)]);
-            soloed[(std::size_t) b] = on (p[(std::size_t) param (b, fSolo)]);
+            // the change grows with the level (downward compression, upward expansion) or shrinks (the other two)
+            growsWithLevel[(std::size_t) b] = on (p[(std::size_t) param (b, fMode)]) == (rangeDb (p[(std::size_t) param (b, fRange)]) > 0.0);
+            enabled[(std::size_t) b] = on (p[(std::size_t) param (b, fEnabled)]) && L.segmentOf[(std::size_t) b] >= 0;
+            soloed[(std::size_t) b] = on (p[(std::size_t) param (b, fSolo)]) && L.segmentOf[(std::size_t) b] >= 0;
             anySolo = anySolo || soloed[(std::size_t) b];
             // round 128: a band's own look-ahead (≤ the global one): its gain waits for the difference
             const auto bandLa = std::min (laMs, lookaheadMs (p[(std::size_t) bandLookaheadParam (b)]));
@@ -1297,22 +1550,39 @@ private:
                 panA[(std::size_t) b] = panB[(std::size_t) b] = 0.5f * (panL[(std::size_t) b] + panR[(std::size_t) b]);
             scFree[(std::size_t) b] = on (p[(std::size_t) (bandScFree0 + b)]);
             if (scFree[(std::size_t) b])
-                scFilter[(std::size_t) b].design (sr, scFilterHz (p[(std::size_t) (bandScLow0 + b)]), scFilterHz (p[(std::size_t) (bandScHigh0 + b)]));
+                scFilter[(std::size_t) b].design (sr, scFilterHz (p[(std::size_t) (bandScLow0 + b)]), scFilterHz (p[(std::size_t) (bandScHigh0 + b)]), measuredDet);
         }
 
-        // 1. the split, the detectors and the gains at the base rate; the dry signal, the bands and the gains are kept
+        // 1. the split, the detectors and the gains at the base rate; the dry signal, the units and the gains are kept
         for (int i = 0; i < n; ++i)
         {
             const float xl = l[i] * inGain, xr = r[i] * inGain;
-            float bl[bands], br[bands], sl0[bands], sr0[bands];
+            float bl[maxSegments], br[maxSegments], sl0[maxSegments], sr0[maxSegments];
             float dl = xl, dr = xr;
-            if (linear)
+            if (freeLin)
+            {
+                // round 150: each band's FIR (its own edges and slopes), the gaps pass with the dry signal
+                linDry.process (dl, dr);
+                for (int b = 0; b < nb; ++b)
+                {
+                    if (L.segmentOf[(std::size_t) b] < 0)
+                    {
+                        bl[b] = br[b] = 0.0f;
+                        continue;
+                    }
+                    float a = xl, c = xr;
+                    lin[(std::size_t) b].step (a, c);
+                    bl[b] = a;
+                    br[b] = c;
+                }
+            }
+            else if (linear)
             {
                 // round 144: FIR bands (zero phase, delayed by the convolvers' latency); the top band is the rest, so
                 // the bands always add up to the delayed input
                 linDry.process (dl, dr);
                 float restL = dl, restR = dr;
-                for (int k = 0; k < nb - 1; ++k)
+                for (int k = 0; k < ns - 1; ++k)
                 {
                     float a = xl, c = xr;
                     lin[(std::size_t) k].step (a, c);
@@ -1321,14 +1591,14 @@ private:
                     restL -= a;
                     restR -= c;
                 }
-                bl[nb - 1] = restL;
-                br[nb - 1] = restR;
+                bl[ns - 1] = restL;
+                br[ns - 1] = restR;
             }
             else
             {
                 // the crossover tree: each split takes the high part of the one before
                 float hl = xl, hr = xr;
-                for (int k = 0; k < nb - 1; ++k)
+                for (int k = 0; k < ns - 1; ++k)
                 {
                     float nl, nr;
                     split[(std::size_t) k].run (hl, 0, bl[k], nl);
@@ -1336,19 +1606,19 @@ private:
                     hl = nl;
                     hr = nr;
                 }
-                bl[nb - 1] = hl;
-                br[nb - 1] = hr;
+                bl[ns - 1] = hl;
+                br[ns - 1] = hr;
             }
             // round 147: what a free side-chain filter hears — the input (in time with the bands) or the side chain
-            float srcL = linear ? dl : xl, srcR = linear ? dr : xr;
+            float srcL = linear ? dl : xl, srcR = linear ? dr : xr, extL = srcL, extR = srcR;
             if (external)
             {
                 float el = scl[i] * inGain, er = scr[i] * inGain;
                 if (linear)
                     linSc.process (el, er); // the detectors stay in time with the delayed bands
-                srcL = el;
-                srcR = er;
-                for (int k = 0; k < nb - 1; ++k)
+                extL = el;
+                extR = er;
+                for (int k = 0; k < ns - 1; ++k)
                 {
                     float nl, nr;
                     scSplit[(std::size_t) k].run (el, 0, sl0[k], nl);
@@ -1356,8 +1626,8 @@ private:
                     el = nl;
                     er = nr;
                 }
-                sl0[nb - 1] = el;
-                sr0[nb - 1] = er;
+                sl0[ns - 1] = el;
+                sr0[ns - 1] = er;
             }
 
             delay.process (dl, dr); // the look-ahead: the audio waits, the detectors don't
@@ -1368,24 +1638,38 @@ private:
                 float g = 1.0f, g2 = 1.0f;
                 if (enabled[(std::size_t) b])
                 {
+                    const auto unit = freeLin ? b : L.segmentOf[(std::size_t) b];
+                    const auto seg = L.segmentOf[(std::size_t) b];
+                    const bool ext = bandExt[(std::size_t) b];
                     // the detector's two channels: the band (split), or the free side-chain filter (round 147)
                     float cl, cr;
                     if (scFree[(std::size_t) b])
                     {
-                        cl = srcL;
-                        cr = srcR;
+                        cl = ext ? extL : srcL;
+                        cr = ext ? extR : srcR;
                         scFilter[(std::size_t) b].run (cl, cr);
                     }
                     else
                     {
-                        cl = external ? sl0[b] : bl[b];
-                        cr = external ? sr0[b] : br[b];
+                        cl = ext ? sl0[seg] : bl[unit];
+                        cr = ext ? sr0[seg] : br[unit];
                     }
-                    const auto follow = [&] (double& e, double m) noexcept {
+                    const auto follow = [&] (double& e, double& hold, double m) noexcept {
                         const auto x = std::max (-120.0, 20.0 * std::log10 (m + 1e-12));
                         e = x > e ? aA[(std::size_t) b] * e + (1.0 - aA[(std::size_t) b]) * x
                                   : aR[(std::size_t) b] * e + (1.0 - aR[(std::size_t) b]) * x;
-                        const auto gdb = bandCurve (p, b, e);
+                        auto gdb = bandCurve (p, b, e, measuredDet);
+                        if (measuredDet)
+                        {
+                            // round 150: the gain's own release after the curve and the range (the reference's
+                            // immediate recovery); what a rising level does goes through at once (a compressor's
+                            // growing reduction, an expander's opening)
+                            if (growsWithLevel[(std::size_t) b] ? std::abs (gdb) >= std::abs (hold) : std::abs (gdb) <= std::abs (hold))
+                                hold = gdb;
+                            else
+                                hold = aR2[(std::size_t) b] * hold + (1.0 - aR2[(std::size_t) b]) * gdb;
+                            gdb = hold;
+                        }
                         if (std::abs (gdb) > std::abs (extreme[(std::size_t) b]))
                             extreme[(std::size_t) b] = gdb;
                         return gdb;
@@ -1393,13 +1677,13 @@ private:
                     const auto peak = (double) std::max (std::abs (cl), std::abs (cr));
                     const auto lev = level[(std::size_t) b];
                     if (fullLink[(std::size_t) b]) // 100 % linked: one detector on the louder channel (the old engine)
-                        g = g2 = (float) dbToGain (follow (env[(std::size_t) b], peak) + lev);
+                        g = g2 = (float) dbToGain (follow (env[(std::size_t) b], held[(std::size_t) b], peak) + lev);
                     else if (linkM[(std::size_t) b] <= 0.0)
                     {
                         // [EXEC] partly linked: each channel's detector hears its own level moved towards the louder one
                         const auto k = linkA[(std::size_t) b];
-                        g = (float) dbToGain (follow (env[(std::size_t) b], (1.0 - k) * std::abs (cl) + k * peak) + lev);
-                        g2 = (float) dbToGain (follow (env2[(std::size_t) b], (1.0 - k) * std::abs (cr) + k * peak) + lev);
+                        g = (float) dbToGain (follow (env[(std::size_t) b], held[(std::size_t) b], (1.0 - k) * std::abs (cl) + k * peak) + lev);
+                        g2 = (float) dbToGain (follow (env2[(std::size_t) b], held2[(std::size_t) b], (1.0 - k) * std::abs (cr) + k * peak) + lev);
                     }
                     else
                     {
@@ -1407,8 +1691,8 @@ private:
                         // (side) itself, the other part's gain from the linked one to unity
                         const auto u = linkM[(std::size_t) b];
                         const auto one = std::abs (0.5 * ((double) cl + (linkSide[(std::size_t) b] ? -(double) cr : (double) cr)));
-                        const auto gOne = dbToGain (follow (env2[(std::size_t) b], (1.0 - u) * peak + u * one));
-                        const auto gLinked = dbToGain (follow (env[(std::size_t) b], peak));
+                        const auto gOne = dbToGain (follow (env2[(std::size_t) b], held2[(std::size_t) b], (1.0 - u) * peak + u * one));
+                        const auto gLinked = dbToGain (follow (env[(std::size_t) b], held[(std::size_t) b], peak));
                         const auto gOther = (1.0 - u) * gLinked + u;
                         const auto lg = dbToGain (lev);
                         g = (float) ((linkSide[(std::size_t) b] ? gOther : gOne) * lg);  // mid
@@ -1417,16 +1701,19 @@ private:
                 }
                 gain[(std::size_t) b][(std::size_t) i] = gainDelay[(std::size_t) b].process (g);
                 gainB[(std::size_t) b][(std::size_t) i] = gainDelayB[(std::size_t) b].process (g2);
-                float sl = bl[b], sr2 = br[b];
-                if (minimum) // round 144: the band passes the all-passes of the crossovers above it
-                    for (int j = b + 1; j < nb - 1; ++j)
+            }
+            for (int u = 0; u < nu; ++u)
+            {
+                float sl = bl[u], sr2 = br[u];
+                if (minimum) // round 144: the segment passes the all-passes of the crossovers above it
+                    for (int j = u + 1; j < ns - 1; ++j)
                     {
-                        sl = comp[(std::size_t) b][(std::size_t) j].allpass (sl, 0);
-                        sr2 = comp[(std::size_t) b][(std::size_t) j].allpass (sr2, 1);
+                        sl = comp[(std::size_t) u][(std::size_t) j].allpass (sl, 0);
+                        sr2 = comp[(std::size_t) u][(std::size_t) j].allpass (sr2, 1);
                     }
-                bandDelay[(std::size_t) b].process (sl, sr2);
-                band[(std::size_t) b][0][(std::size_t) i] = sl;
-                band[(std::size_t) b][1][(std::size_t) i] = sr2;
+                bandDelay[(std::size_t) u].process (sl, sr2);
+                band[(std::size_t) u][0][(std::size_t) i] = sl;
+                band[(std::size_t) u][1][(std::size_t) i] = sr2;
             }
         }
 
@@ -1434,11 +1721,13 @@ private:
         // minimum-phase filter in cascade (core/MinPhaseBand.h); soloed bands are still listened to through the split
         if (md == Phase::dynamic && measuredDynamic (p) && ! anySolo)
         {
-            if (f != dynF || slope != dynSlope || nb != dynNb || osFactor != dynOs || bandMs != dynMs)
+            if (L.loHz != dynLo || L.hiHz != dynHi || L.loSlope != dynLoS || L.hiSlope != dynHiS || nb != dynNb || osFactor != dynOs || bandMs != dynMs)
             {
-                // a new crossover layout: every filter is designed again (their states are kept: no click)
-                dynF = f;
-                dynSlope = slope;
+                // a new layout: every filter is designed again (their states are kept: no click)
+                dynLo = L.loHz;
+                dynHi = L.hiHz;
+                dynLoS = L.loSlope;
+                dynHiS = L.hiSlope;
                 dynNb = nb;
                 dynOs = osFactor;
                 dynMs = bandMs;
@@ -1462,12 +1751,19 @@ private:
             }
             for (int b = nb; b < bands; ++b)
                 dynWorks[(std::size_t) b] = false;
+            std::array<int, bands> codeL {}, codeH {};
+            for (int b = 0; b < nb; ++b)
+            {
+                codeL[(std::size_t) b] = minphase::dynamicSideCode (L.loSlope[(std::size_t) b]);
+                codeH[(std::size_t) b] = minphase::dynamicSideCode (L.hiSlope[(std::size_t) b]);
+            }
             const auto run = [&] (int len, double rate, int every, const float* d0, const float* d1, auto&& gainAt, float* o0, float* o1) noexcept {
                 std::array<double, bands> wl {}, wh {};
                 for (int b = 0; b < nb; ++b)
                 {
-                    wl[(std::size_t) b] = b > 0 ? minphase::warp (std::min (f[(std::size_t) (b - 1)], sr * 0.45), rate) : 0.0;
-                    wh[(std::size_t) b] = b < nb - 1 ? minphase::warp (std::min (f[(std::size_t) b], sr * 0.45), rate) : 0.0;
+                    const auto lo = L.loHz[(std::size_t) b], hi = L.hiHz[(std::size_t) b];
+                    wl[(std::size_t) b] = lo > 0.0 ? minphase::warp (std::min (lo, sr * 0.45), rate) : 0.0;
+                    wh[(std::size_t) b] = hi > 0.0 ? minphase::warp (std::min (hi, sr * 0.45), rate) : 0.0;
                 }
                 for (int i = 0; i < len; ++i)
                 {
@@ -1482,9 +1778,8 @@ private:
                                 if (std::abs (gc[c] - dynGain[(std::size_t) b][(std::size_t) c]) > 1e-7)
                                 {
                                     dynGain[(std::size_t) b][(std::size_t) c] = gc[c];
-                                    dynBand[(std::size_t) b][(std::size_t) c].design (wl[(std::size_t) b], wh[(std::size_t) b],
-                                                                                      b > 0 ? slopeOrder (slope[(std::size_t) (b - 1)]) : 1,
-                                                                                      b < nb - 1 ? slopeOrder (slope[(std::size_t) b]) : 1, std::max (gc[c], 1e-6));
+                                    dynBand[(std::size_t) b][(std::size_t) c].designM (wl[(std::size_t) b], wh[(std::size_t) b],
+                                                                                       codeL[(std::size_t) b], codeH[(std::size_t) b], std::max (gc[c], 1e-6));
                                 }
                         }
                     const double xl = d0[i], xr = d1[i];
@@ -1546,14 +1841,24 @@ private:
             return;
         }
 
-        // 2. the bands' gains applied and summed (at the oversampled rate when oversampling is on)
-        const auto combine = [&] (float dl, float dr, auto&& bandAt, auto&& gainAt, float& outL, float& outR) noexcept {
+        // 2. the units' gains applied and summed (at the oversampled rate when oversampling is on)
+        const auto combine = [&] (float dl, float dr, auto&& unitAt, auto&& gainAt, float& outL, float& outR) noexcept {
             float yl = anySolo || minimum ? 0.0f : dl, yr = anySolo || minimum ? 0.0f : dr;
-            for (int b = 0; b < nb; ++b)
+            for (int u = 0; u < nu; ++u)
             {
-                const auto [ga, gb] = gainAt (b);
+                const auto b = unitBand[(std::size_t) u];
                 float sl, sr2;
-                bandAt (b, sl, sr2);
+                unitAt (u, sl, sr2);
+                if (b < 0) // a gap (round 150): unity — only the minimum-phase sum needs it
+                {
+                    if (minimum && ! anySolo)
+                    {
+                        yl += sl;
+                        yr += sr2;
+                    }
+                    continue;
+                }
+                const auto [ga, gb] = gainAt (b);
                 const auto gl = ga * panA[(std::size_t) b], gr = gb * panB[(std::size_t) b];
                 if (bandMs[(std::size_t) b]) // round 144: the pan's two gains on the band's mid and side (round 147: or the link's)
                 {
@@ -1599,7 +1904,7 @@ private:
         {
             for (int i = 0; i < n; ++i)
                 combine (dry[0][(std::size_t) i], dry[1][(std::size_t) i],
-                         [&] (int b, float& a, float& c) { a = band[(std::size_t) b][0][(std::size_t) i]; c = band[(std::size_t) b][1][(std::size_t) i]; },
+                         [&] (int u, float& a, float& c) { a = band[(std::size_t) u][0][(std::size_t) i]; c = band[(std::size_t) u][1][(std::size_t) i]; },
                          [&] (int b) { return std::pair<float, float> { gain[(std::size_t) b][(std::size_t) i], gainB[(std::size_t) b][(std::size_t) i] }; }, l[i], r[i]);
             return;
         }
@@ -1615,16 +1920,17 @@ private:
         };
         for (int c = 0; c < 2; ++c)
             upsample (upDry[(std::size_t) c], dry[(std::size_t) c].data(), hiDry[(std::size_t) c].data());
+        for (int u = 0; u < nu; ++u)
+            for (int c = 0; c < 2; ++c)
+                upsample (upBand[(std::size_t) u][(std::size_t) c], band[(std::size_t) u][(std::size_t) c].data(), hiBand[(std::size_t) u][(std::size_t) c].data());
         for (int b = 0; b < nb; ++b)
         {
-            for (int c = 0; c < 2; ++c)
-                upsample (upBand[(std::size_t) b][(std::size_t) c], band[(std::size_t) b][(std::size_t) c].data(), hiBand[(std::size_t) b][(std::size_t) c].data());
             upsample (upGain[(std::size_t) b], gain[(std::size_t) b].data(), hiGain[(std::size_t) b].data());
             upsample (upGainB[(std::size_t) b], gainB[(std::size_t) b].data(), hiGainB[(std::size_t) b].data());
         }
         for (int k = 0; k < hi; ++k)
             combine (hiDry[0][(std::size_t) k], hiDry[1][(std::size_t) k],
-                     [&] (int b, float& a, float& c) { a = hiBand[(std::size_t) b][0][(std::size_t) k]; c = hiBand[(std::size_t) b][1][(std::size_t) k]; },
+                     [&] (int u, float& a, float& c) { a = hiBand[(std::size_t) u][0][(std::size_t) k]; c = hiBand[(std::size_t) u][1][(std::size_t) k]; },
                      [&] (int b) { return std::pair<float, float> { hiGain[(std::size_t) b][(std::size_t) k], hiGainB[(std::size_t) b][(std::size_t) k] }; },
                      hiDry[0][(std::size_t) k], hiDry[1][(std::size_t) k]);
         for (int c = 0; c < 2; ++c)
@@ -1637,7 +1943,26 @@ private:
         }
     }
 
-    // the FIR of each band below the top one: the magnitude of the band in the IIR tree (the same crossovers), zero phase
+    // what the linear-phase kernels depend on (the layout, and in the free layout the bands' own edges and slopes)
+    std::array<double, 4 * bands + 2> kernelKey (const Layout& L, bool freeLin, int nb) const noexcept
+    {
+        std::array<double, 4 * bands + 2> k {};
+        k[0] = freeLin ? 1.0 : 0.0;
+        k[1] = freeLin ? (double) nb : (double) L.segments;
+        if (freeLin)
+            for (int b = 0; b < bands; ++b)
+            {
+                const bool use = b < nb && L.segmentOf[(std::size_t) b] >= 0;
+                k[(std::size_t) (2 + 4 * b)] = use ? L.loHz[(std::size_t) b] : -1.0;
+                k[(std::size_t) (3 + 4 * b)] = use ? L.hiHz[(std::size_t) b] : -1.0;
+                k[(std::size_t) (4 + 4 * b)] = use ? L.loSlope[(std::size_t) b] : -1.0;
+                k[(std::size_t) (5 + 4 * b)] = use ? L.hiSlope[(std::size_t) b] : -1.0;
+            }
+        return k;
+    }
+
+    // the FIR of each segment below the top one: the magnitude of the segment in the IIR tree (the same crossovers),
+    // zero phase
     void designKernels (int nb) noexcept
     {
         kernelsDirty = false;
@@ -1657,6 +1982,29 @@ private:
                 t[(std::size_t) i] = (float) m;
             }
             lin[(std::size_t) k].setKernel (t);
+        }
+    }
+
+    // round 150: the free layout's FIRs — each band's own shape (Pro-MB's 1 / (1 + x^m), continuous slopes)
+    void designFreeKernels (const Layout& L, int nb) noexcept
+    {
+        kernelsDirty = false;
+        if (linSize <= 0)
+            return;
+        const auto bins = linSize / 2 + 1;
+        for (int b = 0; b < nb; ++b)
+        {
+            if (L.segmentOf[(std::size_t) b] < 0)
+                continue;
+            const auto wl = L.loHz[(std::size_t) b] > 0.0 ? minphase::warp (L.loHz[(std::size_t) b], sr) : 0.0;
+            const auto wh = L.hiHz[(std::size_t) b] > 0.0 ? minphase::warp (L.hiHz[(std::size_t) b], sr) : 0.0;
+            auto& t = linTable[(std::size_t) b];
+            for (int i = 0; i < bins; ++i)
+            {
+                const auto w = std::tan (0.5 * pi * std::min ((double) i / (double) (bins - 1), 0.9999));
+                t[(std::size_t) i] = (float) linearShare (wl, wh, L.loSlope[(std::size_t) b] / 6.0, L.hiSlope[(std::size_t) b] / 6.0, w);
+            }
+            lin[(std::size_t) b].setKernel (t);
         }
     }
 
@@ -1724,19 +2072,21 @@ private:
             p[i] = info.params[i].defaultValue;
         return p;
     }();
-    std::array<Split, bands - 1> split, scSplit;
-    std::array<std::array<Split, bands - 1>, bands - 1> comp; // minimum phase: band k's copy of split j's all-pass
-    std::array<double, bands - 1> lastF {};
+    // round 150: up to 2·bands + 1 segments (the free layout's gaps), 2·bands crossovers
+    std::array<Split, maxSegments - 1> split, scSplit;
+    std::array<std::array<Split, maxSegments - 1>, maxSegments - 1> comp; // minimum phase: segment k's copy of split j's all-pass
+    std::array<double, maxSegments - 1> lastF {};
     const float* scL = nullptr;
     const float* scR = nullptr;
-    std::array<int, bands - 1> lastSlope {};
+    std::array<int, maxSegments - 1> lastSlope {};
+    std::array<double, 4 * bands + 2> lastKernelKey {};
     bool designed = false, kernelsDirty = true;
-    int mode = -1, osFactor = 0, linSize = 0, lastNb = 0;
-    std::array<peqfl::FftConvolver, bands - 1> lin;
-    std::array<std::vector<float>, bands - 1> linTable;
+    int mode = -1, osFactor = 0, linSize = 0, lastNs = 0;
+    std::array<peqfl::FftConvolver, bands> lin; // the split layout: one per segment below the top; free: one per band
+    std::array<std::vector<float>, bands> linTable;
     LongDelay linDry, linSc;
     StereoDelay delay;
-    std::array<StereoDelay, bands> bandDelay;
+    std::array<StereoDelay, maxSegments> bandDelay;
     std::array<MonoDelay, bands> gainDelay, gainDelayB;
     // round 147: the stereo link (linked part, mid- / side-only part, side mode), the free side-chain filters
     std::array<double, bands> linkA {}, linkM {};
@@ -1745,23 +2095,23 @@ private:
     std::array<ScFilter, bands> scFilter {};
     int laSamples = 0;
     std::array<double, bands> env {}, env2 {}, extreme {};
+    std::array<double, bands> held {}, held2 {}; // round 150: the measured detector's gain after its own release
     std::array<float, bands> gains {};
     // one chunk of the base-rate streams, and the same at the oversampled rate
     std::array<std::array<float, chunk>, 2> dry {};
-    std::array<std::array<std::array<float, chunk>, 2>, bands> band {};
+    std::array<std::array<std::array<float, chunk>, 2>, maxSegments> band {};
     std::array<std::array<float, chunk>, bands> gain {}, gainB {}; // each band's two gains (left / right or mid / side)
     std::array<std::array<float, chunk * maxFactor>, 2> hiDry {};
-    std::array<std::array<std::array<float, chunk * maxFactor>, 2>, bands> hiBand {};
+    std::array<std::array<std::array<float, chunk * maxFactor>, 2>, maxSegments> hiBand {};
     std::array<std::array<float, chunk * maxFactor>, bands> hiGain {}, hiGainB {};
     std::array<mixsuite::Oversampler, 2> upDry, down;
-    std::array<std::array<mixsuite::Oversampler, 2>, bands> upBand;
+    std::array<std::array<mixsuite::Oversampler, 2>, maxSegments> upBand;
     std::array<mixsuite::Oversampler, bands> upGain, upGainB;
     // round 147: the measured Dynamic phase — each band's two filters (left / right or mid / side), their last gains
     std::array<std::array<minphase::Band, 2>, bands> dynBand {};
     std::array<std::array<double, 2>, bands> dynGain {};
     std::array<bool, bands> dynWorks {};
-    std::array<double, bands - 1> dynF {};
-    std::array<int, bands - 1> dynSlope {};
+    std::array<double, bands> dynLo {}, dynHi {}, dynLoS {}, dynHiS {};
     int dynNb = 0, dynOs = 0;
     std::array<bool, bands> dynMs {};
     LiveMeters meters;
@@ -2178,6 +2528,30 @@ const EffectInfo& prismInfo()
         // round 147: each crossover's own slope (0 = the global Slope, the old sound)
         for (const auto* n : { "Crossover 1 slope", "Crossover 2 slope", "Crossover 3 slope", "Crossover 4 slope", "Crossover 5 slope" })
             i.params.push_back ({ n, 0.0f });
+        // round 150: the band layout (split), each band's own edges / slopes for the free layout (the split layout's
+        // defaults: 30 – 120 – 1000 – 6000 – 30k, then 10k – 14k – 30k; 24 dB/oct), each band's side-chain input (the
+        // global switch) and the detector law (measured for new instances; projects saved before keep the old one)
+        i.params.push_back ({ "Band layout", 0.0f });
+        {
+            static constexpr double lo[prism::bands] { 30.0, 120.0, 1000.0, 6000.0, 10000.0, 14000.0 };
+            static constexpr double hi[prism::bands] { 120.0, 1000.0, 6000.0, 30000.0, 14000.0, 30000.0 };
+            static const char* loN[prism::bands] { "B1 low", "B2 low", "B3 low", "B4 low", "B5 low", "B6 low" };
+            static const char* hiN[prism::bands] { "B1 high", "B2 high", "B3 high", "B4 high", "B5 high", "B6 high" };
+            static const char* lsN[prism::bands] { "B1 low slope", "B2 low slope", "B3 low slope", "B4 low slope", "B5 low slope", "B6 low slope" };
+            static const char* hsN[prism::bands] { "B1 high slope", "B2 high slope", "B3 high slope", "B4 high slope", "B5 high slope", "B6 high slope" };
+            static const char* scN[prism::bands] { "B1 SC input", "B2 SC input", "B3 SC input", "B4 SC input", "B5 SC input", "B6 SC input" };
+            for (int b = 0; b < prism::bands; ++b)
+                i.params.push_back ({ loN[b], prism::edgeValue (lo[b]) });
+            for (int b = 0; b < prism::bands; ++b)
+                i.params.push_back ({ hiN[b], prism::edgeValue (hi[b]) });
+            for (int b = 0; b < prism::bands; ++b)
+                i.params.push_back ({ lsN[b], 0.5f });
+            for (int b = 0; b < prism::bands; ++b)
+                i.params.push_back ({ hsN[b], 0.5f });
+            for (int b = 0; b < prism::bands; ++b)
+                i.params.push_back ({ scN[b], 0.0f });
+        }
+        i.params.push_back ({ "Detector", 1.0f });
         return i;
     }();
     return info;
@@ -2336,10 +2710,18 @@ std::string paramText (EffectKind kind, int param, float v)
                 return names[pick (v, 4)];
             }
             case slope: return std::to_string (slopeDbOct (v)) + " dB/oct";
+            case bandLayout: return on (v) ? "free" : "split";
+            case detectorLaw: return on (v) ? "measured" : "classic";
             case lookahead: return v <= 0.0f ? "off" : msText (lookaheadMs (v));
             case mix: return fmt ("%.0f%%", v * 100.0);
             case input: case output: return db (trimDb (v));
             default:
+                if (param >= bandLo0 && param < bandLoSlope0) // round 150
+                    return hzText (edgeHz (v));
+                if (param >= bandLoSlope0 && param < bandScInput0)
+                    return fmt ("%.1f dB/oct", slopeOfValue (v));
+                if (param >= bandScInput0 && param < bandScInput0 + bands)
+                    return v < 0.25f ? "global" : (v < 0.75f ? "plug-in input" : "external");
                 if (param >= bandPan0 && param < bandPan0 + bands)
                 {
                     const auto x = panOf (v);
