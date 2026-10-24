@@ -391,6 +391,12 @@ int fromProG (const State& s, EffectSlot& slot)
 // 15 crossover (log2 Hz, the band's upper edge), 16 crossover slope (6, 12, 24, 36, 48); round 147: 5 drive pan,
 // 12 band pan (−1 … +1), 695 the channel mode (0 left / right, 1 mid / side); round 150: 1 / 3 input / output pan
 // (−1 … +1), six bands, the style index → Ember's measured character
+namespace
+{
+// the reference's slot level for its knob value (0 … 1): Ember's amount law is the same table on |2v − 1|
+double tableLevel (float knob) noexcept { return mixsuite::ember::modAmount (0.5f + 0.5f * std::clamp (knob, 0.0f, 1.0f)); }
+} // namespace
+
 int fromSaturn2 (const State& s, EffectSlot& slot)
 {
     if (slot.kind != EffectKind::ember || s.named || s.count != 951 || ! finiteAll (s, 7 + 17 * 6))
@@ -452,6 +458,87 @@ int fromSaturn2 (const State& s, EffectSlot& slot)
             static constexpr int slopes[5] { 12, 12, 24, 24, 48 };
             const auto d = slopes[std::clamp (roundIndex (s.at (base + 16)), 0, 4)];
             set (xoverSlope, d == 12 ? 0.0f : (d == 24 ? 0.5f : 1.0f));
+        }
+        // round 152: each crossover's own slope, exactly the reference's (6 … 48 dB/oct)
+        if (b < ours - 1)
+        {
+            static constexpr int own[5] { 6, 12, 24, 36, 48 };
+            set (crossSlope1 + b, ownSlopeValue (own[std::clamp (roundIndex (s.at (base + 16)), 0, 4)]));
+        }
+    }
+    // round 152 (read back black-box: the trial's state after setting them): 696 processing mode (1 = linear phase),
+    // the modulation — 134 the XLFO count, XLFO k at 135 + 73k (0 frequency (knob value), 8 step count, step j at
+    // 9 + 4j: value −1 … +1, glide 0 … 1, glide function 0 linear / 1 sqr / 2 sqrt / 3 sine), 646 the follower count,
+    // follower 1 at 647 (2 attack, 3 release: knob values), 700 the slot count, slot k at 701 + 5k (0 source: 13 / 14
+    // XLFO 1 / 2, 25 EF 1; 1 level (knob value); 2 bypassed; 3 inverted; 4 target: 1 input gain, 3 output gain, 5 mix,
+    // band b at 6 + 13b: +0 crossover, +2 drive, +4 level, +12 mix)
+    set (processing, s.at (696) >= 0.5f ? 1.0f : 0.0f);
+    set (effectLaw, 1.0f);
+    if (s.count >= 951)
+    {
+        std::array<double, 2> depth { 1.0, 1.0 };
+        const int lfos = std::clamp (roundIndex (s.at (134)), 0, 6);
+        for (int k = 0; k < std::min (lfos, 2); ++k)
+        {
+            const auto B = (std::size_t) (135 + 73 * k);
+            set (k == 0 ? lfo1Rate : lfo2Rate, clamp01 (s.at (B)));
+            const int steps = std::clamp (roundIndex (s.at (B + 8)), 1, 16);
+            double lo = 1.0, hi = -1.0;
+            for (int j = 0; j < steps; ++j)
+            {
+                lo = std::min (lo, (double) s.at (B + 9 + 4 * (std::size_t) j));
+                hi = std::max (hi, (double) s.at (B + 9 + 4 * (std::size_t) j));
+            }
+            depth[(std::size_t) k] = std::clamp (0.5 * (hi - lo), 0.0, 1.0);
+            LfoShape shape = LfoShape::sine;
+            if (steps == 2)
+            {
+                const auto glide = s.at (B + 10);
+                static constexpr LfoShape byFunction[4] { LfoShape::triangle, LfoShape::easeIn, LfoShape::easeOut, LfoShape::sine };
+                shape = glide < 0.5f ? LfoShape::square : byFunction[std::clamp (roundIndex (s.at (B + 11)), 0, 3)];
+            }
+            set (k == 0 ? lfo1Shape : lfo2Shape, (float) (int) shape / (float) (lfoShapes - 1));
+        }
+        const bool follower = roundIndex (s.at (646)) >= 1;
+        if (follower)
+        {
+            set (envAttack, clamp01 (s.at (649)));
+            set (envRelease, clamp01 (s.at (650)));
+        }
+        const int slots = std::clamp (roundIndex (s.at (700)), 0, 50);
+        int used = 0;
+        for (int k = 0; k < slots && used < modSlots; ++k)
+        {
+            const auto B = (std::size_t) (701 + 5 * k);
+            if (s.at (B + 2) >= 0.5f) continue; // bypassed
+            const int src = roundIndex (s.at (B));
+            ModSource ours2 = ModSource::off;
+            double scale = 1.0;
+            if (src == 13 && lfos >= 1) { ours2 = ModSource::lfo1; scale = depth[0]; }
+            else if (src == 14 && lfos >= 2) { ours2 = ModSource::lfo2; scale = depth[1]; }
+            else if (src == 25 && follower) ours2 = ModSource::envelope;
+            const int t = roundIndex (s.at (B + 4));
+            int target = 0;
+            if (t == 1) target = 1;
+            else if (t == 3) target = 2;
+            else if (t == 5) target = 3;
+            else if (t >= 6 && t < 6 + 13 * 6)
+            {
+                const int b = (t - 6) / 13, f = (t - 6) % 13;
+                if (b < ours)
+                {
+                    if (f == 2) target = 4 + b;
+                    else if (f == 4) target = 10 + b;
+                    else if (f == 12) target = 16 + b;
+                    else if (f == 0 && b < ours - 1) target = 22 + b;
+                }
+            }
+            if (ours2 == ModSource::off || target == 0) continue;
+            const auto level = tableLevel (clamp01 (s.at (B + 1))) * scale * (s.at (B + 3) >= 0.5f ? -1.0 : 1.0);
+            set (mod1Source + 3 * used, (float) (int) ours2 / (float) (modSources - 1));
+            set (mod1Target + 3 * used, (float) target / (float) (modTargets - 1));
+            set (mod1Amount + 3 * used, modAmountValue (level));
+            ++used;
         }
     }
     set (mix, clamp01 (s.at (5) / 100.0));

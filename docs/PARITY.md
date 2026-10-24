@@ -30,6 +30,15 @@ LYNX's style; the transfer-curve and GR-history displays are bars). Her Vocalstr
 model (−60 … −67 dB null on her takes). The other Complete Access plugins (Slate, SSL, LiquidSonics, sonible,
 Harrison) map to LYNX effects by role only.
 
+## Round 152b: what changed (config / design, after 150 → after 152)
+
+Sub-round 152b (`docs/analise/REA_rodada152b.md`), measured black-box on the official Saturn 2 trial.
+
+| LYNX engine | Original | Config 150 → 152 | Design 150 → 152 | Round-152b changes |
+|---|---|---|---|---|
+| Ember Saturator | Saturn 2 | 8 → 9 | 8 → 8 | each crossover's own slope (6 … 48 dB/oct, exact), linear phase (zero-phase bands, 3072-sample latency), modulation (2 LFOs, envelope follower, 4 slots, the reference's laws), Breakdown's pitch drop on Collapse; translated |
+| LYNX Tune | Waves Tune Real-Time | 9 → 10 | 8 → 8 | Group Octaves off (per-key statuses), MIDI reference tone |
+
 ## Round 150: what changed (config / design, after 147 → after 150)
 
 Round 150 (`docs/analise/REA_rodada150.md`, sub-rounds `REA_rodada150a.md` / `REA_rodada150b.md`).
@@ -379,15 +388,15 @@ sources, 50 modulation slots).
 | Drag a band's handle = drive, drag a crossover | ✅ | |
 | Up to 6 bands | ✅ | round 150b: six (the Bands button in the bottom bar: 1 … 6; double-click splits up to six; crossovers 4 / 5 appended); translated from Saturn 2 states with 5 / 6 bands |
 | Floating band panel: power, style button, MIX, FEEDBACK + FREQ, DYNAMICS, big DRIVE, TONE faders, LEVEL | ✅ | round 128: the same order — power / solo / mute, style, MIX, FEEDBACK, FREQ, DYNAMICS, DRIVE, BASS / MID / TREBLE / PRESENCE faders, LEVEL |
-| 28 styles in 6 families | ✅ | round 150b: a per-band **Character** menu with 28 LYNX-named voicings measured black-box on the trial's 28 styles (static curve, its drive law over 0–100 %, level, and the tone: 0–1.2 dB rms on the level curves and 0–1.4 dB rms on the tone for the 23 saturation / amp / transformer styles); the 5 effect styles: Foldback ≈ a sine fold (fit ≤ 1.3 dB to 60 % drive), Smudge / Destroy level-only, Breakdown / Rectify not static in the reference (LYNX: a gentle saturation / a full-wave rectifier); translated per band from Saturn 2 states. The 4-family Style menu stays (Character Off) |
+| 28 styles in 6 families | ✅ | round 152b: Breakdown measured black-box — a pitch drop of 24 semitones × drive at every level and frequency, its level curve refitted (0.02 – 0.37 dB rms over seven levels): LYNX's "Collapse" now pitches down the same way (projects saved before keep the static stand-in); the amps' level "memory" re-measured at 2 ms resolution: it settles within 20 ms (≤ 1.5 dB after 10 ms, none from 50 ms), so nothing to model; Smudge (a smeared, delayed, modulated copy) and Destroy (a level-dependent quantiser) stay static stand-ins. Round 150b: a per-band **Character** menu with 28 LYNX-named voicings measured black-box on the trial's 28 styles (static curve, its drive law over 0–100 %, level, and the tone: 0–1.2 dB rms on the level curves and 0–1.4 dB rms on the tone for the 23 saturation / amp / transformer styles); the 5 effect styles: Foldback ≈ a sine fold (fit ≤ 1.3 dB to 60 % drive), Smudge / Destroy level-only, Breakdown / Rectify not static in the reference (LYNX: a gentle saturation / a full-wave rectifier); translated per band from Saturn 2 states. The 4-family Style menu stays (Character Off) |
 | Per-band tone: Bass / Mid / Treble / Presence | ✅ | round 128: ±18 dB (Saturn ±24) on the band's saturated signal — LYNX's own curves (shelf 120 Hz, bell 800 Hz, shelf 3.5 kHz, bell 6 kHz); the global tilt / cuts stay as LYNX extras in the bottom bar |
 | Per-band power, solo, mute | ✅ | round 128 (panel buttons, tags on the display) |
 | Drive pan (L / R), band pan | ✅ | round 147b: per band DRIVE PAN (beside the drive) and PAN (under the level) [EXEC trial: the far channel's drive × (1 − \|pan\|) on the 0–100 % scale; the band pan's far side 1 − \|pan\|]; translated from Saturn 2 states |
 | Feedback amount / frequency | ✅ | round 128: a band-passed loop around the shaper (10 Hz – 1 kHz, loop gain up to 0.9) |
 | Dynamics (compress / expand the band) | ✅ | round 128: −1 … +1, the band's level follows its input level |
-| Modulation (+ Add Modulation: XLFO, EG, EF, MIDI, XY, slots) | ❌ | |
-| Crossover slope (bottom bar) | ✅ | global (original per band) |
-| Linear phase / minimum phase | ❌ | |
+| Modulation (+ Add Modulation: XLFO, EG, EF, MIDI, XY, slots) | ⚠️ | round 152b: a **Mod** page in the band panel — two LFOs (rate 0.02 – 500 Hz with the reference's knob law; Sine / Triangle / Square / Ease in / Ease out = its two-step XLFO with the four glide functions or none), an envelope follower (attack 1 ms – 1 s, release 50 ms – 5 s, the reference's laws; mean-square follower fitted to 0.018 source units rms) and four slots source → target × amount (27 targets: in / out gain, mix, each band's drive / level / mix, the five crossovers; the reference's level law and target ranges) [EXEC trial]; translated (XLFO 1 / 2, EF 1, the first four usable slots). Not: the 16-step editor, EGs, XY, MIDI sources, 50 slots |
+| Crossover slope (bottom bar) | ✅ | global; round 152b: each crossover its own slope (6 / 12 / 24 / 36 / 48 dB/oct or Global) in the band panel [EXEC trial: minimum phase = the first-order pair, LR2, LR4, LR6, LR8 — within 0.05 dB]; translated per band |
+| Linear phase / minimum phase | ✅ | round 152b: "Linear phase" in the band panel [EXEC trial: zero-phase bands 1 / (1 + (f/fc)^(slope/6)) on the analog axis, the bands sum to the delayed input; latency 3072 samples at 48 kHz] — LYNX's oversampler adds 55 samples; translated (state slot 696) |
 | High Quality mode (oversampling) | ✅ | "Oversampling 2x / 4x / 8x" |
 | Channel mode M/S | ✅ | round 147b: "Channel L/R \| M/S" in the bottom bar [EXEC trial: M = (L + R) / 2, S = (R − L) / 2 through the bands' two channels; drive pan and band pan then balance mid / side]; translated (state slot 695) |
 | In / Out gain + mix | ✅ | round 128: In (±24 dB) in the bottom bar; Out; Dry / wet |
@@ -398,6 +407,8 @@ sources, 50 modulation slots).
 **Round 147b:** configuration 6 → 7 (channel mode M/S, drive pan, band pan, measured on the trial and translated), design 7 → 7. Remaining: 6 bands, 28 styles, modulation, linear phase.
 
 **Round 150b (after 150):** configuration 7 → 8 (six bands, the 28 measured characters, input / output pan, all translated), design 7 → 8 (Character menu in the band panel, Bands 1 … 6, In / Out pan in the strip). Remaining: modulation, linear phase, per-band crossover slopes, the effect styles' time-varying behaviour.
+
+**Round 152b (after 152):** configuration 8 → 9 (each crossover's slope, linear phase, a modulation subset with the reference's laws, Breakdown's pitch drop; all translated), design 8 → 8 (the Mod page and the slope / linear-phase controls in the band panel; Saturn's modulation is drawn as draggable sources and slot cables — LYNX lists them). Remaining: the step-LFO editor (16 steps), EGs / XY / MIDI sources, Smudge / Destroy, the High Quality mode's latencies (Saturn: 0 / 8 / 9 samples; LYNX always oversamples).
 
 ## Aether ← Fresh Air
 
@@ -1073,14 +1084,14 @@ positions against wtune.png once it exists.
 | Range | keyboard span with draggable boundary handles + presets Bass / Baritone / Tenor / Alto / Mezzo / Soprano / Generic; notes outside → **bypassed** | "Input type" menu (Soprano / Alto-Tenor / Low male / Instrument) = detector range | ✅ | round 147b: the range bar over the keys (drag a boundary), seven presets in the keyboard strip (LYNX's spans [model]: classical voice ranges ± a third; they also pick the detector's input type), notes sung outside pass uncorrected |
 | Keyboard | multi-octave piano at the bottom, per-note status area | one octave of on/off key toggles at the bottom ("TARGET NOTES") | ✅ | round 128: four octaves; round 147b: 2–7 octaves shown, scrollable (see navigation) |
 | Note status per key | Legal / Illegal / Illegal-Pitch-Up / Illegal-Pitch-Down / Bypass (click cycles) | on / off | ✅ | round 128: Bypass mode; round 147b: REMOVE mode cycles legal → illegal → illegal up → illegal down (arrows on the key; an illegal note's direction picks the next legal note up / down) |
-| Group Octaves | switch (per-note edits apply to all octaves) | always grouped | ⚠️ | per-octave statuses would need 128 per-key values; LYNX keeps the grouped behaviour (the reference's default) |
+| Group Octaves | switch (per-note edits apply to all octaves) | always grouped | ✅ | round 152b: "Group oct." in the keyboard strip (on by default = as before); off = a click edits that key alone (REMOVE cycles its status, BYPASS toggles it; an outline marks a key with its own status), the correction picks targets per key (MIDI 24 … 119, saved in a packed key map); Reset clears it; Send / Receive carry it [MANUAL S1 p.17] |
 | Reset Scale / Send Scale to All / Receive (key) | buttons | — (key comes from translation / project key) | ✅ | round 147b: RESET SCALE in the keyboard strip; round 150b: SEND (this key, scale, note statuses / bypasses / directions and range to every other LYNX Tune in the project whose RECEIVE is on; one undo step) and RECEIVE (a saved switch, on by default; switching it on takes the scale sent last in this LYNX session) |
 | Keyboard view / navigation buttons | yes | — | ✅ | round 147b: − / + (more / fewer octaves, 2–7) and ◀ / ▶ (scroll by an octave) in the keyboard strip |
 | Central display | target note name + correction amount in cents | `pitchring`: note name, ±100 c ring, sung offset + octave | ✅ | |
 | Scrolling pitch graph | not in WTRT (guide lists none) | `pitchtrace` (input vs corrected, 8 s) | ➕ | Auto-Tune-style; useful |
 | Input / output meters | −28 … 0 dBFS | — | ✅ | round 135w: IN / OUT meters on the "Real-time" page |
 | MIDI Target Pitch | MIDI note forces the target (Speed/NT timing) | "MIDI channel" (held pitch classes become the targets) | ⚠️ | pitch class only, no octave |
-| MIDI Reference Tone + level | tone generator ±18 dB | — | ❌ | |
+| MIDI Reference Tone + level | tone generator ±18 dB | — | ✅ | round 152b: "Ref. tone" + level (±18 dB) on the Real-time page — the notes held on the MIDI channel play as sines at the reference pitch (0 dB = −12 dBFS peak per note [model]) [MANUAL S1 p.21] |
 | Latency | reports 0; real 0–4 ms dynamic | ~25 ms reported + PDC; "Low latency" toggle | ⚠️ | ➕ toggle; different by design |
 | Transpose | — | ±12 st stepper | ➕ | |
 | Tracking | — | knob | ➕ | |
@@ -1093,6 +1104,8 @@ positions against wtune.png once it exists.
 **Round 147b:** configuration 8 → 9, design 6 → 7 (the keyboard: note statuses with directions, the range bar and presets, Reset scale, the view's navigation). Remaining: Group Octaves off, Send / Receive, MIDI reference tone.
 
 **Round 150b (after 150):** configuration 9 → 9, design 7 → 8 (Send / Receive in the keyboard strip). Remaining: Group Octaves off, MIDI reference tone.
+
+**Round 152b (after 152):** configuration 9 → 10 (Group Octaves off with per-key statuses, the MIDI reference tone), design 8 → 8. Remaining: the 44 scale types (13 + Custom here), Reference pitch ±100 c, MIDI Target Pitch with octaves.
 
 **Scores** — configuration: 4/10 (for a Waves Tune RT user: key/scale/formant/time are there, but Speed, Tolerance,
 Vibrato, Correction %, note statuses and range bypass are not), design: 5/10 (note display centre + keyboard at the
