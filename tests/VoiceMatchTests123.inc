@@ -113,11 +113,11 @@ TEST (opto_and_program_compressor_voicings_round123)
     // her CLA-2A: gain 48.96, peak reduction 62.6, compress, Hi Freq 50 -> Glow Leveler "opto classic", dials 1:1
     std::string values;
     for (int i = 0; i < 208; ++i)
-        values += i == 38 ? "48.96 " : i == 74 ? "62.6 " : i == 153 ? "50 " : "0 ";
+        values += i == 38 ? "48.96 " : i == 74 ? "62.6 " : i == 153 ? "50 " : i == 204 ? "100 " : i == 140 ? "2 " : "0 "; // round 152: + Mix 100 %, Analog off (her states)
     int n = 0;
     auto s = vm123::wavesSlot ("CLA-2A", values.c_str(), n);
     namespace g = mixsuite::glow;
-    CHECK (n == 5 && s.kind == EffectKind::glowLeveler && s.params[g::voicing] == 1.0f);
+    CHECK (n == 8 && s.kind == EffectKind::glowLeveler && s.params[g::voicing] == 1.0f);
     CHECK (std::abs (s.params[g::peakReduction] - 0.626f) < 1e-5f && std::abs (s.params[g::gain] - 0.4896f) < 1e-5f);
     // 1 kHz steady gain vs the official plug-in's stairs: +16.0 dB below the threshold, -1.2 dB at -6 dBFS (her state)
     CHECK (std::abs (vm123::sineGainDb (s, 1000.0, -50.0) - 15.98) < 0.1);
