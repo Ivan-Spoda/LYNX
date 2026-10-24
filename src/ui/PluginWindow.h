@@ -40,6 +40,9 @@ void scanPluginsWithProgress (AudioEngine& engine, std::function<void (int)> onD
 juce::PopupMenu pluginProcessingMenu (AudioEngine& engine, const PluginRef& current, juce::AudioPluginInstance* instance,
                                       std::function<PluginRef* (Song&)> find);
 
-// Menus of known plugins (instruments or effects). `onChosen` receives the reference.
-void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instruments, std::function<void (PluginRef)> onChosen);
+// Menus of known plugins (instruments or effects): the favourites, then "More plugins..." (the plugin picker) and
+// the scan. `onChosen` receives the reference; from the picker (a window of its own, chosen later) it is only
+// called while `owner` (the component whose menu this is) still exists.
+void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instruments, std::function<void (PluginRef)> onChosen,
+                     juce::Component* owner = nullptr);
 } // namespace lynx

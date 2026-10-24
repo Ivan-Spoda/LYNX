@@ -5,6 +5,7 @@
 // FL's Sampler render test with one record changed).
 
 #include <array>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,8 @@ int flTimeKnobValue (double beats) noexcept;
 // key: (key − (120 − mid)) / 48 · pan (FL's "Mid" for keys, as FL plays it [EXEC]); velocity: 0.275 · pan ·
 // (v(velocity) − v(mid)), v = FL's velocity → volume curve (REA_rodada76 §1) [EXEC: fitted on FL's renders].
 float trackedPan (const ChannelMisc& misc, int key, float velocity, float notePan) noexcept;
+// The note's Mod X / Y (0..1, 0.5 = none) after the Vol / Key tracking's Mod X / Y knobs (REA round 151).
+std::pair<float, float> trackedModulation (const ChannelMisc& misc, int key, float velocity, float modX, float modY) noexcept;
 
 // FL's chord list (System/Config/Chords.map: "name,short name,interval,interval…" per line, line 0 the header): the
 // chord `index` as semitones above its root (0 first). Empty when the index is not in the text.

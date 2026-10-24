@@ -46,6 +46,7 @@ add_library(lynx_core STATIC
     src/core/FlWrapper.cpp
     src/core/FlPluginDb.cpp
     src/core/MissingFiles.cpp
+    src/core/PluginCatalog.cpp
     src/core/ProjectSafety.cpp
     src/core/PluginSubstitutes.cpp
     src/core/Preferences.cpp
@@ -329,7 +330,8 @@ if(LYNX_BUILD_APP)
         src/ui/ClipProperties.cpp
         src/ui/PluginMonitorWindow.cpp
         src/ui/TouchKeyboard.cpp
-        src/ui/QuickAddPalette.cpp)
+        src/ui/QuickAddPalette.cpp
+        src/ui/PluginPicker.cpp)
 
     target_include_directories(LYNX PRIVATE third_party/clap/include)
 
