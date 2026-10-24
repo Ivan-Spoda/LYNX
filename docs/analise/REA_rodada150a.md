@@ -104,7 +104,7 @@ tests/Parity147aTests.inc: the parameter-block check follows the appended parame
 
 ## Where I stopped
 
-- Done: §2 – §4, PARITY rows (Echo Mode Dual / Ping-Pong, Tweak L/R Offset, Echo Style menu) and the score note.
+- Done: §2 – §4, PARITY rows (Echo Mode Dual / Ping-Pong, Tweak L/R Offset, Echo Style menu) and the score note. build-local with the FL Data dir: 1 648 142 checks, 0 failures; Windows build OK; editor screenshot `D:\lynx-work\parity150\a\ui\shots\Echoform-voicing.png` (`--plugui` now also writes it).
 - Not done: the offset law at offsets other than 8 ms (the Tweak panel is not reachable through host parameters);
   the Diffused style's static right side (its wobble only on the left; Echoform swings both); EchoBoy's per-style
   Style Edit details (per-repeat decay, Mid Res); PrimalTap's per-tap VCO; Auto-pan ← PanMan Tweak and Foil ←
