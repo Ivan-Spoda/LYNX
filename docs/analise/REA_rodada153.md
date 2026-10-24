@@ -198,4 +198,10 @@ per-track low-latency monitoring; Patcherize; browser tags; batch render of sele
 only with a bundled open model (Demucs, MIT) — a separate decision because of the download size.
 
 ## Where I stopped
-(updated at the end of the round)
+- Done and tested (core tests 0 failures; Windows build + `--selftest` OK; `--snapshot` of the Piano Roll checked:
+  coloured notes, the colour swatch and a key label): §2.1 … §2.7.
+- Not done (see §3): note grouping, per-clip pan, MIDI clock sync, per-track low-latency monitoring, Patcherize,
+  browser tags, performance mode; stem separation and Loop Starter content need a decision (model download / online
+  content).
+- Note for the next round: after header edits clear the build's zig cache — a stale cache gave a LYNX.exe that
+  crashed in `--selftest` (exit 5 = access violation) until the cache was cleared.
