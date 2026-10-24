@@ -177,7 +177,8 @@ target_sources(lynx_core PRIVATE
     src/core/Mp3Encoder.cpp
     src/core/PluginMonitor.cpp
     src/core/ProjectContents.cpp
-    src/core/PlaylistOps.cpp)
+    src/core/PlaylistOps.cpp
+    src/core/TempoDetect.cpp)
 
 # LAME's libmp3lame (LGPL; third_party/lame, encoder only, configured by third_party/lame/src/config.h)
 file(GLOB LAME_SOURCES third_party/lame/src/*.c)
@@ -268,6 +269,7 @@ if(LYNX_BUILD_APP)
         src/engine/ClapFormat.cpp
         src/engine/Vst2Format.cpp
         src/engine/MidiFileIo.cpp
+        src/engine/AudioLogger.cpp
         src/engine/PreviewPlayer.cpp
         src/ui/MainComponent.cpp
         src/ui/ChannelRackComponent.cpp

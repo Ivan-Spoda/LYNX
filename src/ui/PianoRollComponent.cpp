@@ -179,6 +179,21 @@ PianoRollComponent::PianoRollComponent (AudioEngine& e)
     slideButton.setColour (juce::TextButton::buttonOnColourId, theme::colour::accent);
     addAndMakeVisible (slideButton);
 
+    colourButton.setTooltip (tr ("Note colour: new notes get this colour. Click: choose it, colour the selection (Alt+C), "
+                                 "select by colour (Shift+C)"));
+    ui::setQuickTip (colourButton, tr ("Note colour"));
+    colourButton.setWantsKeyboardFocus (false);
+    colourButton.setMouseClickGrabsKeyboardFocus (false);
+    colourButton.onClick = [this] { showColourMenu(); };
+    addAndMakeVisible (colourButton);
+
+    chordLabel.setJustificationType (juce::Justification::centred);
+    chordLabel.setFont (theme::font (theme::type::caption, true));
+    chordLabel.setColour (juce::Label::textColourId, theme::colour::textPrimary);
+    chordLabel.setTooltip (tr ("Chord: the chord of the keys held on the MIDI keyboard or the typing piano, else of the selected notes"));
+    chordLabel.setInterceptsMouseClicks (true, false);
+    addAndMakeVisible (chordLabel);
+
     for (auto* box : { &chordBox, &scaleBox })
     {
         box->setWantsKeyboardFocus (false);
@@ -354,6 +369,7 @@ void PianoRollComponent::resized()
     place (snapBox, 128);
     place (ghostButton, h);
     place (slideButton, 54, true);
+    place (colourButton, h, true);
     place (chordBox, 86, true);
     place (scaleBox, 150, true);
     if (scaleBox.isVisible())
@@ -361,6 +377,7 @@ void PianoRollComponent::resized()
     else
         scaleSnapButton.setVisible (false);
     place (moreButton, h);
+    place (chordLabel, 84, true);
     laneBox.setBounds (2, velocityArea().getY() + 4, keyboardWidth - 4, 20);
     overview.setBounds (keyboardWidth, toolbarHeight, getWidth() - keyboardWidth - scrollBarSize, overviewHeight);
     vBar.setBounds (getWidth() - scrollBarSize, headerHeight, scrollBarSize, getHeight() - headerHeight - velocityHeight);
@@ -401,7 +418,16 @@ void PianoRollComponent::scrollToNotes (bool fitPattern)
 std::vector<int> PianoRollComponent::chordIntervals() const
 {
     const auto index = juce::jlimit (0, (int) chords().size() - 1, chordBox.getSelectedId() - 1);
-    return chords()[(std::size_t) index].intervals;
+    auto intervals = chords()[(std::size_t) index].intervals;
+    // FL 2026's top-down stamp (REA round 153): the clicked key is the chord's highest note
+    if (chordTopDown && intervals.size() > 1)
+    {
+        const auto top = *std::max_element (intervals.begin(), intervals.end());
+        for (auto& i : intervals)
+            i -= top;
+        std::reverse (intervals.begin(), intervals.end()); // the clicked (top) note first: it leads the drag
+    }
+    return intervals;
 }
 
 int PianoRollComponent::scaleIndex() const
@@ -546,6 +572,7 @@ void PianoRollComponent::drumPaintAt (juce::Point<int> p, bool snapOn)
     n.length = cell;
     n.key = key;
     n.channel = channel;
+    n.colour = noteColour;
     editNotes ([&n] (Pattern& pat) { noteedit::paste (pat, { n }, 0); });
 
     if (key != previewKey)
@@ -732,7 +759,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
             const auto hovered = i == hover.note && drag == Drag::none;
             const auto r = juce::Rectangle<float> ((float) tickToX ((double) n.start), (float) keyToY (n.key) + 1,
                                                    juce::jmax (4.0f, (float) (n.length * pixelsPerTick) - 1.0f), (float) rowHeight - 2);
-            auto fill = selected ? accentHover.brighter (0.15f) : n.muted ? noteMuted : theme::noteColour (n.velocity);
+            auto fill = selected ? accentHover.brighter (0.15f) : n.muted ? noteMuted : theme::noteGroupColour (n.colour, n.velocity);
             if (hovered)
                 fill = fill.brighter (0.18f);
             g.setColour (fill);
@@ -746,6 +773,12 @@ void PianoRollComponent::paint (juce::Graphics& g)
                 const auto gripX = hover.zone == gesture::Zone::rightEdge ? r.getRight() - 3.0f : r.getX() + 1.0f;
                 g.setColour (textPrimary);
                 g.fillRoundedRectangle (gripX, r.getY() + 2.0f, 2.0f, juce::jmax (2.0f, r.getHeight() - 4.0f), 1.0f);
+            }
+
+            if (n.group != 0 && r.getWidth() > 10.0f) // grouped: a small link mark at the top right
+            {
+                g.setColour (bg0.withAlpha (0.7f));
+                g.fillEllipse (r.getRight() - 6.0f, r.getY() + 1.5f, 3.5f, 3.5f);
             }
 
             if (n.porta) // porta: slanted stroke at the start, like the glide
@@ -882,7 +915,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
 
             const auto x = (float) tickToX ((double) n.start);
             const auto top = (float) lane.getBottom() - 2.0f - usable * laneValue (n);
-            auto colour = isSelected (i) ? accentHover.brighter (0.15f) : theme::noteColour (n.velocity);
+            auto colour = isSelected (i) ? accentHover.brighter (0.15f) : theme::noteGroupColour (n.colour, n.velocity);
             if (n.muted)
                 colour = noteMuted;
             const auto hovered = i == hover.note && drag == Drag::none;
@@ -943,6 +976,10 @@ void PianoRollComponent::paint (juce::Graphics& g)
         g.fillRect (keys);
         const auto fontHeight = gesture::labelHeight (rowHeight);
         const auto blackWidth = keyboardWidth * 3 / 5;
+        static const std::map<int, std::string> noLabels;
+        const auto selectedChannel = engine.getSelectedChannel();
+        const auto& labels = selectedChannel >= 0 && selectedChannel < (int) song.channels.size()
+                                 ? song.channels[(std::size_t) selectedChannel].keyLabels : noLabels;
 
         for (int key = 0; key < 128; ++key)
         {
@@ -977,6 +1014,17 @@ void PianoRollComponent::paint (juce::Graphics& g)
                 const auto area = black ? juce::Rectangle<int> (2, y, blackWidth - 4, rowHeight)
                                         : juce::Rectangle<int> (blackWidth, y, keyboardWidth - blackWidth - 5, rowHeight);
                 g.drawText (keyName (key), area, black ? juce::Justification::centredLeft : juce::Justification::centredRight, false);
+            }
+
+            // a key label (FL 2026's custom key labels) replaces the name on the white part of the key
+            if (const auto label = labels.find (key); label != labels.end() && rowHeight >= 8)
+            {
+                const auto area = juce::Rectangle<int> (black ? blackWidth + 2 : 3, y, keyboardWidth - (black ? blackWidth + 2 : 3) - 4, rowHeight);
+                g.setColour (black ? keyWhite : colour);
+                g.fillRect (area);
+                g.setFont (theme::font (fontHeight, false));
+                g.setColour (pressed ? onAccent : bg0);
+                g.drawFittedText (juce::String::fromUTF8 (label->second.c_str()), area.reduced (1, 0), juce::Justification::centredLeft, 1, 0.8f);
             }
         }
 
@@ -1174,10 +1222,11 @@ void PianoRollComponent::paintNoteAt (std::int64_t start, int key, bool monophon
     n.key = key;
     n.channel = engine.getSelectedChannel();
     n.slide = slideButton.getToggleState();
+    n.colour = noteColour;
 
     std::vector<Note> stamp;
     for (auto interval : chordIntervals())
-        if (n.key + interval <= 127)
+        if (n.key + interval <= 127 && n.key + interval >= 0)
         {
             auto chordNote = n;
             chordNote.key = snapKey (n.key + interval); // with scale snap the chord follows the scale
@@ -1239,6 +1288,12 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
             drag = Drag::keySelect;
             selectionBefore = e.mods.isShiftDown() ? selection : std::vector<int> {};
             mouseDrag (e);
+            return;
+        }
+
+        if (e.mods.isRightButtonDown()) // key labels (FL 2026: right-click a key > Rename)
+        {
+            showKeyMenu (yToKey (e.y));
             return;
         }
 
@@ -1455,7 +1510,7 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
     // Pencil (and Brush on an existing note): Shift+drag on a note drags a copy
     if (hit >= 0 && e.mods.isShiftDown() && ! rightEdge && ! leftEdge)
     {
-        const auto sources = isSelected (hit) ? selection : std::vector<int> { hit };
+        const auto sources = isSelected (hit) ? selection : notetools::groupOf (currentPattern (engine.getSong()), hit);
         const auto grabbedAt = (std::size_t) (std::find (sources.begin(), sources.end(), hit) - sources.begin());
         std::vector<int> added;
 
@@ -1464,7 +1519,10 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
         for (auto i : sources)
             ordered.push_back (currentPattern (engine.getSong()).notes[(std::size_t) i]);
 
-        editNotes ([&] (Pattern& p) { added = noteedit::paste (p, ordered, 0); });
+        editNotes ([&] (Pattern& p) {
+            added = noteedit::paste (p, ordered, 0);
+            notetools::regroup (p, added);
+        });
         setSelection (added);
         dragIndices = added;
         dragOriginals = ordered;
@@ -1477,8 +1535,11 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
 
     if (hit >= 0)
     {
-        if (! isSelected (hit))
-            setSelection ({});
+        if (! isSelected (hit)) // a grouped note brings its group along (FL's note groups)
+        {
+            const auto members = notetools::groupOf (currentPattern (engine.getSong()), hit);
+            setSelection (members.size() > 1 ? members : std::vector<int> {});
+        }
 
         const auto& notes = currentPattern (engine.getSong()).notes;
         const auto& n = notes[(std::size_t) hit];
@@ -1526,10 +1587,11 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
     n.key = snapKey (yToKey (e.y));
     n.channel = engine.getSelectedChannel();
     n.slide = slideButton.getToggleState();
+    n.colour = noteColour;
 
     std::vector<Note> stamp;
     for (auto interval : chordIntervals())
-        if (n.key + interval <= 127)
+        if (n.key + interval <= 127 && n.key + interval >= 0)
         {
             auto chordNote = n;
             chordNote.key = snapKey (n.key + interval); // with scale snap the chord follows the scale
@@ -2453,6 +2515,7 @@ void PianoRollComponent::showMoreMenu()
     menu.addItem (tr ("Rotate right within the bar") + "\tCtrl+Shift+Right", [this, grid, bar] { runOperation ([grid, bar] (Pattern& p, const std::vector<int>& t) { noteedit::rotate (p, t, grid, bar, 1); return t; }); });
     menu.addSeparator();
     menu.addSubMenu (tr ("Tools"), toolsMenu());
+    menu.addSubMenu (tr ("Select"), selectMenu());
     {
         juce::PopupMenu zoom;
         zoom.addItem (tr ("Zoom in") + "\tPageUp", [this] { runAction ("pianoRoll.zoomIn"); });
@@ -2470,6 +2533,7 @@ void PianoRollComponent::showMoreMenu()
     }
     menu.addSeparator();
     menu.addItem (tr ("Snap notes to the scale"), scaleIndex() > 0, scaleSnap, [this] { setScaleSnap (! scaleSnap); });
+    menu.addItem (tr ("Chord stamp: the clicked key is the top note"), true, chordTopDown, [this] { chordTopDown = ! chordTopDown; });
     menu.addItem (tr ("Move the notes onto the scale"), scaleIndex() > 0, false, [this] {
         const auto root = scaleRoot(), scale = scaleIndex();
         runOperation ([root, scale] (Pattern& p, const std::vector<int>& t) { notetools::snapNotesToScale (p, t, root, scale); return t; });
@@ -2634,6 +2698,168 @@ void PianoRollComponent::centreOnPlayhead()
     repaint();
 }
 
+void PianoRollComponent::ColourSwatch::paintButton (juce::Graphics& g, bool over, bool down)
+{
+    auto r = getLocalBounds().toFloat().reduced (3.0f);
+    g.setColour (theme::noteGroupColour (colourIndex, 0.85f));
+    g.fillRoundedRectangle (r, 3.0f);
+    g.setColour (over || down ? theme::colour::textPrimary : theme::colour::bg0.withAlpha (0.7f));
+    g.drawRoundedRectangle (r, 3.0f, 1.0f);
+    g.setColour (theme::colour::bg0.withAlpha (0.85f));
+    g.setFont (theme::font (theme::type::caption, true));
+    g.drawText (juce::String (colourIndex + 1), r, juce::Justification::centred, false);
+}
+
+void PianoRollComponent::colourSelection (int colour)
+{
+    const auto target = selection;
+    if (target.empty())
+        return;
+    editNotes ([&] (Pattern& p) { notetools::setColour (p, target, colour); });
+    repaint();
+}
+
+void PianoRollComponent::selectByColour (int colour)
+{
+    setSelection (notetools::selectByColour (currentPattern (engine.getSong()), channelNotes(), colour));
+}
+
+void PianoRollComponent::showColourMenu()
+{
+    juce::PopupMenu menu;
+    menu.addSectionHeader (tr ("Colour for new notes"));
+    for (int c = 0; c < noteColourCount; ++c)
+        menu.addColouredItem (c + 1, tr ("Colour {0}", { juce::String (c + 1) }), theme::noteGroupColour (c, 0.9f), true, c == noteColour);
+    menu.addSeparator();
+    menu.addItem (1000, tr ("Colour the selected notes with it") + "\tAlt+C", ! selection.empty());
+    {
+        juce::PopupMenu colourAs;
+        for (int c = 0; c < noteColourCount; ++c)
+            colourAs.addColouredItem (2001 + c, tr ("Colour {0}", { juce::String (c + 1) }), theme::noteGroupColour (c, 0.9f), true, false);
+        menu.addSubMenu (tr ("Colour the selected notes"), colourAs, ! selection.empty());
+    }
+    {
+        juce::PopupMenu select;
+        const auto& pattern = currentPattern (engine.getSong());
+        for (int c = 0; c < noteColourCount; ++c)
+            select.addColouredItem (3001 + c, tr ("Colour {0}", { juce::String (c + 1) }), theme::noteGroupColour (c, 0.9f),
+                                    ! notetools::selectByColour (pattern, channelNotes(), c).empty(), false);
+        menu.addSubMenu (tr ("Select by colour") + "\tShift+C", select);
+    }
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&colourButton), [safe = juce::Component::SafePointer (this)] (int id) {
+        if (safe == nullptr || id <= 0)
+            return;
+        if (id <= noteColourCount)
+        {
+            safe->noteColour = id - 1;
+            safe->colourButton.colourIndex = id - 1;
+            safe->colourButton.repaint();
+        }
+        else if (id == 1000)
+            safe->colourSelection (safe->noteColour);
+        else if (id > 2000 && id <= 2000 + noteColourCount)
+            safe->colourSelection (id - 2001);
+        else if (id > 3000 && id <= 3000 + noteColourCount)
+            safe->selectByColour (id - 3001);
+    });
+}
+
+juce::PopupMenu PianoRollComponent::selectMenu()
+{
+    // FL's piano roll Select submenu (its manual): all, invert, odd, random, muted, overlapping, stacked, by colour
+    juce::PopupMenu menu;
+    auto choose = [this] (std::function<std::vector<int> (const Pattern&, const std::vector<int>&)> pick) {
+        setSelection (pick (currentPattern (engine.getSong()), channelNotes()));
+    };
+    menu.addItem (tr ("All") + "\tCtrl+A", [this] { selectAll(); });
+    menu.addItem (tr ("Invert selection") + "\tShift+I", [this] { runAction ("pianoRoll.invertSelection"); });
+    menu.addItem (tr ("Deselect") + "\tEsc", ! selection.empty(), false, [this] { setSelection ({}); });
+    menu.addSeparator();
+    menu.addItem (tr ("Odd notes (every other one)"), [choose] { choose ([] (const Pattern& p, const std::vector<int>& t) { return notetools::selectOdd (p, t); }); });
+    menu.addItem (tr ("Even notes"), [choose] {
+        choose ([] (const Pattern& p, const std::vector<int>& t) { return notetools::invertSelection (t, notetools::selectOdd (p, t)); });
+    });
+    menu.addItem (tr ("Random (half of the notes)"), [choose] {
+        const auto seed = (std::uint32_t) juce::Random::getSystemRandom().nextInt();
+        choose ([seed] (const Pattern& p, const std::vector<int>& t) { return notetools::selectRandom (p, t, 0.5f, seed); });
+    });
+    menu.addItem (tr ("Muted notes"), [choose] { choose ([] (const Pattern& p, const std::vector<int>& t) { return notetools::selectMuted (p, t); }); });
+    menu.addItem (tr ("Overlapping notes"), [choose] { choose ([] (const Pattern& p, const std::vector<int>& t) { return notetools::selectOverlapping (p, t); }); });
+    menu.addItem (tr ("Stacked notes (hidden duplicates)"), [choose] { choose ([] (const Pattern& p, const std::vector<int>& t) { return notetools::selectStacked (p, t); }); });
+    menu.addItem (tr ("Same colour as the selection") + "\tShift+C", [this] { runAction ("pianoRoll.selectByColour"); });
+    menu.addSeparator();
+    menu.addItem (tr ("Group the selected notes") + "\tShift+G", selection.size() > 1, false, [this] { runAction ("pianoRoll.groupNotes"); });
+    menu.addItem (tr ("Ungroup the selected notes") + "\tAlt+G", ! selection.empty(), false, [this] { runAction ("pianoRoll.ungroupNotes"); });
+    return menu;
+}
+
+void PianoRollComponent::showKeyMenu (int key)
+{
+    const auto channel = engine.getSelectedChannel();
+    if (channel < 0 || channel >= (int) engine.getSong().channels.size() || key < 0 || key > 127)
+        return;
+    const auto& labels = engine.getSong().channels[(std::size_t) channel].keyLabels;
+    const auto current = labels.find (key);
+    auto setLabels = [this, channel] (std::function<void (std::map<int, std::string>&)> edit) {
+        engine.editSong ([channel, edit] (Song& s) {
+            if (channel < (int) s.channels.size())
+                edit (s.channels[(std::size_t) channel].keyLabels);
+        });
+        repaint();
+    };
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader (keyName (key));
+    menu.addItem (tr ("Rename this key..."), [key, setLabels, text = current != labels.end() ? current->second : std::string()] {
+        auto* window = new juce::AlertWindow (tr ("Key label"), tr ("The name shown on {0} for this channel", { keyName (key) }), juce::MessageBoxIconType::NoIcon);
+        window->addTextEditor ("label", juce::String::fromUTF8 (text.c_str()));
+        window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+        window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        window->enterModalState (true, juce::ModalCallbackFunction::create ([window, key, setLabels] (int result) {
+                                     if (result != 1)
+                                         return;
+                                     const auto label = window->getTextEditorContents ("label").trim().toStdString();
+                                     setLabels ([key, label] (std::map<int, std::string>& l) {
+                                         if (label.empty())
+                                             l.erase (key);
+                                         else
+                                             l[key] = label;
+                                     });
+                                 }),
+                                 true);
+    });
+    menu.addItem (tr ("Remove this key's label"), current != labels.end(), false,
+                  [setLabels, key] { setLabels ([key] (std::map<int, std::string>& l) { l.erase (key); }); });
+    menu.addSeparator();
+    menu.addItem (tr ("Label the keys with the General MIDI drum map"), [setLabels] {
+        setLabels ([] (std::map<int, std::string>& l) {
+            for (int k = 35; k <= 81; ++k)
+                if (const auto* name = notetools::generalMidiDrumName (k))
+                    l[k] = name;
+        });
+    });
+    menu.addItem (tr ("Remove all key labels of this channel"), ! labels.empty(), false,
+                  [setLabels] { setLabels ([] (std::map<int, std::string>& l) { l.clear(); }); });
+    menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+}
+
+void PianoRollComponent::updateChordReadout()
+{
+    auto keys = engine.heldInputKeys();
+    if (keys.size() < 2)
+    {
+        keys.clear();
+        const auto& notes = currentPattern (engine.getSong()).notes;
+        for (auto i : selection)
+            if (i >= 0 && i < (int) notes.size())
+                keys.push_back (notes[(std::size_t) i].key);
+    }
+    const auto chord = prtools::detectChord (keys);
+    const auto text = chord ? juce::String (chord->name) : juce::String();
+    if (chordLabel.getText() != text)
+        chordLabel.setText (text, juce::dontSendNotification);
+}
+
 bool PianoRollComponent::runAction (const std::string& id)
 {
     auto is = [&id] (const char* name) { return id == name; };
@@ -2660,6 +2886,28 @@ bool PianoRollComponent::runAction (const std::string& id)
     else if (is ("pianoRoll.zoomAll")) zoomAll();
     else if (is ("pianoRoll.zoomSelection")) zoomToSelection();
     else if (is ("pianoRoll.centrePlayhead")) centreOnPlayhead();
+    else if (is ("pianoRoll.colourSelected")) colourSelection (noteColour);
+    else if (is ("pianoRoll.selectByColour"))
+    {
+        // the colour of the selected note (FL: the selection's colour), else the current note colour
+        const auto& notes = currentPattern (engine.getSong()).notes;
+        selectByColour (! selection.empty() && selection.front() < (int) notes.size() ? notes[(std::size_t) selection.front()].colour : noteColour);
+    }
+    else if (is ("pianoRoll.invertSelection")) setSelection (notetools::invertSelection (channelNotes(), selection));
+    else if (is ("pianoRoll.groupNotes") || is ("pianoRoll.ungroupNotes"))
+    {
+        const auto target = selection;
+        if (target.empty())
+            return true;
+        const auto group = is ("pianoRoll.groupNotes");
+        editNotes ([&] (Pattern& p) {
+            if (group)
+                notetools::groupNotes (p, target);
+            else
+                notetools::ungroupNotes (p, target);
+        });
+        repaint();
+    }
     else
         return false;
 
@@ -2808,7 +3056,10 @@ void PianoRollComponent::paste()
     // as in FL: pastes at the same position, already selected for dragging
     std::vector<int> added;
     const auto channel = engine.getSelectedChannel();
-    editNotes ([&added, channel] (Pattern& p) { added = noteedit::paste (p, clipboard, 0, channel); });
+    editNotes ([&added, channel] (Pattern& p) {
+        added = noteedit::paste (p, clipboard, 0, channel);
+        notetools::regroup (p, added); // copies of grouped notes form groups of their own
+    });
     setSelection (added);
     sortNotes();
 }
@@ -2822,7 +3073,10 @@ void PianoRollComponent::duplicateSelection()
 
     std::vector<int> added;
     const auto grid = gridTicks();
-    editNotes ([&added, &source, grid] (Pattern& p) { added = noteedit::duplicate (p, source, grid); });
+    editNotes ([&added, &source, grid] (Pattern& p) {
+        added = noteedit::duplicate (p, source, grid);
+        notetools::regroup (p, added);
+    });
     setSelection (added);
     sortNotes();
 }
@@ -3213,6 +3467,7 @@ void PianoRollComponent::timerCallback()
 {
     if (channelBox.getSelectedId() != engine.getSelectedChannel() + 1)
         refreshChannelBox();
+    updateChordReadout();
 
     auto& transport = engine.getTransport();
     auto tick = -1.0;

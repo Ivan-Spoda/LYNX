@@ -159,6 +159,18 @@ std::string chordName (const Chord& chord); // "Am7", "C/E"...
 // Roman numerals of the chords in the key of `tonic` ("I-V-vi-IV"), readable by parseProgression.
 std::string toNumerals (const std::vector<Chord>& chords, int tonic);
 
+// Chord detection (FL 2026's chord readout, LYNX's own rules; REA round 153): names the chord of a set of MIDI keys
+// (up to 10 are read, the rest ignored). Exact interval templates only (triads, sixths, sevenths, sus, add9, ninths,
+// power chord); the lowest key is preferred as the root, otherwise the chord is written over its bass ("Am7/C").
+// Returns nothing for fewer than two pitch classes or a set no template fits.
+struct DetectedChord
+{
+    int root = 0;      // pitch class
+    int bass = 0;      // pitch class of the lowest key
+    std::string name;  // "C", "F#m7", "Bbmaj7"... ("Am7/C" when the bass is not the root)
+};
+std::optional<DetectedChord> detectChord (std::vector<int> keys, bool preferFlats = false);
+
 struct ProgressionPreset
 {
     std::string name;          // "I-V-vi-IV: Hopeful"

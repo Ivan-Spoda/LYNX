@@ -15980,3 +15980,4 @@ TEST (fl_low_lifter_matches_fl_engine)
     CHECK (lynx::formatEffectParam (lynx::EffectKind::flLowLifter, 10, 0.775f, 120.0) == "80 Hz");
     CHECK (lynx::formatEffectParam (lynx::EffectKind::flLowLifter, 3, 0.721f, 120.0) == "-6.0 dB");
 }
+#include "Rea153Tests.inc"
