@@ -181,6 +181,7 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::foilPlate, "type" }, TR_NOOP ("The plate's metal: each one has its own brightness, density and decay") },
         { { K::foilPlate, "size" }, TR_NOOP ("Size of the plate: larger plates sound deeper") },
         { { K::foilPlate, "width" }, TR_NOOP ("Stereo width of the plate: 0 = mono, above 100 % = wider than the speakers") },
+        { { K::foilPlate, "view" }, TR_NOOP ("Full: every control of the plate; Plate: the one-knob panel of the Little Plate role (Low Cut, Decay, Mod, Mix)") },
         { { K::foilPlate, "infinite" }, TR_NOOP ("Holds the plate's tail for ever (the decay at its top): play into it to layer, switch off to let it fade") },
         // Nebula
         { { K::nebula, "mode" }, TR_NOOP ("The delay network: from clean echoes to huge, slowly building reverbs") },
@@ -357,6 +358,7 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::prismMultiband, "low slope" }, TR_NOOP ("Free layout: the steepness of the band's lower edge (6 to 48 dB/oct)") },
         { { K::prismMultiband, "high slope" }, TR_NOOP ("Free layout: the steepness of the band's upper edge (6 to 48 dB/oct)") },
         { { K::prismMultiband, "sc input" }, TR_NOOP ("What this band's detector hears: the plug-in's input or the external side chain (global: the External SC switch)") },
+        { { K::prismMultiband, "revision" }, TR_NOOP ("Round 152: the reference's attack in the gain stage, its narrow Dynamic-phase bands and the 0.8-octave minimum band; round 150: projects saved before") },
         { { K::prismMultiband, "detector" }, TR_NOOP ("Measured: the reference's attack, release and soft range (a range-limited band recovers at once); classic: the detector of projects saved before round 150") },
         // Sentry Gate
         { { K::sentryGate, "style" }, TR_NOOP ("Gate, expander or ducker, and how it opens") },

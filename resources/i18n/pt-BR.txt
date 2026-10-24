@@ -4230,3 +4230,5 @@ countries: br
 "Off|HP|LP" = "Desl.|PA|PB"
 "Trigger now" = "Disparar agora"
 "Random steps" = "Passos aleatórios"
+"Full: every control of the plate; Plate: the one-knob panel of the Little Plate role (Low Cut, Decay, Mod, Mix)" = "Completo: todos os controles da placa; Placa: o painel de um botão do papel do Little Plate (Low Cut, Decay, Mod, Mix)"
+"Round 152: the reference's attack in the gain stage, its narrow Dynamic-phase bands and the 0.8-octave minimum band; round 150: projects saved before" = "Rodada 152: o ataque da referência no estágio de ganho, suas bandas estreitas em fase dinâmica e a banda mínima de 0,8 oitava; rodada 150: projetos salvos antes"
