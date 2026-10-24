@@ -96,5 +96,13 @@ void clearHistory();
 // One sentence about what a control does (the reference reverbs' description line at the bottom of the window,
 // round 129), translated; empty when there is none. `param` is the parameter's EffectInfo name.
 juce::String describe (EffectKind kind, const char* param);
+
+// The description line while no control is under the mouse (round 135): "Mode: Plate — a plate: dense ...", empty
+// when the engine has no mode.
+juce::String modeLine (EffectKind kind, const EffectParams& params, double bpm);
+
+// The mix lock ("Keep the Mix when loading presets"), also toggled by a click on a LYNX engine's MIX caption (round 135).
+bool isMixLocked (EffectKind kind);
+void toggleMixLock (EffectKind kind);
 } // namespace pluginheader
 } // namespace lynx

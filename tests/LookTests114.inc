@@ -29,7 +29,7 @@ TEST (look114_apex_limiter_publishes_its_meters)
     CHECK (grDb > 5.0f && grDb < 7.5f);
     CHECK (std::abs (lastIn - 0.5f) < 0.01f);
     CHECK (lastOut > 0.9f && lastOut <= std::pow (10.0f, -0.1f / 20.0f) + 1e-4f);
-    CHECK (fx->controlOutput (5) == 0.0f);
+    CHECK (fx->controlOutput (5) < 0.0f); // round 135: output 5 is the integrated loudness (LUFS)
 }
 
 TEST (look114_reverb_panels_write_captions_above_their_knobs)

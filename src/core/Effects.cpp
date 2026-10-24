@@ -43,6 +43,7 @@
 #include "core/ApexLimiter.h"
 #include "core/DynamicsSuite.h"
 #include "core/VoiceTools.h"
+#include "core/VoiceShift.h"
 
 #include <algorithm>
 #include <atomic>
@@ -188,7 +189,26 @@ public:
     float controlOutput (int k) const noexcept override
     {
         return k == 0 ? meterGr.load (std::memory_order_relaxed) : k == 2 ? meterIn.load (std::memory_order_relaxed)
-             : k == 3 ? meterOut.load (std::memory_order_relaxed) : 0.0f;
+             : k == 3 ? meterOut.load (std::memory_order_relaxed) : k == 4 ? meterLimit.load (std::memory_order_relaxed) : 0.0f;
+    }
+
+    // round 135w: the reference's built-in 0 dBFS output limiter — the gain drops at once to keep every sample at or
+    // under 0 dBFS and recovers over 50 ms; meter 4 = its reduction this block (0..1 over 0..12 dB), the activity pill
+    void outputLimit (float* l, float* r, int n) noexcept
+    {
+        const auto rel = (float) (1.0 - std::exp (-1.0 / (0.05 * sampleRate)));
+        float most = 1.0f;
+        for (int i = 0; i < n; ++i)
+        {
+            const auto peak = std::max (std::abs (l[i]), std::abs (r[i]));
+            limitGain += rel * (1.0f - limitGain);
+            if (peak * limitGain > 1.0f)
+                limitGain = 1.0f / peak;
+            l[i] *= limitGain;
+            r[i] *= limitGain;
+            most = std::min (most, limitGain);
+        }
+        meterLimit.store (std::clamp (-20.0f * std::log10 (std::max (most, 1e-6f)) / 12.0f, 0.0f, 1.0f), std::memory_order_relaxed);
     }
 
     void process (float* l, float* r, int n, const EffectParams& params, double) noexcept override
@@ -207,7 +227,14 @@ public:
             v.gainDb = compMakeupDb (params[4]);
             v.mix = std::clamp ((double) params[6], 0.0, 1.0);
             v.trimDb = -18.0 + 36.0 * std::clamp ((double) params[7], 0.0, 1.0);
+            v.manual = params[9] >= 0.5f;
+            v.opto = params[10] >= 0.5f;
+            v.smooth = params[11] >= 0.5f;
             vintage.process (l, r, n, v);
+            if (params[12] >= 0.5f)
+                outputLimit (l, r, n);
+            else
+                meterLimit.store (0.0f, std::memory_order_relaxed);
             for (int i = 0; i < n; ++i)
                 peakOut = std::max (peakOut, std::max (std::abs (l[i]), std::abs (r[i])));
             useSidechain = false;
@@ -270,8 +297,13 @@ public:
             l[i] = (l[i] * gain * wetMix + l[i] * (1.0f - wetMix)) * trim;
             r[i] = (r[i] * gain * wetMix + r[i] * (1.0f - wetMix)) * trim;
             maxGr = std::max (maxGr, envelopeDb);
-            peakOut = std::max (peakOut, std::max (std::abs (l[i]), std::abs (r[i])));
         }
+        if (params[12] >= 0.5f)
+            outputLimit (l, r, n);
+        else
+            meterLimit.store (0.0f, std::memory_order_relaxed);
+        for (int i = 0; i < n; ++i)
+            peakOut = std::max (peakOut, std::max (std::abs (l[i]), std::abs (r[i])));
         meterGr.store (std::clamp (maxGr / 30.0f, 0.0f, 1.0f), std::memory_order_relaxed);
         meterIn.store (std::min (peakIn, 1.0f), std::memory_order_relaxed);
         meterOut.store (std::min (peakOut, 1.0f), std::memory_order_relaxed);
@@ -285,7 +317,8 @@ public:
     }
 
 private:
-    std::atomic<float> meterGr { 0.0f }, meterIn { 0.0f }, meterOut { 0.0f };
+    std::atomic<float> meterGr { 0.0f }, meterIn { 0.0f }, meterOut { 0.0f }, meterLimit { 0.0f };
+    float limitGain = 1.0f;
     std::atomic<int> latency { 0 };
     vmatch::progcomp::Compressor vintage;
     double sampleRate = 44100.0;
@@ -1545,26 +1578,27 @@ private:
 class AutoPan final : public Effect
 {
 public:
-    void prepare (double sr) noexcept override { sampleRate = sr; rhythm.prepare (sr); }
-    void reset() noexcept override { rhythm.reset(); }
+    void prepare (double sr) noexcept override { sampleRate = sr; rhythm.prepare (sr); dcA = (float) std::exp (-2.0 * 3.14159265358979323846 * 8.0 / sr); }
+    void reset() noexcept override { rhythm.reset(); lfo = 0.0; smooth = 0.0; dcX[0] = dcX[1] = dcY[0] = dcY[1] = 0.0f; }
     void setSongPosition (double ticks) noexcept override { beats = ticks / 960.0; }
 
     void process (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept override
     {
-        if (p.size() > 18 && p[7] > 0.5f) // round 136: the Rhythm voicing (core/RhythmPan.h)
+        constexpr int rb = autopan::count; // round 136's Rhythm voicing params follow round 135's panner params
+        if (p.size() > rb + 11 && p[rb] > 0.5f) // round 136: the Rhythm voicing (core/RhythmPan.h)
         {
             rhythmpan::Settings s;
-            s.rateHz = rhythmpan::rateHz (p[8]);
-            s.sync = p[9] > 0.5f;
-            s.beats = rhythmpan::beats (p[10]);
-            s.width = 210.0 * std::clamp ((double) p[11], 0.0, 1.0);
-            s.offset = -105.0 + 210.0 * std::clamp ((double) p[12], 0.0, 1.0);
-            s.smoothing = std::clamp ((double) p[13], 0.0, 1.0);
-            s.pattern = p[14] > 0.5f ? 1 : 0;
-            s.amount = std::clamp ((double) p[15], 0.0, 1.0);
-            s.phase = std::clamp ((double) p[16], 0.0, 1.0);
-            s.analog = p[17] < 0.25f ? 0 : (p[17] < 0.75f ? 1 : 2); // off / analog / hot
-            s.outputDb = -24.0 + 48.0 * std::clamp ((double) p[18], 0.0, 1.0);
+            s.rateHz = rhythmpan::rateHz (p[rb + 1]);
+            s.sync = p[rb + 2] > 0.5f;
+            s.beats = rhythmpan::beats (p[rb + 3]);
+            s.width = 210.0 * std::clamp ((double) p[rb + 4], 0.0, 1.0);
+            s.offset = -105.0 + 210.0 * std::clamp ((double) p[rb + 5], 0.0, 1.0);
+            s.smoothing = std::clamp ((double) p[rb + 6], 0.0, 1.0);
+            s.pattern = p[rb + 7] > 0.5f ? 1 : 0;
+            s.amount = std::clamp ((double) p[rb + 8], 0.0, 1.0);
+            s.phase = std::clamp ((double) p[rb + 9], 0.0, 1.0);
+            s.analog = p[rb + 10] < 0.25f ? 0 : (p[rb + 10] < 0.75f ? 1 : 2); // off / analog / hot
+            s.outputDb = -24.0 + 48.0 * std::clamp ((double) p[rb + 11], 0.0, 1.0);
             if (! (s == rhythmSet))
             {
                 rhythm.set (s);
@@ -1572,7 +1606,13 @@ public:
             }
             rhythm.process (l, r, n, beats, bpm);
             current = rhythm.currentPan();
+            position.store (current, std::memory_order_relaxed);
             beats += n * std::max (bpm, 1.0) / 60.0 / sampleRate;
+            return;
+        }
+        if (autopan::sourceOf (p[autopan::source]) != autopan::Source::fl)
+        {
+            processPanner (l, r, n, p, bpm);
             return;
         }
         const auto period = std::max (1e-3, (double) p[0] * 64.0);
@@ -1583,6 +1623,7 @@ public:
             const auto f = phase + step * n - std::floor (phase + step * n);
             current = (float) ((f < 0.5 ? 1.0 - 4.0 * f : -3.0 + 4.0 * f) + 1.0) * 0.5f; // wave in 0..1
         }
+        position.store (0.5f * (float) (std::clamp (fixed + depth * (2.0 * current - 1.0), -1.0, 1.0) + 1.0), std::memory_order_relaxed);
         if (p[4] > 0.5f) // control only (live automation source)
             return;
         // LFO tension (Love Philter, REA_rodada27 §3.3): applied to |w| with the sign kept, T = 256·(p6 − 0.5)
@@ -1614,12 +1655,117 @@ public:
         }
     }
 
-    float controlOutput (int) const noexcept override { return current; }
+    // 0: the wave (0..1), 1: the pan position (0 = left, 0.5 = centre, 1 = right; round 135's display)
+    float controlOutput (int o) const noexcept override
+    {
+        switch (o)
+        {
+            case 1: return position.load (std::memory_order_relaxed);
+            case 2: return peakIn.load (std::memory_order_relaxed);
+            case 3: return peakOut.load (std::memory_order_relaxed);
+            default: return current;
+        }
+    }
 
 private:
-    double sampleRate = 44100.0, beats = 0.0;
-    float current = 0.5f;
-    rhythmpan::Engine rhythm;
+    // round 135: the rhythmic panner's sources (the PanMan role), measured black-box on the official trial
+    // (docs/analise/REA_rodada135s.md §3): an equal-power balance (centre −3 dB per side, the far side silent at the
+    // extremes), a free LFO in Hz or steps on the beat grid swept back and forth or one way, Smoothing from a hard
+    // square / jump to a soft sine / glide, input and output gains and an "analog" stage (asymmetric soft saturation:
+    // H2 −36 dBc and H3 −54 dBc at −18 dBFS, H2 −25 / H3 −30 at −6 dBFS)
+    void processPanner (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept
+    {
+        using namespace autopan;
+        const auto src = sourceOf (p[source]);
+        const auto dir = directionOf (p[direction]);
+        const auto soft = std::clamp ((double) p[smoothing], 0.0, 1.0);
+        const auto depth = 2.0 * p[1] - 1.0, fixed = 2.0 * p[3] - 1.0;
+        const auto gIn = (float) std::pow (10.0, inputDb (p[inputGain]) / 20.0);
+        const auto gOut = (float) std::pow (10.0, inputDb (p[outputGain]) / 20.0);
+        const auto analog = p[analogStage] >= 0.5f;
+        const auto k = 0.05 + 12.0 * (1.0 - soft) * (1.0 - soft); // the sine's hardness (soft = a sine, hard ≈ a square)
+        const auto tk = std::tanh (k);
+        const auto steps = stepCount (p[stepsParam]);
+        // the period of one cycle: the free rate (Hz), or the steps on the beat grid
+        double inc;
+        if (src == Source::lfo)
+            inc = rateHz (p[rate]) / sampleRate;
+        else
+            inc = std::max (bpm, 1.0) / 60.0 / sampleRate / (stepBeats (p[stepNote]) * (dir == Direction::both ? 2.0 * (steps - 1) : steps));
+        // rhythm steps follow the song position (like the FL source); the LFO runs freely
+        if (src == Source::steps && beats != syncedBeats) // a new song position: back on the grid
+        {
+            lfo = beats / (stepBeats (p[stepNote]) * (dir == Direction::both ? 2.0 * (steps - 1) : steps));
+            syncedBeats = beats;
+        }
+        // steps glide over up to a third of a step (Smoothing 100 %), or jump (0 %)
+        const auto stepSec = stepBeats (p[stepNote]) * 60.0 / std::max (bpm, 1.0);
+        const auto glide = 1.0 - std::exp (-1.0 / (sampleRate * (0.0005 + 0.35 * soft * stepSec)));
+        float pos = 0.0f, pin = 0.0f, pout = 0.0f;
+        for (int i = 0; i < n; ++i, lfo += inc)
+        {
+            const auto f = lfo - std::floor (lfo);
+            double w; // −1 … +1
+            if (src == Source::lfo)
+            {
+                if (dir == Direction::both)
+                    w = std::tanh (k * std::sin (2.0 * 3.14159265358979323846 * f)) / tk;
+                else
+                    w = dir == Direction::right ? 2.0 * f - 1.0 : 1.0 - 2.0 * f;
+                smooth = w;
+            }
+            else
+            {
+                int s;
+                if (dir == Direction::both)
+                {
+                    const auto span = 2 * (steps - 1);
+                    const auto at = (int) std::floor (f * span);
+                    s = at < steps ? at : span - at;
+                }
+                else
+                {
+                    s = std::min (steps - 1, (int) std::floor (f * steps));
+                    if (dir == Direction::left) s = steps - 1 - s;
+                }
+                const auto target = steps > 1 ? -1.0 + 2.0 * s / (steps - 1) : 0.0;
+                smooth += glide * (target - smooth);
+                w = smooth;
+            }
+            const auto pan = std::clamp (fixed + depth * w, -1.0, 1.0);
+            const auto th = (pan + 1.0) * 0.25 * 3.14159265358979323846;
+            pin = std::max (pin, std::max (std::abs (l[i]), std::abs (r[i])));
+            float a = l[i] * gIn, b = r[i] * gIn;
+            if (analog)
+            {
+                a = analogCurve (a, 0);
+                b = analogCurve (b, 1);
+            }
+            l[i] = (float) (a * std::cos (th)) * gOut;
+            r[i] = (float) (b * std::sin (th)) * gOut;
+            pout = std::max (pout, std::max (std::abs (l[i]), std::abs (r[i])));
+            pos = (float) pan;
+        }
+        lfo -= std::floor (lfo);
+        current = (float) (0.5 * (smooth + 1.0));
+        position.store (0.5f * (pos + 1.0f), std::memory_order_relaxed);
+        peakIn.store (pin, std::memory_order_relaxed);
+        peakOut.store (pout, std::memory_order_relaxed);
+    }
+
+    float analogCurve (float x, int c) noexcept
+    {
+        const auto u = std::clamp (x, -1.2f, 1.2f);
+        const auto y = u + 0.25f * u * u - 0.45f * u * u * u; // fitted on the trial's harmonics; DC removed after it
+        dcY[c] = y - dcX[c] + dcA * dcY[c];
+        dcX[c] = y;
+        return dcY[c];
+    }
+
+    double sampleRate = 44100.0, beats = 0.0, lfo = 0.0, smooth = 0.0, syncedBeats = -1.0;
+    float current = 0.5f, dcA = 0.999f, dcX[2] {}, dcY[2] {};
+    std::atomic<float> position { 0.5f }, peakIn { 0.0f }, peakOut { 0.0f };
+    rhythmpan::Engine rhythm; // round 136
     rhythmpan::Settings rhythmSet;
 };
 
@@ -2242,11 +2388,48 @@ std::string widthText (const EffectParams& params, int band)
 }
 } // namespace peq
 
+namespace autopan
+{
+Source sourceOf (float v) noexcept { return (Source) std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * 2.0f), 0, 2); }
+Direction directionOf (float v) noexcept { return (Direction) std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * 2.0f), 0, 2); }
+double rateHz (float v) noexcept { return 0.01 * std::pow (1000.0, (double) std::clamp (v, 0.0f, 1.0f)); }
+float rateValue (double hz) noexcept { return (float) std::clamp (std::log (std::max (hz, 1e-6) / 0.01) / std::log (1000.0), 0.0, 1.0); }
+int stepCount (float v) noexcept { return 2 + std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * 6.0f), 0, 6); }
+double stepBeats (float v) noexcept { return 4.0 / (double) (1 << std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * 5.0f), 0, 5)); }
+double inputDb (float v) noexcept { return -24.0 + 48.0 * (double) std::clamp (v, 0.0f, 1.0f); }
+std::string paramText (int param, float v)
+{
+    char t[32];
+    switch (param)
+    {
+        case source: { static const char* const n[3] { "FL LFO", "LFO", "Rhythm steps" }; return n[(int) sourceOf (v)]; }
+        case rate:
+        {
+            const auto hz = rateHz (v);
+            if (hz < 1.0) std::snprintf (t, sizeof t, "%.1f s", 1.0 / hz);
+            else std::snprintf (t, sizeof t, "%.2f Hz", hz);
+            return t;
+        }
+        case direction: { static const char* const n[3] { "Back and forth", "Left to right", "Right to left" }; return n[(int) directionOf (v)]; }
+        case smoothing: std::snprintf (t, sizeof t, "%.0f%%", 100.0 * std::clamp (v, 0.0f, 1.0f)); return t;
+        case stepsParam: return std::to_string (stepCount (v));
+        case stepNote: { static const char* const n[6] { "1/1", "1/2", "1/4", "1/8", "1/16", "1/32" }; return n[std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * 5.0f), 0, 5)]; }
+        case inputGain:
+        case outputGain: std::snprintf (t, sizeof t, "%+.1f dB", inputDb (v)); return t;
+        case analogStage: return v >= 0.5f ? "Analog" : "Digital";
+        default: std::snprintf (t, sizeof t, "%.2f", (double) v); return t;
+    }
+}
+} // namespace autopan
+
 const EffectInfo& effectInfo (EffectKind kind)
 {
     static const EffectInfo eq { "EQ", { { "Low", 0.5f }, { "Mid", 0.5f }, { "Mid freq.", 0.5f }, { "High", 0.5f }, { "Output", 0.5f } } };
     static const EffectInfo comp { "Compressor", { { "Threshold", 0.7f }, { "Ratio", 3.0f / 19.0f }, { "Attack", 0.67f }, { "Release", 0.54f }, { "Makeup", 0.0f }, { "Auto gain", 0.0f },
-                                                  { "Mix", 1.0f }, { "Trim", 0.5f }, { "Voicing", 0.0f } } }; // round 129: the RComp role's MIX and TRIM
+                                                  { "Mix", 1.0f }, { "Trim", 0.5f }, { "Voicing", 0.0f },
+                                                  // round 135w: the RComp role's switches (the vintage voicing's ARC / Electro / Warm
+                                                  // by default, as fitted) and its 0 dBFS output limiter (off: older projects unchanged)
+                                                  { "Release mode", 0.0f }, { "Release curve", 0.0f }, { "Character", 0.0f }, { "Limiter", 0.0f } } };
     static const EffectInfo delay { "Delay", { { "Time", 0.3f }, { "Feedback", 0.42f }, { "Mix", 0.3f }, { "Ping-pong", 0.0f }, { "Damping", 0.3f } } };
     static const EffectInfo reverb { "Reverb", { { "Room", 0.6f }, { "Damping", 0.5f }, { "Width", 1.0f }, { "Mix", 0.25f }, { "Dry", 1.0f },
                                                  { "Low cut", 0.0f }, { "High cut", 1.0f }, { "Predelay", 0.0f } } };
@@ -2288,11 +2471,15 @@ const EffectInfo& effectInfo (EffectKind kind)
     }();
     static const EffectInfo autoPanInfo { "Auto-pan", { { "Period", 1.0f / 64.0f }, { "Depth", 0.75f }, { "Phase", 0.0f }, { "Pan", 0.5f }, { "Control only", 0.0f },
                                                         { "FL pan law", 0.0f }, { "Tension", 0.5f },
-                                                        // round 136: the Rhythm voicing (core/RhythmPan.h), off = the classic engine
-                                                        { "Voicing", 0.0f }, { "Rate", 0.4659f /* 0.25 Hz */ }, { "Sync", 0.0f },
+                                                        // round 135 (the PanMan role; the FL source stays the default)
+                                                        { "Source", 0.0f }, { "Rate", 0.46598f }, { "Direction", 0.0f }, { "Smoothing", 1.0f },
+                                                        { "Steps", 1.0f / 6.0f }, { "Step note", 0.4f }, { "Input", 0.5f }, { "Output", 0.5f },
+                                                        { "Analog", 0.0f },
+                                                        // round 136: the Rhythm voicing (core/RhythmPan.h, measured), off = the engines above
+                                                        { "Voicing", 0.0f }, { "Rhythm rate", 0.4659f /* 0.25 Hz */ }, { "Sync", 0.0f },
                                                         { "Beats", 0.4f /* 1 beat */ }, { "Width", 180.0f / 210.0f }, { "Offset", 0.5f },
-                                                        { "Smoothing", 1.0f }, { "Pattern", 0.0f }, { "Amount", 1.0f }, { "Start phase", 0.0f },
-                                                        { "Analog", 0.5f }, { "Output", 0.5f } } };
+                                                        { "Rhythm smoothing", 1.0f }, { "Pattern", 0.0f }, { "Amount", 1.0f }, { "Start phase", 0.0f },
+                                                        { "Rhythm analog", 0.5f }, { "Rhythm output", 0.5f } } };
     static const EffectInfo vocoderInfo { "Vocoder", { { "Bands", 0.4f }, { "Order", 0.5f }, { "Listen", 1.0f }, { "Swap L/R", 0.0f },
                                                        { "Min freq.", 0.0f }, { "Max freq.", 1.0f }, { "Scale", 0.5f }, { "Invert", 0.0f },
                                                        { "Formant", 0.5f }, { "Width", 45.0f / 195.0f }, { "Attack", 10.0f / 990.0f },
@@ -2619,6 +2806,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::quellDenoiser: return voicetools::quellInfo();
         case EffectKind::geminiDoubler: return voicetools::geminiInfo();
         case EffectKind::formulaController: return formulaControllerInfo;
+        case EffectKind::voiceShift: return voiceshift::info();
     }
     return eq;
 }
@@ -2669,6 +2857,10 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 case 6: std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f); break;
                 case 7: std::snprintf (text, sizeof (text), "%+.1f dB", -18.0f + 36.0f * v); break;
                 case 8: return v >= 0.5f ? "vintage program" : "classic";
+                case 9: return v >= 0.5f ? "manual" : "ARC";
+                case 10: return v >= 0.5f ? "opto" : "electro";
+                case 11: return v >= 0.5f ? "smooth" : "warm";
+                case 12: return v >= 0.5f ? "on" : "off";
                 default: std::snprintf (text, sizeof (text), "+%.1f dB", compMakeupDb (v)); break;
             }
             return text;
@@ -2898,17 +3090,20 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             }
             return text;
 
-        case EffectKind::rhythmGain:
         case EffectKind::autoPan:
+            if (param >= autopan::source && param < autopan::count)
+                return autopan::paramText (param, v);
+            [[fallthrough]];
+        case EffectKind::rhythmGain:
             if (param == 0)
                 std::snprintf (text, sizeof (text), "%.3g beats", v * 64.0f);
             else if (kind == EffectKind::rhythmGain && param == 1)
                 std::snprintf (text, sizeof (text), "%d", (int) std::lround (v * rhythm::maxPoints));
             else if (kind == EffectKind::autoPan && (param == 1 || param == 3))
                 std::snprintf (text, sizeof (text), "%+.0f%%", (2.0f * v - 1.0f) * 100.0f);
-            else if (kind == EffectKind::autoPan && param >= 7) // round 136: the Rhythm voicing
+            else if (kind == EffectKind::autoPan && param >= autopan::count) // round 136: the Rhythm voicing (after round 135's panner)
             {
-                switch (param)
+                switch (param - autopan::count + 7)
                 {
                     case 7: return v > 0.5f ? "Rhythm" : "Classic";
                     case 8: std::snprintf (text, sizeof (text), "%.2f Hz", rhythmpan::rateHz (v)); break;
@@ -3046,6 +3241,8 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::quellDenoiser:
         case EffectKind::geminiDoubler:
             return voicetools::paramText (kind, param, v);
+        case EffectKind::voiceShift:
+            return voiceshift::paramText (param, v);
 
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
@@ -3135,6 +3332,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return facet::make (&slot.params);
     if (dyn::isDynKind (slot.kind)) // their look-ahead / oversampling latency known before the first block
         return dyn::make (slot.kind, &slot.params);
+    if (slot.kind == EffectKind::apexLimiter) // round 135: the oversampling latency known before the first block
+        return apex::make (&slot.params);
     if (slot.kind == EffectKind::hyperChorus)
         return hyperchorusfx::make (hyperchorusfx::instanceOf (slot.state));
     if (slot.kind == EffectKind::vintageChorus)
@@ -3246,6 +3445,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::quellDenoiser:
         case EffectKind::geminiDoubler: return voicetools::make (kind); // LYNX's voice tools (REA_rodada119)
         case EffectKind::formulaController: return formula::makeEffect ({});
+        case EffectKind::voiceShift: return voiceshift::make(); // round 135
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();

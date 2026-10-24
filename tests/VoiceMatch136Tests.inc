@@ -130,7 +130,7 @@ TEST (rhythm_pan_follows_the_trials_pattern_round136)
     auto slot = makeEffectSlot (EffectKind::autoPan);
     const float v[12] { 1.0f, 0.850488f, 0.0f, 0.4f, 0.717143f, 0.5f, 0.9925f, 0.0f, 0.9981f, 0.9917f, 0.0f, 0.5f };
     for (int i = 0; i < 12; ++i)
-        slot.params[(size_t) (7 + i)] = v[i];
+        slot.params[(size_t) (autopan::count + i)] = v[i]; // the Rhythm voicing follows round 135's panner params
     auto fx = makeEffect (slot);
     fx->prepare (48000.0);
     const int n = 48000;

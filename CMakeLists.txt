@@ -128,6 +128,7 @@ add_library(lynx_core STATIC
     src/core/VoiceTools.cpp
     src/core/MidiControls.cpp
     src/core/FormulaController.cpp
+    src/core/VoiceShift.cpp
     src/core/FabFilterStates.cpp
     src/core/FlResampler.cpp
     src/core/FlKeys.cpp
@@ -155,6 +156,7 @@ target_sources(lynx_core PRIVATE
     src/core/MixerOps.cpp
     src/core/History.cpp
     src/core/EffectPresets.cpp
+    src/core/ParamHelp.cpp
     src/core/SearchQuery.cpp src/core/SearchIndex.cpp)
 
 # spectral waveforms: band analysis and multi-resolution peak cache

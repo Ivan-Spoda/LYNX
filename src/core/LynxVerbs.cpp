@@ -545,6 +545,11 @@ struct Engine::Impl
             // (neither pattern sums to zero, so low frequencies, where the lines move together, are kept)
             float lateL = (sOut[0] + sOut[1] + sOut[2] - sOut[3] + sOut[4] + sOut[5] - sOut[6] + sOut[7]) * norm;
             float lateR = (sOut[0] - sOut[1] + sOut[2] + sOut[3] + sOut[4] - sOut[5] + sOut[6] + sOut[7]) * norm;
+            if (s.splitSides) // two separate halves (round 135): each side hears only its own four lines
+            {
+                lateL = (sOut[0] + sOut[1] + sOut[2] - sOut[3]) * norm * 1.41421356f;
+                lateR = (sOut[4] - sOut[5] + sOut[6] + sOut[7]) * norm * 1.41421356f;
+            }
 
             const float in[2] = { d[0] + send * e[0], d[1] + send * e[1] };
             if (gated)
@@ -979,9 +984,11 @@ protected:
         s.shape = 2;
         s.lineScale = t.scale * (0.5 + 0.5 * size);
         const auto rt = foilDecaySec (p[2]);
-        s.rt60 = rt;
+        // round 135 (the Little Plate role): Infinite holds the plate (the decay knob's ∞), damped as at 30 s
+        const auto infinite = p[12] >= 0.5f;
+        s.rt60 = infinite ? 1000.0 : rt;
         // plates lose highs faster the longer they ring: 1/RT(8 kHz) = 1/RT + damp (measured, §3)
-        s.highMult = 1.0 / (1.0 + t.damp * rt);
+        s.highMult = 1.0 / (1.0 + t.damp * (infinite ? 30.0 : rt));
         s.highXover = 5000.0;
         s.lowMult = t.lowRt;
         s.lowXover = 250.0;
@@ -1001,6 +1008,9 @@ protected:
         s.earlySec = 0.015;
         s.earlyDiffusion = 0.8;
         s.gain = t.gain;
+        // round 135: a low cut on the plate's output, 20 Hz … 1 kHz (0 = off; 12 dB/oct)
+        s.outLowCut = foil::lowCutHz (p[13]);
+        s.outLowOrder = 2;
     }
 };
 
@@ -1097,9 +1107,26 @@ struct HaloMode
 {
     const char* name;
     double scale, rtScale, bright;
+    float value;   // the Reverb mode value that selects it (nearest wins)
+    int stereo;    // 0 = LYNX's own wide tank, 1 = mono in (the reference's Mono), 2 = two separate sides (its stereo modes)
+    double width;  // side gain of the output
 };
-const HaloMode haloModes[3] = { { "Wide", 1.2, 1.0, 0.0 }, { "Dense", 0.9, 1.05, 0.0 }, { "Bright", 1.0, 0.75, 1.0 } };
-const char* const haloShiftModes[5] = { "Up", "Up + down", "Up, bright", "Up + down, bright", "No shift" };
+// round 135: the reference's four modes [EXEC: its trial, a left-only impulse — below 0.25 the input is summed and the
+// tail comes out of both sides, from 0.25 up the left input stays on the left; 0.25 / 0.5 / 0.75 are the steps] beside
+// LYNX's own Wide / Dense / Bright, which keep their values 0 / ½ / 1 (older projects sound the same)
+const HaloMode haloModes[7] = { { "Wide", 1.2, 1.0, 0.0, 0.0f, 0, 1.0 },          { "Mono", 1.0, 1.0, 0.0, 0.125f, 1, 1.0 },
+                                { "Small stereo", 0.75, 0.85, 0.0, 0.25f, 2, 1.0 }, { "Medium stereo", 1.0, 1.0, 0.0, 0.375f, 2, 1.0 },
+                                { "Dense", 0.9, 1.05, 0.0, 0.5f, 0, 1.0 },          { "Big stereo", 1.3, 1.15, 0.0, 0.625f, 2, 1.0 },
+                                { "Bright", 1.0, 0.75, 1.0, 1.0f, 0, 1.0 } };
+int haloModeIndex (float v)
+{
+    int best = 0;
+    for (int i = 1; i < 7; ++i)
+        if (std::abs (v - haloModes[i].value) < std::abs (v - haloModes[best].value))
+            best = i;
+    return best;
+}
+const char* const haloShiftModes[5] = { "Single", "Dual", "Single, bright", "Dual, bright", "No shift" };
 const char* const haloColours[2] = { "Bright", "Dark" };
 
 double haloShiftSemis (float v) { return -12.0 + 24.0 * v; }
@@ -1113,7 +1140,7 @@ protected:
     void configure (const EffectParams& p, double, Settings& s, float& mix) const noexcept override
     {
         mix = p[0];
-        const auto& m = haloModes[choice (p[9], 3)];
+        const auto& m = haloModes[haloModeIndex (p[9])];
         const auto shiftMode = choice (p[10], 5);
         const auto dark = choice (p[11], 2) == 1;
         const auto size = (double) p[4];
@@ -1143,6 +1170,17 @@ protected:
         s.modRateHz = 0.05 + 4.95 * p[7];
         s.modDepthMs = 1.2 * p[8] / std::sqrt (std::max (0.3, s.modRateHz));
         s.gain = dark ? 0.75 : 0.95;
+        if (m.stereo == 2)
+            s.crossFeed = 0.0, s.splitSides = true; // the two sides stay apart
+    }
+
+    // the reference's Mono mode sums the input (mono in, a stereo tail)
+    void preStage (float* l, float* r, int n, const EffectParams& p, double) noexcept override
+    {
+        if (haloModes[haloModeIndex (p[9])].stereo != 1)
+            return;
+        for (int i = 0; i < n; ++i)
+            l[i] = r[i] = 0.5f * (l[i] + r[i]);
     }
 };
 
@@ -1341,6 +1379,7 @@ double epoch::decaySec (float v) noexcept { return epochDecay (v); }
 const char* atrium::typeName (int i) noexcept { return atriumTypes[std::clamp (i, 0, atrium::typeCount - 1)].name; }
 double atrium::decaySec (float v) noexcept { return atriumDecaySec (v); }
 float atrium::decayValue (double s) noexcept { return (float) skewInverse (s, 0.1, 100.0, 5.717); }
+double foil::lowCutHz (float v) noexcept { return v <= 0.0f ? 0.0 : 20.0 * std::pow (50.0, (double) std::min (v, 1.0f)); }
 const char* foil::typeName (int i) noexcept { return foilTypes[std::clamp (i, 0, foil::typeCount - 1)].name; }
 double foil::decaySec (float v) noexcept { return foilDecaySec (v); }
 const char* nebula::modeName (int i) noexcept { return nebulaModes[std::clamp (i, 0, nebula::modeCount - 1)].name; }
@@ -1373,7 +1412,8 @@ const EffectInfo& info (EffectKind kind)
     static const EffectInfo foilInfo { "Foil Plate",
         params ({ { "Mix", 1.0f }, { "Predelay", 0.0f }, { "Decay", 0.5f }, { "Size", 0.5f }, { "Width", 0.5f },
                   { "Mod rate", 0.365345f }, { "Mod depth", 0.0f }, { "Low EQ freq", 0.343434f }, { "Low EQ gain", 0.5f },
-                  { "High EQ freq", 0.494949f }, { "High EQ gain", 0.5f }, { "Type", 0.0f } }) }; // EQ at 700 Hz / 10 kHz (round 129)
+                  { "High EQ freq", 0.494949f }, { "High EQ gain", 0.5f }, { "Type", 0.0f }, // EQ at 700 Hz / 10 kHz (round 129)
+                  { "Infinite", 0.0f }, { "Low cut", 0.0f } }) }; // round 135 (the Little Plate role)
     static const EffectInfo nebulaInfo { "Nebula",
         params ({ { "Mix", 0.5f }, { "Sync", 0.0f }, { "Note", 0.333333f }, { "Delay", 0.5f }, { "Warp", 0.0f },
                   { "Feedback", 0.5f }, { "Density", 0.0f }, { "Width", 1.0f }, { "Low cut", 0.0f }, { "High cut", 1.0f },
@@ -1450,6 +1490,8 @@ std::string paramText (EffectKind kind, int param, float v, double bpm)
                 case 9: return hz (200.0 + 19800.0 * v);
                 case 8: case 10: return fmt ("%+.1f dB", -12.0 + 24.0 * v);
                 case 11: return foil::typeName (choice (v, foil::typeCount));
+                case 12: return v >= 0.5f ? "on" : "off";
+                case 13: return v <= 0.0f ? "off" : hz (foil::lowCutHz (v));
                 default: return pct (v);
             }
         case EffectKind::nebula:
@@ -1475,7 +1517,7 @@ std::string paramText (EffectKind kind, int param, float v, double bpm)
                 case 5: return 250.0 * v < 5.0 ? std::string ("off") : hz (250.0 * v);
                 case 6: return hz (100.0 + 14900.0 * v);
                 case 7: return fmt ("%.2f Hz", 0.05 + 4.95 * v);
-                case 9: return haloModes[choice (v, 3)].name;
+                case 9: return haloModes[haloModeIndex (v)].name;
                 case 10: return haloShiftModes[choice (v, 5)];
                 case 11: return haloColours[choice (v, 2)];
                 default: return pct (v);

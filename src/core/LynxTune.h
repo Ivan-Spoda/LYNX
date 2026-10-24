@@ -54,6 +54,19 @@ enum Param : int
     vibratoDelay,            // onset delay 0…1500 ms after a note starts
     vibratoOnset,            // onset rate (fade-in) 0…1500 ms
     moreScales,              // 0 = the Scale parameter; else whole tone / diminished
+    // round 135f (Auto-Tune Pro parity, appended; off by default)
+    learnMidi,               // on / off: the notes held on the MIDI channel teach the scale (the editor turns them into
+                             // the custom scale's note switches) instead of being the targets
+    classicMode,             // on / off: the classic DSP — the same retune, the short-latency path (as low latency)
+    // ---- round 135w: the real-time corrector's controls (the Waves Tune Real-Time role, docs/PARITY.md), appended;
+    // every default is the old behaviour
+    speedLink,               // on (default) = the in-note deviations follow the retune time, as before; off = Speed
+    speed,                   // 0.1 … 800 ms (half travel = 50 ms): how fast the in-note deviations (drift, vibrato) go
+    toleranceCents,          // 0 (off) … 40 c added to the half-way point before the target note changes
+    toleranceTime,           // 0 (off) … 300 ms a new target note must last before the correction moves to it
+    keepVibrato,             // on (default) = the vibrato is kept at Vibrato amount; off = flattened
+    vibratoAmount,           // 0 … 200 % (default 100 %): the vibrato kept (multiplies Natural vibrato's gain)
+    correction,              // 0 … 100 % (default 100 %): how much of the correction is applied (scales the shift)
     // round 136 (appended, off by default): the drive stage of the voice-shifter role it plays (measured black-box on
     // the reference, REA_rodada136 §3), a wider formant range and an output trim
     driveStage,              // on / off
@@ -83,9 +96,15 @@ int vibratoShapeIndex (float v) noexcept;
 double vibratoRateHz (float v) noexcept;
 double vibratoDepthCents (float v) noexcept;
 double vibratoOnsetMs (float v) noexcept; // delay and onset rate share one law
+double speedMs (float v) noexcept;          // round 135w: 0.1 … 800 ms, piecewise (0.5 = 50 ms)
+float speedValue (double ms) noexcept;
+double toleranceCentsOf (float v) noexcept; // 0 … 40 c
+double toleranceTimeMs (float v) noexcept;  // 0 … 300 ms
+double vibratoAmountOf (float v) noexcept;  // 0 … 2
 // The scale in effect: the Scale parameter, or one of the extra scales chosen by More scales (round 128)
 int effectiveScale (float scaleValue, float moreScalesValue) noexcept;
 
+// controlOutput (5): the pitch classes held on the MIDI channel, a 12-bit mask / 4096 (round 135, LEARN)
 // Latency (samples) for a sample rate and the range / low-latency parameters
 int latencyFor (double sampleRate, int range, bool lowLatency) noexcept;
 

@@ -18,7 +18,12 @@
 // a value above [6] adds linking; default 0 = as before), [9] dither (off, 16, 18, 20, 22, 24 bits), [10] noise shaping
 // (none, basic, optimized, weighted), [11] unity gain (monitor at the input's level), [12] audition limiting (hear
 // what the limiter removes), [13] DC offset filter, [14] meter scale (editor only: −16 / −32 / −48 dB, K-12 / K-14 /
-// K-20).
+// K-20). Round 135 (appended, editor / meter settings or off by default — the sound of saved projects is unchanged):
+// [15] oversampling (off, 2x, 4x, 8x: the limiter runs at the high rate; latency + the oversampler's), [16] peak
+// meter (sample peak / true peak; the output meter and the peak read-out), [17] display mode (editor: Fast, Slow,
+// Slow down, Infinite, Off), [18] loudness reset (a push button: each flip clears the integrated loudness, range
+// and peak hold), [19] side chain (off / on: the limiter is triggered by the slot's side-chain input), [20] the
+// loudness meter panel shown (editor), [21] loudness target (−23, −18, −16, −14, −11, −9 LUFS; editor).
 
 #include <array>
 #include <memory>
@@ -29,9 +34,10 @@
 
 namespace lynx::apex
 {
-constexpr int paramCount = 15;
+constexpr int paramCount = 22;
 enum Param { pGain, pCeiling, pLookahead, pRelease, pStyle, pTruePeak, pLink, pAttack, pLinkRelease, pDither, pShaping,
-             pUnity, pAudition, pDcFilter, pMeterScale };
+             pUnity, pAudition, pDcFilter, pMeterScale,
+             pOversampling, pPeakMeter, pDisplayMode, pLoudnessReset, pSidechain, pLoudnessShown, pLoudnessTarget };
 constexpr double maxLookaheadMs = 5.0;
 
 // Round 128: 8 styles. The four original styles keep the positions their saved values round to (0, 1/3, 2/3, 1 of
@@ -49,13 +55,17 @@ int ditherBits (float v) noexcept;    // 0 = off, else 16 .. 24
 int noiseShaping (float v) noexcept;  // 0 none, 1 basic, 2 optimized, 3 weighted
 int meterScale (float v) noexcept;    // 0 −16 dB, 1 −32 dB, 2 −48 dB, 3 K-12, 4 K-14, 5 K-20
 Style style (float v) noexcept;
+int oversamplingFactor (float v) noexcept; // 1 (off), 2, 4 or 8
+int displayMode (float v) noexcept;        // 0 Fast, 1 Slow, 2 Slow down, 3 Infinite, 4 Off
+double loudnessTarget (float v) noexcept;  // LUFS
 const char* styleName (Style s) noexcept;
 
 const EffectInfo& info();
 std::string paramText (int param, float v);
 
-// Constant latency at a sample rate (samples).
+// Constant latency at a sample rate (samples), without oversampling; latencyFor: with an oversampling factor.
 int latencyAt (double sampleRate) noexcept;
+int latencyFor (double sampleRate, int factor) noexcept;
 
-std::unique_ptr<Effect> make();
+std::unique_ptr<Effect> make (const EffectParams* initial = nullptr);
 } // namespace lynx::apex
