@@ -678,6 +678,7 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                     n.channel = readLE<std::uint16_t> (e.data, o + 6);
                     n.length = readLE<std::uint32_t> (e.data, o + 8);
                     n.key = readLE<std::uint16_t> (e.data, o + 12);
+                    n.group = readLE<std::uint16_t> (e.data, o + 14);
                     n.finePitch = e.data[o + 16];
                     n.repeats = e.data[o + 17];
                     n.extra = e.data[o + 19];

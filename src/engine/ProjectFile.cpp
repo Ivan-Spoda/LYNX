@@ -703,15 +703,18 @@ juce::var clipsToVar (const std::vector<Clip>& list)
 
         // [.., fade-in, fade-out, gain, muted, sub-tick offset] only when not default
         const auto fraction = juce::roundToInt (c.offsetFraction * 10000.0f) / 10000.0;
-        if (c.fadeIn > 0 || c.fadeOut > 0 || c.gain != 1.0f || c.muted || fraction != 0.0)
+        const auto pan = juce::roundToInt (c.pan * 1000.0f) / 1000.0;
+        if (c.fadeIn > 0 || c.fadeOut > 0 || c.gain != 1.0f || c.muted || fraction != 0.0 || pan != 0.0)
         {
             clip.add ((juce::int64) c.fadeIn);
             clip.add ((juce::int64) c.fadeOut);
             clip.add (juce::roundToInt (c.gain * 1000.0f) / 1000.0);
-            if (c.muted || fraction != 0.0)
+            if (c.muted || fraction != 0.0 || pan != 0.0)
                 clip.add (c.muted);
-            if (fraction != 0.0)
+            if (fraction != 0.0 || pan != 0.0)
                 clip.add (fraction);
+            if (pan != 0.0)
+                clip.add (pan); // [.., sub-tick offset, pan]
         }
 
         clips.add (clip);
@@ -745,6 +748,7 @@ std::vector<Clip> clipsFromVar (const juce::var& v, const Song& song)
                 clip.gain = juce::jlimit (0.0f, 4.0f, (float) (double) c[9]);
                 clip.muted = c.size() >= 11 && (bool) c[10];
                 clip.offsetFraction = c.size() >= 12 ? juce::jlimit (-0.5f, 0.5f, (float) (double) c[11]) : 0.0f;
+                clip.pan = c.size() >= 13 ? juce::jlimit (-1.0f, 1.0f, (float) (double) c[12]) : 0.0f;
             }
 
             if (c.size() >= 7 && (int) c[5] == 2)
@@ -813,6 +817,13 @@ juce::var channelToVar (const ChannelDef& c)
         o->setProperty ("group", c.group);
     if (c.swingMix != 1.0f)
         o->setProperty ("swingMix", c.swingMix);
+    if (! c.keyLabels.empty())
+    {
+        auto* labels = new juce::DynamicObject();
+        for (const auto& [key, label] : c.keyLabels)
+            labels->setProperty (juce::String (key), juce::String::fromUTF8 (label.c_str()));
+        o->setProperty ("keyLabels", juce::var (labels));
+    }
     if (c.arp.enabled())
     {
         o->setProperty ("arp", juce::Array<juce::var> { c.arp.direction, c.arp.range, c.arp.stepBeats, c.arp.gate, c.arp.repeat });
@@ -1035,6 +1046,14 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
         def.group = group;
 
     def.swingMix = juce::jlimit (0.0f, 1.0f, (float) (double) c.getProperty ("swingMix", 1.0));
+    if (auto* labels = c.getProperty ("keyLabels", {}).getDynamicObject())
+        for (const auto& p : labels->getProperties())
+        {
+            const auto key = p.name.toString().getIntValue();
+            const auto label = p.value.toString().trim();
+            if (key >= 0 && key < 128 && label.isNotEmpty())
+                def.keyLabels[key] = label.toStdString();
+        }
 
     if (const auto& arp = c["arp"]; arp.isArray() && arp.size() == 5)
     {
@@ -1392,7 +1411,8 @@ juce::String toJson (const Song& song)
                                           juce::roundToInt (n.velocity * 1000.0f) / 1000.0 };
 
             // [.., pan, fine pitch, muted] only when not default
-            const auto extra = n.release != 0.5f || n.modX != 0.5f || n.modY != 0.5f; // [.., release, mod X, mod Y]
+            // [.., release, mod X, mod Y (, colour)]
+            const auto extra = n.release != 0.5f || n.modX != 0.5f || n.modY != 0.5f || n.colour != 0 || n.group != 0;
             if (n.pan != 0.0f || n.finePitch != 0.0f || n.muted || n.slide || n.porta || extra)
             {
                 note.add (juce::roundToInt (n.pan * 1000.0f) / 1000.0);
@@ -1404,6 +1424,10 @@ juce::String toJson (const Song& song)
                 if (extra)
                     for (auto v : { n.release, n.modX, n.modY })
                         note.add (juce::roundToInt (v * 1000.0f) / 1000.0);
+                if (n.colour != 0 || n.group != 0)
+                    note.add (n.colour);
+                if (n.group != 0)
+                    note.add (n.group); // [.., colour, group]
             }
 
             notes.add (note);
@@ -1670,6 +1694,10 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                             note.modX = juce::jlimit (0.0f, 1.0f, (float) (double) n[11]);
                             note.modY = juce::jlimit (0.0f, 1.0f, (float) (double) n[12]);
                         }
+                        if (n.size() >= 14)
+                            note.colour = juce::jlimit (0, noteColourCount - 1, (int) n[13]);
+                        if (n.size() >= 15)
+                            note.group = juce::jmax (0, (int) n[14]);
                     }
 
                     if (note.channel >= 0 && note.channel < (int) song.channels.size())

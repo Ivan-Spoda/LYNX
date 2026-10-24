@@ -23,6 +23,7 @@ struct Props
     int track = 0;
     std::int64_t start = 0, length = 0, offset = 0;
     float gain = 1.0f;        // audio
+    float pan = 0.0f;         // audio: -1..1
     std::int64_t fadeIn = 0, fadeOut = 0; // audio
     bool muted = false;
     float pitch = 0.0f;       // audio: semitones (-24..24)

@@ -224,6 +224,7 @@ struct Note
     std::uint16_t channel = 0;   // index in the Channel Rack
     std::uint16_t key = 60;      // 60 = C5 in FL
     std::uint16_t flags = 0;
+    std::uint16_t group = 0;     // note group (FL's Group, Shift+G); 0 = none
     std::uint8_t finePitch = 120; // 120 = center
     std::uint8_t release = 64;
     std::uint8_t pan = 64;       // 0..128, 64 = center

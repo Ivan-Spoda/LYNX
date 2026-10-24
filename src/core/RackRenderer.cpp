@@ -2138,6 +2138,7 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
     {
         meters->accumulate (0, peakOf (left, numSamples), peakOf (right, numSamples));
         meters->capture.push (0, left, right, numSamples);
+        meters->logTap.push (0, left, right, numSamples);
     }
 }
 
