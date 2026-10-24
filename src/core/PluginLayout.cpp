@@ -2640,8 +2640,8 @@ Layout echoformLayout()
     v.push_back (label (620, 254, 48, 20, TR_NOOP ("Hybrid")));
     v.push_back (menuOf (670, 252, 104, 24, "Hybrid", TR_NOOP ("Hybrid"), TR_NOOP ("Off|Clean|Analog"), { 0.0f, 0.5f, 1.0f }));
     // round 136: the measured tape-echo loops (EchoBoy's role)
-    v.push_back (label (620, 278, 48, 20, TR_NOOP ("Tape")));
-    v.push_back (menuOf (670, 277, 104, 22, "Tape voicing", TR_NOOP ("Tape voicing"), TR_NOOP ("Off|Ping-pong tape|Studio tape|Studio tape hot"),
+    v.push_back (label (782, 254, 40, 20, TR_NOOP ("Tape")));
+    v.push_back (menuOf (824, 252, 122, 24, "Tape voicing", TR_NOOP ("Tape voicing"), TR_NOOP ("Off|Ping-pong tape|Studio tape|Studio tape hot"),
                          { 0.0f, 1.0f / 3.0f, 2.0f / 3.0f, 1.0f }));
     // the mode selector along the bottom
     v.push_back (label (8, 254, 52, 20, TR_NOOP ("Mode")));
