@@ -1,0 +1,148 @@
+#pragma once
+
+// FL's Patcher as a real plugin graph (REA_rodada141): the runtime of a PatcherDoc (core/Song.h), used by a mixer
+// slot (EffectKind::patcher) and by a Channel Rack generator (InstrumentKind::patcher).
+//
+// Behaviour rebuilt from FL's Patcher (REA_rodada14 §1, REA_rodada20 §3.1, REA_rodada141; clean-room, our own code):
+//  - every audio input port sums its active cables: the first one writes source × gain, the next ones add
+//    source × gain; an input with no active cable is silence;
+//  - nodes run in the order of the audio cables (a cable that closes a loop reads the source's previous block);
+//  - delay compensation: a cable whose source has less latency than the destination's latest input goes through a
+//    delay line of the difference, so parallel branches stay aligned; the graph reports its longest path;
+//  - notes: the "From LYNX" MIDI output reaches the instruments cabled to it (a generator Patcher's channel notes);
+//  - control cables: a node's control output (Peak Controller, Formula Controller, an Envelope Controller…) sets a
+//    parameter of another node each block, through the cable's value map.
+
+#include <array>
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "core/Effects.h"
+#include "core/Instruments.h"
+#include "core/Song.h"
+
+namespace lynx::patcher
+{
+// How the graph creates its nodes: the rack's own builders (plugins through the app's factories, nested Patchers…).
+// Null results become pass-through / silent nodes.
+struct Factories
+{
+    std::function<std::shared_ptr<Effect> (const EffectSlot&)> effect;
+    std::function<std::shared_ptr<Instrument> (const ChannelDef&)> instrument;
+};
+
+// Default builders without plugins (tests, offline tools): built-in effects and instruments only.
+Factories builtInFactories (double sampleRate, double bpm = 140.0);
+
+// A node's audio output bus `bus` ≥ 1 that FL's splitting plugins provide: an imported BusHead, or LYNX's
+// Frequency Splitter bands (1 low, 2 mid, 3 high). nullopt = the node has no such output (silence).
+std::optional<PatchNode::BusHead> busHeadOf (const PatchNode& node, int bus);
+
+// The audio inputs / outputs and control outputs a node shows in the editor.
+struct NodePorts
+{
+    int audioIns = 1, audioOuts = 1, controlOuts = 0;
+    bool midiIn = false;
+};
+NodePorts nodePorts (const PatchNode& node);
+
+// Whether two documents have the same structure (nodes, their plugins / states and the cables): a running graph
+// built for `a` can take `b`'s values (parameters, on/off, dry/wet, cable gains) without being built again.
+bool sameStructure (const PatcherDoc& a, const PatcherDoc& b);
+
+class Graph
+{
+public:
+    static constexpr int capacity = 2048; // samples per piece (longer blocks are split)
+
+    // `previous` (may be null): nodes with the same effect / instrument setup keep their running instance.
+    Graph (const PatcherDoc& doc, double sampleRate, const Factories& factories, const Graph* previous = nullptr);
+    ~Graph();
+
+    void prepare (double sampleRate) noexcept;
+    void reset() noexcept;
+    void setSongPosition (double ticks) noexcept;
+    void setPlaying (bool playing) noexcept;
+    void setHeldNotes (const NoteMask* channels, int count) noexcept;
+
+    // One block: the host's input (and side-chain, may be null) in, the main output out (may alias the input);
+    // the extra outputs land in auxOutput(). Any n (split into pieces).
+    void process (const float* inL, const float* inR, const float* scL, const float* scR, float* outL, float* outR, int n, double bpm) noexcept;
+
+    // the instruments cabled to "From LYNX" notes
+    void noteOn (int key, float velocity) noexcept;
+    void noteOff (int key) noexcept;
+    void noteOnMidi (int key, float velocity, int midiChannel) noexcept;
+    void noteOffMidi (int key, int midiChannel) noexcept;
+    void allNotesOff() noexcept;
+    void slideTo (int key, float cents, float samples) noexcept;
+    void setNextNoteExpression (float pan, float cents, bool porta) noexcept;
+    bool hasInstruments() const noexcept;
+    bool instrumentsIdle() const noexcept;
+
+    int latencySamples() const noexcept { return latency; }
+    float controlOutput (int output) const noexcept;
+
+    // "To LYNX" extra outputs (bus 1…): how many and their last block (valid until the next process)
+    int auxOutputs() const noexcept { return (int) aux.size(); }
+    const float* auxOutput (int index, int side) const noexcept;
+
+    // the running nodes (UI: plugin editors, state capture); null where the node failed or is the other type
+    int nodeCount() const noexcept { return (int) nodes.size(); }
+    std::shared_ptr<Effect> effectAt (int node) const;
+    std::shared_ptr<Instrument> instrumentAt (int node) const;
+
+    // Takes the values of a document with the same structure (sameStructure): applied at the next block.
+    // UI thread; the graph keeps the document copy.
+    void takeValues (const PatcherDoc& doc, double bpm = 140.0);
+
+private:
+    struct Node;
+    struct AudioWire;
+    struct ControlWire;
+    struct Values;
+
+    void processPiece (const float* inL, const float* inR, const float* scL, const float* scR, float* outL, float* outR, int n, double bpm) noexcept;
+    void applyPending() noexcept;
+
+    std::vector<std::unique_ptr<Node>> nodes;
+    std::vector<int> order;
+    std::vector<AudioWire> wires;
+    std::vector<ControlWire> controls;
+    std::vector<int> noteTargets; // nodes cabled to the host's notes
+    std::vector<std::vector<int>> outputs; // [bus of "To LYNX"] its cables
+    std::vector<std::array<std::vector<float>, 2>> aux;
+    std::array<std::vector<float>, 6> scratch; // gathered input, gathered side-chain, wire delay
+    std::vector<float> zeros;
+    std::unique_ptr<Values> active;
+    std::atomic<Values*> pending { nullptr };
+    std::atomic<Values*> retired { nullptr };
+    int latency = 0;
+    double rate = 44100.0;
+};
+
+// A mixer slot of kind `patcher`
+std::unique_ptr<Effect> makeEffect (const EffectSlot& slot, double sampleRate, const Factories& factories, const Effect* previous = nullptr);
+// A Channel Rack generator Patcher (aux outputs go to doc.outputTracks)
+std::unique_ptr<Instrument> makeInstrument (const ChannelDef& channel, double sampleRate, const Factories& factories,
+                                            const Instrument* previous = nullptr);
+// The graph inside a Patcher effect / instrument (null for anything else)
+Graph* graphOf (Effect* effect) noexcept;
+Graph* graphOf (Instrument* instrument) noexcept;
+// Takes the new values of a slot / channel whose Patcher kept its structure: true = done (keep the running instance)
+bool acceptValues (Effect* effect, const EffectSlot& slot);
+bool acceptValues (Instrument* instrument, const ChannelDef& channel);
+
+// The mixer insert that extra output k (1…) of a generator Patcher feeds
+int auxOutputTrack (const ChannelDef& channel, int k) noexcept;
+
+// Editing helpers (UI and import): a new node / wire, removing a node (its cables go, later indices shift down)
+int addNode (PatcherDoc& doc, PatchNode node);
+void removeNode (PatcherDoc& doc, int node);
+bool connect (PatcherDoc& doc, const PatchWire& wire); // false if the same cable exists or the ends are invalid
+// Name shown for a node: its label, else the plugin / effect / instrument name
+std::string nodeName (const PatchNode& node);
+} // namespace lynx::patcher
