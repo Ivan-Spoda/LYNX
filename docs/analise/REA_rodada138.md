@@ -104,8 +104,8 @@ pitch without its vibrato (a ±100 c vibrato at R 0 is no longer turned into not
 
 ### 3.7 Latency and the rest
 2670 samples at 44.1 and 48 kHz, 5340 at 96 kHz (fixed in samples); Latency Removal: 112 samples. EFX+: 2780 / 112,
-the same retune and humanize laws (Classic-style humanize). Classic mode: the same retune curve. Tracking / input
-types: rendered, not analysed (data in the archive).
+the same retune and humanize laws (Classic-style humanize). Classic mode: the same retune curve. Tracking and Input Type do not change the correction of clean harmonic notes
+A2 … C6 (+30 c → corrected 29–32 c for every type and tracking 25 … 100; tracking 0 drops one note, A5).
 
 ### 3.8 Her takes with her own states (the real translation, LYNX vs the trial)
 |pitch(LYNX) − pitch(trial)| over the frames voiced in both (5 ms hop), and the dry take for scale:
@@ -155,6 +155,6 @@ null alone does not fit (fits `Ahi1`, `Ahi2` in `D:\lynx-work\vox136\lab`).
 - Not done (round 136's list, in order): Decapitator at drive ≥ 5 (§5: tried, not adopted) and Punish's curve
   (data in `D:\lynx-work\vox136`, Soundtoys trial until 2026-11-22), EchoBoy's Dual and the ping-pong kernel's
   last −21 dB, PanMan's first ~200 ms after a reset, the RComp / CLA-2A / NS1 residue (Waves in demo mode: mute-masked
-  measurements). Auto-Tune Pro: tracking / input-type analysis from the archive, the upper-note tie, LYNX Tune's HF loss.
+  measurements). Auto-Tune Pro: tracking / input type on noisy or breathy voices, the upper-note tie, LYNX Tune's HF loss.
 - Next trials by expiry: Complete Access (Slate / SSL / LiquidSonics / sonible) 2026-11-03, FabFilter ~11-16,
   Soundtoys 11-22.
