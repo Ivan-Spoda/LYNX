@@ -146,6 +146,218 @@
     float barsLastX = 0.0f;
     bool barsDragging = false;
 
+    // --- round 144: Echoform's rhythm editor (EchoBoy's role) -----------------------------------------------
+    // The heard taps on the pattern's time axis (slot 0 = the input, at 0): drag a tap up / down for its level and
+    // sideways for its time (Free / Grid; a sideways drag in Even turns the even pattern into Free taps first);
+    // double-click empty space = a new tap there, double-click a tap = remove it (Free / Grid) or its level back to
+    // 100 % (Even); the Patterns button loads one of LYNX's own tap patterns.
+
+    static bool isRhythmEdit (const LayoutItem& item)
+    {
+        return item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "rhythmedit") == 0;
+    }
+    static bool isRhythmPatterns (const LayoutItem& item)
+    {
+        return item.type == Item::display && item.display != nullptr && std::strcmp (item.display, "rhythmpatterns") == 0;
+    }
+    double rhythmBpm() const { return engine.getSong().bpm > 1.0 ? engine.getSong().bpm : 120.0; }
+    juce::Rectangle<float> rhythmArea (const LayoutItem& item) const
+    {
+        return rectOf (item).reduced (8.0f * scale(), 6.0f * scale()).withTrimmedBottom (12.0f * scale());
+    }
+    // the heard taps: x on screen, the tap's own level (0 … 1, before the pattern's normalisation)
+    struct RhythmHandle { int k; float x; float level; double ms; };
+    std::vector<RhythmHandle> rhythmHandles (const LayoutItem& item) const
+    {
+        namespace ef = echosuite::echoform;
+        std::vector<RhythmHandle> out;
+        const auto* fx = current();
+        if (fx == nullptr)
+            return out;
+        const auto area = rhythmArea (item);
+        const auto length = ef::rhythmLengthMs (fx->params, rhythmBpm());
+        const auto taps = ef::rhythmTaps (fx->params, rhythmBpm());
+        for (int k = 0; k < (int) taps.size(); ++k)
+            out.push_back ({ k, area.getX() + area.getWidth() * (float) (taps[(std::size_t) k].ms / juce::jmax (1.0, length)),
+                             fx->params[(std::size_t) (ef::rhythmTap1 + k)], taps[(std::size_t) k].ms });
+        return out;
+    }
+    int rhythmNearest (const LayoutItem& item, juce::Point<float> p) const
+    {
+        int best = -1;
+        auto bestD = 7.0f * scale();
+        for (const auto& h : rhythmHandles (item))
+            if (const auto d = std::abs (h.x - p.x); d < bestD)
+                best = h.k, bestD = d;
+        return best;
+    }
+
+    void paintRhythmEdit (juce::Graphics& g, const LayoutItem& item, const EffectSlot& fx)
+    {
+        namespace ef = echosuite::echoform;
+        using namespace theme;
+        const auto s = scale();
+        const auto area = rhythmArea (item);
+        const auto bpm = rhythmBpm();
+        const auto beats = ef::rhythmBeatsOf (fx.params[ef::rhythmLength]);
+        const auto edit = ef::rhythmEditOf (fx.params[ef::rhythmEdit]);
+        const auto c = fx.enabled ? colour::accent : colour::textDisabled;
+        // grid: the beats, and the Grid edit's note value (1/16 lines otherwise)
+        const auto gridBeats = edit == ef::RhythmEdit::grid ? ef::rhythmGridBeats (ef::rhythmGridOf (fx.params[ef::rhythmGrid])) : 0.25;
+        const auto lines = (int) std::round ((double) beats / gridBeats);
+        if (lines <= 256)
+            for (int i = 1; i < lines; ++i)
+            {
+                const auto x = area.getX() + area.getWidth() * (float) i / (float) lines;
+                g.setColour (std::fmod ((double) i * gridBeats, 1.0) < 1e-6 ? colour::gridBar : colour::gridBeat);
+                g.drawVerticalLine ((int) x, area.getY(), area.getBottom());
+            }
+        g.setFont (font (juce::jmax (7.0f, 8.5f * s)));
+        g.setColour (colour::textDisabled);
+        for (int b = 0; b < beats; ++b)
+            g.drawText (juce::String (b + 1), juce::Rectangle<float> (area.getX() + area.getWidth() * (float) b / (float) beats + 2.0f * s, area.getBottom() + 1.0f, 20.0f * s, 11.0f * s),
+                        juce::Justification::centredLeft);
+        // slot 0: the input itself (heard through the feedback when the pattern starts again)
+        g.setColour (c.withAlpha (0.5f));
+        g.drawRect (juce::Rectangle<float> (area.getX() - 1.5f * s, area.getY(), 3.0f * s, area.getHeight()), 1.0f);
+        const auto hot = rhythmDrag >= 0 ? rhythmDrag : (hoverItem >= 0 && &activeLayout().items[(std::size_t) hoverItem] == &item ? rhythmNearest (item, mouseAt) : -1);
+        for (const auto& h : rhythmHandles (item))
+        {
+            const auto w = juce::jmax (4.0f, 6.0f * s);
+            const auto bar = juce::Rectangle<float> (h.x - w * 0.5f, area.getBottom() - area.getHeight() * h.level, w, area.getHeight() * h.level);
+            g.setColour (c.withAlpha (h.k == hot ? 0.55f : 0.3f));
+            g.fillRect (bar);
+            g.setColour (c);
+            g.fillRect (bar.withHeight (3.0f * s).withY (bar.getY() - 1.5f * s));
+            g.setColour (colour::textSecondary);
+            g.drawText (juce::String (h.k + 1), juce::Rectangle<float> (h.x - 10.0f * s, area.getY() - 1.0f, 20.0f * s, 10.0f * s), juce::Justification::centred);
+        }
+        // the read-out: the edit, the length, the tempo
+        const auto editName = edit == ef::RhythmEdit::even ? tr ("Even") : edit == ef::RhythmEdit::free ? tr ("Free") : tr ("Grid") + " " + valueText (ef::rhythmGrid, fx.params[ef::rhythmGrid]);
+        g.setColour (colour::textSecondary);
+        g.drawText (editName + "  " + valueText (ef::rhythmLength, fx.params[ef::rhythmLength]) + "  " + juce::String (ef::tempoFor (fx.params, bpm), 1) + " BPM",
+                    rectOf (item).reduced (6.0f * s, 2.0f * s), juce::Justification::bottomRight);
+    }
+
+    void paintRhythmPatterns (juce::Graphics& g, const LayoutItem& item)
+    {
+        using namespace theme;
+        const auto s = scale();
+        const auto r = rectOf (item);
+        g.setColour (colour::bg2);
+        g.fillRoundedRectangle (r, radius::sm * s);
+        g.setColour (colour::textPrimary);
+        g.setFont (font (juce::jmax (8.0f, 10.0f * s)));
+        g.drawText (tr ("Patterns") + juce::String::fromUTF8 (" \u25be"), r, juce::Justification::centred);
+    }
+
+    void rhythmPatternsMenu (const LayoutItem& item)
+    {
+        namespace ef = echosuite::echoform;
+        juce::PopupMenu menu;
+        for (int i = 0; i < ef::rhythmPresetCount(); ++i)
+            menu.addItem (tr (ef::rhythmPresetName (i)), [this, i] { bar.beginGesture(); setParams (ef::rhythmPresetEdits (i)); repaint(); });
+        menu.addSeparator();
+        menu.addItem (tr ("Even spacing"), [this] { setParams ({ { ef::rhythmEdit, 0.0f } }); repaint(); });
+        menu.addItem (tr ("All taps at 100 %"), [this] {
+            std::vector<std::pair<int, float>> e;
+            for (int k = 0; k < 15; ++k)
+                e.push_back ({ ef::rhythmTap1 + k, 1.0f });
+            setParams (e);
+            repaint();
+        });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (rectOf (item).toNearestInt())));
+    }
+
+    void rhythmMouse (const juce::MouseEvent& e, const LayoutItem& item, bool start)
+    {
+        namespace ef = echosuite::echoform;
+        const auto* fx = current();
+        if (fx == nullptr)
+            return;
+        const auto area = rhythmArea (item);
+        if (start)
+        {
+            rhythmDrag = rhythmNearest (item, e.position);
+            rhythmStartX = e.position.x;
+            if (rhythmDrag >= 0)
+                bar.beginGesture();
+            return;
+        }
+        if (rhythmDrag < 0)
+            return;
+        const auto k = rhythmDrag;
+        const auto level = juce::jlimit (0.0f, 1.0f, (area.getBottom() - e.position.y) / juce::jmax (1.0f, area.getHeight()));
+        std::vector<std::pair<int, float>> changes { { ef::rhythmTap1 + k, level } };
+        auto params = fx->params;
+        if (ef::rhythmEditOf (params[ef::rhythmEdit]) == ef::RhythmEdit::even && std::abs (e.position.x - rhythmStartX) > 4.0f * scale())
+            for (const auto& c : ef::rhythmFreeFromEven (params, rhythmBpm())) // moving a tap in time: Free taps from here on
+            {
+                changes.push_back (c);
+                params[(std::size_t) c.first] = c.second;
+            }
+        juce::String tip = valueText (ef::rhythmTap1 + k, level);
+        if (ef::rhythmEditOf (params[ef::rhythmEdit]) != ef::RhythmEdit::even)
+        {
+            const auto length = ef::rhythmLengthMs (params, rhythmBpm());
+            const auto ms = (double) juce::jlimit (0.0f, 1.0f, (e.position.x - area.getX()) / juce::jmax (1.0f, area.getWidth())) * length;
+            const auto t = ef::rhythmTimeValue (params, ms, rhythmBpm());
+            changes.push_back ({ ef::rhythmTime1 + k, t });
+            params[(std::size_t) (ef::rhythmTime1 + k)] = t;
+            tip = juce::String (juce::roundToInt (ef::rhythmTapMs (params, k, rhythmBpm()))) + " ms  " + tip;
+        }
+        setParams (changes);
+        ui::showValueTip (*this, rectOf (item).toNearestInt(), tr ("Tap") + " " + juce::String (k + 1) + ": " + tip);
+    }
+
+    // double-click: a new tap at the mouse (Free / Grid), or the tap under it removed / back to 100 %
+    void rhythmDoubleClick (const juce::MouseEvent& e, const LayoutItem& item)
+    {
+        namespace ef = echosuite::echoform;
+        const auto* fx = current();
+        if (fx == nullptr)
+            return;
+        auto params = fx->params;
+        const auto area = rhythmArea (item);
+        const auto k = rhythmNearest (item, e.position);
+        const auto even = ef::rhythmEditOf (params[ef::rhythmEdit]) == ef::RhythmEdit::even;
+        const auto heard = (int) ef::rhythmTaps (params, rhythmBpm()).size();
+        std::vector<std::pair<int, float>> changes;
+        if (k >= 0 && even)
+            changes.push_back ({ ef::rhythmTap1 + k, 1.0f });
+        else if (k >= 0) // remove tap k: the later ones move down a place
+        {
+            for (int j = k; j + 1 < heard; ++j)
+            {
+                changes.push_back ({ ef::rhythmTime1 + j, params[(std::size_t) (ef::rhythmTime1 + j + 1)] });
+                changes.push_back ({ ef::rhythmTap1 + j, params[(std::size_t) (ef::rhythmTap1 + j + 1)] });
+            }
+            changes.push_back ({ ef::rhythmRepeats, (float) juce::jmax (0, heard - 1) / 15.0f });
+        }
+        else if (heard < 15)
+        {
+            if (even)
+                for (const auto& c : ef::rhythmFreeFromEven (params, rhythmBpm()))
+                {
+                    changes.push_back (c);
+                    params[(std::size_t) c.first] = c.second;
+                }
+            const auto ms = (double) juce::jlimit (0.0f, 1.0f, (e.position.x - area.getX()) / juce::jmax (1.0f, area.getWidth())) * ef::rhythmLengthMs (params, rhythmBpm());
+            changes.push_back ({ ef::rhythmTime1 + heard, ef::rhythmTimeValue (params, ms, rhythmBpm()) });
+            changes.push_back ({ ef::rhythmTap1 + heard, juce::jlimit (0.05f, 1.0f, (area.getBottom() - e.position.y) / juce::jmax (1.0f, area.getHeight())) });
+            changes.push_back ({ ef::rhythmRepeats, (float) (heard + 1) / 15.0f });
+        }
+        if (! changes.empty())
+        {
+            bar.beginGesture();
+            setParams (changes);
+            repaint();
+        }
+    }
+
+    int rhythmDrag = -1;
+    float rhythmStartX = 0.0f;
+
     // --- the other displays -----------------------------------------------------------------------------
 
     // true = drawn (id is one of round 105's displays)
@@ -158,6 +370,16 @@
         if (id == "equobars" || id == "mbdbars" || id == "rhythmbars")
         {
             paintBars (g, item, fx);
+            return true;
+        }
+        if (id == "rhythmedit") // round 144
+        {
+            paintRhythmEdit (g, item, fx);
+            return true;
+        }
+        if (id == "rhythmpatterns")
+        {
+            paintRhythmPatterns (g, item);
             return true;
         }
         if (id == "vocbands") // Fruity Vocoder: one column per band (FL animates their levels; LYNX shows the bands)

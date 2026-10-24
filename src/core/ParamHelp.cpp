@@ -219,6 +219,7 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::latticeMod, "spread" }, TR_NOOP ("How far the taps are spread in time") },
         { { K::latticeMod, "colour" }, TR_NOOP ("Tone of the modulated signal") },
         { { K::latticeMod, "sync" }, TR_NOOP ("Locks the modulation to the project tempo") },
+        { { K::latticeMod, "delay sync" }, TR_NOOP ("Sets the delay to a note value at the project tempo: straight, dotted or triplet (up to 2.75 s)") },
         { { K::latticeMod, "input pan" }, TR_NOOP ("What enters the taps: stereo, swapped sides, or the mono sum to both, the left or the right") },
         // Echoform
         { { K::echoform, "mode" }, TR_NOOP ("The machine the echo imitates (tape, bucket brigade, digital, lo-fi, pitch...)") },
@@ -229,6 +230,17 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::echoform, "repeats" }, TR_NOOP ("Slots in the rhythm pattern (the first one is the input itself)") },
         { { K::echoform, "decay" }, TR_NOOP ("How much quieter the last tap of the pattern is than the first") },
         { { K::echoform, "length" }, TR_NOOP ("Length of the rhythm pattern in beats; the feedback replays it") },
+        { { K::echoform, "rhythm edit" }, TR_NOOP ("Where the rhythm taps sit: evenly spaced, each at its own time (Free) or snapped to the grid") },
+        { { K::echoform, "rhythm grid" }, TR_NOOP ("The note value the taps snap to in the Grid edit") },
+        { { K::echoform, "input level" }, TR_NOOP ("Level into the echoes only (the dry signal is not touched): hotter drives the loop harder") },
+        { { K::echoform, "fb balance" }, TR_NOOP ("Feedback of the left side against the right side") },
+        { { K::echoform, "diffusion post" }, TR_NOOP ("Diffusion inside the loop (each repeat smears more) or only on the echoes' way out") },
+        { { K::echoform, "mod shape" }, TR_NOOP ("Wave of the modulation: sine, triangle, square, saw or random") },
+        { { K::echoform, "mod sync" }, TR_NOOP ("Locks the modulation rate to a note value of the tempo") },
+        { { K::echoform, "loop bass" }, TR_NOOP ("Low shelf inside the loop: every repeat gets darker or fuller") },
+        { { K::echoform, "loop mid" }, TR_NOOP ("Mid bell inside the loop: every repeat gets more or less of the middle") },
+        { { K::echoform, "loop treble" }, TR_NOOP ("High shelf inside the loop: every repeat gets brighter or duller") },
+        { { K::echoform, "rhythm shape" }, TR_NOOP ("How Decay spreads over the taps: falling, rising, a swell, a fade or a late drop") },
         // Ridge Strip
         { { K::ridgeStrip, "input" }, TR_NOOP ("Level into the channel strip") },
         { { K::ridgeStrip, "hpf" }, TR_NOOP ("High-pass filter: removes rumble below this frequency") },
@@ -312,6 +324,8 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         // Prism Multiband
         { { K::prismMultiband, "level" }, TR_NOOP ("Output level of this band") },
         { { K::prismMultiband, "slope" }, TR_NOOP ("Steepness of the band splits") },
+        { { K::prismMultiband, "pan mode" }, TR_NOOP ("What each band's pan balances: left / right, or mid / side") },
+        { { K::prismMultiband, "processing" }, TR_NOOP ("Dynamic phase: the crossovers' phase only where a band works; linear phase: no phase change (more latency); minimum phase: the classic crossover sum") },
         // Sentry Gate
         { { K::sentryGate, "style" }, TR_NOOP ("Gate, expander or ducker, and how it opens") },
         { { K::sentryGate, "threshold" }, TR_NOOP ("Level below which the gate closes") },

@@ -12,6 +12,7 @@
 #include "core/FacetEq.h"
 #include "core/LrCrossover.h"
 #include "core/MixSuite.h"
+#include "core/ParametricEqLinear.h"
 
 // REA_rodada108. Published material the designs rest on:
 //  - feed-forward compressor with a log-domain level detector (branching attack / release), soft-knee gain computer:
@@ -911,6 +912,21 @@ int slopeDbOct (float v) noexcept
 }
 double lookaheadMs (float v) noexcept { return lin (v, 0.0, 20.0); }
 double trimDb (float v) noexcept { return lin (v, -36.0, 36.0); }
+Phase phaseOf (float v) noexcept
+{
+    const auto k = pick (v, 3);
+    return k == 0 ? Phase::linear : (k == 1 ? Phase::dynamic : Phase::minimum);
+}
+int oversamplingOf (float v) noexcept { return 1 << pick (v, 3); }
+int linearFftSize (double sampleRate) noexcept
+{
+    int n = 4096;
+    for (double r = 50000.0; sampleRate > r && n < 16384; r *= 2.0)
+        n *= 2;
+    return n;
+}
+int linearLatency (double sampleRate) noexcept { return 3 * linearFftSize (sampleRate) / 4; }
+
 
 namespace
 {
@@ -980,10 +996,24 @@ double responseDb (const EffectParams& p, const double* bandGainDb, double sampl
         rest *= s.response (true, w);
     }
     band[(std::size_t) (nb - 1)] = rest;
+    // round 144: the processing mode — linear phase: the same magnitudes, no phase; minimum phase: the lower bands
+    // pass the all-passes of the crossovers above them, the output is the sum of the bands
+    const auto mode = phaseOf (p[processingMode]);
+    if (mode == Phase::linear)
+        for (auto& b : band)
+            b = std::abs (b);
+    else if (mode == Phase::minimum)
+        for (int k = 0; k < nb - 2; ++k)
+            for (int j = k + 1; j < nb - 1; ++j)
+            {
+                Split s;
+                s.design (sampleRate, f[(std::size_t) j], slope);
+                band[(std::size_t) k] *= s.response (false, w) + s.response (true, w);
+            }
     bool solo = false;
     for (int b = 0; b < nb; ++b)
         solo = solo || on (p[(std::size_t) param (b, fSolo)]);
-    std::complex<double> y = solo ? std::complex<double> {} : std::complex<double> { 1.0, 0.0 };
+    std::complex<double> y = solo || mode == Phase::minimum ? std::complex<double> {} : std::complex<double> { 1.0, 0.0 };
     for (int b = 0; b < nb; ++b)
     {
         const auto g = dbToGain (bandGainDb[b]);
@@ -992,6 +1022,8 @@ double responseDb (const EffectParams& p, const double* bandGainDb, double sampl
             if (on (p[(std::size_t) param (b, fSolo)]))
                 y += g * band[b];
         }
+        else if (mode == Phase::minimum)
+            y += g * band[b];
         else
             y += (g - 1.0) * band[b];
     }
@@ -1000,6 +1032,30 @@ double responseDb (const EffectParams& p, const double* bandGainDb, double sampl
 
 namespace
 {
+// a delay line sized in prepare() (the linear-phase path's dry signal: up to 12 288 samples at 192 kHz)
+struct LongDelay
+{
+    std::vector<float> l, r;
+    int pos = 0, len = 0;
+    void allocate (int n) { l.assign ((std::size_t) n + 1, 0.0f); r.assign ((std::size_t) n + 1, 0.0f); len = n; pos = 0; }
+    void reset() noexcept { std::fill (l.begin(), l.end(), 0.0f); std::fill (r.begin(), r.end(), 0.0f); pos = 0; }
+    void process (float& a, float& b) noexcept
+    {
+        if (len == 0 || l.empty())
+            return;
+        const auto size = (int) l.size();
+        l[(std::size_t) pos] = a;
+        r[(std::size_t) pos] = b;
+        auto rd = pos - len;
+        if (rd < 0)
+            rd += size;
+        a = l[(std::size_t) rd];
+        b = r[(std::size_t) rd];
+        if (++pos == size)
+            pos = 0;
+    }
+};
+
 class Multiband final : public Effect
 {
 public:
@@ -1013,6 +1069,21 @@ public:
     {
         sr = rate;
         laMs = -1.0;
+        // round 144: the linear-phase crossovers (one stereo FFT convolver per band below the top one) and the dry
+        // delay that matches them, allocated here (process() never allocates)
+        const auto size = linearFftSize (rate);
+        if (size != linSize)
+        {
+            linSize = size;
+            for (auto& c : lin)
+                c.init (size);
+            for (auto& t : linTable)
+                t.assign ((std::size_t) (size / 2 + 1), 0.0f);
+            linDry.allocate (linearLatency (rate));
+            linSc.allocate (linearLatency (rate));
+        }
+        mode = -1;
+        osFactor = 0;
         configure (lastParams);
         designed = false;
         reset();
@@ -1024,11 +1095,20 @@ public:
             s.reset();
         for (auto& s : scSplit)
             s.reset();
+        for (auto& row : comp)
+            for (auto& s : row)
+                s.reset();
         delay.reset();
         for (auto& d : bandDelay)
             d.reset();
         for (auto& d : gainDelay)
             d.reset();
+        for (auto& c : lin)
+            if (c.n > 0)
+                c.clear();
+        linDry.reset();
+        linSc.reset();
+        resetOversamplers();
         env.fill (-120.0);
         gains.fill (1.0f);
     }
@@ -1045,26 +1125,64 @@ public:
     {
         lastParams = p;
         configure (p);
+        const auto inPeak = blockPeak (l, r, n);
+        extreme.fill (0.0);
+        const auto* sl = scL;
+        const auto* sr2 = scR;
+        for (int i = 0; i < n; i += chunk)
+        {
+            const auto m = std::min (chunk, n - i);
+            const bool sc = sl != nullptr && sr2 != nullptr;
+            processChunk (l + i, r + i, sc ? sl + i : nullptr, sc ? sr2 + i : nullptr, m, p);
+        }
+        const auto nb = bandCount (p);
+        for (int b = 0; b < bands; ++b)
+            meters.set (bandMeter (b), b < nb ? (float) std::clamp (extreme[(std::size_t) b] / 30.0, -1.0, 1.0) : 0.0f);
+        meters.set (4, inPeak);
+        meters.set (5, blockPeak (l, r, n));
+        scL = scR = nullptr;
+    }
+
+private:
+    static constexpr int chunk = 256, maxFactor = 4;
+
+    void processChunk (float* l, float* r, const float* scl, const float* scr, int n, const EffectParams& p) noexcept
+    {
         const auto f = crossovers (p);
         const auto slope = slopeDbOct (p[Global::slope]);
         const auto nb = bandCount (p);
+        const auto md = (Phase) mode;
+        const bool linear = md == Phase::linear, minimum = md == Phase::minimum;
         if (! designed || f != lastF || slope != lastSlope)
         {
             for (int k = 0; k < bands - 1; ++k)
             {
                 split[(std::size_t) k].design (sr, f[(std::size_t) k], slope);
                 scSplit[(std::size_t) k].design (sr, f[(std::size_t) k], slope);
+                for (int j = 0; j < bands - 1; ++j)
+                    comp[(std::size_t) j][(std::size_t) k].design (sr, f[(std::size_t) k], slope);
             }
             lastF = f;
             lastSlope = slope;
             designed = true;
+            kernelsDirty = true;
         }
+        if (nb != lastNb)
+        {
+            lastNb = nb;
+            kernelsDirty = true;
+            for (auto& c : lin)
+                if (c.n > 0)
+                    c.clear();
+        }
+        if (linear && kernelsDirty)
+            designKernels (nb);
         // round 135: the detectors hear the slot's side chain, split by the same crossovers
-        const bool external = on (p[scExternal]) && scL != nullptr && scR != nullptr;
-        const auto inPeak = blockPeak (l, r, n);
+        const bool external = on (p[scExternal]) && scl != nullptr && scr != nullptr;
         const auto inGain = (float) dbToGain (trimDb (p[input]));
         const auto outGain = (float) dbToGain (trimDb (p[output]));
         const auto mx = std::clamp (p[mix], 0.0f, 1.0f);
+        const bool msPan = on (p[panMode]);
 
         std::array<double, bands> aA {}, aR {}, level {};
         std::array<bool, bands> enabled {}, soloed {};
@@ -1085,12 +1203,32 @@ public:
             const auto bandLa = std::min (laMs, lookaheadMs (p[(std::size_t) bandLookaheadParam (b)]));
             gainDelay[(std::size_t) b].setLength (std::max (0, laSamples - (int) std::lround (bandLa * 0.001 * sr)));
         }
-        std::array<double, bands> extreme {};
 
+        // 1. the split, the detectors and the gains at the base rate; the dry signal, the bands and the gains are kept
         for (int i = 0; i < n; ++i)
         {
             const float xl = l[i] * inGain, xr = r[i] * inGain;
             float bl[bands], br[bands], sl0[bands], sr0[bands];
+            float dl = xl, dr = xr;
+            if (linear)
+            {
+                // round 144: FIR bands (zero phase, delayed by the convolvers' latency); the top band is the rest, so
+                // the bands always add up to the delayed input
+                linDry.process (dl, dr);
+                float restL = dl, restR = dr;
+                for (int k = 0; k < nb - 1; ++k)
+                {
+                    float a = xl, c = xr;
+                    lin[(std::size_t) k].step (a, c);
+                    bl[k] = a;
+                    br[k] = c;
+                    restL -= a;
+                    restR -= c;
+                }
+                bl[nb - 1] = restL;
+                br[nb - 1] = restR;
+            }
+            else
             {
                 // the crossover tree: each split takes the high part of the one before
                 float hl = xl, hr = xr;
@@ -1104,25 +1242,27 @@ public:
                 }
                 bl[nb - 1] = hl;
                 br[nb - 1] = hr;
-                if (external)
+            }
+            if (external)
+            {
+                float el = scl[i] * inGain, er = scr[i] * inGain;
+                if (linear)
+                    linSc.process (el, er); // the detectors stay in time with the delayed bands
+                for (int k = 0; k < nb - 1; ++k)
                 {
-                    float el = scL[i] * inGain, er = scR[i] * inGain;
-                    for (int k = 0; k < nb - 1; ++k)
-                    {
-                        float nl, nr;
-                        scSplit[(std::size_t) k].run (el, 0, sl0[k], nl);
-                        scSplit[(std::size_t) k].run (er, 1, sr0[k], nr);
-                        el = nl;
-                        er = nr;
-                    }
-                    sl0[nb - 1] = el;
-                    sr0[nb - 1] = er;
+                    float nl, nr;
+                    scSplit[(std::size_t) k].run (el, 0, sl0[k], nl);
+                    scSplit[(std::size_t) k].run (er, 1, sr0[k], nr);
+                    el = nl;
+                    er = nr;
                 }
+                sl0[nb - 1] = el;
+                sr0[nb - 1] = er;
             }
 
-            float dl = xl, dr = xr;
             delay.process (dl, dr); // the look-ahead: the audio waits, the detectors don't
-            float yl = anySolo ? 0.0f : dl, yr = anySolo ? 0.0f : dr;
+            dry[0][(std::size_t) i] = dl;
+            dry[1][(std::size_t) i] = dr;
             for (int b = 0; b < nb; ++b)
             {
                 float g = 1.0f;
@@ -1138,10 +1278,46 @@ public:
                         extreme[(std::size_t) b] = gdb;
                     g = (float) dbToGain (gdb + level[(std::size_t) b]);
                 }
-                g = gainDelay[(std::size_t) b].process (g);
+                gain[(std::size_t) b][(std::size_t) i] = gainDelay[(std::size_t) b].process (g);
                 float sl = bl[b], sr2 = br[b];
+                if (minimum) // round 144: the band passes the all-passes of the crossovers above it
+                    for (int j = b + 1; j < nb - 1; ++j)
+                    {
+                        sl = comp[(std::size_t) b][(std::size_t) j].allpass (sl, 0);
+                        sr2 = comp[(std::size_t) b][(std::size_t) j].allpass (sr2, 1);
+                    }
                 bandDelay[(std::size_t) b].process (sl, sr2);
+                band[(std::size_t) b][0][(std::size_t) i] = sl;
+                band[(std::size_t) b][1][(std::size_t) i] = sr2;
+            }
+        }
+
+        // 2. the bands' gains applied and summed (at the oversampled rate when oversampling is on)
+        const auto combine = [&] (float dl, float dr, auto&& bandAt, auto&& gainAt, float& outL, float& outR) noexcept {
+            float yl = anySolo || minimum ? 0.0f : dl, yr = anySolo || minimum ? 0.0f : dr;
+            for (int b = 0; b < nb; ++b)
+            {
+                const auto g = gainAt (b);
+                float sl, sr2;
+                bandAt (b, sl, sr2);
                 const auto gl = g * panL[(std::size_t) b], gr = g * panR[(std::size_t) b];
+                if (msPan) // round 144: the pan's two gains on the band's mid and side
+                {
+                    const auto mid = 0.5f * (sl + sr2), side = 0.5f * (sl - sr2);
+                    if (anySolo && ! soloed[(std::size_t) b])
+                        continue;
+                    if (anySolo || minimum)
+                    {
+                        yl += gl * mid + gr * side;
+                        yr += gl * mid - gr * side;
+                    }
+                    else if (gl != 1.0f || gr != 1.0f)
+                    {
+                        yl += (gl - 1.0f) * mid + (gr - 1.0f) * side;
+                        yr += (gl - 1.0f) * mid - (gr - 1.0f) * side;
+                    }
+                    continue;
+                }
                 if (anySolo)
                 {
                     if (soloed[(std::size_t) b])
@@ -1150,35 +1326,135 @@ public:
                         yr += gr * sr2;
                     }
                 }
+                else if (minimum)
+                {
+                    yl += gl * sl;
+                    yr += gr * sr2;
+                }
                 else if (gl != 1.0f || gr != 1.0f)
                 {
                     yl += (gl - 1.0f) * sl;
                     yr += (gr - 1.0f) * sr2;
                 }
             }
-            l[i] = (dl + (yl - dl) * mx) * outGain;
-            r[i] = (dr + (yr - dr) * mx) * outGain;
+            outL = (dl + (yl - dl) * mx) * outGain;
+            outR = (dr + (yr - dr) * mx) * outGain;
+        };
+
+        if (osFactor <= 1)
+        {
+            for (int i = 0; i < n; ++i)
+                combine (dry[0][(std::size_t) i], dry[1][(std::size_t) i],
+                         [&] (int b, float& a, float& c) { a = band[(std::size_t) b][0][(std::size_t) i]; c = band[(std::size_t) b][1][(std::size_t) i]; },
+                         [&] (int b) { return gain[(std::size_t) b][(std::size_t) i]; }, l[i], r[i]);
+            return;
         }
-        for (int b = 0; b < bands; ++b)
-            meters.set (bandMeter (b), b < nb ? (float) std::clamp (extreme[(std::size_t) b] / 30.0, -1.0, 1.0) : 0.0f);
-        meters.set (4, inPeak);
-        meters.set (5, blockPeak (l, r, n));
-        scL = scR = nullptr;
+        // round 144: oversampling — every stream is interpolated by the same half-band filters (mixsuite::Oversampler:
+        // only its upsampling half is used here), the gains are applied at the high rate (no aliasing from fast gain
+        // changes), and one more Oversampler's decimating half brings the sum back
+        const int hi = n * osFactor;
+        const auto upsample = [&] (mixsuite::Oversampler& os, const float* src, float* dst) noexcept {
+            std::array<float, chunk> tmp {};
+            std::copy (src, src + n, tmp.begin());
+            int k = 0;
+            os.process (tmp.data(), n, [&] (float s) { dst[k++] = s; return 0.0f; });
+        };
+        for (int c = 0; c < 2; ++c)
+            upsample (upDry[(std::size_t) c], dry[(std::size_t) c].data(), hiDry[(std::size_t) c].data());
+        for (int b = 0; b < nb; ++b)
+        {
+            for (int c = 0; c < 2; ++c)
+                upsample (upBand[(std::size_t) b][(std::size_t) c], band[(std::size_t) b][(std::size_t) c].data(), hiBand[(std::size_t) b][(std::size_t) c].data());
+            upsample (upGain[(std::size_t) b], gain[(std::size_t) b].data(), hiGain[(std::size_t) b].data());
+        }
+        for (int k = 0; k < hi; ++k)
+            combine (hiDry[0][(std::size_t) k], hiDry[1][(std::size_t) k],
+                     [&] (int b, float& a, float& c) { a = hiBand[(std::size_t) b][0][(std::size_t) k]; c = hiBand[(std::size_t) b][1][(std::size_t) k]; },
+                     [&] (int b) { return hiGain[(std::size_t) b][(std::size_t) k]; }, hiDry[0][(std::size_t) k], hiDry[1][(std::size_t) k]);
+        for (int c = 0; c < 2; ++c)
+        {
+            auto* out = c == 0 ? l : r;
+            const auto* src = hiDry[(std::size_t) c].data();
+            std::fill (out, out + n, 0.0f);
+            int k = 0;
+            down[(std::size_t) c].process (out, n, [&] (float) { return src[k++]; });
+        }
     }
 
-private:
+    // the FIR of each band below the top one: the magnitude of the band in the IIR tree (the same crossovers), zero phase
+    void designKernels (int nb) noexcept
+    {
+        kernelsDirty = false;
+        if (linSize <= 0)
+            return;
+        const auto bins = linSize / 2 + 1;
+        for (int k = 0; k < nb - 1; ++k)
+        {
+            auto& t = linTable[(std::size_t) k];
+            for (int i = 0; i < bins; ++i)
+            {
+                const auto w = pi * (double) i / (double) (bins - 1);
+                double m = 1.0;
+                for (int j = 0; j < k; ++j)
+                    m *= std::abs (split[(std::size_t) j].response (true, w));
+                m *= std::abs (split[(std::size_t) k].response (false, w));
+                t[(std::size_t) i] = (float) m;
+            }
+            lin[(std::size_t) k].setKernel (t);
+        }
+    }
+
+    void resetOversamplers() noexcept
+    {
+        for (auto& o : upDry) o.reset();
+        for (auto& row : upBand)
+            for (auto& o : row) o.reset();
+        for (auto& o : upGain) o.reset();
+        for (auto& o : down) o.reset();
+    }
+
     void configure (const EffectParams& p) noexcept
     {
+        // round 144: the processing mode and the oversampling (at most 4x, and only up to 400 kHz)
+        const int m = linSize > 0 ? (int) phaseOf (p[processingMode]) : (int) Phase::dynamic;
+        int factor = oversamplingOf (p[oversampling]);
+        while (factor > 1 && sr * factor > 400000.0)
+            factor /= 2;
         const auto la = lookaheadMs (p[lookahead]);
-        if (la == laMs)
+        if (la == laMs && m == mode && factor == osFactor)
             return;
-        laMs = la;
-        const auto s = (int) std::lround (la * 0.001 * sr);
-        laSamples = s;
-        delay.setLength (s);
-        for (auto& d : bandDelay)
-            d.setLength (s);
-        latency.store (s, std::memory_order_relaxed);
+        if (m != mode)
+        {
+            mode = m;
+            kernelsDirty = true;
+            for (auto& c : lin)
+                if (c.n > 0)
+                    c.clear();
+            linDry.reset();
+            linSc.reset();
+        }
+        if (factor != osFactor)
+        {
+            osFactor = factor;
+            const auto set = [&] (mixsuite::Oversampler& o) { o.setFactor (std::max (2, factor)); o.reset(); };
+            for (auto& o : upDry) set (o);
+            for (auto& row : upBand)
+                for (auto& o : row) set (o);
+            for (auto& o : upGain) set (o);
+            for (auto& o : down) set (o);
+        }
+        if (la != laMs)
+        {
+            laMs = la;
+            const auto s = (int) std::lround (la * 0.001 * sr);
+            laSamples = s;
+            delay.setLength (s);
+            for (auto& d : bandDelay)
+                d.setLength (s);
+        }
+        latency.store (laSamples + ((Phase) mode == Phase::linear ? linearLatency (sr) : 0)
+                           + (osFactor > 1 ? mixsuite::Oversampler::latency() : 0),
+                       std::memory_order_relaxed);
     }
 
     double sr = 48000.0, laMs = -1.0;
@@ -1191,17 +1467,32 @@ private:
         return p;
     }();
     std::array<Split, bands - 1> split, scSplit;
+    std::array<std::array<Split, bands - 1>, bands - 1> comp; // minimum phase: band k's copy of split j's all-pass
     std::array<double, bands - 1> lastF {};
     const float* scL = nullptr;
     const float* scR = nullptr;
     int lastSlope = 0;
-    bool designed = false;
+    bool designed = false, kernelsDirty = true;
+    int mode = -1, osFactor = 0, linSize = 0, lastNb = 0;
+    std::array<peqfl::FftConvolver, bands - 1> lin;
+    std::array<std::vector<float>, bands - 1> linTable;
+    LongDelay linDry, linSc;
     StereoDelay delay;
     std::array<StereoDelay, bands> bandDelay;
     std::array<MonoDelay, bands> gainDelay;
     int laSamples = 0;
-    std::array<double, bands> env {};
+    std::array<double, bands> env {}, extreme {};
     std::array<float, bands> gains {};
+    // one chunk of the base-rate streams, and the same at the oversampled rate
+    std::array<std::array<float, chunk>, 2> dry {};
+    std::array<std::array<std::array<float, chunk>, 2>, bands> band {};
+    std::array<std::array<float, chunk>, bands> gain {};
+    std::array<std::array<float, chunk * maxFactor>, 2> hiDry {};
+    std::array<std::array<std::array<float, chunk * maxFactor>, 2>, bands> hiBand {};
+    std::array<std::array<float, chunk * maxFactor>, bands> hiGain {};
+    std::array<mixsuite::Oversampler, 2> upDry, down;
+    std::array<std::array<mixsuite::Oversampler, 2>, bands> upBand;
+    std::array<mixsuite::Oversampler, bands> upGain;
     LiveMeters meters;
 };
 } // namespace
@@ -1595,6 +1886,10 @@ const EffectInfo& prismInfo()
         for (const auto* n : { "B1 pan", "B2 pan", "B3 pan", "B4 pan", "B5 pan", "B6 pan" })
             i.params.push_back ({ n, 0.5f });
         i.params.push_back ({ "External SC", 0.0f });
+        // round 144: the processing mode (dynamic phase = the old engine) and the oversampling (off)
+        i.params.push_back ({ "Processing", 0.5f });
+        i.params.push_back ({ "Oversampling", 0.0f });
+        i.params.push_back ({ "Pan mode", 0.0f });
         return i;
     }();
     return info;
@@ -1730,6 +2025,13 @@ std::string paramText (EffectKind kind, int param, float v)
             case xover1: case xover2: case xover3: case xover4: case xover5: return hzText (crossoverHz (v));
             case bandCountParam: return std::to_string (1 + pick (v, bands));
             case scExternal: return on (v) ? "external" : "internal";
+            case processingMode:
+            {
+                static const char* const names[3] { "Linear Phase", "Dynamic Phase", "Minimum Phase" };
+                return names[(int) phaseOf (v)];
+            }
+            case oversampling: return oversamplingOf (v) == 1 ? "Off" : std::to_string (oversamplingOf (v)) + "x";
+            case panMode: return on (v) ? "mid / side" : "left / right";
             case slope: return std::to_string (slopeDbOct (v)) + " dB/oct";
             case lookahead: return v <= 0.0f ? "off" : msText (lookaheadMs (v));
             case mix: return fmt ("%.0f%%", v * 100.0);

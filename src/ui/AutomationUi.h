@@ -18,8 +18,12 @@ void closeAutomationEditors();
 // Just the editor (for --snapshot mode).
 std::unique_ptr<juce::Component> makeAutomationEditor (AudioEngine& engine, int automation);
 
-// "Create automation clip" item for knob menus.
+// A parameter's menu items, in FL's order (REA round 143 / 146): Edit events in the pattern, Edit events in piano
+// roll, Init song with this position, Delete initial value, Create automation clip; remote control: Link to MIDI
+// controller, Override global link..., internal controllers, unlink.
 void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const AutomationTarget& target);
+// Opens the Piano roll with the target's pattern events in its bottom lane (the main window sets it).
+extern std::function<void (const AutomationTarget&)> onEditEventsInPianoRoll;
 
 // An output of a built-in controller that knobs can be linked to (Envelope / Keyboard Controller channels, Formula and
 // Peak Controller mixer slots), as FL's "Link to controller" lists them.

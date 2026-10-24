@@ -114,6 +114,9 @@ public:
 
     // Play pressed: with recording on, honours wait-for-input and the count-in; otherwise play().
     void startPlayback();
+    // The song's initial values (FL's initialized controls) back on their targets, in song mode; play() and a
+    // seek while playing do it (REA round 146). UI thread.
+    void resetToInitialValues() noexcept;
     bool isWaitingForInput() const noexcept { return waitingForInput.load(); }
     bool isCountingIn() const noexcept { return transport.countIn.load() > 0.0; }
 
@@ -214,6 +217,12 @@ public:
     // MIDI learn: the next CC received becomes a controller linked to `target`.
     void learnMidiController (const AutomationTarget& target);
     bool isLearningMidi() const noexcept { return learning.kind != AutomationTargetKind::none; }
+    // Global links (FL's "Override global link...", REA round 146): links in the MIDI settings that every project
+    // follows unless it links the same target or controller itself. The next CC received becomes `target`'s.
+    void learnGlobalLink (const AutomationTarget& target);
+    void removeGlobalLink (const AutomationTarget& target);
+    std::optional<MidiLink> globalLinkOf (const AutomationTarget& target) const;
+    std::vector<MidiLink> getGlobalLinks() const;
 
     // FL's "Last tweaked" (REA round 143: FLEngine keeps the last two moved parameters, Tools › Last tweaked /
     // Next to last tweaked, Add › Automation for last tweaked parameter). Every control that can be automated reports
@@ -453,6 +462,8 @@ private:
     };
     SpscQueue<ControllerEvent, 1024> controllerQueue; // MIDI thread -> UI (controllers)
     AutomationTarget learning;
+    bool learningGlobal = false;
+    bool saveGlobalLinks = false; // only the engine with an audio device (the app) writes the settings file
     void applyControllers();
     std::vector<RecordedEvent> uiRecorded;           // PC keyboard -> recording
     NoteRecorder recorder;
@@ -471,6 +482,7 @@ private:
     std::int64_t automationLoopLength = 0;
     int automationPattern = 0;
     int recordedAutomationPoints = 0;
+    bool automationOverrideActive = false; // touched targets override their automation in the renderer
     std::vector<AutomationWrite> takeWrites; // per target: where this take writes (its own clip grows)
     bool takeHasUndoStep = false;
     RecordOptions recordOptions;

@@ -1,4 +1,5 @@
 #include "core/RackRenderer.h"
+#include "core/FacetEq.h"
 #include "core/MidiControls.h"
 #include "core/Patcher.h"
 #include "core/LoadTrace.h"
@@ -313,6 +314,10 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                 && previous->song.mixer[t].effects[i].kind == kind && kind != EffectKind::patcher
                 && (kind != EffectKind::parallel || sameContainer (previous->song.mixer[t].effects[i], slots[i])) // children are built in
                 && previous->song.mixer[t].effects[i].samplePath == slots[i].samplePath
+                // round 144: Facet EQ's buffers are sized by its linear-phase resolution: a new one, a new instance
+                && (kind != EffectKind::facetEq
+                    || facet::resolution (previous->song.mixer[t].effects[i].params[(std::size_t) facet::resolutionParam])
+                           == facet::resolution (slots[i].params[(std::size_t) facet::resolutionParam]))
                 && (kind != EffectKind::plugin
                     || (previous->song.mixer[t].effects[i].plugin.id == slots[i].plugin.id && previous->sampleRate == sampleRate
                         && samePluginProcessing (previous->song.mixer[t].effects[i].plugin, slots[i].plugin)))
@@ -728,6 +733,28 @@ void RackState::buildAutomationTables()
         }
 }
 
+void RackState::slotsOfTarget (const Song& song, const AutomationTarget& target, std::vector<int>& out)
+{
+    out.clear();
+    if (target.kind == AutomationTargetKind::none)
+        return;
+    const auto count = std::min<int> ((int) song.automations.size(), maxAutomations);
+    for (int a = 0; a < count; ++a)
+        if (song.automations[(std::size_t) a].target == target)
+            out.push_back (a);
+
+    auto slot = count;
+    for (const auto& pattern : song.patterns)
+        for (const auto& lane : pattern.events)
+        {
+            if (lane.events.empty() || lane.target.kind == AutomationTargetKind::tempo || slot >= maxAutomations)
+                continue;
+            if (lane.target == target)
+                out.push_back (slot);
+            ++slot;
+        }
+}
+
 namespace
 {
 // Constant-power pan: at center both sides are 1 (0 dB).
@@ -982,6 +1009,28 @@ float automationValueAt (const Song& song, const Automation& automation, const s
 }
 } // namespace
 
+void RackRenderer::setOverriddenSlots (const std::vector<int>& slots) noexcept
+{
+    std::array<std::uint32_t, RackState::maxAutomations / 32> bits {};
+    for (const auto s : slots)
+        if (s >= 0 && s < RackState::maxAutomations)
+            bits[(std::size_t) s / 32] |= 1u << ((unsigned) s % 32);
+    for (std::size_t i = 0; i < bits.size(); ++i)
+        overridden[i].store (bits[i], std::memory_order_relaxed);
+    anyOverridden.store (! slots.empty(), std::memory_order_release);
+}
+
+void RackRenderer::clearOverriddenValues() noexcept
+{
+    if (! anyOverridden.load (std::memory_order_acquire))
+        return;
+    for (std::size_t w = 0; w < overridden.size(); ++w)
+        if (auto bits = overridden[w].load (std::memory_order_relaxed); bits != 0)
+            for (unsigned b = 0; b < 32; ++b)
+                if ((bits & (1u << b)) != 0)
+                    automationValues[w * 32 + b] = std::numeric_limits<float>::quiet_NaN(); // the control's own value
+}
+
 void RackRenderer::updateAutomation (const RackState& state, double startTick) noexcept
 {
     const auto& song = state.song;
@@ -1051,6 +1100,7 @@ void RackRenderer::updateAutomation (const RackState& state, double startTick) n
     // in pattern mode the Playlist does not play: values stay as they were
     if (song.mode != PlayMode::song)
     {
+        clearOverriddenValues();
         if (! state.eventLanes.empty()) // only the plugin parameters driven by pattern events
             applyPluginParams (state, std::min<int> ((int) song.automations.size(), RackState::maxAutomations));
         return;
@@ -1063,6 +1113,7 @@ void RackRenderer::updateAutomation (const RackState& state, double startTick) n
         if (! state.automationClips[a].empty())
             automationValues[a] = automationValueAt (song, song.automations[a], state.automationClips[a], tick);
 
+    clearOverriddenValues();
     applyPluginParams (state, 0);
 }
 
@@ -1586,7 +1637,7 @@ void RackRenderer::process (const RackState* state,
     // tempo automation: the tempo holds for the whole block (evaluated at its start)
     bpm = state->song.bpm;
 
-    if (state->tempoAutomation >= 0 && state->song.mode == PlayMode::song)
+    if (state->tempoAutomation >= 0 && state->song.mode == PlayMode::song && ! isSlotOverridden (state->tempoAutomation))
     {
         const auto length = (double) std::max<std::int64_t> (1, state->schedule.songLength);
         const auto& clips = state->automationClips[(std::size_t) state->tempoAutomation];

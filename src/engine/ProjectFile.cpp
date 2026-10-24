@@ -1331,6 +1331,14 @@ juce::String toJson (const Song& song)
         root->setProperty ("midiLinks", links);
     }
 
+    if (! song.initialValues.empty()) // FL's initialized controls (REA round 146)
+    {
+        juce::Array<juce::var> values;
+        for (const auto& v : song.initialValues)
+            values.add (juce::Array<juce::var> { targetKindName (v.target.kind), v.target.index, v.target.slot, v.target.param, v.value });
+        root->setProperty ("initialValues", values);
+    }
+
     root->setProperty ("playlist", clipsToVar (song.playlist));
 
     {
@@ -1584,6 +1592,11 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             if (l.isArray() && l.size() == 6)
                 song.midiLinks.push_back ({ juce::jlimit (0, 127, (int) l[0]), juce::jlimit (-1, 15, (int) l[1]),
                                             { targetKindFromName (l[2].toString()), (int) l[3], (int) l[4], (int) l[5] } });
+
+    if (auto* values = root["initialValues"].getArray())
+        for (const auto& v : *values)
+            if (v.isArray() && v.size() == 5)
+                song.setInitialValue ({ targetKindFromName (v[0].toString()), (int) v[1], (int) v[2], (int) v[3] }, (float) (double) v[4]);
 
     if (auto* tracks = root["playlistTracks"].getArray())
         for (const auto& t : *tracks)

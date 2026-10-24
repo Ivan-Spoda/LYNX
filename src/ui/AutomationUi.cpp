@@ -802,13 +802,36 @@ void addControllerLinkItems (juce::PopupMenu& menu, AudioEngine& engine, const A
     menu.addSubMenu (tr ("Link to internal controller"), sub);
 }
 
+std::function<void (const AutomationTarget&)> onEditEventsInPianoRoll;
+
 void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const AutomationTarget& target)
 {
-    menu.addItem (tr ("Create automation clip"), [&engine, target] { createAutomationClip (engine, target); });
     if (target.kind != AutomationTargetKind::tempo)
+    {
         menu.addItem (tr ("Edit events in the pattern"), [&engine, target] { openEventEditor (engine, target); });
+        if (onEditEventsInPianoRoll)
+            menu.addItem (tr ("Edit events in piano roll"), [target] {
+                if (onEditEventsInPianoRoll)
+                    onEditEventsInPianoRoll (target);
+            });
+    }
+    // FL's initialized controls (REA round 146): the value the song resets this control to whenever it starts
+    const auto initial = engine.getSong().findInitialValue (target);
+    menu.addItem (tr ("Init song with this position"), engine.currentTargetValue (target) >= 0.0f, initial >= 0, [&engine, target] {
+        const auto value = engine.currentTargetValue (target);
+        if (value >= 0.0f)
+            engine.editSong ([target, value] (Song& s) { s.setInitialValue (target, value); });
+    });
+    menu.addItem (tr ("Delete initial value"), initial >= 0, false, [&engine, target] {
+        engine.editSong ([target] (Song& s) { s.removeInitialValue (target); });
+    });
+    menu.addItem (tr ("Create automation clip"), [&engine, target] { createAutomationClip (engine, target); });
     menu.addItem (tr ("Link to MIDI controller (move a knob on the controller)"), [&engine, target] {
         engine.learnMidiController (target);
+    });
+    // FL's "Override global link..." (form "Global link settings"): a link for every project, kept in the settings
+    menu.addItem (tr ("Override global link... (for all projects: move a knob on the controller)"), [&engine, target] {
+        engine.learnGlobalLink (target);
     });
 
     if (target.kind != AutomationTargetKind::tempo)
@@ -824,6 +847,8 @@ void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const Automa
                                    s.midiLinks.end());
             });
         });
+    if (const auto global = engine.globalLinkOf (target))
+        menu.addItem (tr ("Remove global link (CC {0})", { juce::String (global->cc) }), [&engine, target] { engine.removeGlobalLink (target); });
 }
 
 juce::String midiParamLabel (int param)
