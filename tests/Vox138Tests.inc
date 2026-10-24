@@ -119,3 +119,30 @@ TEST (ember_classic_styles_fitted_round138)
         CHECK (std::abs (m.gainPerUnitDb - a.gainPerUnitDb) < 1e-9);
     }
 }
+
+TEST (ember_classic_high_drive_blend_round138)
+{
+    using namespace lynx;
+    // style A: up to drive 4 the table's constants exactly; from drive 6 the high-drive refit (another curve)
+    auto render = [] (double drive, const emberclassic::StyleModel* model) {
+        emberclassic::Engine e;
+        e.prepare (48000.0);
+        emberclassic::Settings s;
+        s.style = 0;
+        s.drive = drive;
+        e.set (s, model);
+        std::vector<float> x (9600);
+        for (size_t i = 0; i < x.size(); ++i)
+            x[i] = 0.3f * (float) std::sin (2.0 * 3.141592653589793 * 1000.0 * (double) i / 48000.0);
+        e.process (x.data(), nullptr, (int) x.size());
+        return x;
+    };
+    auto diff = [] (const std::vector<float>& a, const std::vector<float>& b) {
+        double d = 0.0;
+        for (size_t i = 0; i < a.size(); ++i) d = std::max (d, (double) std::abs (a[i] - b[i]));
+        return d;
+    };
+    const auto& a = emberclassic::styleModel (0);
+    CHECK (diff (render (3.0, nullptr), render (3.0, &a)) < 1e-7);
+    CHECK (diff (render (8.0, nullptr), render (8.0, &a)) > 1e-3);
+}

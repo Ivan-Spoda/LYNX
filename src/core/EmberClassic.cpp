@@ -48,6 +48,35 @@ const StyleModel styleTable[styleCount] {
                  { -0.07587156, 0.67775215, 0.59516886, -0.39260415, 0.32049256, -0.26406084, 0.24365413, -0.19383356, 0.17184911, -0.12649202, 0.10493743, -0.067138583, 0.053183781, -0.026498863, 0.020158807, -0.0039552972 } }, // P
 };
 
+// Round 138: style A refitted on drives 6 … 10 (stairs, bursts, her takes at 6 / 8; REA_rodada138 §5): the curve
+// constants for high drive. The engine blends from styleTable[0] (drive ≤ 4) to these (drive ≥ 6) — her drive-5.9
+// states (70 slots) play almost these. Mean null at drives 6 … 10: −18.0 dB (−15.6 with the low-drive constants);
+// her takes at drive 6: −22.8 … −24.7 dB (was −17.4 … −21.9).
+const StyleModel styleAHigh { -1.14871, 3.28943, 9.75, -0.591178, 1133.57, 0.279444, 9443.56, 2.29363, 0.460806, 2.17933, 1.40522, 5.22727, -0.300077, -0.496203, 9.69997, 113.906, 17.7432,
+                              styleTable[0].fir };
+
+StyleModel blend (const StyleModel& a, const StyleModel& b, double w) noexcept
+{
+    auto m = a;
+    auto mix = [w] (double x, double y) { return x + w * (y - x); };
+    m.gain0Db = mix (a.gain0Db, b.gain0Db);
+    m.outDb = mix (a.outDb, b.outDb);
+    m.preLowHz = std::exp (mix (std::log (a.preLowHz), std::log (b.preLowHz)));
+    m.preLowDb = mix (a.preLowDb, b.preLowDb);
+    m.preHighHz = std::exp (mix (std::log (a.preHighHz), std::log (b.preHighHz)));
+    m.preHighDb = mix (a.preHighDb, b.preHighDb);
+    m.cPos = mix (a.cPos, b.cPos);
+    m.pPos = mix (a.pPos, b.pPos);
+    m.cNeg = mix (a.cNeg, b.cNeg);
+    m.pNeg = mix (a.pNeg, b.pNeg);
+    m.bias = mix (a.bias, b.bias);
+    m.biasDyn = mix (a.biasDyn, b.biasDyn);
+    m.envAttackMs = std::exp (mix (std::log (a.envAttackMs), std::log (b.envAttackMs)));
+    m.envReleaseMs = std::exp (mix (std::log (a.envReleaseMs), std::log (b.envReleaseMs)));
+    m.dcHz = mix (a.dcHz, b.dcHz);
+    return m;
+}
+
 // analog biquad (b2 s² + b1 s + b0) / (a2 s² + a1 s + a0), s = j·f in Hz → digital by the bilinear transform
 // prewarped at `hz`
 void bilinear (Biquad& f, double sr, double hz, double b2, double b1, double b0, double a2, double a1, double a0) noexcept
@@ -188,6 +217,8 @@ void Engine::set (const Settings& settings, const StyleModel* model)
 {
     s = settings;
     m = model != nullptr ? *model : styleModel (s.style);
+    if (model == nullptr && std::clamp (s.style, 0, styleCount - 1) == 0) // round 138: style A's high-drive constants
+        m = blend (m, styleAHigh, std::clamp ((s.drive - 4.0) / 2.0, 0.0, 1.0));
     design();
 }
 
