@@ -481,6 +481,28 @@ bool makeInstrumentTrack (Song& song, int track, int channel)
     return true;
 }
 
+int instrumentTrackPattern (Song& song, int track)
+{
+    if (track < 0 || track >= (int) song.playlistTracks.size())
+        return -1;
+    const auto& t = song.playlistTracks[(std::size_t) track];
+    if (t.mode != PlaylistTrackMode::instrument || t.channel < 0 || t.channel >= (int) song.channels.size())
+        return -1;
+    const auto channel = t.channel;
+    const auto& name = song.channels[(std::size_t) channel].name;
+    for (int p = 0; p < (int) song.patterns.size(); ++p)
+    {
+        const auto& pattern = song.patterns[(std::size_t) p];
+        if (pattern.name == name && std::all_of (pattern.notes.begin(), pattern.notes.end(), [channel] (const Note& n) { return n.channel == channel; }))
+            return p;
+    }
+    Pattern made;
+    made.name = name;
+    made.colour = song.channels[(std::size_t) channel].colour;
+    song.patterns.push_back (std::move (made));
+    return (int) song.patterns.size() - 1;
+}
+
 void unassign (Song& song, int track)
 {
     if (track < 0 || track >= (int) song.playlistTracks.size())

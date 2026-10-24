@@ -147,6 +147,9 @@ int auxOutputTrack (const ChannelDef& channel, int k) noexcept;
 int addNode (PatcherDoc& doc, PatchNode node);
 void removeNode (PatcherDoc& doc, int node);
 bool connect (PatcherDoc& doc, const PatchWire& wire); // false if the same cable exists or the ends are invalid
+// The Surface tab (round 151): a new control (its outputs follow the others'), removing one (its cables go)
+int addSurfaceControl (PatcherDoc& doc, SurfaceControl control);
+void removeSurfaceControl (PatcherDoc& doc, int index);
 // Name shown for a node: its label, else the plugin / effect / instrument name
 std::string nodeName (const PatchNode& node);
 } // namespace lynx::patcher

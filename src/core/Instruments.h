@@ -49,6 +49,15 @@ public:
     // The next note's volume factor (FL's echo delay, REA round 146b); false when the instrument does not scale its
     // voices (the caller then scales the velocity).
     virtual bool setNextNoteGain (float /*gain*/) noexcept { return false; }
+    // The next note's Mod X / Y (0..1, 0.5 = none; the note's own, moved by the echo delay and the key / velocity
+    // tracking, REA round 151), called right before noteOn; and the release velocity of the next noteOff (0..1),
+    // right before it. Ignored if unsupported (hosted plugins: FL's wrapper MIDI options).
+    virtual void setNextNoteModulation (float /*modX*/, float /*modY*/) noexcept {}
+    virtual void setNextNoteRelease (float /*velocity*/) noexcept {}
+    // Playback stopped: the held notes stop (hosted plugins may send "All Notes Off" or only those notes' note offs:
+    // FL's wrapper option). The panic button: everything stops (a hosted plugin may also be reset).
+    virtual void transportStopped() noexcept { allNotesOff(); }
+    virtual void panic() noexcept { allNotesOff(); }
     // Channel settings (sampler, synth). UI thread, on every snapshot; the instrument stores them
     // so the audio thread can read without waiting.
     virtual void configure (const ChannelDef&, double /*bpm*/) noexcept {}
@@ -116,6 +125,8 @@ bool hqForAllPlugins() noexcept;
 struct HostTimeline
 {
     std::atomic<double> tick { 0.0 };          // song position in LYNX ticks (ppq per quarter note)
+    std::atomic<double> loopStart { 0.0 }, loopEnd { 0.0 }; // the playback loop in LYNX ticks (round 151: "Send loop position")
+    std::atomic<bool> looping { false };
     std::atomic<double> bpm { 120.0 };
     std::atomic<double> sampleRate { 44100.0 };
     std::atomic<bool> playing { false };

@@ -109,6 +109,12 @@ bool sameStructure (const PatcherDoc& a, const PatcherDoc& b)
 {
     if (a.nodes.size() != b.nodes.size() || a.wires.size() != b.wires.size() || a.outputTracks != b.outputTracks || ! (a.published == b.published))
         return false;
+    // the Surface's controls: their outputs are structure, their values are not (round 151)
+    if (a.surface.size() != b.surface.size())
+        return false;
+    for (std::size_t i = 0; i < a.surface.size(); ++i)
+        if (a.surface[i].kind != b.surface[i].kind)
+            return false;
     for (std::size_t i = 0; i < a.nodes.size(); ++i)
     {
         const auto& x = a.nodes[i];
@@ -186,6 +192,7 @@ struct Graph::Values
     std::vector<NodeValues> nodes;
     std::vector<float> gains;
     std::vector<char> on;
+    std::vector<float> surface; // the Surface node's control outputs
 };
 
 Graph::Graph (const PatcherDoc& doc, double sampleRate, const Factories& factories, const Graph* previous) : rate (sampleRate)
@@ -318,8 +325,9 @@ Graph::Graph (const PatcherDoc& doc, double sampleRate, const Factories& factori
                 && std::find (noteTargets.begin(), noteTargets.end(), src.to) == noteTargets.end())
                 noteTargets.push_back (src.to);
         }
-        else if (validNode (src.from) && validNode (src.to) && src.enabled && src.toPort >= 0
-                 && std::max (0, src.fromPort) < nodePorts (doc.nodes[(std::size_t) src.from]).controlOuts) // (a source with that output)
+        else if ((validNode (src.from) || (src.from == patchSurface && std::max (0, src.fromPort) < doc.surfaceOutputs())) && validNode (src.to)
+                 && src.enabled && src.toPort >= 0
+                 && (src.from == patchSurface || std::max (0, src.fromPort) < nodePorts (doc.nodes[(std::size_t) src.from]).controlOuts)) // (a source with that output)
         {
             ControlWire c;
             c.from = src.from;
@@ -457,6 +465,8 @@ void Graph::takeValues (const PatcherDoc& doc, double bpm)
         values->gains.push_back (std::isfinite (src.gain) ? src.gain : 1.0f);
         values->on.push_back (src.enabled ? 1 : 0);
     }
+    for (int k = 0; k < doc.surfaceOutputs(); ++k)
+        values->surface.push_back (std::clamp (doc.surfaceOutput (k), 0.0f, 1.0f));
     delete retired.exchange (nullptr);
     delete pending.exchange (values.release());
 }
@@ -650,10 +660,16 @@ void Graph::processPiece (const float* inL, const float* inR, const float* scL, 
     // control cables: the source's latest output moves the target's parameter (one block of lag, as the mixer's links)
     for (const auto& c : controls)
     {
-        const auto& source = *nodes[(std::size_t) c.from];
-        const auto raw = source.effect != nullptr && ! source.generator ? source.effect->controlOutput (c.output)
-                         : source.instrument != nullptr                 ? source.instrument->controlOutput (c.output)
-                                                                        : 0.0f;
+        auto raw = 0.0f;
+        if (c.from == patchSurface) // the Surface tab's control (round 151)
+            raw = c.output < (int) values.surface.size() ? values.surface[(std::size_t) c.output] : 0.0f;
+        else
+        {
+            const auto& source = *nodes[(std::size_t) c.from];
+            raw = source.effect != nullptr && ! source.generator ? source.effect->controlOutput (c.output)
+                  : source.instrument != nullptr                 ? source.instrument->controlOutput (c.output)
+                                                                 : 0.0f;
+        }
         const auto v = mapControl (c.curve, raw);
         auto& target = *nodes[(std::size_t) c.to];
         if (target.generator)
@@ -1026,14 +1042,37 @@ void removeNode (PatcherDoc& doc, int node)
     }
 }
 
+int addSurfaceControl (PatcherDoc& doc, SurfaceControl control)
+{
+    doc.surface.push_back (std::move (control));
+    return (int) doc.surface.size() - 1;
+}
+
+void removeSurfaceControl (PatcherDoc& doc, int index)
+{
+    if (index < 0 || index >= (int) doc.surface.size())
+        return;
+    int first = 0;
+    for (int i = 0; i < index; ++i)
+        first += doc.surface[(std::size_t) i].outputs();
+    const auto count = doc.surface[(std::size_t) index].outputs();
+    doc.surface.erase (doc.surface.begin() + index);
+    // its cables go; the later controls' outputs move down
+    std::erase_if (doc.wires, [first, count] (const PatchWire& w) { return w.from == patchSurface && w.fromPort >= first && w.fromPort < first + count; });
+    for (auto& w : doc.wires)
+        if (w.from == patchSurface && w.fromPort >= first + count)
+            w.fromPort -= count;
+}
+
 bool connect (PatcherDoc& doc, const PatchWire& wire)
 {
     const auto count = (int) doc.nodes.size();
-    const auto validFrom = wire.from == patchFromHost || (wire.from >= 0 && wire.from < count);
+    const auto validFrom = wire.from == patchFromHost || (wire.from >= 0 && wire.from < count)
+                           || (wire.from == patchSurface && wire.kind == PatchWire::Kind::control && wire.fromPort >= 0 && wire.fromPort < doc.surfaceOutputs());
     const auto validTo = wire.to == patchToHost || (wire.to >= 0 && wire.to < count);
     if (! validFrom || ! validTo || (wire.from == wire.to && wire.from >= 0 && wire.kind == PatchWire::Kind::audio))
         return false;
-    if (wire.kind == PatchWire::Kind::control && (wire.from < 0 || wire.to < 0))
+    if (wire.kind == PatchWire::Kind::control && ((wire.from < 0 && wire.from != patchSurface) || wire.to < 0))
         return false;
     if (wire.to >= 0 && doc.nodes[(std::size_t) wire.to].generator && wire.kind == PatchWire::Kind::audio)
         return false;

@@ -1,4 +1,6 @@
 #include "ui/MixerComponent.h"
+#include "ui/UiTrace.h"
+#include "ui/TextCache.h"
 
 #include "core/FlEffects.h"
 #include "core/ProjectContents.h"
@@ -407,6 +409,7 @@ void MixerStrips::mouseExit (const juce::MouseEvent&)
 
 void MixerStrips::paint (juce::Graphics& g)
 {
+    const uitrace::Scope trace ("MixerStrips paint", true, g.getClipBounds());
     using namespace theme;
     const auto& song = engine.getSong();
     const auto tracks = (int) song.mixer.size();
@@ -535,19 +538,19 @@ void MixerStrips::paint (juce::Graphics& g)
         // header: number and effect count on one line, the name (once) below
         g.setColour (isSelected ? colour::accent : colour::textSecondary);
         g.setFont (font (type::caption, isSelected));
-        g.drawText (t == 0 ? juce::String ("M") : juce::String (t), x, 6, w - 4, 13, juce::Justification::centred);
+        textcache::drawText (g, t == 0 ? juce::String ("M") : juce::String (t), x, 6, w - 4, 13, juce::Justification::centred);
 
         if (! track.effects.empty())
         {
             const auto on = mixerops::anyEffectEnabled (song, t);
             g.setColour (on ? colour::info : colour::textDisabled);
             g.setFont (font (9.0f, true));
-            g.drawText ("FX" + juce::String ((int) track.effects.size()), x + w - 30, 6, 23, 13, juce::Justification::centredRight);
+            textcache::drawText (g, "FX" + juce::String ((int) track.effects.size()), x + w - 30, 6, 23, 13, juce::Justification::centredRight);
         }
 
         g.setColour (track.muted ? colour::textDisabled : (hovered (Part::header) ? colour::textPrimary : colour::textPrimary.withAlpha (0.9f)));
         g.setFont (font (type::small, isSelected));
-        g.drawFittedText (juce::String::fromUTF8 (track.name.c_str()), x + 3, 20, w - 10, 14, juce::Justification::centred, 1, 0.7f);
+        textcache::drawFittedText (g, juce::String::fromUTF8 (track.name.c_str()), x + 3, 20, w - 10, 14, juce::Justification::centred, 1, 0.7f);
 
         // compensated latency (PDC) on the Master
         if (t == 0 && engine.getLatencySamples() > 0)
@@ -555,7 +558,7 @@ void MixerStrips::paint (juce::Graphics& g)
             const auto ms = 1000.0 * engine.getLatencySamples() / juce::jmax (1.0, engine.getTransport().sampleRate.load());
             g.setColour (colour::textSecondary);
             g.setFont (font (10.0f));
-            g.drawFittedText ("PDC " + juce::String (ms, 1) + " ms", soloArea (t).withX (x + 30).withWidth (w - 36),
+            textcache::drawFittedText (g, "PDC " + juce::String (ms, 1) + " ms", soloArea (t).withX (x + 30).withWidth (w - 36),
                               juce::Justification::centredLeft, 1, 0.8f); // the Master has no solo: use its spot
         }
 
@@ -583,7 +586,7 @@ void MixerStrips::paint (juce::Graphics& g)
                 g.fillRoundedRectangle (s, radius::sm);
                 g.setColour (track.solo ? colour::onAccent : hovered (Part::solo) ? colour::textPrimary : colour::textSecondary);
                 g.setFont (font (type::caption, true));
-                g.drawText ("S", s.toNearestInt(), juce::Justification::centred);
+                textcache::drawText (g, "S", s.toNearestInt(), juce::Justification::centred);
             }
         }
 
@@ -655,7 +658,7 @@ void MixerStrips::paint (juce::Graphics& g)
 
             g.setColour (colour::textSecondary);
             g.setFont (font (type::caption));
-            g.drawText (faderToDb (track.volume) + " dB", x, area.getBottom() + 3, w - 4, readoutHeight - 2, juce::Justification::centred);
+            textcache::drawText (g, faderToDb (track.volume) + " dB", x, area.getBottom() + 3, w - 4, readoutHeight - 2, juce::Justification::centred);
         }
 
         // routing lane: send switch from the selected insert to this one, and its level knob
@@ -677,7 +680,7 @@ void MixerStrips::paint (juce::Graphics& g)
                 }
                 g.setColour (on ? colour::onAccent : colour::textSecondary);
                 g.setFont (font (10.0f, on));
-                g.drawText (juce::String::fromUTF8 ("\xe2\x86\x92 ") + (t == 0 ? juce::String ("M") : juce::String (t)), r.toNearestInt(),
+                textcache::drawText (g, juce::String::fromUTF8 ("\xe2\x86\x92 ") + (t == 0 ? juce::String ("M") : juce::String (t)), r.toNearestInt(),
                             juce::Justification::centred);
 
                 // the route's level knob (FL's route knob), on the routes to inserts and to Master
@@ -691,7 +694,7 @@ void MixerStrips::paint (juce::Graphics& g)
                 g.fillRoundedRectangle (r, radius::sm);
                 g.setColour (colour::info);
                 g.setFont (font (10.0f, true));
-                g.drawText (juce::String::fromUTF8 ("\xe2\x86\x92 ") + juce::String (selected), r.toNearestInt(), juce::Justification::centred);
+                textcache::drawText (g, juce::String::fromUTF8 ("\xe2\x86\x92 ") + juce::String (selected), r.toNearestInt(), juce::Justification::centred);
             }
         }
     }
@@ -2132,11 +2135,11 @@ void EffectsPanel::paintEq (juce::Graphics& g)
 
     g.setColour (colour::textSecondary);
     g.setFont (font (type::title));
-    g.drawText (tr ("Equalizer"), 10, eqGraphBounds().getBottom() + 4, eqKnobBounds (0, 1).getX() - 40, 20, juce::Justification::centredLeft);
+    textcache::drawText (g, tr ("Equalizer"), 10, eqGraphBounds().getBottom() + 4, eqKnobBounds (0, 1).getX() - 40, 20, juce::Justification::centredLeft);
     g.setFont (font (type::caption));
     g.setColour (colour::textDisabled);
-    g.drawText (tr ("Freq"), eqKnobBounds (0, 1).getX() - 34, eqKnobBounds (0, 1).getY(), 32, 22, juce::Justification::centredRight);
-    g.drawText (tr ("Width"), eqKnobBounds (0, 2).getX() - 34, eqKnobBounds (0, 2).getY(), 32, 22, juce::Justification::centredRight);
+    textcache::drawText (g, tr ("Freq"), eqKnobBounds (0, 1).getX() - 34, eqKnobBounds (0, 1).getY(), 32, 22, juce::Justification::centredRight);
+    textcache::drawText (g, tr ("Width"), eqKnobBounds (0, 2).getX() - 34, eqKnobBounds (0, 2).getY(), 32, 22, juce::Justification::centredRight);
 
     // the audio output target
     auto box = outputBounds().toFloat();
@@ -2150,7 +2153,7 @@ void EffectsPanel::paintEq (juce::Graphics& g)
     g.drawRoundedRectangle (box.reduced (0.5f), radius::sm, 1.0f);
     g.setColour (track == 0 ? colour::textPrimary : colour::textSecondary);
     g.setFont (font (type::body));
-    g.drawText (outputName(), box.withTrimmedLeft (8.0f).withTrimmedRight (18.0f).toNearestInt(), juce::Justification::centredLeft, true);
+    textcache::drawText (g, outputName(), box.withTrimmedLeft (8.0f).withTrimmedRight (18.0f).toNearestInt(), juce::Justification::centredLeft, true);
     icons::draw (g, Icon::chevronDown, box.removeFromRight (18.0f).reduced (4.0f).translated (-2.0f, 0.0f), colour::textSecondary);
 }
 
@@ -2428,6 +2431,7 @@ int EffectsPanel::knobAt (juce::Point<int> p) const
 
 void EffectsPanel::paint (juce::Graphics& g)
 {
+    const uitrace::Scope trace ("EffectsPanel paint", true, g.getClipBounds());
     using namespace theme;
     g.fillAll (colour::bg2);
     g.setColour (colour::border);
@@ -2441,7 +2445,7 @@ void EffectsPanel::paint (juce::Graphics& g)
     const auto& song = engine.getSong();
     g.setColour (colour::textPrimary);
     g.setFont (font (type::title, true));
-    g.drawText (tr ("Effects: {0}", { juce::String::fromUTF8 (song.mixer[(std::size_t) track].name.c_str()) }), 10, 4,
+    textcache::drawText (g, tr ("Effects: {0}", { juce::String::fromUTF8 (song.mixer[(std::size_t) track].name.c_str()) }), 10, 4,
                 getWidth() - 70, panelHeader - 8, juce::Justification::centredLeft, true);
 
     // input row: arm switch (inserts) and the audio input source with its level (the Master has one too, as in FL;
@@ -2489,7 +2493,7 @@ void EffectsPanel::paint (juce::Graphics& g)
                                                 : tr ("No audio input");
         g.setColour (mt.inputChannel >= 0 ? colour::textPrimary : colour::textSecondary);
         g.setFont (font (type::body));
-        g.drawText (label, box.withTrimmedLeft (24.0f).withTrimmedRight (18.0f).translated (0.0f, -1.0f).toNearestInt(), juce::Justification::centredLeft, true);
+        textcache::drawText (g, label, box.withTrimmedLeft (24.0f).withTrimmedRight (18.0f).translated (0.0f, -1.0f).toNearestInt(), juce::Justification::centredLeft, true);
         icons::draw (g, Icon::chevronDown, box.removeFromRight (18.0f).reduced (4.0f).translated (-2.0f, -1.0f), colour::textSecondary);
     }
 
@@ -2504,7 +2508,7 @@ void EffectsPanel::paint (juce::Graphics& g)
         g.fillEllipse (r.withWidth (r.getHeight()).reduced (6.0f).translated (3.0f, 0.0f));
         g.setColour (on ? colour::textPrimary : colour::textDisabled);
         g.setFont (font (type::caption, true));
-        g.drawText ("FX", r.withTrimmedLeft (r.getHeight()).toNearestInt(), juce::Justification::centredLeft);
+        textcache::drawText (g, "FX", r.withTrimmedLeft (r.getHeight()).toNearestInt(), juce::Justification::centredLeft);
     }
 
     g.setFont (font (type::body));
@@ -2566,11 +2570,11 @@ void EffectsPanel::paint (juce::Graphics& g)
                 g.setColour (playing ? colour::info : colour::textDisabled);
                 const auto keep = g.getCurrentFont();
                 g.setFont (font (type::caption, true));
-                g.drawText ("LYNX", badge, juce::Justification::centred);
+                textcache::drawText (g, "LYNX", badge, juce::Justification::centred);
                 g.setFont (keep);
                 g.setColour (slot.enabled ? colour::textPrimary : colour::textDisabled);
             }
-            g.drawText (name, text, juce::Justification::centredLeft);
+            textcache::drawText (g, name, text, juce::Justification::centredLeft);
 
             // slot's dry/wet knob
             const auto mixActive = (hoverParam == mixParam && hoverSlot == i) || (dragParam == mixParam && selectedSlot == i);
@@ -2585,7 +2589,7 @@ void EffectsPanel::paint (juce::Graphics& g)
             drawKnob (g, mixBounds (i).toFloat().withSizeKeepingCentre (18.0f, 18.0f), 1.0f, false, colour::textDisabled.withAlpha (0.5f), false);
             g.setColour (slotHovered ? colour::textSecondary : colour::textDisabled);
             g.setFont (juce::Font (font (type::body)).italicised());
-            g.drawText (tr ("Slot {0}", { juce::String (i + 1) }), textArea, juce::Justification::centredLeft);
+            textcache::drawText (g, tr ("Slot {0}", { juce::String (i + 1) }), textArea, juce::Justification::centredLeft);
             g.setFont (font (type::body));
         }
     }
@@ -2616,7 +2620,7 @@ void EffectsPanel::paint (juce::Graphics& g)
         content.removeFromLeft (6.0f);
         g.setColour (colour::textPrimary);
         g.setFont (f);
-        g.drawFittedText (text, content.toNearestInt(), juce::Justification::centredLeft, 1, 0.85f);
+        textcache::drawFittedText (g, text, content.toNearestInt(), juce::Justification::centredLeft, 1, 0.85f);
     };
 
     if (slot.kind == EffectKind::plugin)
@@ -2625,7 +2629,7 @@ void EffectsPanel::paint (juce::Graphics& g)
         drawButton (button, tr ("Open plugin interface"), Icon::plugin);
         g.setColour (colour::textSecondary);
         g.setFont (font (type::caption));
-        g.drawText (juce::String::fromUTF8 (slot.plugin.name.c_str()), button.translated (0, 34), juce::Justification::centred);
+        textcache::drawText (g, juce::String::fromUTF8 (slot.plugin.name.c_str()), button.translated (0, 34), juce::Justification::centred);
         return;
     }
 
@@ -2644,7 +2648,7 @@ void EffectsPanel::paint (juce::Graphics& g)
         drawButton (button, tr ("Open Soundgoodizer"), Icon::settings);
         g.setColour (colour::textSecondary);
         g.setFont (font (type::caption));
-        g.drawFittedText (tr ("Approximation (FL Studio's Soundgoodizer presets were not found on this computer)"),
+        textcache::drawFittedText (g, tr ("Approximation (FL Studio's Soundgoodizer presets were not found on this computer)"),
                           button.translated (0, 34).withHeight (40), juce::Justification::centredTop, 2);
         return;
     }
@@ -2663,7 +2667,7 @@ void EffectsPanel::paint (juce::Graphics& g)
         auto y = knobBounds (0).getY() - 28;
         g.setColour (colour::textPrimary);
         g.setFont (font (type::title, true));
-        g.drawText (juce::String::fromUTF8 (effectInfo (slot.kind).name), 10, y, getWidth() - 20, 20, juce::Justification::centredLeft);
+        textcache::drawText (g, juce::String::fromUTF8 (effectInfo (slot.kind).name), 10, y, getWidth() - 20, 20, juce::Justification::centredLeft);
         g.setFont (font (type::small));
         for (std::size_t b = 0; b < slot.branches.size(); ++b)
         {
@@ -2675,7 +2679,7 @@ void EffectsPanel::paint (juce::Graphics& g)
                 chain += (c > 0 ? " -> " : "") + juce::String::fromUTF8 (effectInfo (slot.branches[b].chain[c].kind).name);
             const auto line = tr ("Branch {0} (x{1}): {2}", { juce::String ((int) b + 1), juce::String (slot.branches[b].gain, 2), chain });
             g.setColour (colour::textSecondary);
-            g.drawText (line, 14, y, getWidth() - 28, 20, juce::Justification::centredLeft, true);
+            textcache::drawText (g, line, 14, y, getWidth() - 28, 20, juce::Justification::centredLeft, true);
         }
         return;
     }
@@ -2689,14 +2693,14 @@ void EffectsPanel::paint (juce::Graphics& g)
     const auto editorButton = ! gate && ! vocoder && NativeEffectWindows::canOpen (slot.kind);
     const auto titleY = (gate ? gateStepsBounds().getY() : vocoder ? bandLevelsBounds().getY() : tune ? tuneKeysBounds().getY() : knobBounds (0).getY()) - 28;
     const auto titleRight = getWidth() - 10 - (editorButton ? editorButtonBounds().getWidth() + 6 : 0);
-    g.drawText (juce::String::fromUTF8 (info.name), 10, titleY, titleRight - 10, 20, juce::Justification::centredLeft, true);
+    textcache::drawText (g, juce::String::fromUTF8 (info.name), 10, titleY, titleRight - 10, 20, juce::Justification::centredLeft, true);
     if (slot.isSubstitute()) // which missing plugin this stands in for (the project keeps it)
     {
         const auto titleWidth = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), juce::String::fromUTF8 (info.name));
         g.setColour (colour::info);
         g.setFont (font (type::caption));
         const auto original = juce::String::fromUTF8 (substituteOriginalName (slot).c_str());
-        g.drawText (engine.getSong().substitutesBypassed ? tr ("LYNX substitute for {0} (bypassed)", { original }) : tr ("LYNX substitute for {0}", { original }),
+        textcache::drawText (g, engine.getSong().substitutesBypassed ? tr ("LYNX substitute for {0} (bypassed)", { original }) : tr ("LYNX substitute for {0}", { original }),
                     10 + titleWidth + 10, titleY,
                     juce::jmax (0, titleRight - 20 - titleWidth), 20, juce::Justification::centredLeft, true);
     }
@@ -2710,7 +2714,7 @@ void EffectsPanel::paint (juce::Graphics& g)
         icons::draw (g, Icon::plugin, b.withWidth (22.0f).withSizeKeepingCentre (13.0f, 13.0f).translated (4.0f, 0.0f), colour::textSecondary);
         g.setColour (colour::textPrimary);
         g.setFont (font (type::small));
-        g.drawFittedText (tr ("Editor"), b.withTrimmedLeft (24.0f).toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
+        textcache::drawFittedText (g, tr ("Editor"), b.withTrimmedLeft (24.0f).toNearestInt(), juce::Justification::centredLeft, 1, 0.8f);
     }
 
     if (tune) // the scale's notes on one octave; a note switched off is never a target
@@ -2744,12 +2748,12 @@ void EffectsPanel::paint (juce::Graphics& g)
                     static const char* names[12] { "C", "", "D", "", "E", "F", "", "G", "", "A", "", "B" };
                     g.setColour (inScale && on ? colour::textPrimary : colour::textSecondary);
                     g.setFont (font (type::caption));
-                    g.drawText (names[pc], r.withTrimmedTop (r.getHeight() - 16.0f), juce::Justification::centred);
+                    textcache::drawText (g, names[pc], r.withTrimmedTop (r.getHeight() - 16.0f), juce::Justification::centred);
                 }
             }
         g.setColour (colour::textSecondary);
         g.setFont (font (type::caption));
-        g.drawFittedText (tr ("Target notes: click a key to switch it off or on"), tuneKeysBounds().withY (tuneKeysBounds().getBottom() + 2).withHeight (14),
+        textcache::drawFittedText (g, tr ("Target notes: click a key to switch it off or on"), tuneKeysBounds().withY (tuneKeysBounds().getBottom() + 2).withHeight (14),
                           juce::Justification::centredLeft, 1, 0.8f);
     }
 
@@ -2771,7 +2775,7 @@ void EffectsPanel::paint (juce::Graphics& g)
         g.drawHorizontalLine ((int) unity, area.getX(), area.getRight());
         g.setColour (colour::textSecondary);
         g.setFont (font (type::caption));
-        g.drawFittedText (tr ("Band levels: draw them; right-click = presets"), area.withY (area.getBottom() + 2).withHeight (14).toNearestInt(),
+        textcache::drawFittedText (g, tr ("Band levels: draw them; right-click = presets"), area.withY (area.getBottom() + 2).withHeight (14).toNearestInt(),
                           juce::Justification::centredLeft, 1, 0.8f);
     }
 
@@ -2792,7 +2796,7 @@ void EffectsPanel::paint (juce::Graphics& g)
             g.drawVerticalLine ((int) (area.getX() + beat * 8 * w), area.getY(), area.getBottom());
         g.setColour (colour::textSecondary);
         g.setFont (font (type::caption));
-        g.drawFittedText (tr ("1 bar: draw the steps; right-click = patterns"), area.withY (area.getBottom() + 2).withHeight (14).toNearestInt(),
+        textcache::drawFittedText (g, tr ("1 bar: draw the steps; right-click = patterns"), area.withY (area.getBottom() + 2).withHeight (14).toNearestInt(),
                           juce::Justification::centredLeft, 1, 0.8f);
     }
 
@@ -2807,10 +2811,10 @@ void EffectsPanel::paint (juce::Graphics& g)
 
         g.setColour (colour::textSecondary);
         g.setFont (font (type::caption));
-        g.drawFittedText (juce::String::fromUTF8 (info.params[(std::size_t) p].name), r.getX(), r.getY() + knobHeight + 2, r.getWidth(), 14,
+        textcache::drawFittedText (g, juce::String::fromUTF8 (info.params[(std::size_t) p].name), r.getX(), r.getY() + knobHeight + 2, r.getWidth(), 14,
                           juce::Justification::centred, 1, 0.8f);
         g.setColour (colour::textPrimary);
-        g.drawText (juce::String::fromUTF8 (formatEffectParam (slot.kind, p, value, song.bpm, slot.params).c_str()), r.getX(), r.getY() + knobHeight + 16,
+        textcache::drawText (g, juce::String::fromUTF8 (formatEffectParam (slot.kind, p, value, song.bpm, slot.params).c_str()), r.getX(), r.getY() + knobHeight + 16,
                     r.getWidth(), 14, juce::Justification::centred);
     }
 }
@@ -3652,7 +3656,7 @@ void EffectsPanel::showAddMenu (int)
         selectedSlot = (int) slots()->size() - 1;
         openPluginWindow (selectedSlot);
         repaint();
-    });
+    }, this);
     menu.addSeparator();
     menu.addSubMenu (tr ("Plugin (VST/VST3/CLAP)"), plugins);
     menu.addSeparator();
