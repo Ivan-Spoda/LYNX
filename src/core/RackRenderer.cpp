@@ -629,6 +629,7 @@ void RackState::buildAutomationTables()
             case AutomationTargetKind::channelParam:
                 // VST plugins and the exact engines that take FL's parameter automation (FL Slayer: REA_rodada79)
                 if (channelOk && (song.channels[(std::size_t) t.index].instrument == InstrumentKind::plugin
+                                  || song.channels[(std::size_t) t.index].instrument == InstrumentKind::patcher // (its published parameters)
                                   || song.channels[(std::size_t) t.index].instrument == InstrumentKind::slayer
                                   || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::midiOut && midictl::isMidiParam (t.param))))
                     pluginParams.push_back ({ a, t.index, 0, 0, t.param });
@@ -642,7 +643,8 @@ void RackState::buildAutomationTables()
 
                 if (! slotOk)
                     used = false;
-                else if (song.mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].kind == EffectKind::plugin)
+                else if (song.mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].kind == EffectKind::plugin
+                         || song.mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].kind == EffectKind::patcher) // (its published parameters)
                     pluginParams.push_back ({ a, -1, t.index, t.slot, t.param });
                 else if (song.mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].isSubstitute())
                     used = false; // the missing plugin's parameters: kept for when it is back, they don't drive the substitute

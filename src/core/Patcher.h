@@ -84,6 +84,8 @@ public:
     bool instrumentsIdle() const noexcept;
 
     int latencySamples() const noexcept { return latency; }
+    // The Patcher's published parameter k (automation, FL's record 1100) set to v (0..1). Audio thread.
+    void setPublished (int k, float v) noexcept;
     float controlOutput (int output) const noexcept;
 
     // "To LYNX" extra outputs (bus 1…): how many and their last block (valid until the next process)
@@ -113,6 +115,8 @@ private:
     std::vector<AudioWire> wires;
     std::vector<ControlWire> controls;
     std::vector<int> noteTargets; // nodes cabled to the host's notes
+    std::vector<PatchParam> published;
+    std::vector<float> publishedValues; // built-in targets: the latest automation value (NaN = none), applied each block
     std::vector<std::vector<int>> outputs; // [bus of "To LYNX"] its cables
     std::vector<std::array<std::vector<float>, 2>> aux;
     std::array<std::vector<float>, 6> scratch; // gathered input, gathered side-chain, wire delay

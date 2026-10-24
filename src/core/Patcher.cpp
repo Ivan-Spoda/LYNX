@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <map>
 
 #include "core/FrequencySplitter.h"
@@ -106,7 +107,7 @@ NodePorts nodePorts (const PatchNode& node)
 
 bool sameStructure (const PatcherDoc& a, const PatcherDoc& b)
 {
-    if (a.nodes.size() != b.nodes.size() || a.wires.size() != b.wires.size() || a.outputTracks != b.outputTracks)
+    if (a.nodes.size() != b.nodes.size() || a.wires.size() != b.wires.size() || a.outputTracks != b.outputTracks || ! (a.published == b.published))
         return false;
     for (std::size_t i = 0; i < a.nodes.size(); ++i)
     {
@@ -333,6 +334,8 @@ Graph::Graph (const PatcherDoc& doc, double sampleRate, const Factories& factori
         }
     }
     highestAux = std::max (highestAux, (int) doc.outputTracks.size());
+    published = doc.published;
+    publishedValues.assign (published.size(), std::numeric_limits<float>::quiet_NaN());
     aux.resize ((std::size_t) highestAux);
     for (auto& a : aux)
         for (auto& side : a)
@@ -591,6 +594,26 @@ bool Graph::instrumentsIdle() const noexcept
 
 float Graph::controlOutput (int) const noexcept { return 0.0f; }
 
+void Graph::setPublished (int k, float v) noexcept
+{
+    if (k < 0 || k >= (int) published.size())
+        return;
+    const auto& p = published[(std::size_t) k];
+    if (p.node < 0 || p.node >= (int) nodes.size() || p.param < 0)
+        return;
+    const auto value = mapControl (p.curve, v);
+    auto& node = *nodes[(std::size_t) p.node];
+    if (node.generator)
+    {
+        if (node.instrument != nullptr)
+            node.instrument->setParameter (p.param, value);
+    }
+    else if (node.plugin)
+        node.effect->setParameter (p.param, value);
+    else if (p.param < maxEffectParams)
+        publishedValues[(std::size_t) k] = value; // (applied at the start of each block, over the UI's values)
+}
+
 const float* Graph::auxOutput (int index, int side) const noexcept
 {
     return index >= 0 && index < (int) aux.size() ? aux[(std::size_t) index][(std::size_t) (side & 1)].data() : nullptr;
@@ -620,6 +643,9 @@ void Graph::processPiece (const float* inL, const float* inR, const float* scL, 
 {
     applyPending();
     auto& values = *active;
+    for (std::size_t k = 0; k < publishedValues.size(); ++k)
+        if (! std::isnan (publishedValues[k]))
+            values.nodes[(std::size_t) published[k].node].params[(std::size_t) published[k].param] = publishedValues[k];
 
     // control cables: the source's latest output moves the target's parameter (one block of lag, as the mixer's links)
     for (const auto& c : controls)
@@ -779,7 +805,7 @@ public:
         sendL = l;
         sendR = r;
     }
-    void setParameter (int, float) noexcept override {}
+    void setParameter (int index, float value) noexcept override { graph.setPublished (index, value); }
     void setSongPosition (double ticks) noexcept override { graph.setSongPosition (ticks); }
     void setPlaying (bool playing) noexcept override { graph.setPlaying (playing); }
     void setSidechain (const float* l, const float* r) noexcept override
@@ -826,6 +852,7 @@ public:
     void slideTo (int key, float cents, float samples) noexcept override { graph.slideTo (key, cents, samples); }
     void setNextNoteExpression (float pan, float cents, bool porta) noexcept override { graph.setNextNoteExpression (pan, cents, porta); }
     void setSongPosition (double ticks) noexcept override { graph.setSongPosition (ticks); }
+    void setParameter (int index, float value) noexcept override { graph.setPublished (index, value); }
     int latencySamples() const noexcept override { return graph.latencySamples(); }
     bool idle() const noexcept override { return idleWhenQuiet.load (std::memory_order_relaxed) && graph.instrumentsIdle(); }
 
