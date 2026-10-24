@@ -30,6 +30,18 @@ LYNX's style; the transfer-curve and GR-history displays are bars). Her Vocalstr
 model (−60 … −67 dB null on her takes). The other Complete Access plugins (Slate, SSL, LiquidSonics, sonible,
 Harrison) map to LYNX effects by role only.
 
+## Round 150: what changed (config / design, after 147 → after 150)
+
+Round 150 (`docs/analise/REA_rodada150.md`, sub-rounds `REA_rodada150a.md` / `REA_rodada150b.md`).
+
+| LYNX engine | Original | Config 147 → 150 | Design 147 → 150 | Round-150 changes |
+|---|---|---|---|---|
+| Prism Multiband | Pro-MB | 10 → 10 | 9 → 10 | free layout with gaps, slopes 6 … 48 dB/oct (measured per processing mode, the 6 dB/oct designs), side-chain input per band, narrow free side-chain filter, measured detector (soft range, release after the curve); translated |
+| Compressor (stand-in) | Renaissance Compressor | 8 → 9 | 7 → 7 | the reference's own ranges: ratio 0.5 … 50 with the measured upward expansion, gain ±30, attack 0.5 … 500, release 5 … 5000 ms; translated |
+| Echoform | EchoBoy / PrimalTap | 10 → 10 | 8 → 8 | voicings in Dual / Ping-Pong (measured), L/R offset, wobble shapes / depths from delay tracks (no style has several voices on the trial) |
+| Ember Saturator | Saturn 2 | 7 → 8 | 7 → 8 | six bands, global input / output pan, 28 measured characters (LYNX names); translated |
+| LYNX Tune | Waves Tune Real-Time | 9 → 9 | 7 → 8 | Send / Receive of the scale between instances |
+
 ## Round 147: what changed (config / design, after 144 → after 147)
 
 Round 147 (`docs/analise/REA_rodada147.md`, sub-rounds `REA_rodada147a.md` / `REA_rodada147b.md`).
