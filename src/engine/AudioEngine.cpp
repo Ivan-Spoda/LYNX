@@ -835,7 +835,7 @@ AudioEngine::RecordingNotice AudioEngine::openAudioInput (const juce::String& de
 
 void AudioEngine::setInsertInput (int track, int channel, bool stereo)
 {
-    if (track <= 0 || track >= (int) song.mixer.size())
+    if (track < 0 || track >= (int) song.mixer.size()) // (the Master too: REA round 143)
         return;
 
     editSong ([=] (Song& s) {
@@ -852,7 +852,7 @@ void AudioEngine::setInsertInput (int track, int channel, bool stereo)
 
 void AudioEngine::setInsertMonitor (int track, InputMonitor mode)
 {
-    if (track > 0 && track < (int) song.mixer.size())
+    if (track >= 0 && track < (int) song.mixer.size())
         editSong ([=] (Song& s) { s.mixer[(std::size_t) track].monitor = mode; });
 }
 
@@ -1090,6 +1090,7 @@ void AudioEngine::updateRecording()
     uiRecorded.clear();
 
     updateAudioRecording();
+    updateAutomationRecording (active);
 
     if (! active && recorder.isActive())
         recorder.end (song, lastPlayingTick);
@@ -1723,6 +1724,179 @@ void AudioEngine::learnMidiController (const AutomationTarget& target)
     sendChangeMessage();
 }
 
+// --- last tweaked parameters and automation recording (REA round 143) --------------------------------------
+
+void AudioEngine::noteTweaked (const AutomationTarget& target, bool held)
+{
+    if (target.kind == AutomationTargetKind::none)
+        return;
+
+    if (! (lastTweaked[0] == target))
+    {
+        lastTweaked[1] = lastTweaked[0];
+        lastTweaked[0] = target;
+    }
+
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    auto it = std::find_if (touches.begin(), touches.end(), [&] (const Touch& t) { return t.target == target; });
+    if (it == touches.end())
+    {
+        touches.push_back ({ target, now, held, {} });
+        return;
+    }
+    it->lastMs = now;
+    it->held = it->held || held;
+}
+
+void AudioEngine::tweakReleased (const AutomationTarget& target)
+{
+    for (auto& t : touches)
+        if (t.target == target)
+        {
+            t.held = false;
+            t.lastMs = juce::Time::getMillisecondCounterHiRes();
+        }
+}
+
+std::optional<AutomationTarget> AudioEngine::getLastTweaked (int which) const
+{
+    if (which < 0 || which > 1 || lastTweaked[(std::size_t) which].kind == AutomationTargetKind::none
+        || currentTargetValue (lastTweaked[(std::size_t) which]) < 0.0f)
+        return std::nullopt;
+    return lastTweaked[(std::size_t) which];
+}
+
+float AudioEngine::currentTargetValue (const AutomationTarget& t) const
+{
+    const auto base = song.targetValue (t);
+    if (base < 0.0f || (t.kind != AutomationTargetKind::channelParam && t.kind != AutomationTargetKind::effectParam))
+        return base;
+
+    juce::AudioPluginInstance* plugin = nullptr;
+    float midiValue = -1.0f;
+    if (t.kind == AutomationTargetKind::channelParam)
+        if (auto* p = dynamic_cast<PluginInstrument*> (getChannelInstrument (t.index).get()))
+        {
+            plugin = &p->getInstance();
+            midiValue = midictl::isMidiParam (t.param) ? p->midiControlValue (t.param) : -1.0f;
+        }
+    if (t.kind == AutomationTargetKind::effectParam)
+        if (auto* p = dynamic_cast<PluginEffect*> (getEffect (t.index, t.slot).get()))
+        {
+            plugin = &p->getInstance();
+            midiValue = midictl::isMidiParam (t.param) ? p->midiControlValue (t.param) : -1.0f;
+        }
+
+    if (midiValue >= 0.0f)
+        return midiValue;
+    if (plugin != nullptr && t.param >= 0 && t.param < plugin->getParameters().size())
+        return plugin->getParameters()[t.param]->getValue();
+    return base;
+}
+
+std::optional<AutomationTarget> AudioEngine::targetOfPlugin (const juce::AudioPluginInstance& plugin, int param) const
+{
+    for (int c = 0; c < (int) song.channels.size(); ++c)
+        if (auto* p = dynamic_cast<PluginInstrument*> (getChannelInstrument (c).get()); p != nullptr && &p->getInstance() == &plugin)
+            return AutomationTarget { AutomationTargetKind::channelParam, c, 0, param };
+
+    for (int t = 0; t < (int) song.mixer.size(); ++t)
+        for (int s = 0; s < (int) song.mixer[(std::size_t) t].effects.size(); ++s)
+            if (auto* p = dynamic_cast<PluginEffect*> (getEffect (t, s).get()); p != nullptr && &p->getInstance() == &plugin)
+                return AutomationTarget { AutomationTargetKind::effectParam, t, s, param };
+
+    return std::nullopt;
+}
+
+void AudioEngine::updateAutomationRecording (bool active)
+{
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    const auto recording = active && recordOptions.recordAutomation;
+    const auto grid = recordOptions.quantiseAutomation ? recordOptions.quantise : std::int64_t { 0 };
+
+    auto writeFor = [this] (const AutomationTarget& target) -> AutomationWrite& {
+        auto it = std::find_if (takeWrites.begin(), takeWrites.end(), [&] (const AutomationWrite& w) { return w.target == target; });
+        if (it != takeWrites.end())
+            return *it;
+        AutomationWrite w;
+        w.target = target;
+        w.name = nameAutomation ? nameAutomation (target) : std::string ("Automation");
+        takeWrites.push_back (w);
+        return takeWrites.back();
+    };
+
+    // writes what was sampled (one undo step for the whole take); `ended` = the gestures that are over
+    auto commit = [&] (const std::vector<AutomationTarget>& ended) {
+        if (std::none_of (touches.begin(), touches.end(), [] (const Touch& t) { return ! t.pending.empty(); }))
+            return;
+        const auto songMode = song.mode == PlayMode::song;
+        editSong ([&] (Song& s) {
+            for (auto& t : touches)
+                if (! t.pending.empty())
+                {
+                    auto& w = writeFor (t.target);
+                    recordedAutomationPoints += (int) t.pending.size();
+                    if (songMode)
+                        commitAutomationPoints (s, w, std::move (t.pending), grid);
+                    else
+                        commitEventPoints (s, automationPattern, w, std::move (t.pending), automationLoopLength, grid);
+                    t.pending.clear();
+                }
+        }, ! automationTakeHasUndoStep);
+        automationTakeHasUndoStep = true;
+        for (const auto& target : ended)
+            writeFor (target).lastLocal = -1; // the next gesture on it starts a new stretch
+    };
+
+    if (! recording)
+    {
+        commit ({});
+        touches.clear();
+        if (! active)
+        {
+            takeWrites.clear();
+            automationTakeHasUndoStep = false;
+            automationLoopLength = 0;
+        }
+        return;
+    }
+
+    if (automationLoopLength <= 0)
+    {
+        automationPattern = song.currentPattern;
+        automationLoopLength = song.patterns.empty() ? ppq * 4
+                                                     : song.patterns[(std::size_t) juce::jlimit (0, (int) song.patterns.size() - 1, song.currentPattern)]
+                                                           .effectiveLength (song.beatsPerBar);
+    }
+
+    const auto tick = estimatedPositionNow();
+    std::vector<AutomationTarget> ended;
+    for (auto& t : touches)
+    {
+        const auto alive = t.held || now - t.lastMs < 350.0;
+        const auto value = currentTargetValue (t.target);
+        if (value < 0.0f)
+        {
+            ended.push_back (t.target);
+            continue;
+        }
+        if (alive)
+            t.pending.push_back ({ tick, value });
+        else
+            ended.push_back (t.target);
+    }
+
+    if (! ended.empty() || --automationCommitCountdown <= 0)
+    {
+        commit (ended);
+        automationCommitCountdown = 6; // about 5 writes per second while a control keeps moving
+    }
+
+    touches.erase (std::remove_if (touches.begin(), touches.end(),
+                                   [&] (const Touch& t) { return std::find (ended.begin(), ended.end(), t.target) != ended.end(); }),
+                   touches.end());
+}
+
 void AudioEngine::applyControllers()
 {
     ControllerEvent e;
@@ -1765,6 +1939,7 @@ void AudioEngine::applyControllers()
                         continue;
                 }
                 changes.push_back ({ t, v });
+                noteTweaked (t); // a linked controller's move is a tweak (Last tweaked, automation recording)
             }
 
     std::vector<std::pair<AutomationTarget, float>> pluginChanges;

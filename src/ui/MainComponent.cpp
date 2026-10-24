@@ -417,6 +417,18 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     quickTips = std::make_unique<ui::QuickTipWindow>();
 
     ui::installSliderContract();
+    // FL's Last tweaked and automation recording (REA round 143): every automatable control reports its moves
+    ui::onTweak = [this] (const AutomationTarget& t) { engine.noteTweaked (t); };
+    PluginWindows::onGesture = [this] (const juce::AudioPluginInstance& plugin, int param, bool starting) {
+        if (const auto t = engine.targetOfPlugin (plugin, param))
+        {
+            if (starting)
+                engine.noteTweaked (*t, true);
+            else
+                engine.tweakReleased (*t);
+        }
+    };
+    engine.nameAutomation = [this] (const AutomationTarget& t) { return describeAutomationTarget (engine, t).toStdString(); };
     addAndMakeVisible (gridBox); // global grid (editors)
     engine.addChangeListener (this);
     setTypingPiano (typingPiano);
@@ -452,6 +464,9 @@ MainComponent::~MainComponent()
     saveUiSettings();
     workspace.saveState();
     ui::uninstallSliderContract();
+    ui::onTweak = nullptr;
+    PluginWindows::onGesture = nullptr;
+    engine.nameAutomation = nullptr;
     PluginWindows::closeAll(); // plugin UIs before the engine
     ParametricEqWindows::closeAll();
     closeAutomationEditors();
@@ -1225,6 +1240,12 @@ void MainComponent::loadUiSettings()
              : key == "disarmOnStop" ? o.disarmOnStop : o.startsPlayback) = on;
             engine.setRecordOptions (o);
         }
+        else if (key == "recordAutomation" || key == "recordQuantiseAutomation")
+        {
+            auto o = engine.getRecordOptions();
+            (key == "recordAutomation" ? o.recordAutomation : o.quantiseAutomation) = on;
+            engine.setRecordOptions (o);
+        }
         else if (key == "recordToStepSequencer" || key == "recordingMarkers" || key == "recordNoteEnd")
         {
             auto o = engine.getRecordOptions();
@@ -1280,7 +1301,9 @@ void MainComponent::saveUiSettings()
                                       + "\nrecordQuantiseStarts=" + juce::String (recordQuantiseOn ? 1 : 0)
                                       + "\nrecordNoteEnd=" + juce::String ((int) engine.getRecordOptions().noteEnd)
                                       + "\nrecordToStepSequencer=" + juce::String (engine.getRecordOptions().toStepSequencer ? 1 : 0)
-                                      + "\nrecordingMarkers=" + juce::String (engine.getRecordOptions().recordingMarkers ? 1 : 0) + "\n");
+                                      + "\nrecordingMarkers=" + juce::String (engine.getRecordOptions().recordingMarkers ? 1 : 0)
+                                      + "\nrecordAutomation=" + juce::String (engine.getRecordOptions().recordAutomation ? 1 : 0)
+                                      + "\nrecordQuantiseAutomation=" + juce::String (engine.getRecordOptions().quantiseAutomation ? 1 : 0) + "\n");
 }
 
 // --- transport -----------------------------------------------------------------------------------
@@ -1666,6 +1689,10 @@ void MainComponent::addRecordQuantizeItems (juce::PopupMenu& menu)
     });
     menu.addItem (tr ("Record to step sequencer"), true, o.toStepSequencer,
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.toStepSequencer = ! r.toStepSequencer; }); });
+    // FL's "Automations" (RecQuantizeAutomationsMenu, setting QuantizeAutomations; REA round 143): recorded automation
+    // points go to the snap
+    menu.addItem (tr ("Automations"), true, o.quantiseAutomation,
+                  [set] { set ([] (AudioEngine::RecordOptions& r) { r.quantiseAutomation = ! r.quantiseAutomation; }); });
 }
 
 void MainComponent::addRecordOptions (juce::PopupMenu& menu)
@@ -1731,6 +1758,7 @@ void MainComponent::toggleRecording()
         auto o = safe->engine.getRecordOptions();
         o.recordNotes = choice != recordChoiceAudio;
         o.recordAudio = choice != recordChoiceNotes;
+        o.recordAutomation = choice != recordChoiceAudio;
         if (dontAsk)
             o.askWhatToRecord = false;
         safe->engine.setRecordOptions (o);
@@ -1855,6 +1883,9 @@ void MainComponent::showRecordMenu()
 
     juce::PopupMenu menu;
     menu.addSectionHeader (tr ("Recording filter"));
+    // FL's filter order (RecMenu, REA round 143): Automation, Notes, Audio
+    menu.addItem (tr ("Automation (the controls you move: automation clips in song mode, pattern events in pattern mode)"), true,
+                  o.recordAutomation, [set] { set ([] (AudioEngine::RecordOptions& r) { r.recordAutomation = ! r.recordAutomation; }); });
     menu.addItem (tr ("Notes (MIDI and PC keyboard) into the current pattern"), true, o.recordNotes,
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.recordNotes = ! r.recordNotes; }); });
     menu.addItem (tr ("Audio of the armed mixer inserts (becomes Playlist clips)"), true, o.recordAudio,
@@ -2161,7 +2192,10 @@ void MainComponent::TempoDisplay::mouseDown (const juce::MouseEvent& e)
 void MainComponent::TempoDisplay::mouseDrag (const juce::MouseEvent& e)
 {
     if (dragging)
+    {
+        engine.noteTweaked ({ AutomationTargetKind::tempo, 0 });
         setBpm (controls::tempoDrag (startBpm, -e.getDistanceFromDragStartY(), dragOnDecimals, e.mods.isCtrlDown()));
+    }
 }
 
 void MainComponent::TempoDisplay::mouseUp (const juce::MouseEvent&)
@@ -2184,6 +2218,7 @@ void MainComponent::TempoDisplay::mouseWheelMove (const juce::MouseEvent& e, con
         return;
 
     const auto step = isOnDecimals (e.x) ? 0.01 : 1.0;
+    engine.noteTweaked ({ AutomationTargetKind::tempo, 0 });
     setBpm (engine.getSong().bpm + (delta > 0.0f ? 1.0 : -1.0) * step * (e.mods.isCtrlDown() ? 0.1 : 1.0));
 }
 
@@ -3397,6 +3432,58 @@ void MainComponent::exportAudio (int format)
     showExportDialog (engine, currentFile.getParentDirectory(), projectName, format);
 }
 
+void MainComponent::importMidiFile()
+{
+    const auto folder = currentFile.existsAsFile() ? currentFile.getParentDirectory() : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+    fileChooser = std::make_unique<juce::FileChooser> (tr ("Import MIDI file"), folder, "*.mid;*.midi");
+    juce::Component::SafePointer<MainComponent> safe (this);
+    fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [safe] (const juce::FileChooser& fc) {
+        const auto file = fc.getResult();
+        if (safe == nullptr || file == juce::File())
+            return;
+        static MidiFileIo::ImportOptions remembered; // FL keeps the window's choices
+        showMidiImportDialog (file.getFileName(), remembered, [safe, file] (const MidiFileIo::ImportOptions& o) {
+            remembered = o;
+            if (safe != nullptr)
+                safe->importMidiFile (file, o);
+        });
+    });
+}
+
+void MainComponent::importMidiFile (const juce::File& file, const MidiFileIo::ImportOptions& o)
+{
+    juce::String error;
+    if (o.newProject)
+    {
+        confirmDiscard ([this, file, o] {
+            Song song;
+            juce::String err;
+            if (! MidiFileIo::importInto (song, file, o, err))
+            {
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not import"), err);
+                return;
+            }
+            engine.stop();
+            engine.rewind();
+            engine.setSong (std::move (song));
+            currentFile = juce::File();
+            projectName = file.getFileNameWithoutExtension();
+            importedSuffix = " " + tr ("(imported from MIDI)");
+            updateTitle();
+        });
+        return;
+    }
+
+    auto song = engine.getSong();
+    if (! MidiFileIo::importInto (song, file, o, error))
+    {
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not import"), error);
+        return;
+    }
+    engine.editSong ([&song] (Song& s) { s = std::move (song); });
+    showPanel (Panel::channelRack);
+}
+
 void MainComponent::exportMidiFile()
 {
     // FL's File › Export › "MIDI file...": the arrangement's notes (or the current pattern's) as a Standard MIDI File
@@ -3479,6 +3566,60 @@ void MainComponent::save (bool askForFile)
                               });
 }
 
+juce::PopupMenu MainComponent::makeLastTweakedMenu (int which)
+{
+    juce::PopupMenu menu;
+    const auto target = engine.getLastTweaked (which);
+    if (! target)
+    {
+        menu.addItem (tr ("No parameter"), false, false, [] {});
+        return menu;
+    }
+
+    // as FL: the parameter's name, then the items of its own menu (events, automation clip, remote control, value)
+    ui::addItemHeader (menu, tr ("Parameter"), describeAutomationTarget (engine, *target), juce::Colours::transparentBlack);
+    const auto& song = engine.getSong();
+    int clip = -1;
+    for (int a = 0; a < (int) song.automations.size(); ++a)
+        if (song.automations[(std::size_t) a].target == *target)
+            clip = a;
+    menu.addSectionHeader (tr ("Automation"));
+    addAutomationItem (menu, engine, *target);
+    menu.addItem (tr ("Edit automation clip..."), clip >= 0, false, [this, clip] { openAutomationEditor (engine, clip); });
+    menu.addSectionHeader (tr ("Value"));
+    const auto value = engine.currentTargetValue (*target);
+    menu.addItem (tr ("Copy value"), value >= 0.0f, false, [value] { lastTweakedClipboard() = value; });
+    menu.addItem (tr ("Paste value"), lastTweakedClipboard() >= 0.0f, false, [this, t = *target] { setTweakedValue (t, lastTweakedClipboard()); });
+    menu.addItem (tr ("Type in value..."), value >= 0.0f, false, [this, t = *target, value] {
+        auto spec = ui::percentSpec (describeAutomationTarget (engine, t), value);
+        ui::typeValue (*this, spec, value, [this, t] (double v) { setTweakedValue (t, (float) v); });
+    });
+    return menu;
+}
+
+float& MainComponent::lastTweakedClipboard()
+{
+    static float copied = -1.0f;
+    return copied;
+}
+
+void MainComponent::setTweakedValue (const AutomationTarget& target, float value)
+{
+    value = juce::jlimit (0.0f, 1.0f, value);
+    auto plugin = false;
+    engine.editSong ([&] (Song& s) { plugin = ! s.setTargetValue (target, value); });
+    if (plugin)
+    {
+        if (target.kind == AutomationTargetKind::channelParam)
+            if (auto* p = dynamic_cast<PluginInstrument*> (engine.getChannelInstrument (target.index).get()))
+                p->setParameterFromUi (target.param, value);
+        if (target.kind == AutomationTargetKind::effectParam)
+            if (auto* p = dynamic_cast<PluginEffect*> (engine.getEffect (target.index, target.slot).get()))
+                p->setParameterFromUi (target.param, value);
+    }
+    engine.noteTweaked (target);
+}
+
 juce::StringArray MainComponent::getMenuBarNames()
 {
     // FL's menu bar order (REA round 139): FILE EDIT ADD PATTERNS VIEW OPTIONS TOOLS HELP
@@ -3498,6 +3639,14 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
         menu.addSectionHeader (tr ("Channel"));
         rack.addInstrumentItems (menu, -1);
         menu.addSectionHeader (tr ("Other"));
+        // FL's "Automation for last tweaked parameter" (Add_AutoLastMenu → FUN_01231100, REA round 143)
+        const auto last = engine.getLastTweaked (0);
+        menu.addItem (last ? tr ("Automation for last tweaked parameter ({0})", { describeAutomationTarget (engine, *last) })
+                           : tr ("Automation for last tweaked parameter"),
+                      last.has_value(), false, [this] {
+                          if (const auto t = engine.getLastTweaked (0))
+                              createAutomationClip (engine, *t);
+                      });
         menu.addItem (tr ("Pattern"), [this] { newPatternButton.onClick(); });
         menu.addItem (tr ("Plugin manager..."), [this] { showPluginManager(); });
         return menu;
@@ -3512,6 +3661,11 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
         });
         menu.addItem (tr ("One-click audio recording: arm the selected insert..."), [this] { armSelectedInsertForAudio(); });
         menu.addItem (tr ("Plugin performance monitor..."), [this] { showPluginMonitor (engine); });
+        // FL's "Last tweaked parameters" section (LastTweaked1Menu / LastTweaked2Menu → FUN_0123d1d0, REA round 143):
+        // the parameter's own menu for the last two moved controls
+        menu.addSectionHeader (tr ("Last tweaked parameters"));
+        menu.addSubMenu (tr ("Last tweaked"), makeLastTweakedMenu (0), engine.getLastTweaked (0).has_value());
+        menu.addSubMenu (tr ("Next to last tweaked"), makeLastTweakedMenu (1), engine.getLastTweaked (1).has_value());
         menu.addSectionHeader (tr ("Macros"));
         menu.addItem (tr ("Stop sound (all notes off)"), [this] { engine.panic(); });
         menu.addItem (tr ("Select unused channels"), [this] {
@@ -3555,6 +3709,12 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
         menu.addItem (tr ("Save as template..."), [this] { saveAsTemplate(); });
         menu.addItem (tr ("Delete unused recordings and save..."), [this] { deleteUnusedRecordingsAndSave(); });
         menu.addSeparator();
+        {
+            // FL's File › Import (ImportMenu › ImportMIDIMenu → FileImportMIDIFileAction, REA round 143)
+            juce::PopupMenu imports;
+            imports.addItem (tr ("MIDI file..."), [this] { importMidiFile(); });
+            menu.addSubMenu (tr ("Import"), imports);
+        }
         {
             // FL's File › Export (REA round 139): one entry per format, then the formats of the last export
             juce::PopupMenu exports;

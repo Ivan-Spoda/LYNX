@@ -7,6 +7,15 @@
 
 namespace lynx
 {
+namespace MidiFileIo
+{
+struct ImportOptions;
+}
+// FL's "Import MIDI data" window (File › Import › MIDI file..., REA round 143). `onAccept` gets the chosen options.
+void showMidiImportDialog (const juce::String& fileName, const MidiFileIo::ImportOptions& current,
+                           std::function<void (const MidiFileIo::ImportOptions&)> onAccept);
+std::unique_ptr<juce::AlertWindow> makeMidiImportDialog();
+
 // "Rename and color" dialog for patterns and channels (docs/WORKFLOW_FL.md, P1 item 4): a name field
 // and LYNX's palette (plus "automatic"); F2 inside the dialog picks a random palette color.
 // `onDone(name, colour)` runs when the user confirms (colour 0 = automatic / theme default).

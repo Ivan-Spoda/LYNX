@@ -3041,6 +3041,9 @@ private:
             saveIconSheet (prefix + "-icons-150.png", 1.5f);
             saveWindow (lynx::MainComponent::makeHelpContent(), "-help.png");
             saveWindow (std::make_unique<lynx::toolbar::CustomizePanel> (lynx::toolbarlayout::Layout::makeDefault()), "-customize-toolbar.png");
+            // two moved controls: Tools › Last tweaked and Add › Automation for last tweaked parameter show them (REA round 143)
+            offline.noteTweaked ({ lynx::AutomationTargetKind::channelVolume, 0 });
+            offline.noteTweaked ({ lynx::AutomationTargetKind::mixerVolume, 0 });
             saveMenus (ui, prefix + "-menus.png");
             {
                 // the windows' own menus (title bars) and the toolbar's recording menu
@@ -3068,6 +3071,7 @@ private:
             saveAlert (lynx::MainComponent::makeAboutWindow(), "-about.png");
             saveAlert (lynx::makeNameAndColourDialog (lynx::tr ("Rename pattern"), "Pattern 2", lynx::lynxPalette()[6]), "-rename.png");
             saveAlert (lynx::makeRecordChoiceDialog(), "-record-dialog.png");
+            saveAlert (lynx::makeMidiImportDialog(), "-midi-import-dialog.png"); // File › Import › MIDI file (REA round 143)
             saveWindow (lynx::makeSetupWizardContent (offline, {}, {}), "-setup.png");
             saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 0, 1), "-missing-files.png");
             saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 1), "-missing-plugins.png");

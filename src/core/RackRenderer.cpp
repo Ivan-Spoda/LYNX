@@ -1977,7 +1977,9 @@ void RackRenderer::mixLiveInput (const RackState& state, bool playing, int n) no
     const auto& mixer = state.song.mixer;
     const auto recording = liveInput->recording.load (std::memory_order_relaxed);
 
-    for (int t = 1; t < (int) mixer.size() && t < maxMixerTracks; ++t)
+    // the Master too (FL's slot panel has its audio input selector; REA round 143): it plays whenever its
+    // monitoring is not off (it has no record arm)
+    for (int t = 0; t < (int) mixer.size() && t < maxMixerTracks; ++t)
     {
         const auto& track = mixer[(std::size_t) t];
         const auto [first, count] = inputChannelsOf (track, liveInput->numChannels);
@@ -1993,7 +1995,8 @@ void RackRenderer::mixLiveInput (const RackState& state, bool playing, int n) no
 
         liveInput->meters.accumulate (t, peakOf (a, n), peakOf (b, n));
 
-        if (! inputMonitored (track.monitor, liveInput->armed[(std::size_t) t].load (std::memory_order_relaxed), playing, recording))
+        if (t == 0 ? track.monitor == InputMonitor::off
+                   : ! inputMonitored (track.monitor, liveInput->armed[(std::size_t) t].load (std::memory_order_relaxed), playing, recording))
             continue;
 
         auto* dl = trackBuffer (t, 0);
