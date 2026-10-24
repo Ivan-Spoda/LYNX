@@ -312,6 +312,8 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         // Prism Multiband
         { { K::prismMultiband, "level" }, TR_NOOP ("Output level of this band") },
         { { K::prismMultiband, "slope" }, TR_NOOP ("Steepness of the band splits") },
+        { { K::prismMultiband, "pan mode" }, TR_NOOP ("What each band's pan balances: left / right, or mid / side") },
+        { { K::prismMultiband, "processing" }, TR_NOOP ("Dynamic phase: the crossovers' phase only where a band works; linear phase: no phase change (more latency); minimum phase: the classic crossover sum") },
         // Sentry Gate
         { { K::sentryGate, "style" }, TR_NOOP ("Gate, expander or ducker, and how it opens") },
         { { K::sentryGate, "threshold" }, TR_NOOP ("Level below which the gate closes") },

@@ -250,7 +250,7 @@ int fromProC3 (const State& s, EffectSlot& slot)
 // layout (FabF v2, 151 values): band b (0 … 5) at 22b: 0 state (0 disabled, 1 enabled, 2 unused), 1 low crossover
 // (log2 Hz), 2 low slope (norm), 3 high crossover, 4 high slope, 5 mode, 6 threshold (norm), 7 range dB, 8 ratio
 // (norm), 9 attack %, 10 release %, 11 knee dB, 12 look-ahead ms, 13 level dB, 21 solo / mute; 133 mix (0 … 2),
-// 134 input level, 136 output level, 141 look-ahead on
+// 134 input level, 136 output level, 139 processing mode, 140 oversampling, 141 look-ahead on
 int fromProMB (const State& s, EffectSlot& slot)
 {
     if (slot.kind != EffectKind::prismMultiband || ! s.named || s.count != 151 || ! finiteAll (s, 142))
@@ -343,6 +343,7 @@ int fromProMB (const State& s, EffectSlot& slot)
         set (param (b, fSolo), soloMute == 1 || soloMute == 3 ? 1.0f : 0.0f);
         la = std::max (la, (double) s.at (base + 12));
         set (bandLookaheadParam (b), linValue (s.at (base + 12), 0.0, 20.0)); // round 128: the band's own
+        set (bandPanParam (b), (float) ((std::clamp ((double) s.at (base + 14), -1.0, 1.0) + 1.0) * 0.5)); // round 144: mid / side
         if (b == 0)
         {
             // the slope: the steeper of the band's sides, to our nearest
@@ -354,6 +355,11 @@ int fromProMB (const State& s, EffectSlot& slot)
     set (Global::mix, clamp01 (s.at (133)));
     set (Global::input, linValue (levelDb (s.at (134)), -36.0, 36.0));
     set (Global::output, linValue (levelDb (s.at (136)), -36.0, 36.0));
+    // round 144: 139 processing mode (0 linear, 1 dynamic, 2 minimum phase), 140 oversampling (0 off, 1 2x, 2 4x),
+    // read black-box from the trial's saved states (REA_rodada144b); our parameters use the same value law
+    set (Global::processingMode, (float) std::clamp (roundIndex (s.at (139)), 0, 2) * 0.5f);
+    set (Global::oversampling, (float) std::clamp (roundIndex (s.at (140)), 0, 2) * 0.5f);
+    set (Global::panMode, 1.0f); // the reference's band pan is always mid / side (state 14: −1 … +1)
     return n;
 }
 

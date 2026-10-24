@@ -251,15 +251,17 @@ lookahead on, expert mode, display range, analyser options.
 | Floating band panel: power, THRESHOLD, RANGE, ATTACK, RELEASE, OUTPUT, mode, RATIO, KNEE | ✅ | |
 | LOOKAHEAD per band | ✅ | round 128: LOOKAHEAD in the band panel (0–20 ms, capped by the global look-ahead, which sets the latency); translated from Pro-MB |
 | EXPERT (»): side-chain filtering, external side chain, stereo link per band | ⚠️ | round 135: external side chain (bottom bar Int / Ext: the detectors hear the side chain split by the same crossovers); no side-chain filtering or per-band stereo link |
-| Band output pan (mid / side) | ⚠️ | round 135: PAN in the band panel (left / right balance of the band); no mid / side |
-| Crossover slope per band 6–48 dB/oct | ⚠️ | one global slope 12 / 24 / 48 |
-| Processing mode Linear / Dynamic / Minimum phase | ❌ | |
-| Oversampling | ❌ | |
+| Band output pan (mid / side) | ✅ | round 135: PAN in the band panel (left / right balance of the band); round 144: L/R \| M/S switch in the band panel (mid / side = the reference's law, measured: the far side's gain 1 − \|pan\|), translated from Pro-MB states |
+| Crossover slope per band 6–48 dB/oct | ⚠️ | one global slope 12 / 24 / 48 (round 144: in the band panel, where the reference has it) |
+| Processing mode Linear / Dynamic / Minimum phase | ✅ | round 144: Phase menu in the bottom bar; linear = FIR crossovers with the same magnitudes, 3072 samples at 48 kHz (measured); minimum = all-pass compensated sum; dynamic = the old engine (its crossover shape when a band works still differs: REA_rodada144b); translated |
+| Oversampling | ✅ | round 144: Off / 2x / 4x in the bottom bar: the gains applied at the high rate; latency + the oversampler's; translated |
 | Display range 3 / 6 / 12 / 30 dB | ✅ | round 128: 3 dB added |
 | Analyser off / pre / post / pre+post | ✅ | |
-| Analyser resolution / speed / tilt / freeze | ⚠️ | round 128: the analyser button opens a menu (off / pre / post / pre+post, speed, freeze); no resolution / tilt choice |
+| Analyser resolution / speed / tilt / freeze | ✅ | round 128: the analyser button opens a menu (off / pre / post / pre+post, speed, freeze); round 144: Resolution (Low … Maximum) and Tilt (0 … 6 dB/oct) |
 | Mix, In, Out (bottom bar) | ✅ | |
 | Output meter | ✅ | |
+
+**After round 144** (REA_rodada144b): configuration 7 → **9**/10, design 7 → **8**/10 — processing modes, oversampling, mid / side band pan, analyser resolution / tilt, the reference's bottom-bar order. Left: per-band slopes, side-chain filtering, per-band stereo link, the dynamic mode's crossover shape, free band placement.
 
 ## Sentry Gate ← Pro-G
 

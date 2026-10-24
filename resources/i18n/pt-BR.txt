@@ -3698,3 +3698,6 @@ countries: br
 "What enters the taps: stereo, swapped sides, or the mono sum to both, the left or the right" = "O que entra nos taps: estéreo, lados trocados, ou a soma mono nos dois, só na esquerda ou só na direita"
 "MIDI port {0}" = "Porta MIDI {0}"
 "+ MIDI port" = "+ porta MIDI"
+"Dynamic phase: the crossovers' phase only where a band works; linear phase: no phase change (more latency); minimum phase: the classic crossover sum" = "Fase dinâmica: a fase dos crossovers só onde uma banda atua; fase linear: sem mudança de fase (mais latência); fase mínima: a soma clássica dos crossovers"
+"Resolution" = "Resolução"
+"What each band's pan balances: left / right, or mid / side" = "O que o pan de cada banda equilibra: esquerda / direita, ou meio / lados"
