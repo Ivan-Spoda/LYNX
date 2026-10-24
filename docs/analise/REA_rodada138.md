@@ -129,12 +129,23 @@ HF loss (−0.6 dB more than the trial at 10–12 kHz) is the item to revisit.
   "More scales"); `autoTuneProNoteEdits` reads the modern 12-digit rows (§3.1).
 - Throat length → formant shift with the measured law (§3.5).
 - LYNX Tune: humanize ramp 0.275 … 0.375 s (§3.3); natural-vibrato gain 10^(dB/34), ≥ 2/3 below 0 dB (§3.6).
+- Ember Classic: the E / N / T / P styles' fitted constants (§5).
 - Tests: `tests/Vox138Tests.inc` (modern-scale states incl. her kwe state when present, the substitute's scale and
-  notes, whole tone; the humanize ramp), `Parity128cTests` natural vibrato to the measured law.
+  notes, whole tone; the humanize ramp; the fitted styles), `Parity128cTests` natural vibrato and `Vmatch127Tests`
+  throat to the measured laws.
+
+## 5. Decapitator's styles E / N / T / P (Ember Classic voicing) [EXEC]
+Round 136 measured the five styles on the official trial (stairs at six frequencies, bursts, her three takes at
+drives 0 … 6; `D:\lynx-work\vox136\deca5_*.pkl`) but fitted only style A; E, N, T, P ran on the struct's default
+constants. Fitted now with round 136's lab (`tmp/vox136/lab/decalab`, Nelder–Mead, 2 × 300 iterations, started from A's
+constants with each style's measured colour FIR, the same 15 constants free): mean null over the signal set E −16.3,
+N −16.6, T −12.1, P −12.5 dB (A: −25.2 dB; with A's curve they were −8.9 … −9.5 dB). Constants in
+`EmberClassic.cpp` `styleTable`; her states all use style A, so this is for everyone else's Decapitator states and
+the Classic style buttons.
 
 ## Where I stopped
-- Done: §0 (round 136 merged and landed), §1 trials, §2 archive, §3 Auto-Tune Pro measured, §4.
-- Not done (round 136's list, in order): Decapitator at drive ≥ 5 and the styles E / N / T / P (data in
+- Done: §0 (round 136 merged and landed), §1 trials, §2 archive, §3 Auto-Tune Pro measured, §4, §5.
+- Not done (round 136's list, in order): Decapitator at drive ≥ 5 (data in
   `D:\lynx-work\vox136`, Soundtoys trial until 2026-11-22), Punish's curve, EchoBoy's Dual and the ping-pong kernel's
   last −21 dB, PanMan's first ~200 ms after a reset, the RComp / CLA-2A / NS1 residue (Waves in demo mode: mute-masked
   measurements). Auto-Tune Pro: tracking / input-type analysis from the archive, the upper-note tie, LYNX Tune's HF loss.

@@ -103,3 +103,19 @@ TEST (lynx_tune_humanize_ramp_round138)
     CHECK (std::abs (shortHold) < 8.0); // already back on A4
     CHECK (longHold > 15.0);            // still mostly sharp (humanize slows the pull-back)
 }
+
+TEST (ember_classic_styles_fitted_round138)
+{
+    using namespace lynx;
+    // the E / N / T / P styles carry their own fitted constants (no longer the struct's defaults), each with its measured
+    // colour FIR; style A is unchanged
+    const auto& a = emberclassic::styleModel (0);
+    CHECK (std::abs (a.cPos - 0.539481) < 1e-6 && std::abs (a.gain0Db + 0.255358) < 1e-6);
+    for (int k = 1; k < emberclassic::styleCount; ++k)
+    {
+        const auto& m = emberclassic::styleModel (k);
+        CHECK (m.fir[0] != 1.0 && m.fir[1] != 0.0);
+        CHECK (m.cPos != 1.0 && m.pPos != 2.0 && m.bias < 0.0);
+        CHECK (std::abs (m.gainPerUnitDb - a.gainPerUnitDb) < 1e-9);
+    }
+}
