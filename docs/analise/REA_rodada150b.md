@@ -81,3 +81,6 @@ measured −2.5 / −12.0 dB), the Saturn 2 translation (six bands, styles, cros
   (Breakdown, Rectify, Smudge, Destroy are static stand-ins), per-band crossover slopes (Saturn: per band 6–48 dB/oct;
   Ember: one global slope), modulation, linear phase.
 - LYNX Tune: Group Octaves off (per-octave statuses), the MIDI reference tone.
+
+Verification: build-local with the FL Data dir 1 744 735 checks, 0 failures; Windows build OK; editor screenshots
+(`LYNX.exe --plugui`) in `D:\lynx-work\parity150\b\ui2\` (Ember Saturator.png) and `ui\` (LYNX Tune.png).
