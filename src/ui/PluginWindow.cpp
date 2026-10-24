@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <map>
 
+#include "core/FlWrapper.h"
 #include "engine/PluginSandbox.h"
 #include "engine/Text.h"
 #include "platform/CrashGuard.h"
@@ -15,10 +16,252 @@ namespace lynx
 {
 namespace
 {
+void toggleWrapperOption (AudioEngine& engine, const std::function<PluginRef* (Song&)>& find, juce::AudioPluginInstance* instance,
+                          bool PluginRef::*option, bool recreates);
+
+// FL's plugin wrapper settings page (REA round 146a), in LYNX's style: what the plugin reports, then the wrapper
+// options LYNX applies in FL's sections (Processing, Bridging, MIDI). Options that re-create the plugin keep its state
+// and close this window (open it again from the channel or the slot).
+class WrapperSettingsPage final : public juce::Component, private juce::ChangeListener
+{
+public:
+    WrapperSettingsPage (AudioEngine& e, std::function<PluginRef* (Song&)> f, juce::AudioPluginInstance& p)
+        : engine (e), find (std::move (f)), plugin (p)
+    {
+        const auto& options = wrapperOptions();
+        for (std::size_t i = 0; i < options.size(); ++i)
+        {
+            auto* t = toggles.add (new juce::ToggleButton (tr (options[i].label)));
+            t->setTooltip (tr (options[i].hint));
+            t->setColour (juce::ToggleButton::textColourId, theme::colour::textPrimary);
+            t->setColour (juce::ToggleButton::tickColourId, theme::colour::accent);
+            t->onClick = [this, i] {
+                auto* en = &engine;
+                auto fn = find;
+                auto* inst = &plugin;
+                const auto& o = wrapperOptions()[i];
+                juce::MessageManager::callAsync ([en, fn, inst, member = o.member, re = o.recreates] { toggleWrapperOption (*en, fn, inst, member, re); });
+            };
+            addAndMakeVisible (t);
+        }
+        port.addItem (tr ("None"), 1);
+        for (int i = 0; i < 32; ++i)
+            port.addItem (tr ("Port {0}", { juce::String (i) }), i + 2);
+        port.setTooltip (tr ("MIDI input port number"));
+        port.onChange = [this] {
+            const auto value = port.getSelectedId() - 2;
+            engine.editSong ([fn = find, value] (Song& song) {
+                if (auto* ref = fn (song))
+                    ref->midiInPort = value;
+            });
+        };
+        addAndMakeVisible (port);
+        engine.addChangeListener (this);
+        refresh();
+        setSize (460, preferredHeight());
+    }
+
+    ~WrapperSettingsPage() override { engine.removeChangeListener (this); }
+
+    int preferredHeight() const { return top() + (int) wrapperOptions().size() * rowHeight + 4 * headerHeight + rowHeight + 24; }
+
+    void paint (juce::Graphics& g) override
+    {
+        using namespace theme;
+        g.fillAll (colour::bg1);
+        auto header = [&g] (const juce::String& text, int y) {
+            g.setColour (colour::textSecondary);
+            g.setFont (font (type::caption, true));
+            g.drawText (caps (text), 16, y, 400, headerHeight - 4, juce::Justification::bottomLeft);
+            g.setColour (colour::border);
+            g.fillRect (16, y + headerHeight - 2, 428, 1);
+        };
+        header (tr ("Plugin"), 8);
+        g.setFont (font (type::body));
+        int y = 8 + headerHeight + 2;
+        for (const auto& [label, value] : infoLines())
+        {
+            g.setColour (colour::textSecondary);
+            g.drawText (label, 16, y, 130, infoHeight, juce::Justification::centredLeft);
+            g.setColour (colour::textPrimary);
+            g.drawFittedText (value, 150, y, getWidth() - 166, infoHeight, juce::Justification::centredLeft, 1);
+            y += infoHeight;
+        }
+        juce::String last;
+        for (std::size_t i = 0; i < wrapperOptions().size(); ++i)
+            if (const juce::String section = wrapperOptions()[i].section; section != last)
+            {
+                header (tr (section), toggles[(int) i]->getY() - headerHeight);
+                last = section;
+            }
+        header (tr ("MIDI"), port.getY() - headerHeight);
+        g.setColour (colour::textSecondary);
+        g.drawText (tr ("Input port"), 16, port.getY(), 130, port.getHeight(), juce::Justification::centredLeft);
+    }
+
+    void resized() override
+    {
+        int y = top();
+        juce::String last;
+        for (std::size_t i = 0; i < wrapperOptions().size(); ++i)
+        {
+            if (const juce::String section = wrapperOptions()[i].section; section != last)
+            {
+                y += headerHeight;
+                last = section;
+            }
+            toggles[(int) i]->setBounds (24, y, getWidth() - 40, rowHeight);
+            y += rowHeight;
+        }
+        y += headerHeight;
+        port.setBounds (150, y + 2, 140, rowHeight - 4);
+    }
+
+private:
+    static constexpr int headerHeight = 24, rowHeight = 24, infoHeight = 18;
+
+    int top() const { return 8 + headerHeight + 2 + (int) infoLines().size() * infoHeight + 6; }
+
+    std::vector<std::pair<juce::String, juce::String>> infoLines() const
+    {
+        const auto d = plugin.getPluginDescription();
+        const auto rate = plugin.getSampleRate() > 0 ? plugin.getSampleRate() : 44100.0;
+        const auto latency = plugin.getLatencySamples();
+        return {
+            { tr ("Name"), d.name + (d.version.isNotEmpty() ? "  " + d.version : juce::String()) },
+            { tr ("Vendor"), d.manufacturerName },
+            { tr ("Format"), d.pluginFormatName + (d.isInstrument ? "  (" + tr ("instrument") + ")" : juce::String()) },
+            { tr ("File"), d.fileOrIdentifier },
+            { tr ("Latency"), tr ("{0} samples ({1} ms)", { juce::String (latency), juce::String (latency * 1000.0 / rate, 1) }) },
+            { tr ("Inputs / outputs"), juce::String (plugin.getTotalNumInputChannels()) + " / " + juce::String (plugin.getTotalNumOutputChannels()) },
+            { tr ("Parameters"), juce::String (plugin.getParameters().size()) },
+        };
+    }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
+
+    void refresh()
+    {
+        auto* ref = find (const_cast<Song&> (engine.getSong()));
+        if (ref == nullptr)
+            return;
+        const auto& options = wrapperOptions();
+        for (std::size_t i = 0; i < options.size(); ++i)
+        {
+            toggles[(int) i]->setToggleState (ref->*(options[i].member), juce::dontSendNotification);
+            toggles[(int) i]->setEnabled (! options[i].needsFixed || ref->fixedBuffers);
+        }
+        // with Options › "Run plugins in a separate process" every plugin already runs bridged
+        for (std::size_t i = 0; i < options.size(); ++i)
+            if (options[i].member == &PluginRef::separateProcess && pluginSandboxEnabled())
+                toggles[(int) i]->setToggleState (true, juce::dontSendNotification), toggles[(int) i]->setEnabled (false);
+        port.setSelectedId (ref->midiInPort + 2, juce::dontSendNotification);
+    }
+
+    AudioEngine& engine;
+    std::function<PluginRef* (Song&)> find;
+    juce::AudioPluginInstance& plugin;
+    juce::OwnedArray<juce::ToggleButton> toggles;
+    juce::ComboBox port;
+};
+
+// The window's content with FL's wrapper header: the plugin's editor, or the wrapper settings page (gear).
+class WrappedEditor final : public juce::Component
+{
+public:
+    WrappedEditor (juce::AudioProcessorEditor* e, AudioEngine& engine, std::function<PluginRef* (Song&)> find, juce::AudioPluginInstance& plugin)
+        : editor (e), page (engine, std::move (find), plugin)
+    {
+        for (auto* b : { &pluginTab, &settingsTab })
+        {
+            b->setClickingTogglesState (false);
+            b->setColour (juce::TextButton::buttonColourId, theme::colour::bg2);
+            b->setColour (juce::TextButton::buttonOnColourId, theme::colour::bg4);
+            b->setColour (juce::TextButton::textColourOffId, theme::colour::textSecondary);
+            b->setColour (juce::TextButton::textColourOnId, theme::colour::textPrimary);
+            addAndMakeVisible (b);
+        }
+        pluginTab.setTooltip (tr ("The plugin's own editor"));
+        settingsTab.setTooltip (tr ("Plugin wrapper settings: processing, bridging and MIDI options"));
+        pluginTab.onClick = [this] { show (false); };
+        settingsTab.onClick = [this] { show (true); };
+        addAndMakeVisible (editor.get());
+        addChildComponent (page);
+        pluginTab.setToggleState (true, juce::dontSendNotification);
+        fitEditor();
+    }
+
+    ~WrappedEditor() override
+    {
+        editor = nullptr; // the editor goes first (the plugin may be released right after the window)
+    }
+
+    bool isEditorResizable() const { return editor != nullptr && editor->isResizable(); }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (theme::colour::bg0);
+        g.fillRect (getLocalBounds().removeFromTop (headerHeight));
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+        auto header = area.removeFromTop (headerHeight).reduced (4, 3);
+        pluginTab.setBounds (header.removeFromLeft (80));
+        header.removeFromLeft (4);
+        settingsTab.setBounds (header.removeFromLeft (130));
+        page.setBounds (area);
+        if (editor != nullptr && ! settings)
+        {
+            const juce::ScopedValueSetter<bool> guard (laying, true);
+            if (editor->isResizable())
+                editor->setBounds (area);
+            else
+                editor->setTopLeftPosition (area.getPosition());
+        }
+    }
+
+    void childBoundsChanged (juce::Component* child) override
+    {
+        if (child == editor.get() && ! laying && ! settings)
+            fitEditor();
+    }
+
+private:
+    static constexpr int headerHeight = 30;
+
+    void fitEditor()
+    {
+        if (editor != nullptr)
+            setSize (juce::jmax (220, editor->getWidth()), editor->getHeight() + headerHeight);
+    }
+
+    void show (bool showSettings)
+    {
+        settings = showSettings;
+        pluginTab.setToggleState (! settings, juce::dontSendNotification);
+        settingsTab.setToggleState (settings, juce::dontSendNotification);
+        page.setVisible (settings);
+        if (editor != nullptr)
+            editor->setVisible (! settings);
+        if (settings)
+            setSize (juce::jmax (getWidth(), page.getWidth()), juce::jmax (getHeight(), page.preferredHeight() + headerHeight));
+        else
+            fitEditor();
+        resized();
+    }
+
+    std::unique_ptr<juce::AudioProcessorEditor> editor;
+    WrapperSettingsPage page;
+    juce::TextButton pluginTab { tr ("Plugin") }, settingsTab { juce::String::fromUTF8 ("\xe2\x9a\x99 ") + tr ("Wrapper settings") };
+    bool settings = false, laying = false;
+};
+
 class PluginWindow final : public juce::DocumentWindow, private juce::AudioProcessorListener
 {
 public:
-    PluginWindow (std::shared_ptr<void> keepAlive, juce::AudioPluginInstance& p, const juce::String& title)
+    PluginWindow (std::shared_ptr<void> keepAlive, juce::AudioPluginInstance& p, const juce::String& title, PluginWindows::WrapperContext context)
         : DocumentWindow (title, theme::colour::bg1, DocumentWindow::closeButton | DocumentWindow::minimiseButton),
           owner (std::move (keepAlive)),
           plugin (p)
@@ -26,14 +269,17 @@ public:
         setUsingNativeTitleBar (true);
 
         crashguard::note (("opening the editor of " + plugin.getName()).toStdString()); // session breadcrumb (round 111)
-        if (auto* editor = plugin.createEditorIfNeeded())
-            setContentOwned (editor, true);
-        else
-            setContentOwned (new juce::GenericAudioProcessorEditor (plugin), true); // plugin without a UI
+        juce::AudioProcessorEditor* editor = plugin.createEditorIfNeeded();
+        if (editor == nullptr)
+            editor = new juce::GenericAudioProcessorEditor (plugin); // plugin without a UI
         crashguard::note (("editor open: " + plugin.getName()).toStdString());
 
-        if (auto* editor = dynamic_cast<juce::AudioProcessorEditor*> (getContentComponent()))
-            setResizable (editor->isResizable(), false);
+        const auto resizable = editor->isResizable();
+        if (context.engine != nullptr && context.find) // FL's wrapper header and settings page (round 146a)
+            setContentOwned (new WrappedEditor (editor, *context.engine, std::move (context.find), plugin), true);
+        else
+            setContentOwned (editor, true);
+        setResizable (resizable, false);
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
         keepAboveMainWindow (*this);
@@ -127,7 +373,7 @@ private:
 
 namespace PluginWindows
 {
-void open (std::shared_ptr<void> owner, juce::AudioPluginInstance& plugin, const juce::String& title)
+void open (std::shared_ptr<void> owner, juce::AudioPluginInstance& plugin, const juce::String& title, WrapperContext context)
 {
     auto& open = windows();
 
@@ -137,7 +383,7 @@ void open (std::shared_ptr<void> owner, juce::AudioPluginInstance& plugin, const
         return;
     }
 
-    open[&plugin] = std::make_unique<PluginWindow> (std::move (owner), plugin, title);
+    open[&plugin] = std::make_unique<PluginWindow> (std::move (owner), plugin, title, std::move (context));
 }
 
 void closeAll()
@@ -160,6 +406,24 @@ void scanPluginsWithProgress (AudioEngine& engine, std::function<void (int)> onD
 {
     (new ScanThread (engine, std::move (onDone)))->launchThread(); // deletes itself when done
 }
+
+namespace
+{
+void toggleWrapperOption (AudioEngine& engine, const std::function<PluginRef* (Song&)>& find, juce::AudioPluginInstance* instance,
+                          bool PluginRef::*option, bool recreates)
+{
+    if (recreates)
+    {
+        if (instance != nullptr && PluginWindows::isOpen (*instance))
+            PluginWindows::close (*instance);
+        engine.capturePluginStates(); // the new instance starts from the current settings
+    }
+    engine.editSong ([find, option] (Song& song) {
+        if (auto* ref = find (song))
+            ref->*option = ! (ref->*option);
+    });
+}
+} // namespace
 
 juce::PopupMenu pluginProcessingMenu (AudioEngine& engine, const PluginRef& current, juce::AudioPluginInstance* instance,
                                       std::function<PluginRef* (Song&)> find)

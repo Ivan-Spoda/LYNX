@@ -176,6 +176,16 @@ void Song::removeChannel (int index)
             --t.index;
     });
 
+    for (auto& t : playlistTracks) // instrument tracks (REA round 146a)
+        if (t.channel == index)
+        {
+            t.channel = -1;
+            if (t.mode == PlaylistTrackMode::instrument)
+                t.mode = PlaylistTrackMode::unassigned, t.mixerTrack = -1;
+        }
+        else if (t.channel > index)
+            --t.channel;
+
     for (auto& automation : automations) // live source on a controller channel
         if (automation.source.channel == index)
             automation.source.channel = -1, automation.target.kind = AutomationTargetKind::none;

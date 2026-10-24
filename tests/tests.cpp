@@ -15547,6 +15547,7 @@ TEST (flp_pattern_events_import)
 #include "Rea143Tests.inc"
 #include "Rea143aTests.inc"
 #include "Rea143bTests.inc"
+#include "Rea146aTests.inc"
 #include "Rea146bTests.inc"
 #include "Rea146Tests.inc"
 #include "AudioEditTests.inc"

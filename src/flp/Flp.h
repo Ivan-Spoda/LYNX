@@ -280,6 +280,9 @@ struct PlaylistTrackInfo
     float heightScale = 1.0f; // the track's size (FL's Size menu: 0.33 .. 2.0; 1 = 100 %)
     bool grouped = false;     // "Group with above track"
     bool expanded = true;     // a group header's members are shown (false = "Collapse grouped tracks")
+    // track mode (REA round 146a): u32 at 49 (0 none, 1 audio track, 3 instrument track), i32 mixer track at 53, i32
+    // FL channel index at 57 (-1 = none)
+    int mode = 0, mixerTrack = -1, channel = -1;
 };
 
 // Playlist time marker: 0x94 (u32: type << 24 | position in ticks), followed by
