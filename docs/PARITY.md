@@ -30,7 +30,20 @@ LYNX's style; the transfer-curve and GR-history displays are bars). Her Vocalstr
 model (−60 … −67 dB null on her takes). The other Complete Access plugins (Slate, SSL, LiquidSonics, sonible,
 Harrison) map to LYNX effects by role only.
 
-## Round 152b: what changed (config / design, after 150 → after 152)
+## Round 152: what changed (config / design, after 150 → after 152)
+
+Round 152 (`docs/analise/REA_rodada152.md`, sub-rounds `REA_rodada152a.md` / `152b` / `152c`).
+
+| LYNX engine | Original | Config 150 → 152 | Design 150 → 152 | Round-152 changes |
+|---|---|---|---|---|
+| Prism Multiband | Pro-MB | 10 → 10 | 10 → 10 | the attack in the gain stage (slow attacks now ≤ 0.4 dB off), Dynamic phase's own narrow-band / cut shapes (measured table, ≤ 0.05 dB), 0.8-octave minimum band; editor menus at the mouse, read-out above the band panel (checked by hand) |
+| Compressor (stand-in) | Renaissance Compressor | 9 → 10 | 7 → 8 | bipolar gain-change meter, measured static curve at every ratio, RComp-style factory start (152a) |
+| Glow Leveler | CLA-2A | 7 → 9 | 7 → 8 | the reference's fresh instance, ANALOG 50 / 60 Hz, measured Limit and AUTO MAKEUP; translated (152a) |
+| Auto-pan (stand-in) | PanMan | 8 → 9 | 7 → 8 | trigger sources Ping-pong / Random step (threshold, divider, detector filter, manual trigger), Random steps |
+| Foil Plate | Little Plate | 9 → 9 | 6 → 8 | the one-knob Plate view (the substitute opens in it) |
+| Crest Compressor / Echoform | Pro-C 3 / EchoBoy | — | — | stale ❌ rows re-checked: Host sync / MIDI trigger and audition (round 137), EchoBoy state recognition (round 136) |
+
+### Sub-round 152b
 
 Sub-round 152b (`docs/analise/REA_rodada152b.md`), measured black-box on the official Saturn 2 trial.
 
