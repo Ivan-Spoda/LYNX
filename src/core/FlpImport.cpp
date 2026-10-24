@@ -36,6 +36,7 @@
 #include "core/SytrusEngine.h"
 #include "core/PhysicalModels.h"
 
+#include "core/ChannelMiscFx.h"
 #include "core/Effects.h"
 #include "core/FlEffects.h"
 #include "core/Reeverb2.h"
@@ -852,6 +853,58 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             const auto ticks = std::round ((std::pow (27.0, std::clamp (c.slideTime, 0, 1660) / 1024.0) - 1.0) * 48.0 / 26.0);
             def.synth.portaBeats = def.sampler.portaBeats = (float) std::max (1.0, ticks) / 192.0f;
             def.synth.porta = def.sampler.porta = c.portaFlag;
+        }
+
+        // the Misc tab (REA round 146b [EXEC: FL renders and saves]): time shift / gate, echo delay, tracking, main
+        // pitch, pitch range, the arpeggiator
+        {
+            auto& m = def.misc;
+            // FL rounds the shift to the project's ticks
+            const auto filePpq = project.header.ppq > 0 ? project.header.ppq : 96;
+            m.shiftBeats = c.timeShift > 0 ? (float) (std::nearbyint (channelmisc::flTimeKnobBeats (c.timeShift) * filePpq) / filePpq) : 0.0f;
+            m.gateBeats = c.timeGate < 1446 ? (float) std::max (1.0 / filePpq, std::nearbyint (channelmisc::flTimeKnobBeats (c.timeGate) * filePpq) / filePpq) : 0.0f;
+            m.fullPorta = c.fullPorta;
+            m.echo.feedback = std::clamp (c.echoFeedback / 12800.0f, 0.0f, 2.0f);
+            m.echo.pan = std::clamp ((c.echoPan - 6400) / 6400.0f, -1.0f, 1.0f);
+            m.echo.pitch = (float) std::clamp (c.echoPitch, -4800, 4800);
+            m.echo.echoes = std::clamp (c.echoes, 0, 16);
+            m.echo.timeBeats = std::clamp (c.echoTime / 192.0f, 1.0f / 192.0f, 16.0f);
+            m.echo.modX = std::clamp ((c.echoModX - 128) / 128.0f, -1.0f, 1.0f);
+            m.echo.modY = std::clamp ((c.echoModY - 128) / 128.0f, -1.0f, 1.0f);
+            m.echo.pingPong = (c.delayFlags & 2) != 0;
+            m.echo.fat = (c.delayFlags & 4) != 0;
+            for (int k = 0; k < 2; ++k)
+                if (const auto& t = c.tracking[(std::size_t) k]; t.present)
+                {
+                    auto& to = k == 0 ? m.velocity : m.key;
+                    to.mid = t.mid;
+                    to.pan = std::clamp (t.pan / 64.0f, -1.0f, 1.0f);
+                    to.modX = std::clamp (t.modX / 256.0f, -1.0f, 1.0f);
+                    to.modY = std::clamp (t.modY / 256.0f, -1.0f, 1.0f);
+                }
+            m.pitchRange = std::clamp (c.pitchRange, 0, 48);
+            m.mainPitch = c.mainPitch;
+
+            // arpeggiator: FL's directions 1 up, 2 down, 3 up-down bounce, 4 up-down sticky, 5 random
+            static constexpr int directions[] = { 0, 1, 2, 3, 5, 4 };
+            if (c.arpDirection >= 1 && c.arpDirection <= 5)
+            {
+                auto& a = def.arp;
+                a.direction = directions[c.arpDirection];
+                a.range = std::clamp (c.arpRange, 1, 4);
+                a.stepBeats = (float) std::clamp (channelmisc::flTimeKnobBeats (c.arpTime), 1.0 / 192.0, 4.0);
+                a.gate = std::clamp (c.arpGate / 48.0f, 0.05f, 128.0f / 48.0f);
+                a.slide = c.arpSlide;
+                a.octaveRepeat = std::clamp (c.arpRepeat, 1, 16);
+                a.chordSustain = c.arpChord != -2;
+                if (c.arpChord == 0)
+                    a.chord = { 0 }; // "None": the root, stepping by octaves
+                else if (c.arpChord > 0 && options.readFile && ! options.roots.factoryData.empty())
+                {
+                    const auto map = options.readFile (options.roots.factoryData + "\\System\\Config\\Chords.map");
+                    a.chord = channelmisc::chordFromFlMap (std::string (map.begin(), map.end()), c.arpChord);
+                }
+            }
         }
 
         // volume envelope (record 1 of 0xDA) -> sampler ADSR

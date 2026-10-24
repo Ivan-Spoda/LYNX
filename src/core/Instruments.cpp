@@ -32,6 +32,7 @@
 #include "core/PhysicalModels.h"
 
 #include <algorithm>
+#include <utility>
 #include <atomic>
 
 #include <cmath>
@@ -1551,6 +1552,7 @@ public:
 
     void noteOnAt (int key, float velocity, double startSeconds) noexcept override
     {
+        const auto noteGain = std::exchange (nextGain, 1.0f);
         const auto* zone = clipMode ? nullptr : zoneFor (key, velocity);
         const auto* data = zone != nullptr ? zone->sample.get() : sample.get();
 
@@ -1626,7 +1628,7 @@ public:
         // curve is relative to that point for clips (REA_rodada89 §4.2 [EXEC]: +5.2 dB at every volume and pan)
         target->velocity = clipMode ? velocity * audioClipUnity() : velocity;
         target->data = data;
-        target->zoneGain = zone != nullptr ? zone->zone.gain : 1.0f;
+        target->zoneGain = (zone != nullptr ? zone->zone.gain : 1.0f) * noteGain;
 
         // zone loop (DirectWave): only when playing forward and with the loop inside the region
         if (zone != nullptr && zone->zone.loopMode != 0 && ! backwards && zone->zone.loopEnd > zone->zone.loopStart + 16
@@ -1727,6 +1729,12 @@ public:
     void setNextClipFades (float elapsed, float remaining, float in, float out) noexcept override
     {
         nextClip = { elapsed, remaining, in, out };
+    }
+
+    bool setNextNoteGain (float gain) noexcept override
+    {
+        nextGain = gain;
+        return true;
     }
 
     void slideTo (int key, float cents, float samples) noexcept override
@@ -2368,6 +2376,7 @@ private:
     SettingsMailbox<SliceTable> sliceMailbox;
     SliceTable slices; // audio thread's copy
     float nextPan = 0.0f, nextCents = 0.0f;
+    float nextGain = 1.0f; // the next note's volume factor (setNextNoteGain)
     bool nextPorta = false;
     std::atomic<bool> reverse { false }, cut { false };
 };
