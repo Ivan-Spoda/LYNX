@@ -54,7 +54,28 @@ parameters. Saved projects store parameters by index, so older files load unchan
 The GR bar now holds its deepest reduction (a line and the number at the foot of the bar); click it to reset
 (the reference's infinite peak hold).
 
+## 4. PanMan's Feel / Groove (measured, not implemented)
+
+[EXEC] PanMan 5.5.5 trial: Feel and Groove are host parameters (±0.25 of a step, default 0), Rate is 0.01 … 10 Hz
+(0.01 · 1000^v). In the mode reachable through host parameters alone (the free LFO; PanMan's rhythm modes are
+chosen in its editor, not by a host parameter), a 1 kHz tone at 1 Hz gives bit-identical outputs for Feel ±0.25 and
+Groove ±0.25: they act only in the rhythm modes, which cannot be driven black-box without its GUI. Auto-pan's
+Feel / Groove row stays ❌ (it would reuse EchoBoy's measured law, round 135w, as a model).
+
+## 5. Sub-rounds
+
+- 144a (`REA_rodada144a.md`): Lattice Mod's DelaySync measured (18 steps at k / 17: free, 1/16 … 2/1, dotted,
+  triplet; synced delay capped at 2750 ms) and translated; Facet EQ's linear-phase Resolution (Low … Maximum, the
+  trial's latencies 3072 … 66560 samples at 48 kHz), translated from Pro-Q 4 states.
+- 144b (`REA_rodada144b.md`): Prism Multiband's Processing (Dynamic / Linear / Minimum phase), Oversampling off /
+  2x / 4x, mid / side band pan, analyser resolution / tilt — measured on the Pro-MB trial, translated.
+
 ## Where I stopped
 
+- Not done: Prism's Dynamic phase still the old engine (it differs from Pro-MB once a band works, 144b); Facet's
+  resolution change by automation waits for the next prepare(); PanMan Feel / Groove (above) and its Tweak page;
+  EchoBoy's saturation types, ~30 style voicings, PrimalTap's Multiply; Glow's ANALOG hum (the Waves shell hung
+  in our host this round: CLA-2A not loaded, nothing measured); Ridge's auto make-up / ANALOG; Ember's M/S and
+  drive pan; Waves Tune RT keyboard navigation (rounds 138 / 145 own the sound of those).
 - Round 138 (vox138) landed first with `tapeVoicing` at index 75 (right after `lofi`); round 144's parameters
   follow it: `rhythmEdit` … `loopTreble` = indices 76 … 101 (Echoform: 102 parameters).
