@@ -33,11 +33,7 @@ public:
         for (int t = 0; t < 3; ++t)
         {
             auto* b = tabs.add (new juce::TextButton (tr (tabNames[t])));
-            b->setClickingTogglesState (false);
-            b->setColour (juce::TextButton::buttonColourId, theme::colour::bg1);
-            b->setColour (juce::TextButton::buttonOnColourId, theme::colour::bg3);
-            b->setColour (juce::TextButton::textColourOffId, theme::colour::textSecondary);
-            b->setColour (juce::TextButton::textColourOnId, theme::colour::accent);
+            b->setClickingTogglesState (false); // LYNX's tab look (as the channel window's): the shown one filled
             b->onClick = [this, t] { showTab (t); };
             addAndMakeVisible (b);
         }
@@ -303,11 +299,7 @@ public:
     {
         for (auto* b : { &pluginTab, &settingsTab })
         {
-            b->setClickingTogglesState (false);
-            b->setColour (juce::TextButton::buttonColourId, theme::colour::bg2);
-            b->setColour (juce::TextButton::buttonOnColourId, theme::colour::bg4);
-            b->setColour (juce::TextButton::textColourOffId, theme::colour::textSecondary);
-            b->setColour (juce::TextButton::textColourOnId, theme::colour::textPrimary);
+            b->setClickingTogglesState (false); // LYNX's tab look (as the channel window's): the shown one filled
             addAndMakeVisible (b);
         }
         pluginTab.setTooltip (tr ("The plugin's own editor"));

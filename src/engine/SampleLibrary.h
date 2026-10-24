@@ -18,6 +18,10 @@ public:
     SampleLibrary();
 
     std::shared_ptr<const SampleData> load (const juce::String& path);
+    // The sample when something already holds it loaded (nullptr otherwise): never reads the file (round 149: the
+    // stream prefetcher looked its clips up with load(), which decoded again every audio clip whose channel plays a
+    // time-stretched copy, seconds on every edit of a song with many of them)
+    std::shared_ptr<const SampleData> findLoaded (const juce::String& path);
     // The file changed on disk (the audio editor saved over it): the next load() reads it again.
     void forget (const juce::String& path);
 
