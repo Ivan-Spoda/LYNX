@@ -4,7 +4,7 @@ Branch `feature/vox145` (from main after round 138). English-first; clean-room. 
 project files, [EXEC] measured (our host / LYNX), [model] our reading, not confirmed.
 THIRD-PARTY RULE: official trials only, black-box only — hosted in our own host (`uiview.exe`, the public VST3 API:
 parameter names / ranges / texts, `getStateInformation` / `setStateInformation`, audio in and out), screenshots of the
-vendor's window as a user sees it; nothing decompiled, patched or copied. No vendor app was opened this round (the
+vendor's window as a user sees it (`D:\lynx-work\vox145\shots\vs2_*.png`; LYNX's panel `lynx_vocal_strip.png`); nothing decompiled, patched or copied. No vendor app was opened this round (the
 Complete Access licences were already active since round 138).
 
 ## 1. Which Complete Access plugins her projects use [DATA]
