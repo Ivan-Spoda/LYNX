@@ -1703,7 +1703,7 @@ std::string paramText (EffectKind kind, int param, float v)
             case triggerRate: return fmt ("%.0f%%", 100.0 * triggerRateOf (v));
             case triggerLength: return fmt ("%.0f%%", 100.0 * triggerLengthOf (v));
             case triggerChannel:
-                return triggerChannelOf (v) < 0 ? std::string ("Off") : fmt ("Channel %d", triggerChannelOf (v) + 1);
+                return triggerChannelOf (v) < 0 ? std::string ("Off") : fmt ("Channel %.0f", (double) (triggerChannelOf (v) + 1));
             default: return on (v) ? "on" : "off";
         }
     }

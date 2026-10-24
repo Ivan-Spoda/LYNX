@@ -2208,8 +2208,7 @@ Layout voiceShiftLayout()
     v.push_back (section (310, 4, 130, 222, TR_NOOP ("Mode")));
     v.push_back (radio (322, 50, 110, 120, "Mode", TR_NOOP ("Transpose|Quantize|Robot")));
     // round 137: MIDI control (the notes held on a Channel Rack channel set the pitch / the robot's note)
-    v.push_back (label (322, 172, 110, 16, TR_NOOP ("MIDI")));
-    v.push_back (stepper (318, 190, 118, 22, "MIDI", TR_NOOP ("MIDI channel"), 129));
+    v.push_back (stepper (318, 178, 118, 34, "MIDI", TR_NOOP ("MIDI channel"), 129));
     v.push_back (section (446, 4, 190, 222, nullptr, boxed));
     v.push_back (dial (494, 100, 60, "Drive", TR_NOOP ("Drive"), big));
     v.push_back (dial (588, 100, 60, "Mix", TR_NOOP ("Mix"), big));
@@ -2604,12 +2603,10 @@ Layout echoformLayout()
     v.push_back (when (menuOf (88, 320, 76, 20, "Rhythm sync", TR_NOOP ("Spacing"), TR_NOOP ("ms|Note|Dotted|Triplet"), syncValues), "Rhythm", 0.5f, 1.0f));
     v.push_back (when (when (stepper (170, 320, 90, 20, "Rhythm note", TR_NOOP ("Note"), 9), "Rhythm sync", 0.5f, 1.0f), "Rhythm", 0.5f, 1.0f));
     v.push_back (when (when (slider (Item::hslider, 170, 322, 90, 16, "Rhythm time", nullptr, noCaption), "Rhythm sync", 0.0f, 0.49f), "Rhythm", 0.5f, 1.0f));
-    v.push_back (when (label (268, 320, 54, 20, TR_NOOP ("Repeats")), "Rhythm", 0.5f, 1.0f));
     v.push_back (when (stepper (324, 320, 70, 20, "Repeats", TR_NOOP ("Repeats"), 15), "Rhythm", 0.5f, 1.0f));
     v.push_back (when (label (402, 320, 44, 20, TR_NOOP ("Decay")), "Rhythm", 0.5f, 1.0f));
     v.push_back (when (slider (Item::hslider, 448, 322, 100, 16, "Decay", nullptr, noCaption), "Rhythm", 0.5f, 1.0f));
     v.push_back (when (value (552, 320, 56, 20, "Decay"), "Rhythm", 0.5f, 1.0f));
-    v.push_back (when (label (614, 320, 50, 20, TR_NOOP ("Length")), "Rhythm", 0.5f, 1.0f));
     v.push_back (when (stepper (666, 320, 96, 20, "Length", TR_NOOP ("Length"), 7), "Rhythm", 0.5f, 1.0f));
     // round 137: ValhallaDelay's Era (the loop's bandwidth per mode), bottom right
     v.push_back (tabs (770, 320, 176, 20, "Era", TR_NOOP ("Past|Present|Future"), { 0.0f, 0.5f, 1.0f }));

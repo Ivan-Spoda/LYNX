@@ -1786,14 +1786,14 @@ std::string paramText (EffectKind kind, int param, float v)
             }
             case rhythmNote: return noteNames[noteIndex (v)];
             case rhythmTime: return msText (timeMs (v));
-            case rhythmRepeats: return fmt ("%d", rhythmRepeatsOf (v));
+            case rhythmRepeats: return fmt ("%.0f", (double) rhythmRepeatsOf (v));
             case rhythmDecay: return fmt ("%.1f dB", rhythmDecayDb (v));
             case rhythmTap1: case rhythmTap1 + 1: case rhythmTap1 + 2: case rhythmTap1 + 3: case rhythmTap1 + 4: case rhythmTap1 + 5:
             case rhythmTap1 + 6: case rhythmTap1 + 7: case rhythmTap1 + 8: case rhythmTap1 + 9: case rhythmTap1 + 10: case rhythmTap1 + 11:
             case rhythmTap1 + 12: case rhythmTap1 + 13: case rhythmTapLast: return pct (v * 100.0);
             case lofi: return v >= 0.5f ? "on" : "off";
             case era: return eraOf (v) == 0 ? "past" : eraOf (v) == 1 ? "present" : "future";
-            case rhythmLength: return rhythmBeatsOf (v) == 1 ? std::string ("1 beat") : fmt ("%d beats", rhythmBeatsOf (v));
+            case rhythmLength: return rhythmBeatsOf (v) == 1 ? std::string ("1 beat") : fmt ("%.0f beats", (double) rhythmBeatsOf (v));
             default: return fmt ("%.2f", v);
         }
     }
