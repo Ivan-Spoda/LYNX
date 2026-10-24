@@ -4260,3 +4260,6 @@ countries: br
 "Could not create a file in {0}" = "Não foi possível criar um arquivo em {0}"
 "Audio logger: recording the Master to {0}" = "Gravador contínuo: gravando o Master em {0}"
 "Show the audio logger's files" = "Mostrar os arquivos do gravador contínuo"
+"Detector" = "Detector"
+"Hush|Vocal" = "Hush|Vocal"
+"Vocal: the measured single-vocal detector (sibilants that stand out from the voice)" = "Vocal: o detector medido de voz única (sibilantes que se destacam da voz)"
