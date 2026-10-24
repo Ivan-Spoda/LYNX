@@ -134,9 +134,43 @@ Tests (tests/Rea143aTests.inc): `rea143_piano_roll_tools_have_fls_keys`, `rea143
 
 ### A.2 Channel settings, wrapper settings, Browser menus, Options pages, hint bar (sub-round r143b)
 
-<!-- B-NOTES -->
+Method: FL Studio 2026 (build 5654) on a copy of `Ookay - Thief.flp` (D:\lynx-work\flrea143b), driven with our
+SendInput / CopyFromScreen helpers under `~/.cache/lynx-fl.lock` (captures `tmp/flrea143/b/flref/*.png`, not in the
+repo) **[EXEC]**; strings of FLEngine_x64.dll from our own Ghidra project copy `~/ghproj/r143b` (StrRefs.java)
+**[DATA]**; LYNX from `LYNX.exe --snapshot`. Side-by-side images: `tmp/flrea143/compare/b-*.png` (FL left, LYNX right).
+
+| # | Screen | FL Studio 2026 | LYNX before | LYNX now |
+|---|---|---|---|---|
+| B1 | Channel window header | every channel window: tabs on the left (plugin page, wrench "Miscellaneous functions"), then **ON, PAN, VOL, PITCH + RANGE, TRACK** on the right **[EXEC captures gear.png, misc.png; DATA hint "\|Miscellaneous functions" 0x0149294d, "\|Envelope / instrument settings" 0x01490778]** | the instrument page alone; envelopes / LFOs in a second window; no channel level / route in the window | a **header strip** over every built-in channel window: tabs *Plugin*, *Envelope / instrument* (synth, sampler: the envelopes and LFOs, before a second window), *Misc*; **On**, **Pan**, **Vol**, **Track** (target mixer track; automation items on Pan / Vol) |
+| B2 | Misc (wrench) tab | Levels adjustment (Pan, Vol, Mod X, Mod Y); Polyphony (Max, Slide, Porta, Mono); Time (Gate, Shift, Swing, Full porta); Vol / Key / Tracking; Group (Cut, By, Cut self); Arpeggiator (direction, Time, Gate, Range, Repeat, Slide, Chord); Echo delay / fat mode; Root note keyboard **[EXEC misc.png; DATA "\|Maximum polyphony" 0x01492751, "\|Disables channel's polyphony limit" 0x0148fea9]** | Max polyphony had no control at all (only imported); cut groups only as the rack menu's "Cut itself"; arpeggiator and swing mix in rack sub-menus; porta only for sampler/synth pages | **Misc** tab with what LYNX's channels have: Levels (Pan, Vol), Polyphony (**Max**, Slide = portamento time, Porta, Mono), Time (Swing mix), Group (**Cut group**, **Cut by**, **Cut self**), Arpeggiator (direction, time, Range, Gate, Repeat). A hosted-plugin channel gets the Misc tab from the rack menu's new *Miscellaneous functions...* (FL shows it under the wrapper). Not done: Mod X / Y, time Gate / Shift, Full porta, key / velocity tracking, Echo delay / fat mode, arpeggiator Slide / Chord, root note keyboard, Pitch + Range in the header (LYNX's channels have no such parameters yet) |
+| B3 | Browser: sample menu | Send to selected channel or focused plugin, Open in new channel \| Send to playlist as an audio clip / audio track / instrument track \| Edit in audio editor / pitch corrector / time warper \| Open in new sampler / Granulizer / Slicer / Slicex channel \| **System**: Windows shell menu, Open parent folder, Locate file, Delete file... \| **Tags**: Favorite, Tags ▸, Add tag, Edit tags **[EXEC br_file.png]** | Send / Open in channel / Send to Playlist / Edit in audio editor / Show in file manager / Starred | FL's order and sections: the file's actions, then **System** (*Open parent folder*, *Locate file*, *Copy the file path*, *Delete file...* to the recycle bin after a confirmation) and **Tags** (*Starred*). Projects / MIDI files / FL presets get their own first item (*Open project*, *Open MIDI file*, *Open in a new channel*) instead of the folder menu |
+| B4 | Browser: folder menu | Expand all, Collapse all \| Open in new tab \| Change color, Change icon \| **System**: Windows shell menu, Open **[EXEC br_folder.png, br_pfolder.png]** | Collapse all folders, Show in file manager, Starred, Add folder | **Expand all** (the folder and two levels of sub-folders), **Collapse all**, *Refresh*, **System**: *Open*, *Copy the file path*, **Tags**: *Starred*, then LYNX's *Add folder...* |
+| B5 | Browser: project items / plugin database | Current project: Expand all / Collapse all **[EXEC br_projsamples.png]**; plugin: Send to selected channel or focused plugin, Add to plugin database (flag as favorite), System, Tags **[EXEC br_plugin.png]** | Expand all / Collapse all + per-item actions | unchanged (already matched); LYNX's Browser has no plugin database tree (round 142 adds the FL engines to the Add menus) |
+| B6 | Options › Audio | Input / output (device, sample rate, buffer, status, priority, playback tracking), **CPU** (multithreaded generator / mixer processing, Smart disable, Align tick lengths), **Mixer** (resampling quality, preview / metronome track, play truncated notes, reset plugins on transport) **[EXEC opt_audio.png]** | driver, devices, rate, buffer, status, recording | unchanged; recorded difference: LYNX has no global CPU / Mixer switches (smart disable is per slot since round 139; threading is automatic) |
+| B7 | Options › General | Display, Language, Input (mouse, scrolling), **Undo history** (maximum levels, undo knob tweaks) **[EXEC opt_general.png]** | Language and display, Startup, Editing (incl. Maximum undo levels), Backup, Plugins and shortcuts | unchanged (FL's Backup lives in File; LYNX keeps it in General) |
+| B8 | Options › File | Backup (autosave, maximum), **Plugins: Manage plugins**, User data folder, Browser extra search folders, External tools **[EXEC opt_file.png]** | search folders, Browser folders, plugin folders | + **Plugin manager...** under the plugin folders' buttons, as FL's File page has it |
+| B9 | Options › MIDI | Output list, sync; Input list, controller type, link velocities, pickup, foot pedal, MIDI channels for preview / song markers / performance / muting; external sync **[EXEC opt_midi.png]** | input devices (on / channel / target), velocity curve, controller type, pickup, project links | unchanged (MIDI output is LYNX's MIDI Out channel) |
+| B10 | Hint bar | "Name: value" on the left, the shortcut and an automatable dot / F1 on the right: *Channel panning: Centered*, *Mute / solo (shift/ctrl+)0..9*, a step: **1:02:00**, a channel button: **Grv Kick 27 … Audio Clip**, *Target mixer track (double-click)* **[EXEC hints.png]** | name + gestures + value; a step showed no position, a channel button no type, the route box said "Mixer insert" | a step shows its **bar:step:tick** position (FL's 24 ticks per step), a channel button the **instrument type** (or the plugin's name) on the right, the route box is the **Target mixer track** |
+
+Tests: `rea143b_channel_misc_functions`, `rea143b_step_position_like_fl_hint_bar` (tests/Rea143bTests.inc).
+
+Not done (r143b): FL's wrapper settings page for hosted plugins (LYNX's plugin window has no wrapper header yet; the
+same options are the rack / slot menus' *Processing* items — r137 owns the plugin windows); the Misc tab's FL-only
+parameters listed in B2; FL's "Send to playlist as an audio track / instrument track", "Edit in pitch corrector /
+time warper", "Open in new Slicer channel" (no such LYNX features); folder colours / icons and tags.
 
 ---
 
 ## Where I stopped
 
+- Done: Part B — Last tweaked parameters (Tools section, Add item, plugin-editor gestures), automation recording
+  (filter, Quantize › Automations, song-mode clips / pattern-mode events), File › Import › MIDI file with FL's import
+  options, the Master's audio input; per-channel smart disable examined and left out (no generator in 400 projects has
+  it on). Part A — Piano roll Tools, Playlist track / clip menus, Mixer track menu (with LYNX mixer track states),
+  channel window header + Misc tab, Browser menus, Options › File, hint bar texts.
+- Not done: Init song with this position / Delete initial value / Edit events in piano roll / Override global link;
+  the "Clips" recording filter; the touched control winning over its playing automation at once; MIDI import's
+  track / channel / controller choice and zero-velocity notes; FL's plugin wrapper settings page (r137's files);
+  the items listed as "Not done" in A.1 / A.2.
+- Not confirmed: where FL writes recorded automation when a clip of the parameter exists but ends before the take
+  (LYNX: drops the points past its end; a new clip is only made where none plays); FL's touch timeout.
