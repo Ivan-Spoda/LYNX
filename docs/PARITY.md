@@ -150,7 +150,7 @@ range.
 | Hover tooltip next to a node (freq, gain, Q, power, solo) | ✅ | read-out box at the node with power (round 128), solo and remove |
 | Right-click a node: shape, slope, dynamic range, solo, reset, remove | ✅ | |
 | Processing: Zero Latency / Natural Phase / Linear Phase | ✅ | |
-| Linear-phase resolution | ❌ | fixed (LYNX: 4608 samples at 48 kHz). Round 137 [EXEC] the trial's latencies at 48 kHz: natural phase 320 (LYNX 320 ✅); linear phase Low 3072 / Medium 5120 (default) / High 9216 / Very High 17408 / Maximum 66560 = 1024 + 2^11 … 2^16 (no 2^15) — an FIR of 2× that half-length; needs per-instance buffers sized by the resolution |
+| Linear-phase resolution | ✅ | round 144: Low / Medium (default) / High / Very High / Maximum in the Processing menu (with each latency) and in the bottom bar; the FIR is 2 × 2048 … 65536 taps in blocks of 1024, so the latencies are the trial's exactly; the buffers are sized per instance (choosing another resolution builds a new instance); translated from Pro-Q 4 states (value 553, and the character at 554). Was: fixed (LYNX: 4608 samples at 48 kHz). Round 137 [EXEC] the trial's latencies at 48 kHz: natural phase 320 (LYNX 320 ✅); linear phase Low 3072 / Medium 5120 (default) / High 9216 / Very High 17408 / Maximum 66560 = 1024 + 2^11 … 2^16 (no 2^15) — an FIR of 2× that half-length; needs per-instance buffers sized by the resolution |
 | Character (Clean / Subtle / Warm) | ✅ | round 135: in the Processing menu (shown after the mode in the bottom bar); LYNX's own soft-knee curves on the output, unity below about −20 dBFS (the reference's law is not measured) |
 | Gain scale | ✅ | |
 | Output level | ✅ | |
@@ -163,6 +163,8 @@ range.
 | Piano display (note names on the frequency axis) | ✅ | piano strip toggle at the bottom left; note name of the mouse position |
 | Output meter with peak hold | ✅ | |
 | Window size | ✅ | resizable |
+
+**After round 144**: configuration 9/10, design 8/10 (the linear-phase resolution row closed; left: 24 bands, spectral dynamics, EQ match, per-band attack / release).
 
 ## Apex Limiter ← Pro-L 2
 
@@ -1442,7 +1444,7 @@ Sources: [VintageVerb](https://valhalladsp.com/shop/reverb/valhalla-vintage-verb
 |---|---|---|---|---|
 | Faders Mix / Depth / Width / Delay / Feedback, values under them | 50 % / 50 % / 100 % (0–200) / 10 ms (0–1000) / 0 % | Same faders, values and defaults | ✅ | |
 | **MODE** menu (under the faders) | Named algorithms: 2TapChorus (default), 4TapEnsemble, SuperSix, 6TapRandom, DualEnsemble, 8Tap, 16Phase, 16Tap, 32Tap; each has its own LFO design (antiphase triangle, 3-phase, randomised triangle, 16-phase) | round 135: a "Mode" menu with the nine algorithms under LYNX's own names (2-tap chorus … 32-tap) on the reference's type index, default 2-tap chorus (round 129), ◀ ▶ | ⚠️ | The three 6-tap modes and the two 16-tap modes still play alike (one random-detune plus one vibrato LFO for every mode — vox136 / engine) |
-| Sync | Free plus 17 note values, next to the mode | 18-entry list (Free, 1/64 … 1/1), next to Taps | ⚠️ | List order is a guess; the substitute doesn't translate `DelaySync`. Round 137 [EXEC]: the demo's value has more states than its 18 index texts (impulses at 120 BPM, sampled at k / 24: free, 1/16, 1/8, 1/4, 1/2, 1/1, then dotted and triplet groups, long values capped at 2750 ms) — the full map is still to read |
+| Sync | Free plus 17 note values, next to the mode | round 144: the reference's list on its own value law (Free, 1/16 … 2/1, 1/16. … 1/1., 1/16T … 1/1T), next to the mode; translated | ✅ | round 144 [EXEC] (REA_rodada144a §1): index = floor (17 v) (boundaries at k / 17, checked ± 0.002); 0 and 1 both free; 2–7 straight 1/16 … 2/1, 8–12 dotted 1/16. … 1/1., 13–17 triplet 1/16T … 1/1T; the synced delay is capped at 2750 ms (2/1 and 1/1. at 120 BPM; uncapped at 240 BPM). The older by-length list stays for LYNX projects that use it (shown only while it is set) |
 | Page tabs | MOD / TAPS / DIFF / EQ / DRIVE / WARP, top right | Same 6 tabs, same order | ✅ | |
 | MOD page | SlowRate 0.50 Hz, SlowDepth 50 %, VibRate 6.00 Hz, VibDepth 0 %, OverMod 1.0× | Same 5 knobs and defaults | ✅ | |
 | TAPS page | Spread 50 %, Slope 0, Skew 0, Random 0, TapGain 0 dB | Same | ✅ | Smoothing of tap-time changes (Warp Smoothing) should be checked |
@@ -1457,9 +1459,9 @@ Sources: [VintageVerb](https://valhalladsp.com/shop/reverb/valhalla-vintage-verb
 | Tap display | — | Tap graph under the pages | ➕ | |
 | Resizable | Fixed size | Resizable | ➕ | |
 | Gestures / text entry | Not confirmed | Full LYNX set | ✅ | |
-| Saved-state translation | — | Everything except DelaySync (round 137: InputPan translated) | ⚠️ | `PluginSubstitutes.cpp [valhalla-ubermod]` |
+| Saved-state translation | — | Everything (round 137: InputPan; round 144: DelaySync) | ✅ | `PluginSubstitutes.cpp [valhalla-ubermod]` |
 
-**Scores:** configuration 6/10, design 7/10. **After round 135**: configuration 7/10, design 9/10 (left: per-mode LFO designs, InputPan, Sync translation).
+**Scores:** configuration 6/10, design 7/10. **After round 135**: configuration 7/10, design 9/10 (left: per-mode LFO designs, InputPan, Sync translation). **After round 144**: configuration 9/10, design 9/10 (left: per-mode LFO designs, 16-tap polarity).
 
 **Top gaps** (1 and 5 done in round 135, except the per-mode sound):
 1. **Named Mode menu with the correct default**: replace "Taps" with 9 LYNX-named algorithms using the measured `type` index (2TapChorus = index 1), and set the default to index 1 (1.5/24) instead of 6.5/24. Changes `latticeLayout()`, `latticeInfo()` and `tapCount()`. UI plus default, S.

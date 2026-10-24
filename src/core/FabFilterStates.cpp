@@ -480,7 +480,7 @@ int fromSaturn2 (const State& s, EffectSlot& slot)
 // 5 shape (0 bell, 1 low shelf, 2 low cut, 3 high shelf, 4 high cut, 5 notch, 6 band pass, 7 tilt shelf, 8 flat tilt,
 // 9 all pass), 6 slope (0 = 0, 1 … 9 = 6, 12, 18, 24, 30, 36, 48, 72, 96 dB/oct, 10 brickwall), 7 stereo placement
 // (0 left, 1 right, 2 stereo, 3 mid, 4 side), 9 dynamic range dB; 552 processing mode (0 zero latency, 1 natural,
-// 2 linear), 555 gain scale (1 = 100 %), 556 output level (level encoding). Facet EQ has eight stereo bands with the
+// 2 linear), 553 resolution, 554 character (round 144), 555 gain scale (1 = 100 %), 556 output level (level encoding). Facet EQ has eight stereo bands with the
 // same shapes, Q law and slopes: the first eight used, enabled, stereo-placed bands are taken; dynamic bands keep
 // their static curve (her states use none).
 int fromProQ4 (const State& s, EffectSlot& slot)
@@ -517,6 +517,10 @@ int fromProQ4 (const State& s, EffectSlot& slot)
     for (int b = band; b < facet::bands; ++b)
         p[(std::size_t) facet::param (b, 0)] = facet::shapeValue (facet::Shape::off);
     set (facet::phaseParam, facet::phaseValue ((facet::Phase) std::clamp (roundIndex (s.at (552)), 0, facet::phaseCount - 1)));
+    // round 144: 553 the linear-phase resolution (0 Low … 4 Maximum), 554 the character (0 Clean, 1 Subtle, 2 Warm) —
+    // read back black-box: the trial's state after setting each through its parameters (REA_rodada144a §2)
+    set (facet::resolutionParam, facet::resolutionValue (std::clamp (roundIndex (s.at (553)), 0, facet::resolutionCount - 1)));
+    set (facet::characterParam, (float) std::clamp (roundIndex (s.at (554)), 0, 2) / 2.0f);
     set (facet::scaleParam, clamp01 (s.at (555) / 2.0));
     set (facet::outputParam, linValue (levelDb (s.at (556)), -24.0, 24.0));
     return n;

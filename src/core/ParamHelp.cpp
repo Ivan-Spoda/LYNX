@@ -219,6 +219,7 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::latticeMod, "spread" }, TR_NOOP ("How far the taps are spread in time") },
         { { K::latticeMod, "colour" }, TR_NOOP ("Tone of the modulated signal") },
         { { K::latticeMod, "sync" }, TR_NOOP ("Locks the modulation to the project tempo") },
+        { { K::latticeMod, "delay sync" }, TR_NOOP ("Sets the delay to a note value at the project tempo: straight, dotted or triplet (up to 2.75 s)") },
         { { K::latticeMod, "input pan" }, TR_NOOP ("What enters the taps: stereo, swapped sides, or the mono sum to both, the left or the right") },
         // Echoform
         { { K::echoform, "mode" }, TR_NOOP ("The machine the echo imitates (tape, bucket brigade, digital, lo-fi, pitch...)") },

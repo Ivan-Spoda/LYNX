@@ -244,7 +244,8 @@ cd evalDigital (const Section& s, double w) noexcept
 
 // the FIR grid factor of a phase mode: 1 up to 48 kHz, 2 up to 96 kHz, 4 above
 int rateFactor (double sr) noexcept { return sr <= 50000.0 ? 1 : sr <= 100000.0 ? 2 : 4; }
-constexpr int naturalBlock = 128, naturalDelay = 192, linearBlock = 512, firTaps = 8192;
+// round 144: the linear-phase block is 1024 (the trial's latencies are 1024 + half the FIR; was 512)
+constexpr int naturalBlock = 128, naturalDelay = 192, linearBlock = 1024, firTaps = 8192;
 
 // --- FFT and the partitioned convolver (the FIR phase modes) ------------------------------------------------------
 
@@ -443,21 +444,31 @@ class FacetEqEffect final : public Effect
 public:
     explicit FacetEqEffect (const EffectParams* initial)
     {
-        if (initial != nullptr) mode = phase ((*initial)[(std::size_t) phaseParam]);
+        if (initial != nullptr)
+        {
+            mode = phase ((*initial)[(std::size_t) phaseParam]);
+            allocRes = resolution ((*initial)[(std::size_t) resolutionParam]);
+        }
     }
 
     void prepare (double sr) noexcept override
     {
         sampleRate = sr;
         const int fct = rateFactor (sr);
-        taps = firTaps * fct;
+        // round 144: the buffers are sized for this instance's linear-phase resolution (a new resolution chosen in
+        // the editor builds a new instance: RackRenderer's reuse rule; automation of it waits for the next prepare)
+        if (seenParams) allocRes = resolution (current[(std::size_t) resolutionParam]);
+        natTaps = firTaps * fct;
+        linTaps = 2 * linearHalfTaps (allocRes, sr);
+        const int most = std::max (natTaps, linTaps);
         fftNatural.init (2 * naturalBlock * fct);
         fftLinear.init (2 * linearBlock * fct);
-        fftDesign.init (taps);
-        conv.allocate (taps, linearBlock * fct);
-        spec.assign ((std::size_t) taps, {});
-        fir.assign ((std::size_t) taps, 0.0);
-        delayLen = latencyFor (Phase::linear, sr) + 1;
+        fftDesignNat.init (natTaps);
+        fftDesignLin.init (linTaps);
+        conv.allocate (most, linearBlock * fct);
+        spec.assign ((std::size_t) most, {});
+        fir.assign ((std::size_t) most, 0.0);
+        delayLen = std::max (latencyFor (Phase::linear, sr, allocRes), latencyFor (Phase::natural, sr)) + 1;
         delay[0].assign ((std::size_t) delayLen, 0.0f);
         delay[1].assign ((std::size_t) delayLen, 0.0f);
         cached.fill (-1.0f);
@@ -575,17 +586,20 @@ private:
     {
         mode = p;
         const int fct = rateFactor (sampleRate);
+        taps = p == Phase::linear ? linTaps : natTaps;
         if (p == Phase::natural) conv.configure (fftNatural, naturalBlock * fct, taps);
         else if (p == Phase::linear) conv.configure (fftLinear, linearBlock * fct, taps);
-        updateEvery = std::max (1024 * fct, p == Phase::linear ? linearBlock * fct : naturalBlock * fct);
+        // a long FIR is redesigned less often (its design is an FFT of its length)
+        updateEvery = std::max ({ 1024 * fct, p == Phase::linear ? linearBlock * fct : naturalBlock * fct, taps / 16 });
         firLoaded = false;
-        latencyNow.store (latencyFor (p, sampleRate), std::memory_order_relaxed);
+        latencyNow.store (latencyFor (p, sampleRate, allocRes), std::memory_order_relaxed);
     }
 
     void update (const EffectParams& params) noexcept
     {
         for (int i = 0; i < paramCount; ++i) cached[(std::size_t) i] = params[(std::size_t) i];
         current = params;
+        seenParams = true;
         const auto newMode = phase (params[(std::size_t) phaseParam]);
         if (newMode != mode)
         {
@@ -768,7 +782,7 @@ private:
     // solo: the band's region alone (delayed like the FIR modes so switching does not jump)
     void runSolo (float* left, float* right, int n) noexcept
     {
-        const int lat = mode == Phase::zeroLatency ? 0 : latencyFor (mode, sampleRate);
+        const int lat = mode == Phase::zeroLatency ? 0 : latencyFor (mode, sampleRate, allocRes);
         for (int i = 0; i < n; ++i)
         {
             const float yl = (float) solo.run (left[i], 0), yr = (float) solo.run (right[i], 1);
@@ -800,12 +814,9 @@ private:
             for (int k = 0; k < c; ++k) f0[used + k] = hz (current[(std::size_t) param (b, 1)]);
             used += c;
         }
-        const cd rot = std::polar (1.0, -2.0 * pi * D / M);
-        cd phasor (1.0, 0.0);
-        for (int k = 0; k <= M / 2; ++k)
-        {
-            const double f = std::max ((double) k * sampleRate / M, 0.01);
-            double hr = 1.0, hi = 0.0;
+        const auto response = [&] (double f, double& hr, double& hi) noexcept {
+            hr = 1.0;
+            hi = 0.0;
             for (int j = 0; j < used; ++j)
             {
                 const auto& s = a[j];
@@ -817,7 +828,38 @@ private:
                 hi = hr * qi + hi * qr;
                 hr = tr;
             }
-            cd h = natural ? cd (hr, hi) : cd (std::sqrt (hr * hr + hi * hi), 0.0);
+        };
+        // round 144: an FIR longer than the old 8192 taps (High … Maximum) reads the magnitude from a log-spaced grid
+        // (designGrid points from the first bin to Nyquist, interpolated in log frequency) instead of every bin
+        const bool gridded = ! natural && M > firTaps * fct;
+        const double gLo = std::log (sampleRate / M), gHi = std::log (0.5 * sampleRate);
+        if (gridded)
+            for (int g = 0; g < designGrid; ++g)
+            {
+                double hr, hi;
+                response (std::exp (gLo + (gHi - gLo) * g / (designGrid - 1)), hr, hi);
+                grid[(std::size_t) g] = std::sqrt (hr * hr + hi * hi);
+            }
+        const cd rot = std::polar (1.0, -2.0 * pi * D / M);
+        cd phasor (1.0, 0.0);
+        for (int k = 0; k <= M / 2; ++k)
+        {
+            const double f = std::max ((double) k * sampleRate / M, 0.01);
+            cd h;
+            if (gridded)
+            {
+                const double x = k == 0 ? 0.0 : (std::log (f) - gLo) / (gHi - gLo) * (designGrid - 1);
+                const int g = std::clamp ((int) x, 0, designGrid - 2);
+                const double t = std::clamp (x - g, 0.0, 1.0);
+                h = cd (grid[(std::size_t) g] * (1.0 - t) + grid[(std::size_t) (g + 1)] * t, 0.0);
+                if (k == 0) { double hr, hi; response (0.01, hr, hi); h = cd (std::sqrt (hr * hr + hi * hi), 0.0); }
+            }
+            else
+            {
+                double hr, hi;
+                response (f, hr, hi);
+                h = natural ? cd (hr, hi) : cd (std::sqrt (hr * hr + hi * hi), 0.0);
+            }
             h = cd (h.real() * phasor.real() - h.imag() * phasor.imag(), h.real() * phasor.imag() + h.imag() * phasor.real());
             if ((k & 255) == 255) phasor = std::polar (1.0, -2.0 * pi * (double) (k + 1) * D / M); // no drift
             else phasor *= rot;
@@ -825,7 +867,7 @@ private:
             spec[(std::size_t) k] = h;
             if (k > 0 && k < M / 2) spec[(std::size_t) (M - k)] = std::conj (h);
         }
-        fftDesign.run (spec.data(), true);
+        (natural ? fftDesignNat : fftDesignLin).run (spec.data(), true);
         for (int i = 0; i < M; ++i)
         {
             const double w = i < D ? 0.5 * (1.0 - std::cos (pi * (i + 0.5) / D)) : 0.5 * (1.0 + std::cos (pi * (i - D) / (double) (M - D)));
@@ -857,9 +899,12 @@ private:
     Biquad solo;
     const float* sideL = nullptr;
     const float* sideR = nullptr;
-    Fft fftNatural, fftLinear, fftDesign;
+    Fft fftNatural, fftLinear, fftDesignNat, fftDesignLin;
     Convolver conv;
-    int taps = firTaps, updateEvery = 1024, sinceDesign = 0;
+    int taps = firTaps, natTaps = firTaps, linTaps = firTaps, allocRes = 1, updateEvery = 1024, sinceDesign = 0;
+    bool seenParams = false;
+    static constexpr int designGrid = 4096;
+    std::array<double, designGrid> grid {};
     std::vector<cd> spec;
     std::vector<double> fir;
     std::vector<float> delay[2];
@@ -969,6 +1014,7 @@ const EffectInfo& info()
         e.params.push_back ({ "Analyzer Tilt", 0.75f });
         e.params.push_back ({ "Display Range", displayRangeValue (12.0) });
         e.params.push_back ({ "Character", 0.0f }); // round 135
+        e.params.push_back ({ "Resolution", 0.25f }); // round 144: Medium (the old FIR length)
         return e;
     }();
     return i;
@@ -1004,6 +1050,7 @@ std::string paramText (int p, float v)
     if (p == specTiltParam) { std::snprintf (t, sizeof (t), "%.1f dB/oct", analyzerTiltDb (v)); return t; }
     if (p == displayRangeParam) { std::snprintf (t, sizeof (t), "%.0f dB", displayRangeDb (v)); return t; }
     if (p == characterParam) { static const char* a[] = { "Clean", "Subtle", "Warm" }; return a[character (v)]; }
+    if (p == resolutionParam) return resolutionName (resolution (v));
     switch (p % fieldsPerBand)
     {
         case 0: return shapeName (shape (v));
@@ -1117,13 +1164,27 @@ double dynamicGainDb (double level, double threshold, double range) noexcept
     return range < 0.0 ? -std::min (-range, over) : std::min (range, over);
 }
 
-int latencyFor (Phase p, double sampleRate) noexcept
+int resolution (float v) noexcept { return std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * 4.0f), 0, resolutionCount - 1); }
+float resolutionValue (int r) noexcept { return (float) std::clamp (r, 0, resolutionCount - 1) / 4.0f; }
+const char* resolutionName (int r) noexcept
+{
+    static const char* names[] = { "Low", "Medium", "High", "Very High", "Maximum" };
+    return names[std::clamp (r, 0, resolutionCount - 1)];
+}
+
+int linearHalfTaps (int r, double sampleRate) noexcept
+{
+    static constexpr int half[resolutionCount] = { 2048, 4096, 8192, 16384, 65536 }; // [EXEC] the trial: no 32768
+    return half[std::clamp (r, 0, resolutionCount - 1)] * rateFactor (sampleRate);
+}
+
+int latencyFor (Phase p, double sampleRate, int r) noexcept
 {
     const int f = rateFactor (sampleRate);
     switch (p)
     {
         case Phase::natural: return (naturalBlock + naturalDelay) * f;
-        case Phase::linear: return linearBlock * f + firTaps * f / 2;
+        case Phase::linear: return linearBlock * f + linearHalfTaps (r, sampleRate);
         default: return 0;
     }
 }
