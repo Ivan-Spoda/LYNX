@@ -89,6 +89,22 @@ enum Param
     lofi,          // round 137: H-Delay's LoFi switch, independent of the mode: a steep low-pass (8th order, 5.8 kHz)
                    // inside the loop (measured on the trial, docs/specs/h-delay.md §4.2); off by default
     tapeVoicing, // round 136: a measured tape-echo loop (REA_rodada136 §4): 0 = off, else one of tapeVoicingCount
+    // ---- round 144 (docs/PARITY.md: EchoBoy's rhythm editor), appended; Even = the round-137 pattern (the old sound)
+    rhythmEdit,    // where the taps sit: Even (0, evenly spaced, the measured law), Free (0.5, each tap at its own time),
+                   // Grid (1, each tap's time snapped to the Grid note)
+    rhythmGrid,    // the grid of the Grid edit: 1/2, 1/4, 1/8, 1/16, 1/32, 1/64 (default 1/16)
+    rhythmShape,   // how Decay spreads over the slots: Decay, Reverse, Swell, Fade, Nonlin (LYNX laws, default Decay)
+    rhythmTime1,   // the time of each heard tap in the Free / Grid edits, 0 … 1 of the pattern length (default k / 16)
+    rhythmTimeLast = rhythmTime1 + 14,
+    // ---- round 144 (docs/PARITY.md: EchoBoy's Style Edit / Tweak rows), appended; every default = the old sound
+    inputLevel,    // the echo path's input level, −24 … +24 dB (EchoBoy's Input; the dry signal is not touched)
+    fbBalance,     // ±100 %: the feedback of the left / right side (EchoBoy's Dual "FB Balance"; 0 = both alike)
+    diffPost,      // the diffusion inside the loop (0, every repeat more diffuse) or after it (1, on the echoes only)
+    modShape,      // the LFO's wave (rate / depth modes): sine, triangle, square, saw, random (EchoBoy's Wobble shape)
+    modSync,       // the LFO rate free (0) or locked to a note: 1/16, 1/8, 1/4, 1/2, 1 bar, 2 bars
+    loopBass,      // ±18 dB shelves / bell inside the loop (EchoBoy's Style Edit EQ: each repeat is shaped again):
+    loopMid,       //   bass 120 Hz, mid 1.2 kHz (Q 0.7), treble 5 kHz; 0 dB = off
+    loopTreble,
     paramCount
 };
 enum class Style { single, ratio, quad, dual, pingPong }; // the two-time styles last (the panel shows the right time for both)
@@ -133,6 +149,32 @@ double rhythmLengthMs (const EffectParams& p, double bpm) noexcept;
 // and the level of slot 0 in `slot0`; levels are equal-power normalised over the slots that fit in the length
 std::vector<RhythmTap> rhythmTaps (const EffectParams& p, double bpm, double* slot0 = nullptr);
 int rhythmPattern (const EffectParams& p, double bpm, std::array<RhythmTap, 16>& taps, double& slot0) noexcept; // no allocation
+// round 144: the rhythm editor (EchoBoy's Pattern / Custom Time / Custom Beats roles; laws and presets are LYNX's own)
+enum class RhythmEdit { even, free, grid };
+enum class RhythmShape { decay, reverse, swell, fade, nonlin };
+RhythmEdit rhythmEditOf (float v) noexcept;
+int rhythmGridOf (float v) noexcept;         // 0 … 5 = 1/2 … 1/64
+double rhythmGridBeats (int index) noexcept; // quarter notes (2, 1, 0.5, 0.25, 0.125, 0.0625)
+RhythmShape rhythmShapeOf (float v) noexcept;
+// the level (dB, ≤ 0) of slot u = 0 … 1 (first … last) for `decayDb` and the shape
+double rhythmShapeDb (RhythmShape shape, double decayDb, double u) noexcept;
+// the time (ms) of heard tap k (0-based) in the Free / Grid edits
+double rhythmTapMs (const EffectParams& p, int k, double bpm) noexcept;
+// the inverse for the editor: a time in ms → the tap's time value (snapped to the grid in the Grid edit)
+float rhythmTimeValue (const EffectParams& p, double ms, double bpm) noexcept;
+// LYNX-authored tap patterns for the editor's Pattern menu (no preset of any other product)
+int rhythmPresetCount() noexcept;
+const char* rhythmPresetName (int index) noexcept;
+// the parameter edits that load pattern `index` (Rhythm on, edit, grid, length, repeats, tap times and levels)
+std::vector<std::pair<int, float>> rhythmPresetEdits (int index);
+// the edits that turn the current even pattern into Free taps at the same times (the editor's first horizontal drag)
+std::vector<std::pair<int, float>> rhythmFreeFromEven (const EffectParams& p, double bpm);
+// round 144: the Style-Edit-role controls
+double inputLevelDb (float v) noexcept;  // −24 … +24
+double loopEqDb (float v) noexcept;      // −18 … +18
+int modShapeOf (float v) noexcept;       // 0 sine, 1 triangle, 2 square, 3 saw, 4 random
+int modSyncOf (float v) noexcept;        // 0 free, 1 … 6 = 1/16 … 2 bars
+double modSyncBeats (int index) noexcept; // the LFO period in quarter notes (0 for free)
 int eraOf (float v) noexcept;           // 0 past, 1 present, 2 future (round 137)
 // the factor on the character's low-pass cut-off for the mode and era (1 for Past)
 double eraBandwidth (Mode m, int era) noexcept;
@@ -186,9 +228,17 @@ enum Param
     inputPan, // round 137 (appended): what enters the taps, 9 steps (index round (8 v)), measured on the reference
               // [EXEC]: 0 / 1 stereo (default 1), 2 swapped, 3 mono to both, 4 mono to the left, 5 mono to the right,
               // 6–8 stereo (no difference measured with an impulse)
+    delaySync, // round 144 (appended): the reference's DelaySync law, measured [EXEC] (REA_rodada144a §1): index
+               // floor (17 v): 0–1 free, 2–7 1/16 … 2/1, 8–12 1/16. … 1/1., 13–17 1/16T … 1/1T; the synced delay is capped
+               // at 2750 ms. Free (0, the default) leaves the older `sync` law in charge
     paramCount
 };
 int inputPanOf (float v) noexcept;  // 0 … 8
+int delaySyncIndex (float v) noexcept;      // 0 … 17 (round 144)
+double delaySyncBeats (int index) noexcept; // quarter notes, 0 = free (round 144)
+constexpr double delaySyncCapMs = 2750.0;  // the reference's longest synced delay [EXEC]
+// the synced delay of the longest tap (ms) or 0 when free: the round-144 law first, then the older one
+double syncedDelayMs (const EffectParams& p, double bpm) noexcept;
 int tapCount (float v) noexcept;     // 1, 1, 2, 3, 3, 3, 4, 8, 8, 16 (index floor(24 v))
 double delayMs (float v) noexcept;   // 0 .. 1000 ms
 double tapMs (const EffectParams& p, int tap, int taps, bool right) noexcept; // tap position (without modulation)

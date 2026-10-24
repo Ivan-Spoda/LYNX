@@ -1,4 +1,5 @@
 #include "core/RackRenderer.h"
+#include "core/FacetEq.h"
 #include "core/MidiControls.h"
 #include "core/Patcher.h"
 #include "core/LoadTrace.h"
@@ -313,6 +314,10 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                 && previous->song.mixer[t].effects[i].kind == kind && kind != EffectKind::patcher
                 && (kind != EffectKind::parallel || sameContainer (previous->song.mixer[t].effects[i], slots[i])) // children are built in
                 && previous->song.mixer[t].effects[i].samplePath == slots[i].samplePath
+                // round 144: Facet EQ's buffers are sized by its linear-phase resolution: a new one, a new instance
+                && (kind != EffectKind::facetEq
+                    || facet::resolution (previous->song.mixer[t].effects[i].params[(std::size_t) facet::resolutionParam])
+                           == facet::resolution (slots[i].params[(std::size_t) facet::resolutionParam]))
                 && (kind != EffectKind::plugin
                     || (previous->song.mixer[t].effects[i].plugin.id == slots[i].plugin.id && previous->sampleRate == sampleRate
                         && samePluginProcessing (previous->song.mixer[t].effects[i].plugin, slots[i].plugin)))
