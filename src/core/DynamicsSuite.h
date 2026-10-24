@@ -151,7 +151,15 @@ enum Global { xover1 = legacyBands * fieldsPerBand, xover2, xover3, slope, looka
               bandScLow0 = bandScFree0 + bands, bandScHigh0 = bandScLow0 + bands,
               // round 147: each crossover's own slope (Pro-MB's per-band slopes): 0 = the global Slope, then 12 / 24 / 48
               xoverSlope0 = bandScHigh0 + bands,
-              count = xoverSlope0 + bands - 1 };
+              // round 150 (REA_rodada150): free band placement like Pro-MB — the layout (0 = split: contiguous bands on the
+              // crossovers, the old engine; 1 = free: each band its own low / high edge and slopes, gaps pass untouched),
+              // each band's edges (30 Hz … 30 kHz, 30 · 1000^v) and slopes (6 … 48 dB/oct, the reference's value law), each
+              // band's side-chain input (0 = the global External SC switch, 0.5 = the plug-in input, 1 = external), and
+              // the detector law (1 = measured on the trial: soft range, release after the curve; 0 = the round-108 one)
+              bandLayout = xoverSlope0 + bands - 1,
+              bandLo0, bandHi0 = bandLo0 + bands, bandLoSlope0 = bandHi0 + bands, bandHiSlope0 = bandLoSlope0 + bands,
+              bandScInput0 = bandHiSlope0 + bands, detectorLaw = bandScInput0 + bands,
+              count = detectorLaw + 1 };
 inline int param (int band, int field) noexcept
 {
     return band < legacyBands ? band * fieldsPerBand + field : band5 + (band - legacyBands) * fieldsPerBand + field;
@@ -195,6 +203,28 @@ int crossoverSlopeDbOct (const EffectParams& p, int k) noexcept; // round 147: c
 float crossoverSlopeValue (int dbOct) noexcept;                  // 12 / 24 / 48 → its own value (0 = global)
 inline int slopeOrder (int dbOct) noexcept { return dbOct <= 12 ? 1 : (dbOct <= 24 ? 2 : 4); } // n of LR(2n)
 int oversamplingOf (float v) noexcept;   // 1 (off), 2 or 4
+// round 150: the free layout and its laws
+bool freeLayout (const EffectParams& p) noexcept;
+double edgeHz (float v) noexcept;                  // 30 · 1000^v (Pro-MB's crossover law)
+float edgeValue (double hz) noexcept;
+double slopeOfValue (float v) noexcept;            // 6 + 24v below 0.25, then 48v (Pro-MB's slope law), dB/oct
+float slopeValue (double dbOct) noexcept;
+int iirSlope (double dbOct) noexcept;              // the IIR crossovers' slope for a continuous one: 6, 12, 24, 36 or 48
+bool measuredDetector (const EffectParams& p) noexcept;
+// the segments the bands make: contiguous bands (the split layout, or free bands with the gaps between them as
+// segments that pass untouched); at most 2·bands + 1
+constexpr int maxSegments = 2 * bands + 1;
+struct Layout
+{
+    int segments = 1;
+    std::array<double, maxSegments - 1> xoverHz {};   // ascending
+    std::array<double, maxSegments - 1> xoverSlope {}; // dB/oct (continuous: the linear phase's shapes)
+    std::array<int, maxSegments> bandOf {};            // the band of a segment, −1 = a gap
+    std::array<int, bands> segmentOf {};               // the segment of band b (−1 = not in use)
+    // per band (free layout: its own; split layout: its crossovers), ≤ 0 Hz = no edge on that side
+    std::array<double, bands> loHz {}, hiHz {}, loSlope {}, hiSlope {};
+};
+Layout layoutOf (const EffectParams& p) noexcept;
 int linearFftSize (double sampleRate) noexcept; // 4096 up to 50 kHz, ×2 per doubling of the rate
 int linearLatency (double sampleRate) noexcept; // 3/4 of the FFT size (3072 samples at 48 kHz, as measured)
 

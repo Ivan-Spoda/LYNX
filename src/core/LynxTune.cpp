@@ -6,6 +6,8 @@
 #include <cstdio>
 
 #include "core/Effects.h"
+#include "core/Song.h"
+#include <mutex>
 #include "core/VocalPitch.h"
 
 namespace lynx::lynxtune
@@ -143,6 +145,7 @@ const EffectInfo& info()
             e.params.push_back ({ nm, 0.0f });
         e.params.push_back ({ "Range low", 0.0f });
         e.params.push_back ({ "Range high", 1.0f });
+        e.params.push_back ({ "Receive", 1.0f }); // round 150
         return e;
     }();
     return i;
@@ -240,6 +243,8 @@ std::string paramText (int param, float v)
         static const char* const n[3] { "Nearest", "Up", "Down" };
         return n[(int) noteDir (v)];
     }
+    if (param == receiveScale)
+        return onOff();
     if (param == rangeLow || param == rangeHigh)
     {
         static const char* const names[12] { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
@@ -645,5 +650,93 @@ std::unique_ptr<Effect> make()
     auto e = std::make_unique<Tune>();
     e->prepare (44100.0);
     return e;
+}
+
+// ---- round 150: Send / Receive -------------------------------------------------------------------------------------
+const std::array<int, sharedScaleParams>& sharedScaleList() noexcept
+{
+    static const auto list = [] {
+        std::array<int, sharedScaleParams> l {};
+        int n = 0;
+        l[(std::size_t) n++] = key;
+        l[(std::size_t) n++] = scale;
+        l[(std::size_t) n++] = moreScales;
+        for (int k = 0; k < 12; ++k) l[(std::size_t) n++] = noteC + k;
+        for (int k = 0; k < 12; ++k) l[(std::size_t) n++] = bypassC + k;
+        for (int k = 0; k < 12; ++k) l[(std::size_t) n++] = noteDirC + k;
+        l[(std::size_t) n++] = rangeLow;
+        l[(std::size_t) n++] = rangeHigh;
+        return l;
+    }();
+    return list;
+}
+
+SharedScale captureScale (const float* params) noexcept
+{
+    SharedScale s;
+    const auto& l = sharedScaleList();
+    for (std::size_t i = 0; i < l.size(); ++i) s.values[i] = params[l[i]];
+    return s;
+}
+
+void applyScale (float* params, const SharedScale& s) noexcept
+{
+    const auto& l = sharedScaleList();
+    for (std::size_t i = 0; i < l.size(); ++i) params[l[i]] = std::clamp (s.values[i], 0.0f, 1.0f);
+}
+
+namespace
+{
+std::mutex sharedMutex;
+SharedScale sharedScale;
+bool sharedValid = false;
+
+template <typename Fn>
+void forEachTune (std::vector<EffectSlot>& chain, Fn&& fn)
+{
+    for (auto& fx : chain)
+    {
+        if (fx.kind == EffectKind::lynxTune) fn (fx);
+        for (auto& br : fx.branches) forEachTune (br.chain, fn);
+    }
+}
+} // namespace
+
+void publishScale (const SharedScale& s) noexcept
+{
+    std::lock_guard<std::mutex> g (sharedMutex);
+    sharedScale = s;
+    sharedValid = true;
+}
+
+bool publishedScale (SharedScale& out) noexcept
+{
+    std::lock_guard<std::mutex> g (sharedMutex);
+    if (sharedValid) out = sharedScale;
+    return sharedValid;
+}
+
+void clearPublishedScale() noexcept
+{
+    std::lock_guard<std::mutex> g (sharedMutex);
+    sharedValid = false;
+}
+
+int sendScaleToAll (Song& song, int track, int slot)
+{
+    if (track < 0 || track >= (int) song.mixer.size()) return 0;
+    auto& fx = song.mixer[(std::size_t) track].effects;
+    if (slot < 0 || slot >= (int) fx.size() || fx[(std::size_t) slot].kind != EffectKind::lynxTune) return 0;
+    const auto* source = &fx[(std::size_t) slot];
+    const auto s = captureScale (source->params.data());
+    publishScale (s);
+    int n = 0;
+    for (auto& t : song.mixer)
+        forEachTune (t.effects, [&] (EffectSlot& e) {
+            if (&e == source || e.params[receiveScale] < 0.5f) return;
+            applyScale (e.params.data(), s);
+            ++n;
+        });
+    return n;
 }
 } // namespace lynx::lynxtune

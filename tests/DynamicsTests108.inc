@@ -752,12 +752,13 @@ TEST (dyn108_fabfilter_states_translate_to_the_suite)
         std::printf ("  Pro-MB state: %d parameters translated, crossovers %.0f / %.0f / %.0f Hz\n", translated,
                      m::crossoverHz (slot.params[m::xover1]), m::crossoverHz (slot.params[m::xover2]), m::crossoverHz (slot.params[m::xover3]));
         CHECK (translated > 10);
-        CHECK (at (0, m::fEnabled) < 0.5f && at (1, m::fEnabled) > 0.5f && at (2, m::fEnabled) < 0.5f && at (3, m::fEnabled) < 0.5f);
-        CHECK (std::abs (m::crossoverHz (slot.params[m::xover1]) - 300.0) < 1.0 && std::abs (m::crossoverHz (slot.params[m::xover2]) - 3000.0) < 5.0);
-        CHECK (at (1, m::fMode) > 0.5f && std::abs (m::thresholdDb (at (1, m::fThreshold)) + 30.0) < 0.05);
-        CHECK (std::abs (m::rangeDb (at (1, m::fRange)) + 24.0) < 0.01 && std::abs (m::ratioOf (at (1, m::fRatio)) - 4.0) < 0.05);
-        CHECK (std::abs (at (1, m::fAttack) - 0.3f) < 1e-6f && std::abs (at (1, m::fRelease) - 0.6f) < 1e-6f);
-        CHECK (std::abs (m::kneeDb (at (1, m::fKnee)) - 12.0) < 0.01 && std::abs (m::levelDb (at (1, m::fLevel)) - 3.0) < 0.01);
+        // round 150: the free layout — our band 1 is the reference's band with its own edges, the rest passes untouched
+        CHECK (m::freeLayout (slot.params) && m::bandCount (slot.params) == 1 && at (0, m::fEnabled) > 0.5f);
+        CHECK (std::abs (m::edgeHz (slot.params[m::bandLo0]) - 300.0) < 1.0 && std::abs (m::edgeHz (slot.params[m::bandHi0]) - 3000.0) < 5.0);
+        CHECK (at (0, m::fMode) > 0.5f && std::abs (m::thresholdDb (at (0, m::fThreshold)) + 30.0) < 0.05);
+        CHECK (std::abs (m::rangeDb (at (0, m::fRange)) + 24.0) < 0.01 && std::abs (m::ratioOf (at (0, m::fRatio)) - 4.0) < 0.05);
+        CHECK (std::abs (at (0, m::fAttack) - 0.3f) < 1e-6f && std::abs (at (0, m::fRelease) - 0.6f) < 1e-6f);
+        CHECK (std::abs (m::kneeDb (at (0, m::fKnee)) - 12.0) < 0.01 && std::abs (m::levelDb (at (0, m::fLevel)) - 3.0) < 0.01);
     }
 
     // Pro-G (FabF, 34 values): Vocal, −40 dB, ratio norm 0.4 (2 : 1), range norm 0.5 (16 dB), attack norm 0.3, release

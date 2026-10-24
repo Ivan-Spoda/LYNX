@@ -212,7 +212,7 @@ TEST (prism_stereo_link_round147)
 {
     using namespace lynx;
     namespace m = dyn::prism;
-    CHECK (m::bandLink0 == 88 && m::count == 123 && (int) effectInfo (EffectKind::prismMultiband).params.size() == m::count);
+    CHECK (m::bandLink0 == 88 && m::count == 155 && (int) effectInfo (EffectKind::prismMultiband).params.size() == m::count);
     CHECK (formatEffectParam (EffectKind::prismMultiband, m::bandLink0, 0.25f, 120.0) == "50%");
     CHECK (formatEffectParam (EffectKind::prismMultiband, m::bandLink0 + 2, 0.75f, 120.0) == "100%, 50% only");
     CHECK (formatEffectParam (EffectKind::prismMultiband, m::bandScLow0, m::scFilterValue (2000.0), 120.0) == "2.00 kHz");
@@ -330,7 +330,7 @@ TEST (prism_per_crossover_slopes_round147)
     using namespace lynx;
     namespace m = dyn::prism;
     namespace mp = minphase;
-    CHECK (m::xoverSlope0 == 118 && m::count == 123);
+    CHECK (m::xoverSlope0 == 118 && m::count == 155);
     // the default follows the global slope (the old sound)
     const auto def = makeEffectSlot (EffectKind::prismMultiband).params;
     for (int k = 0; k < 5; ++k)

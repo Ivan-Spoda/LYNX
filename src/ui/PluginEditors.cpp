@@ -1136,7 +1136,9 @@ public:
     // the range pass uncorrected), the range presets and Reset scale.
     int tuneFirstOctave = 2, tuneShownOctaves = 4; // the view: C2 … B5 by default (the editor's own, not saved)
     int tuneRangeDrag = -1;                       // 0 = the low boundary, 1 = the high one
-    enum TuneButton { tbBypass, tbRemove, tbReset, tbRange0, tbZoomOut = tbRange0 + lynxtune::rangePresets, tbZoomIn, tbLeft, tbRight, tbLatch, tbCount };
+    int tuneSendFlash = 0;                        // round 150: Send lit for a few repaints after a click
+    enum TuneButton { tbBypass, tbRemove, tbReset, tbRange0, tbZoomOut = tbRange0 + lynxtune::rangePresets, tbZoomIn, tbLeft, tbRight, tbLatch,
+                      tbSend, tbReceive, tbCount }; // round 150: Send / Receive
     juce::Rectangle<float> tuneKeysStrip (juce::Rectangle<float> r) const { return r.withHeight (22.0f * scale()); }
     juce::Rectangle<float> tuneKeysBed (juce::Rectangle<float> r) const { return r.withTrimmedTop (36.0f * scale()).reduced (2.0f * scale(), 2.0f * scale()); }
     juce::Rectangle<float> tuneRangeBar (juce::Rectangle<float> r) const
@@ -1150,11 +1152,13 @@ public:
         const auto s = scale();
         const auto strip = tuneKeysStrip (r).reduced (2.0f * s, 2.0f * s);
         auto at = [&] (float x, float w) { return juce::Rectangle<float> (strip.getX() + x * s, strip.getY(), w * s, strip.getHeight()); };
-        if (which == tbBypass) return at (0.0f, 66.0f);
-        if (which == tbRemove) return at (70.0f, 66.0f);
-        if (which == tbReset) return at (144.0f, 74.0f);
-        if (which >= tbRange0 && which < tbZoomOut) return at (230.0f + 54.0f * (float) (which - tbRange0), 52.0f);
-        if (which >= tbZoomOut && which <= tbRight) return at (618.0f + 24.0f * (float) (which - tbZoomOut), 22.0f);
+        if (which == tbBypass) return at (0.0f, 62.0f);
+        if (which == tbRemove) return at (66.0f, 62.0f);
+        if (which == tbReset) return at (132.0f, 48.0f);
+        if (which == tbSend) return at (184.0f, 42.0f);    // round 150
+        if (which == tbReceive) return at (230.0f, 52.0f);
+        if (which >= tbRange0 && which < tbZoomOut) return at (288.0f + 47.0f * (float) (which - tbRange0), 45.0f);
+        if (which >= tbZoomOut && which <= tbRight) return at (620.0f + 24.0f * (float) (which - tbZoomOut), 22.0f);
         return strip.withLeft (strip.getRight() - 62.0f * s); // LATCH
     }
     int tuneVisibleWhites() const { return 7 * tuneShownOctaves; }
@@ -1214,7 +1218,9 @@ public:
             juce::String name;
             if (b == tbBypass) { lit = ! tuneRemove; name = tr ("Bypass"); }
             else if (b == tbRemove) { lit = tuneRemove; name = tr ("Remove"); }
-            else if (b == tbReset) name = tr ("Reset scale");
+            else if (b == tbReset) name = tr ("Reset");
+            else if (b == tbSend) { lit = tuneSendFlash > 0; name = tr ("Send"); }
+            else if (b == tbReceive) { lit = p[lynxtune::receiveScale] >= 0.5f; name = tr ("Receive"); }
             else if (b >= tbRange0 && b < tbZoomOut)
             {
                 const auto [lo, hi] = lynxtune::rangePresetNotes (b - tbRange0);
@@ -1351,6 +1357,21 @@ public:
             {
                 if (b == tbLatch)
                     tuneLatch = ! tuneLatch;
+                else if (b == tbSend) // round 150: this scale to every other LYNX Tune with Receive on
+                {
+                    engine.editSong ([t = track, sl = slot] (Song& song) { lynxtune::sendScaleToAll (song, t, sl); });
+                    tuneSendFlash = 8;
+                }
+                else if (b == tbReceive) // on: take the scale sent last now, and the ones sent later
+                {
+                    const bool nowOn = fx->params[lynxtune::receiveScale] < 0.5f;
+                    std::vector<std::pair<int, float>> c { { lynxtune::receiveScale, nowOn ? 1.0f : 0.0f } };
+                    lynxtune::SharedScale sh;
+                    if (nowOn && lynxtune::publishedScale (sh))
+                        for (std::size_t i = 0; i < sh.values.size(); ++i)
+                            c.push_back ({ lynxtune::sharedScaleList()[i], sh.values[i] });
+                    setParams (c);
+                }
                 else if (b == tbBypass || b == tbRemove)
                     tuneRemove = b == tbRemove;
                 else if (b == tbReset) // every note of the scale legal again, nothing bypassed, no direction
@@ -1436,6 +1457,8 @@ public:
                 if (b == tbBypass) return tr ("Bypass mode: a key switches its note between corrected and passed as sung");
                 if (b == tbRemove) return tr ("Remove mode: a key cycles its note: legal, illegal (to the nearest note), illegal pitch up, illegal pitch down");
                 if (b == tbReset) return tr ("Reset scale: every note of the scale legal again, nothing bypassed");
+                if (b == tbSend) return tr ("Send: copy this key, scale and keyboard to every other LYNX Tune whose Receive is on");
+                if (b == tbReceive) return tr ("Receive: take the scale another LYNX Tune sends (switching it on takes the last one sent)");
                 if (b >= tbRange0 && b < tbZoomOut) return tr ("Range preset: notes sung outside the range pass uncorrected (Generic: the whole keyboard)");
                 if (b == tbZoomOut || b == tbZoomIn) return tr ("Keyboard view: show more / fewer octaves");
                 if (b == tbLeft || b == tbRight) return tr ("Keyboard view: scroll down / up an octave");
@@ -3647,6 +3670,8 @@ private:
                         keyHistogram[(std::size_t) (((int) std::lround (sungNote) % 12 + 12) % 12)] += 1.0;
                     if (autoKeyFlash > 0)
                         --autoKeyFlash;
+                    if (tuneSendFlash > 0 && --tuneSendFlash == 0) // round 150
+                        repaint();
                 }
                 // LYNX Tune's pitch history (30 points a second)
                 pitchHistory.push_back ({ liveMeter (0) * 127.0f, liveMeter (1) * 127.0f, (liveMeter (2) - 0.5f) * 4.0f });

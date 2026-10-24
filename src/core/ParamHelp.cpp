@@ -351,6 +351,13 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::prismMultiband, "slope" }, TR_NOOP ("Steepness of the band splits") },
         { { K::prismMultiband, "pan mode" }, TR_NOOP ("What each band's pan balances: left / right, or mid / side") },
         { { K::prismMultiband, "processing" }, TR_NOOP ("Dynamic phase: the crossovers' phase only where a band works; linear phase: no phase change (more latency); minimum phase: the classic crossover sum") },
+        { { K::prismMultiband, "band layout" }, TR_NOOP ("Split: the bands sit side by side on crossovers; free: each band has its own edges and slopes, the room between bands passes untouched") },
+        { { K::prismMultiband, "low" }, TR_NOOP ("Free layout: where this band starts") },
+        { { K::prismMultiband, "high" }, TR_NOOP ("Free layout: where this band ends") },
+        { { K::prismMultiband, "low slope" }, TR_NOOP ("Free layout: the steepness of the band's lower edge (6 to 48 dB/oct)") },
+        { { K::prismMultiband, "high slope" }, TR_NOOP ("Free layout: the steepness of the band's upper edge (6 to 48 dB/oct)") },
+        { { K::prismMultiband, "sc input" }, TR_NOOP ("What this band's detector hears: the plug-in's input or the external side chain (global: the External SC switch)") },
+        { { K::prismMultiband, "detector" }, TR_NOOP ("Measured: the reference's attack, release and soft range (a range-limited band recovers at once); classic: the detector of projects saved before round 150") },
         // Sentry Gate
         { { K::sentryGate, "style" }, TR_NOOP ("Gate, expander or ducker, and how it opens") },
         { { K::sentryGate, "threshold" }, TR_NOOP ("Level below which the gate closes") },

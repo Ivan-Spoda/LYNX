@@ -192,8 +192,9 @@ vendor = Soundtoys
 lynx = Foil Plate
 names = LittlePlate; Little Plate
 # round 129 (docs/PARITY.md): LYNX's plate reverb plays a plate's role (was Reeverb 2); its state is encoded: a
-# 2 s plate, 100 % wet, at the slot's dry / wet 25 % as before
-preset = Decay=0.3; Mix=1
+# 2 s plate, 100 % wet, at the slot's dry / wet 25 % as before. Round 150: in the measured plate voicing (the
+# trial's onset and decay per band, REA_rodada150a §7)
+preset = Decay=0.3; Mix=1; Voicing=1
 mix = 0.25
 
 [waves-reverbs]
@@ -1356,6 +1357,14 @@ int translateWavesRComp (const std::vector<std::uint8_t>& state, EffectSlot& slo
     slot.params[10] = wavesValue (rw, 22).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
     slot.params[11] = wavesValue (rw, 16).value_or (0.0) >= 0.5 ? 1.0f : 0.0f;
     slot.params[12] = 1.0f;
+    // round 150: the reference's own ranges (Compressor's "Ranges = RComp" and its RC parameters, REA_rodada150 §6):
+    // ratio 0.5 … 50 (below 1 expands), gain −30 … +30, attack 0.5 … 500 ms, release 5 … 5000 ms, as they are
+    const auto r = std::clamp (*ratio, 0.5, 50.0);
+    slot.params[13] = 1.0f;
+    slot.params[14] = (float) (r >= 1.0 ? 0.625 * (1.0 - std::log (r) / std::log (50.0)) : 0.625 + 0.375 * std::log (r) / std::log (0.5));
+    slot.params[15] = linNorm (wavesValue (rw, 2).value_or (0.0), -30.0, 30.0);
+    slot.params[16] = logNorm (wavesValue (rw, 8).value_or (16.0), 0.5, 500.0);
+    slot.params[17] = logNorm (wavesValue (rw, 0).value_or (160.0), 5.0, 5000.0);
     return 6;
 }
 

@@ -49,7 +49,7 @@ TEST (echoform_voicing_params_round147a)
     using namespace lynx;
     namespace e = echosuite::echoform;
     CHECK ((int) effectInfo (EffectKind::echoform).params.size() == e::paramCount);
-    CHECK (e::voicing == e::loopTreble + 1 && e::multiply == e::paramCount - 1); // appended after round 144's
+    CHECK (e::voicing == e::loopTreble + 1 && e::multiply == e::voicingStereo - 1); // appended after round 144's
     CHECK (e::paramCount <= maxEffectParams);
     const auto p = makeEffectSlot (EffectKind::echoform).params;
     CHECK (e::voicingOf (p[e::voicing]) == 0 && e::satTypeOf (p[e::satType]) == 0 && e::multiplyOf (p[e::multiply]) == 1);

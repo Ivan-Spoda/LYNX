@@ -31,6 +31,15 @@ struct Settings
     double phase = 0.0;        // start phase (cycles) at song position 0
     int analog = 1;            // 0 off, 1 the analog input stage (soft saturation), 2 the "hot" stage (a fast compressor)
     double outputDb = 0.0;
+    // round 150 (parity150a): the Tweak page — an envelope follower on the input moves the rate (octaves), the offset
+    // and the width (degrees) by its amount (0 below the threshold, 1 at threshold + range) [EXEC, REA_rodada150a §6]
+    double rateMod = 0.0;          // −3 … +3 octaves
+    double offsetMod = 0.0;        // −180 … +180 degrees
+    double widthMod = 0.0;         // −180 … +180 degrees
+    double envThresholdDb = -20.0; // peak dBFS of a sine where the modulation starts (the trial's default, measured)
+    double envRangeDb = 11.0;      // dB above it where the modulation is full (measured)
+    double feel = 0.0, groove = 0.0; // ±0.25 of a step: the whole pattern / the odd steps late (+) or early (−) [model]
+    bool beyond = false;           // angles past the speakers fold back with the far side inverted (measured); off = clipped
     bool operator== (const Settings&) const = default;
 };
 
@@ -49,6 +58,7 @@ public:
     // `beatPos` = song position in beats at the block's first sample; `bpm` the tempo
     void process (float* left, float* right, int n, double beatPos, double bpm) noexcept;
     float currentPan() const noexcept { return current; } // 0 (left) … 1 (right), for a display / control output
+    float envelopeAmount() const noexcept { return (float) envAmount; } // round 150: the Tweak follower, 0 … 1
 
 private:
     float analogStage (float x, int c) noexcept;
@@ -65,5 +75,9 @@ private:
     std::array<std::array<float, 32>, 2> hist {};
     int histPos = 0;
     float current = 0.5f;
+    // round 150: the Tweak envelope follower (mean square 1 ms, then attack 21 ms / release 290 ms on the peak-equivalent
+    // level) and the phase it adds when it moves the rate
+    double envMs = 0.0, env = 0.0, envAmount = 0.0, extraPhase = 0.0;
+    double msA = 0.0, envAtt = 0.0, envRel = 0.0;
 };
 } // namespace lynx::rhythmpan

@@ -697,7 +697,7 @@ struct VoicingData
     float p, b, driveDb[5], gainDb[5];
     float ratio, thresholdDb[5], makeupDb[5];
     float wobbleCents, wobbleHz;
-    int wobbleRandom;
+    int wobbleRandom;              // 0 = sine, 1 = smooth random, 2 = triangle (round 150)
     float wobblePhase;             // the right side's LFO phase offset (turns)
     float diffusion;               // 0 … 1, Echoform's diffusion amount
 };
@@ -797,6 +797,64 @@ float multiplyValue (int factor) noexcept
 // band of ≈ 6.2 / 3.1 / 1.55 kHz (−1 … −2 dB just below, −43 … −49 dB a third of an octave above)
 double multiplyCutoffHz (int factor) noexcept { return factor <= 1 ? 0.0 : 12400.0 / (double) factor; }
 
+// round 150 [EXEC]: EchoBoy's L/R offset in Single and Dual, measured at its default 8 ms with every style and with
+// 100 / 250 / 500 ms: the left side's odd repeats at n · T − 4 ms, its even ones at n · T + 6 ms; the right side +4 /
+// −6 ms (a left-only input leaves the right side silent: no cross-feed). Other offsets: the same law scaled [model].
+double lrOffsetMs (float v) noexcept { return 25.0 * (double) clamp01 (v); }
+float lrOffsetValue (double ms) noexcept { return (float) std::clamp (ms / 25.0, 0.0, 1.0); }
+double lrOddMs (double offsetMs, bool right) noexcept { return (right ? 0.5 : -0.5) * offsetMs; }
+double lrEvenMs (double offsetMs, bool right) noexcept { return (right ? -0.75 : 0.75) * offsetMs; }
+
+namespace
+{
+// round 150: the ping-pong pair tone per voicing (EchoBoy's Ping-Pong, measured black-box: a left-right pair's tone
+// beyond the loop tone of Single, white-noise bursts at −30 dBFS, feedback 0.5; fitted, tmp/parity150/pya/fitpp.py)
+struct PairToneData
+{
+    float gainDb;
+    int hp;            // 0 … 2 second-order high passes
+    float hpHz, hpQ;
+    int lp;            // 0 … 2 second-order low passes
+    float lpHz, lpQ;
+    float pkHz[2], pkDb[2], pkQ[2];
+};
+const PairToneData pairToneTable[voicingCount] {
+#include "core/EchoPairTones.inc"
+};
+int designPairTone (int k, double sr, Biquad* q) noexcept
+{
+    const auto& v = pairToneTable[std::clamp (k - 1, 0, voicingCount - 1)];
+    int n = 0;
+    const auto lim = [sr] (double hz) { return std::clamp (hz, 10.0, 0.45 * sr); };
+    for (int i = 0; i < v.hp; ++i)
+        q[n++].filter (sr, 1, lim (v.hpHz), v.hpQ);
+    if (v.lpHz < 0.45 * sr)
+        for (int i = 0; i < v.lp; ++i)
+            q[n++].filter (sr, 0, lim (v.lpHz), v.lpQ);
+    for (int i = 0; i < 2; ++i)
+        if (std::abs (v.pkDb[i]) > 0.01f && v.pkHz[i] < 0.45 * sr)
+            q[n++].peaking (sr, lim (v.pkHz[i]), v.pkQ[i], v.pkDb[i]);
+    return n;
+}
+float pairToneGain (int k) noexcept { return (float) std::pow (10.0, pairToneTable[std::clamp (k - 1, 0, voicingCount - 1)].gainDb / 20.0); }
+void copyCoefficients (Biquad& to, const Biquad& from) noexcept
+{
+    to.b0 = from.b0; to.b1 = from.b1; to.b2 = from.b2; to.a1 = from.a1; to.a2 = from.a2;
+}
+} // namespace
+
+double voicingPairToneDb (int k, double hz, double sampleRate)
+{
+    if (k <= 0)
+        return 0.0;
+    std::array<Biquad, 6> q {};
+    const int n = designPairTone (k, sampleRate, q.data());
+    auto db = 20.0 * std::log10 ((double) pairToneGain (k));
+    for (int i = 0; i < n; ++i)
+        db += biquadDb (q[(std::size_t) i], twoPi * hz / sampleRate);
+    return db;
+}
+
 double voicingToneDb (int k, bool loop, double hz, double sampleRate)
 {
     if (k <= 0)
@@ -861,6 +919,12 @@ public:
             for (auto& a : c.diffOut) // round 144: the diffusion after the loop
                 a.line.allocate (sr * 0.05);
         }
+        for (auto& b : bpath) // round 150: the second loop of the L/R offset
+        {
+            b.line.allocate (lineSamples);
+            for (auto& a : b.diff)
+                a.line.allocate (sr * 0.05);
+        }
         reset();
     }
 
@@ -904,6 +968,23 @@ public:
         multLp1.reset();
         multLp2.reset();
         compEnv[0] = compEnv[1] = 0.0;
+        for (auto& b : bpath)
+        {
+            b.line.clear();
+            for (auto& a : b.diff)
+                a.line.clear();
+            b.lowCut.reset();
+            b.highCut.reset();
+        }
+        for (auto& q : loopQB) q.reset();
+        for (auto& q : pairQ) q.reset();
+        eqBassB.reset();
+        eqMidB.reset();
+        eqTrebleB.reset();
+        lofiLpB.reset();
+        multLpB1.reset();
+        multLpB2.reset();
+        compEnvB[0] = compEnvB[1] = 0.0;
         voicePhase = 0.0;
         lfoPhase = 0.0;
         envelope = 0.0f;
@@ -1076,11 +1157,50 @@ private:
         const auto maxRead = ch[0].line.maxDelay() - 2.0;
         const auto loopG = freezeOn ? 1.0 : (twoTap ? g * g : g);
 
+        // round 150 [EXEC]: the voicing's measured stereo behaviour (EchoBoy's L/R offset in Single / Dual, its Ping-Pong)
+        const bool vStereo = vd != nullptr && p[voicingStereo] >= 0.5f && ! rhythmOn && ! freezeOn;
+        const auto lrO = lrOffsetMs (p[lrOffset]);
+        const bool lrOn = vStereo && lrO > 1e-3 && (st == Style::single || st == Style::dual) && plainRead && ! twoTap && ! feelTap
+                          && std::max (tL, tR) * 0.001 * sr + 0.05 * sr < maxRead;
+        const bool ppV = vStereo && st == Style::pingPong;
+        double offA[2] {}, offB[2] {};
+        if (lrOn)
+        {
+            for (int c = 0; c < 2; ++c)
+            {
+                offA[c] = lrOddMs (lrO, c == 1) * 0.001 * sr;
+                offB[c] = lrEvenMs (lrO, c == 1) * 0.001 * sr;
+                bpath[(std::size_t) c].lowCut.a = ch[(std::size_t) c].lowCut.a;
+                bpath[(std::size_t) c].highCut.a = ch[(std::size_t) c].highCut.a;
+            }
+            for (int k = 0; k < loopN; ++k)
+                copyCoefficients (loopQB[(std::size_t) k], loopQ[(std::size_t) k]);
+            copyCoefficients (eqBassB, eqBass);
+            copyCoefficients (eqMidB, eqMid);
+            copyCoefficients (eqTrebleB, eqTreble);
+            if (lofiOn)
+                lofiLpB.set (5800.0, sr);
+            if (mult > 1)
+            {
+                multLpB1.set (multiplyCutoffHz (mult), sr);
+                multLpB2.set (multiplyCutoffHz (mult), sr);
+            }
+        }
+        if (ppV && (vk != pairVoicing || sr != pairSr))
+        {
+            pairVoicing = vk;
+            pairSr = sr;
+            for (auto& q : pairQ) q = {};
+            pairN = designPairTone (vk, sr, pairQ.data());
+            pairLin = pairToneGain (vk);
+        }
+
         // round 147: the voicing's wobble as a delay swing (ms): a sine of depth c cents rms at f Hz swings the delay by
         // √2 · c / (1731.2 · 2π f) s (the smooth random LFO about its rms, so without the √2)
-        wobbleMs = vd != nullptr && vd->wobbleCents > 0.0f
-                       ? 1000.0 * (vd->wobbleRandom != 0 ? 1.0 : std::sqrt (2.0)) * vd->wobbleCents / (1731.234 * twoPi * std::max (0.05f, vd->wobbleHz))
-                       : 0.0;
+        // (round 150: a triangle of constant pitch ±c cents swings it by c / (1731.2 · 4 f) s)
+        wobbleMs = vd == nullptr || vd->wobbleCents <= 0.0f ? 0.0
+                   : vd->wobbleRandom == 2 ? 1000.0 * vd->wobbleCents / (1731.234 * 4.0 * std::max (0.05f, vd->wobbleHz))
+                                           : 1000.0 * (vd->wobbleRandom != 0 ? 1.0 : std::sqrt (2.0)) * vd->wobbleCents / (1731.234 * twoPi * std::max (0.05f, vd->wobbleHz));
         for (int i = 0; i < n; ++i)
         {
             const float in[2] = { l[i], r[i] };
@@ -1095,15 +1215,20 @@ private:
                 voicePhase -= std::floor (voicePhase);
                 for (int c = 0; c < 2; ++c)
                 {
-                    if (vd->wobbleRandom != 0) // both sides on one random swing when the reference's are in step
+                    if (vd->wobbleRandom == 1) // both sides on one random swing when the reference's are in step
                         modMs[c] = c == 1 && vd->wobblePhase == 0.0f ? modMs[0]
                                                                      : wobbleMs * (double) ch[(std::size_t) c].drift.next (2.0 * vd->wobbleHz, sr); // ≈ unit rms
                     else
                     {
                         auto ph = voicePhase + (c == 1 ? (double) vd->wobblePhase : 0.0);
-                        modMs[c] = wobbleMs * std::sin (twoPi * (ph - std::floor (ph)));
+                        ph -= std::floor (ph);
+                        // round 150: a triangle where the reference's delay track is one (wobbleRandom 2), in the sine's phase
+                        const auto u = ph + 0.25 - std::floor (ph + 0.25);
+                        modMs[c] = vd->wobbleRandom == 2 ? wobbleMs * (1.0 - 4.0 * std::abs (u - 0.5)) : wobbleMs * std::sin (twoPi * ph);
                     }
                 }
+                if (ppV) // round 150: the ping-pong's second side repeats the first one's echo as it is
+                    modMs[second] = 0.0;
             }
             for (int c = 0; c < 2 && vd == nullptr; ++c)
             {
@@ -1151,7 +1276,7 @@ private:
             }
 
             // read the echoes (read path: shifter / pitch / reverse / phaser / detune)
-            float echo[2], fbSig[2];
+            float echo[2], fbSig[2], oddEcho[2] { 0.0f, 0.0f };
             for (int c = 0; c < 2; ++c)
             {
                 auto& s = ch[(std::size_t) c];
@@ -1188,6 +1313,15 @@ private:
                 {
                     y = reverseRead (s, d[c], std::pow (2.0, semis / 12.0));
                     fbSig[c] = y;
+                }
+                else if (lrOn)
+                {
+                    // round 150: the L/R offset — the odd repeats from the first loop (T + odd offset, which feeds the
+                    // second loop), the even ones from the second (T + even − odd offset), which feeds the first again
+                    auto& b = bpath[(std::size_t) c];
+                    oddEcho[c] = s.line.at (std::clamp (d[c] + offA[c], 2.0, maxRead));
+                    y = oddEcho[c] + b.line.at (std::clamp (d[c] + offB[c] - offA[c], 2.0, maxRead));
+                    fbSig[c] = b.line.at (std::clamp (d[c] - offA[c], 2.0, maxRead));
                 }
                 else if (twoTap)
                 {
@@ -1237,7 +1371,7 @@ private:
                     }
                     default: break;
                 }
-                if (st != Style::quad && ! twoTap && ! feelTap && ! rhythmOn) // the quad style feeds back its last tap as read
+                if (st != Style::quad && ! twoTap && ! feelTap && ! rhythmOn && ! lrOn) // the quad style feeds back its last tap as read
                     fbSig[c] = y;
                 if (vd != nullptr) // round 147: the voicing's output tone (once, on the way out)
                 {
@@ -1252,7 +1386,17 @@ private:
             const auto mono = 0.5f * (in[0] + in[1]);
             const auto feed = freezeOn ? 0.0f : inG; // frozen: the input stays out of the loop; round 144: Input level
             float loopIn[2];
-            if (st == Style::pingPong && pairsOn)
+            if (ppV)
+            {
+                // round 150 [EXEC] EchoBoy's Ping-Pong: (L + R) / √2 into the first side; the second side's echo is the
+                // first one's at full level (same tone), the pair comes back through the pair tone and the loop gain
+                auto back = fbSig[second] * pairLin;
+                for (int k = 0; k < pairN; ++k)
+                    back = pairQ[(std::size_t) k].process (back, 0);
+                loopIn[first] = feed * (in[0] + in[1]) * 0.70710678f + (float) loopG * back;
+                loopIn[second] = fbSig[first];
+            }
+            else if (st == Style::pingPong && pairsOn)
             {
                 // in pairs: the start side → the other one at full level, the loop gain once per pair
                 loopIn[first] = feed * mono + (float) loopG * fbSig[second];
@@ -1276,7 +1420,7 @@ private:
             {
                 auto& s = ch[(std::size_t) c];
                 auto u = loopIn[c];
-                if (freezeOn) // the loop as it is: no diffusion, colour, cuts or limiter
+                if (freezeOn || (ppV && c == second)) // the loop as it is (round 150: the ping-pong copy too)
                 {
                     s.line.push (u);
                     continue;
@@ -1300,6 +1444,31 @@ private:
                 if (mult > 1) // round 147: Multiply's band
                     u = multLp2.process (multLp1.process (u, c), c);
                 s.line.push (softLimit (u));
+            }
+            // round 150: the L/R offset's second loop gets the odd repeats (one more pass: gain, diffusion, colour, cuts)
+            for (int c = 0; c < 2; ++c)
+            {
+                auto& b = bpath[(std::size_t) c];
+                if (! lrOn)
+                {
+                    b.line.push (0.0f);
+                    continue;
+                }
+                auto u = (c == 0 ? fbL : fbR) * (float) loopG * oddEcho[c];
+                if (diffAmount > 0.0f && ! postDiff)
+                    for (std::size_t k = 0; k < 4; ++k)
+                        u = b.diff[k].process (u, diffMs[k] * diffScale * 0.001 * sr * (c == 1 ? 1.07 : 1.0), 0.65f * diffAmount);
+                u = saturate (u, compEnvB[c]);
+                for (int k = 0; k < loopN; ++k)
+                    u = loopQB[(std::size_t) k].process (u, c);
+                u = b.highCut.lp (b.lowCut.hp (u));
+                if (loopEq)
+                    u = eqTrebleB.process (eqMidB.process (eqBassB.process (u, c), c), c);
+                if (lofiOn)
+                    u = lofiLpB.process (u, c);
+                if (mult > 1)
+                    u = multLpB2.process (multLpB1.process (u, c), c);
+                b.line.push (softLimit (u));
             }
 
             // ducking, round 137 [EXEC] measured on the ValhallaDelay demo (REA_rodada137 §5): a gain reduction on the
@@ -1801,12 +1970,12 @@ private:
         }
     }
 
-    float saturate (float x, int c) noexcept
+    float saturate (float x, int c) noexcept { return saturate (x, compEnv[c]); }
+    float saturate (float x, double& e) noexcept
     {
         const auto& v = *satCurve;
         if (v.comp != 0)
         {
-            auto& e = compEnv[c];
             const auto a = (double) std::abs (x);
             e += (a - e) * (a > e ? compAttack : compRelease);
             const auto lvl = 20.0 * std::log10 (std::max (1e-9, e));
@@ -1827,6 +1996,23 @@ private:
     double toneSr = 0.0, voicePhase = 0.0, wobbleMs = 0.0;
     float outLin = 1.0f;
     Butter8 multLp1, multLp2;
+    // round 150: the L/R offset's second loop per side (the even repeats; its own write path state) and the ping-pong
+    // pair tone
+    struct SecondLoop
+    {
+        Line line;
+        std::array<Allpass, 4> diff;
+        OnePole lowCut, highCut;
+    };
+    std::array<SecondLoop, 2> bpath;
+    std::array<Biquad, 4> loopQB {};
+    Biquad eqBassB, eqMidB, eqTrebleB;
+    Butter8 lofiLpB, multLpB1, multLpB2;
+    double compEnvB[2] {};
+    std::array<Biquad, 6> pairQ {};
+    int pairN = 0, pairVoicing = -1;
+    float pairLin = 1.0f;
+    double pairSr = 0.0;
 
     double sr = 48000.0;
     std::array<Channel, 2> ch;
@@ -2409,7 +2595,10 @@ const EffectInfo& echoformInfo()
                                      { "Mod shape", 0.0f }, { "Mod sync", 0.0f },
                                      { "Loop bass", 0.5f }, { "Loop mid", 0.5f }, { "Loop treble", 0.5f },
                                      // round 147: the echo voicings, the saturation type, Multiply (appended; off = the old sound)
-                                     { "Echo voicing", 0.0f }, { "Saturation type", 0.0f }, { "Multiply", 0.0f } } };
+                                     { "Echo voicing", 0.0f }, { "Saturation type", 0.0f }, { "Multiply", 0.0f },
+                                     // round 150: the voicings' measured stereo behaviour, EchoBoy's L/R offset (appended;
+                                     // projects saved before load with it off)
+                                     { "Voicing stereo", 1.0f }, { "L/R offset", 8.0f / 25.0f } } };
     return info;
 }
 
@@ -2537,6 +2726,8 @@ std::string paramText (EffectKind kind, int param, float v)
             case voicing: return voicingName (voicingOf (v));
             case satType: return satTypeName (satTypeOf (v));
             case multiply: return std::to_string (multiplyOf (v)) + "x";
+            case voicingStereo: return v >= 0.5f ? "measured" : "classic";
+            case lrOffset: return fmt ("%.1f ms", lrOffsetMs (v));
             case rhythmEdit: return rhythmEditOf (v) == RhythmEdit::even ? "even" : rhythmEditOf (v) == RhythmEdit::free ? "free" : "grid";
             case rhythmGrid:
             {
