@@ -94,7 +94,8 @@ TEST (lynx_tune_round128_extra_scales)
 
 TEST (lynx_tune_round128_natural_vibrato)
 {
-    // a held A3 with a ±40 c, 5.5 Hz vibrato and a slow retune (the vibrato survives): +6 dB doubles it, −12 dB keeps a quarter
+    // a held A3 with a ±40 c, 5.5 Hz vibrato and a slow retune (the vibrato survives): round 138 measured the reference:
+    // +6 dB makes it about 1.5 times wider, −12 dB keeps about two thirds
     const double fs = 44100.0;
     const auto x = r95::vowel (fs, (int) (fs * 1.6), [] (double t) { return 220.0 * std::exp2 (40.0 * std::sin (2.0 * r95::pi * 5.5 * t) / 1200.0); });
     double span[3] {};
@@ -108,8 +109,8 @@ TEST (lynx_tune_round128_natural_vibrato)
         span[k] = p128c::pitchSpan (y, latency, fs, 220.0, 0.6, 1.5);
     }
     CHECK (span[0] > 50.0);
-    CHECK (span[1] / span[0] > 1.6 && span[1] / span[0] < 2.4);
-    CHECK (span[2] / span[0] < 0.5);
+    CHECK (span[1] / span[0] > 1.3 && span[1] / span[0] < 1.8);
+    CHECK (span[2] / span[0] > 0.5 && span[2] / span[0] < 0.85);
 }
 
 TEST (lynx_tune_round128_bypass_and_remove)

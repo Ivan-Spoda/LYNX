@@ -1,6 +1,7 @@
 #include "core/Patcher.h"
 #include "core/Effects.h"
 #include "core/FormulaController.h"
+#include "core/RhythmPan.h"
 #include "core/MixSuite.h"
 #include "core/VoiceMatch.h"
 #include "core/EchoSuite.h"
@@ -1578,12 +1579,38 @@ private:
 class AutoPan final : public Effect
 {
 public:
-    void prepare (double sr) noexcept override { sampleRate = sr; dcA = (float) std::exp (-2.0 * 3.14159265358979323846 * 8.0 / sr); }
-    void reset() noexcept override { lfo = 0.0; smooth = 0.0; dcX[0] = dcX[1] = dcY[0] = dcY[1] = 0.0f; }
+    void prepare (double sr) noexcept override { sampleRate = sr; rhythm.prepare (sr); dcA = (float) std::exp (-2.0 * 3.14159265358979323846 * 8.0 / sr); }
+    void reset() noexcept override { rhythm.reset(); lfo = 0.0; smooth = 0.0; dcX[0] = dcX[1] = dcY[0] = dcY[1] = 0.0f; }
     void setSongPosition (double ticks) noexcept override { beats = ticks / 960.0; }
 
     void process (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept override
     {
+        constexpr int rb = autopan::count; // round 136's Rhythm voicing params follow round 135's panner params
+        if (p.size() > rb + 11 && p[rb] > 0.5f) // round 136: the Rhythm voicing (core/RhythmPan.h)
+        {
+            rhythmpan::Settings s;
+            s.rateHz = rhythmpan::rateHz (p[rb + 1]);
+            s.sync = p[rb + 2] > 0.5f;
+            s.beats = rhythmpan::beats (p[rb + 3]);
+            s.width = 210.0 * std::clamp ((double) p[rb + 4], 0.0, 1.0);
+            s.offset = -105.0 + 210.0 * std::clamp ((double) p[rb + 5], 0.0, 1.0);
+            s.smoothing = std::clamp ((double) p[rb + 6], 0.0, 1.0);
+            s.pattern = p[rb + 7] > 0.5f ? 1 : 0;
+            s.amount = std::clamp ((double) p[rb + 8], 0.0, 1.0);
+            s.phase = std::clamp ((double) p[rb + 9], 0.0, 1.0);
+            s.analog = p[rb + 10] < 0.25f ? 0 : (p[rb + 10] < 0.75f ? 1 : 2); // off / analog / hot
+            s.outputDb = -24.0 + 48.0 * std::clamp ((double) p[rb + 11], 0.0, 1.0);
+            if (! (s == rhythmSet))
+            {
+                rhythm.set (s);
+                rhythmSet = s;
+            }
+            rhythm.process (l, r, n, beats, bpm);
+            current = rhythm.currentPan();
+            position.store (current, std::memory_order_relaxed);
+            beats += n * std::max (bpm, 1.0) / 60.0 / sampleRate;
+            return;
+        }
         if (autopan::sourceOf (p[autopan::source]) != autopan::Source::fl)
         {
             processPanner (l, r, n, p, bpm);
@@ -1739,6 +1766,8 @@ private:
     double sampleRate = 44100.0, beats = 0.0, lfo = 0.0, smooth = 0.0, syncedBeats = -1.0;
     float current = 0.5f, dcA = 0.999f, dcX[2] {}, dcY[2] {};
     std::atomic<float> position { 0.5f }, peakIn { 0.0f }, peakOut { 0.0f };
+    rhythmpan::Engine rhythm; // round 136
+    rhythmpan::Settings rhythmSet;
 };
 
 // Vocoder = FL's Fruity Vocoder, exact engine (core/FruityVocoder.h, REA_rodada70; laws first read in REA_rodada20
@@ -2447,7 +2476,12 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                         // round 135 (the PanMan role; the FL source stays the default)
                                                         { "Source", 0.0f }, { "Rate", 0.46598f }, { "Direction", 0.0f }, { "Smoothing", 1.0f },
                                                         { "Steps", 1.0f / 6.0f }, { "Step note", 0.4f }, { "Input", 0.5f }, { "Output", 0.5f },
-                                                        { "Analog", 0.0f } } };
+                                                        { "Analog", 0.0f },
+                                                        // round 136: the Rhythm voicing (core/RhythmPan.h, measured), off = the engines above
+                                                        { "Voicing", 0.0f }, { "Rhythm rate", 0.4659f /* 0.25 Hz */ }, { "Sync", 0.0f },
+                                                        { "Beats", 0.4f /* 1 beat */ }, { "Width", 180.0f / 210.0f }, { "Offset", 0.5f },
+                                                        { "Rhythm smoothing", 1.0f }, { "Pattern", 0.0f }, { "Amount", 1.0f }, { "Start phase", 0.0f },
+                                                        { "Rhythm analog", 0.5f }, { "Rhythm output", 0.5f } } };
     static const EffectInfo vocoderInfo { "Vocoder", { { "Bands", 0.4f }, { "Order", 0.5f }, { "Listen", 1.0f }, { "Swap L/R", 0.0f },
                                                        { "Min freq.", 0.0f }, { "Max freq.", 1.0f }, { "Scale", 0.5f }, { "Invert", 0.0f },
                                                        { "Formant", 0.5f }, { "Width", 45.0f / 195.0f }, { "Attack", 10.0f / 990.0f },
@@ -3060,7 +3094,7 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return text;
 
         case EffectKind::autoPan:
-            if (param >= autopan::source)
+            if (param >= autopan::source && param < autopan::count)
                 return autopan::paramText (param, v);
             [[fallthrough]];
         case EffectKind::rhythmGain:
@@ -3070,6 +3104,22 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 std::snprintf (text, sizeof (text), "%d", (int) std::lround (v * rhythm::maxPoints));
             else if (kind == EffectKind::autoPan && (param == 1 || param == 3))
                 std::snprintf (text, sizeof (text), "%+.0f%%", (2.0f * v - 1.0f) * 100.0f);
+            else if (kind == EffectKind::autoPan && param >= autopan::count) // round 136: the Rhythm voicing (after round 135's panner)
+            {
+                switch (param - autopan::count + 7)
+                {
+                    case 7: return v > 0.5f ? "Rhythm" : "Classic";
+                    case 8: std::snprintf (text, sizeof (text), "%.2f Hz", rhythmpan::rateHz (v)); break;
+                    case 9: return v > 0.5f ? "beats" : "Hz";
+                    case 10: std::snprintf (text, sizeof (text), "%.3g beats", rhythmpan::beats (v)); break;
+                    case 11: std::snprintf (text, sizeof (text), "%.1f deg", 210.0f * v); break;
+                    case 12: std::snprintf (text, sizeof (text), "%+.1f deg", -105.0f + 210.0f * v); break;
+                    case 14: return v > 0.5f ? "8 steps" : "left / right";
+                    case 17: return v < 0.25f ? "digital" : (v < 0.75f ? "analog" : "analog (hot)");
+                    case 18: std::snprintf (text, sizeof (text), "%+.1f dB", -24.0f + 48.0f * v); break;
+                    default: std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f); break;
+                }
+            }
             else
                 std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f);
             return text;

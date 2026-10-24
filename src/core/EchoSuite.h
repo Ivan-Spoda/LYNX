@@ -88,6 +88,7 @@ enum Param
     rhythmTapLast = rhythmTap1 + 14,
     lofi,          // round 137: H-Delay's LoFi switch, independent of the mode: a steep low-pass (8th order, 5.8 kHz)
                    // inside the loop (measured on the trial, docs/specs/h-delay.md §4.2); off by default
+    tapeVoicing, // round 136: a measured tape-echo loop (REA_rodada136 §4): 0 = off, else one of tapeVoicingCount
     paramCount
 };
 enum class Style { single, ratio, quad, dual, pingPong }; // the two-time styles last (the panel shows the right time for both)
@@ -136,6 +137,10 @@ int eraOf (float v) noexcept;           // 0 past, 1 present, 2 future (round 13
 // the factor on the character's low-pass cut-off for the mode and era (1 for Past)
 double eraBandwidth (Mode m, int era) noexcept;
 int hybridOf (float v) noexcept;         // 0 off, 1 clean, 2 analog (round 124)
+constexpr int tapeVoicingCount = 3; // round 136: ping-pong (edited style), studio tape, studio tape hot
+int tapeVoicingOf (float v) noexcept; // 0 = off, 1 … tapeVoicingCount
+float tapeVoicingValue (int k) noexcept;
+const char* tapeVoicingName (int k) noexcept;
 float hybridValue (int h) noexcept;
 Mode modeOf (float v) noexcept;
 float modeValue (Mode m) noexcept;

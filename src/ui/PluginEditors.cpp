@@ -3602,7 +3602,10 @@ void open (AudioEngine& engine, int track, int slot)
         FacetEqWindows::open (engine, track, slot);
         return;
     }
-    if (ProEditorWindows::handles (kind)) // display-first editors of the dynamics / saturation engines (REA round 114)
+    // round 136: Ember in its Classic voicing opens the layout editor (the Classic controls); the Pro editor is Ember's own
+    const bool emberClassic = kind == EffectKind::ember && fxSlot.params.size() > (std::size_t) mixsuite::ember::voicing
+                              && fxSlot.params[(std::size_t) mixsuite::ember::voicing] > 0.5f;
+    if (ProEditorWindows::handles (kind) && ! emberClassic) // display-first editors of the dynamics / saturation engines (REA round 114)
     {
         ProEditorWindows::open (engine, track, slot);
         return;

@@ -67,6 +67,12 @@ enum Param : int
     keepVibrato,             // on (default) = the vibrato is kept at Vibrato amount; off = flattened
     vibratoAmount,           // 0 … 200 % (default 100 %): the vibrato kept (multiplies Natural vibrato's gain)
     correction,              // 0 … 100 % (default 100 %): how much of the correction is applied (scales the shift)
+    // round 136 (appended, off by default): the drive stage of the voice-shifter role it plays (measured black-box on
+    // the reference, REA_rodada136 §3), a wider formant range and an output trim
+    driveStage,              // on / off
+    drive,                   // 0 … 10
+    wideFormant,             // on: Formant shift reaches ±12 semitones
+    outputTrim,              // −24 … +24 dB
     count
 };
 
@@ -81,6 +87,7 @@ int scaleIndex (float v) noexcept;
 int keyIndex (float v) noexcept;
 double retuneMs (float v) noexcept;
 double formantSemitones (float v) noexcept;
+double formantSemitones (float v, bool wide) noexcept; // round 136: ±12 when wide
 int transposeSemitones (float v) noexcept;
 double referenceHz (float v) noexcept;
 int midiChannelIndex (float v) noexcept; // −1 = off, else the channel index (0-based)
