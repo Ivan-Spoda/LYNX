@@ -1902,7 +1902,7 @@ private:
             tilt.addItem (juce::String (t, 1) + " dB/oct", true, specTilt == t, [this, t] { specTilt = t; });
         m.addSubMenu (tr ("Tilt"), tilt);
         m.addItem (tr ("Freeze"), true, specFrozen, [this] { specFrozen = ! specFrozen; repaint(); });
-        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+        m.showMenuAsync (juce::PopupMenu::Options().withMousePosition()); // round 152 (checked by hand): at the mouse, not under the window
     }
 
     void showBandMenu (int b)
@@ -1925,7 +1925,7 @@ private:
         if (! isFree())
             m.addItem (tr ("Split the band"), nb() < bands, false, [this, b] { splitBand (b, std::sqrt ((b > 0 ? xoHz (b - 1) : 30.0) * (b < nb() - 1 ? xoHz (b) : 18000.0))); });
         m.addItem (tr ("Remove the band"), nb() > 1, false, [this, b] { removeBand (b); });
-        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+        m.showMenuAsync (juce::PopupMenu::Options().withMousePosition()); // round 152 (checked by hand): at the mouse, not under the window
     }
 
     bool bodyDown (const juce::MouseEvent& e) override
@@ -1960,7 +1960,7 @@ private:
                 const auto hz = hzForX (p.x, plot());
                 juce::PopupMenu m;
                 m.addItem (tr ("New band here"), [this, hz] { addFreeBand (hz); });
-                m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+                m.showMenuAsync (juce::PopupMenu::Options().withMousePosition()); // round 152 (checked by hand): at the mouse, not under the window
                 return false;
             }
             selected = -1;
@@ -2180,7 +2180,10 @@ private:
         if (hoverBand >= 0 && dragCtl == -1)
         {
             const auto n = node (hoverBand);
-            const auto r = juce::Rectangle<float> (n.x - 54.0f, n.y + 14.0f, 108.0f, 48.0f).constrainedWithin (p);
+            auto r = juce::Rectangle<float> (n.x - 54.0f, n.y + 14.0f, 108.0f, 48.0f).constrainedWithin (p);
+            // round 152 (checked by hand): the open band panel hid the read-out under the node; then it goes above
+            if (selected >= 0 && r.intersects (panelArea()))
+                r = juce::Rectangle<float> (n.x - 54.0f, n.y - 62.0f, 108.0f, 48.0f).constrainedWithin (p);
             g.setColour (colour::bg3.withAlpha (0.95f));
             g.fillRoundedRectangle (r, 5.0f);
             g.setColour (colour::textPrimary);
@@ -2447,7 +2450,7 @@ private:
         juce::PopupMenu m;
         for (int k = 1; k <= mixsuite::ember::maxBands; ++k)
             m.addItem (juce::String (k), true, count() == k, [this, k] { setBandCount (k); });
-        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+        m.showMenuAsync (juce::PopupMenu::Options().withMousePosition()); // round 152 (checked by hand): at the mouse, not under the window
     }
 
     void setBandCount (int target)

@@ -94,9 +94,20 @@ to the other side (Ping-pong, starting on the left) or to a random place (Random
 place (a hash of the step's number since the song start, so renders repeat). Defaults = the old sound (Clock, off).
 pt-BR: "Relógio|Pingue-pongue|Passo aleatório", "Divisor", "Disparar agora", "Passos aleatórios".
 
-## 5. Prism's free layout by hand in the running app
+## 5. Prism's free layout by hand in the running app [EXEC]
 
-(pending)
+LYNX.exe (this round's Windows build, `C:\Users\kauan\lynx-test\parity152`) driven with the real mouse (ui.ps1:
+moves, clicks, drags, right-clicks), every step screenshotted (`D:\lynx-work\parity152\ui\hand\g01 … g15`): Master
+slot → Prism Multiband → Editor → **Free** → drag the edge between bands 1 / 2 (both move: touching bands share it) →
+drag band 2's node right (a **gap** opens, band 3 is pushed) → **double-click in the gap** (band 5 fills it) → drag band
+5's low edge towards its high edge (the **0.8-octave minimum** pushes its upper edge and band 2) → right-click a node.
+Everything worked; two bugs found and fixed:
+- the right-click band menu (and the gap / analyser / bands menus) opened under the window's bottom-left corner, far
+  from the mouse (`withTargetComponent (this)`): now at the mouse (g13);
+- the hovered node's read-out (band, range, threshold) was drawn under the open band panel: it goes above the node
+  when the panel would cover it.
+Not seen: a sound check by ear (the machine's audio was not monitored); the menus' Split / Remove items in the free
+layout were not clicked.
 
 ## Tests
 
@@ -108,4 +119,9 @@ parameter-count checks follow the appended parameters.
 
 ## Where I stopped
 
-(pending)
+- Done (parent): §1–§5; sub-rounds 152a / 152b / 152c (see their docs). Stale ❌ rows flipped (Crest's Host sync /
+  MIDI trigger and audition — round 137; EchoBoy's state recognition — round 136).
+- Prism left: Linear phase on the prewarped axis (≤ 0.35 dB at a 3 kHz edge, 6 dB/oct); mixed 6 / n sides beyond the
+  measured table; the narrow-band table's mixed even slopes use their mean [model].
+- Auto-pan left: the trigger laws measured (the sources are not host parameters), the free rhythm-shape editor, tap tempo.
+- Foil ← Little Plate left: Mod's narrowing of the tail.

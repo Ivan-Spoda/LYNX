@@ -272,9 +272,9 @@ lookahead, meter scale, knee display, input meter.
 | Wet / dry pan (mid / side balance) | ✅ | round 135: WET PAN / DRY PAN in the side-chain panel (left / right balance of each path) |
 | SIDE CHAIN panel: listen, level, stereo link, detector EQ with nodes | ✅ | 3 EQ bands (original: 6) |
 | Side chain Internal / External | ✅ | |
-| Side chain Host Sync / MIDI triggering | ❌ | |
+| Side chain Host Sync / MIDI triggering | ✅ | round 137: side-chain trigger Host sync (note, rate, length — measured on the trial) and MIDI (row re-checked in round 152) |
 | Stereo link mode (Mid / Side / M→S / S→M) | ✅ | round 128: "Link mode" in the side-chain panel (Stereo, Mid, Side, Mid > side, Side > mid); translated from Pro-C 3's mid-only link range + mode |
-| Audition triggering | ❌ | |
+| Audition triggering | ✅ | round 137 / re-checked round 152: SC LISTEN plays the trigger key while a Host sync / MIDI trigger drives the detector (the detector's signal is the trigger) |
 | Oversampling (bottom bar) | ⚠️ | up to 8x (original 32x) |
 | Lookahead maximum (bottom bar) | ✅ | |
 | In / out levels (bottom bar) | ✅ | no pan |
@@ -1622,7 +1622,7 @@ Sources: docs/specs/echoboy.md (Pro Tools-era guide pp. 22–54, store page); `[
 | VCO Rate/Depth per tap, phase flip (PrimalTap) | knobs | Mod rate | Rate/Depth (one LFO) | ⚠️ | |
 | Preset menu / user presets / A/B | Soundtoys strip | FL factory list only; no user save, no A/B | "(no preset)" | ✅ | round 129's preset bar (Echoform) |
 | Gestures, value entry, automation | standard | generic editor: full set | full set | ✅ | |
-| Translation of the saved state | encoded | none, FL defaults (ms delay, FB, etc. unrelated) | none | ❌ | state unreadable; default only |
+| Translation of the saved state | encoded | none, FL defaults (ms delay, FB, etc. unrelated) | her states recognised (round 136) | ⚠️ | round 136 / re-checked round 152: the encoded preset is not decoded; her EchoBoy states are recognised by their hash and play Echoform's measured Tape voicing, any other state the Studio reel voicing at 1/4 note, 25 % feedback (`[soundtoys-echoboy]`) |
 
 **Scores**: Fruity Delay 3 as the stand-in: configuration 2/10, design 2/10. Echoform: configuration 5/10, design 5/10. **After round 144** (Echoform): configuration 9/10, design 8/10 (round 137: 8 / 7) — the rhythm editor (patterns, free / grid taps, shapes) and the Style Edit role (input, loop EQ, FB balance, diffusion place, wobble shape / sync); left: the saturation types, the ~30 style voicings, PrimalTap's Multiply. **After round 147a**: configuration 10/10, design 8/10 — the 31 measured voicings, the style-dependent Saturation, six saturation types, PrimalTap's Multiply; left: the reference's per-voicing Style Edit details (per-repeat decay, Mid Res), the chorus styles' multiple modulated voices (one wobble per side here), PrimalTap's per-tap VCO. **After round 150a**: configuration 10/10, design 8/10 (sound closer) — the voicings in Dual / Ping-Pong as measured (ping-pong copy, summed input, pair tone), EchoBoy's L/R offset (a control, measured law), the wobbles' shapes and depths from delay tracks; the "several voices" of the chorus styles do not exist on the trial (one modulated read per side, measured), so nothing is missing there; left: the per-voicing Style Edit details, PrimalTap's per-tap VCO, EchoBoy's offset law at offsets other than 8 ms (not a host parameter).
 
