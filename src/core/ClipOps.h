@@ -150,6 +150,51 @@ inline bool mergeClips (Song& song, std::vector<int> clips)
     return true;
 }
 
+// FL's track menu "Merge clips" (REA round 143): on `track`, every run of clips that continue each other (same
+// source, as canMerge) becomes one clip. Returns how many clips disappeared.
+inline int mergeTrackClips (Song& song, int track)
+{
+    int removed = 0;
+    for (bool again = true; again;)
+    {
+        again = false;
+        std::vector<int> onTrack;
+        for (int i = 0; i < (int) song.playlist.size(); ++i)
+            if (song.playlist[(std::size_t) i].track == track)
+                onTrack.push_back (i);
+        std::sort (onTrack.begin(), onTrack.end(), [&song] (int a, int b) { return song.playlist[(std::size_t) a].start < song.playlist[(std::size_t) b].start; });
+        for (std::size_t i = 0; i + 1 < onTrack.size() && ! again; ++i)
+        {
+            std::vector<int> run { onTrack[i] };
+            for (auto j = i + 1; j < onTrack.size() && canMerge (song, { run.back(), onTrack[j] }); ++j)
+                run.push_back (onTrack[j]);
+            if (run.size() > 1 && mergeClips (song, run))
+            {
+                removed += (int) run.size() - 1;
+                again = true;
+            }
+        }
+    }
+    return removed;
+}
+
+// FL's clip menu "Select source pattern / channel" (REA round 143): the clips (of that kind) play another source.
+inline void setClipSource (Song& song, const std::vector<int>& clips, ClipKind kind, int source)
+{
+    for (auto i : clips)
+    {
+        if (i < 0 || i >= (int) song.playlist.size() || song.playlist[(std::size_t) i].kind != kind)
+            continue;
+        auto& c = song.playlist[(std::size_t) i];
+        if (kind == ClipKind::pattern && source >= 0 && source < (int) song.patterns.size())
+            c.pattern = source;
+        else if (kind == ClipKind::audio && source >= 0 && source < (int) song.channels.size())
+            c.channel = source;
+        else if (kind == ClipKind::automation && source >= 0 && source < (int) song.automations.size())
+            c.automation = source;
+    }
+}
+
 // Reverse an audio clip: the channel plays its file backwards (all clips of that channel, as in FL; "Make
 // unique" first to reverse one clip alone). The clip keeps showing the same stretch of time: its offset is
 // mirrored so the part that was heard is still the part that plays (backwards).

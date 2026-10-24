@@ -1076,6 +1076,108 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
 
 } // namespace
 
+juce::var mixerTrackToVar (const MixerTrack& t)
+{
+    auto o = std::make_unique<juce::DynamicObject>();
+    o->setProperty ("name", str (t.name));
+    o->setProperty ("volume", t.volume);
+    o->setProperty ("pan", t.pan);
+    o->setProperty ("muted", t.muted);
+    o->setProperty ("solo", t.solo);
+    if (! t.threaded)
+        o->setProperty ("threaded", false);
+
+    if (! t.toMaster)
+        o->setProperty ("toMaster", false);
+    if (t.masterLevel != 1.0f)
+        o->setProperty ("masterLevel", juce::roundToInt (t.masterLevel * 10000.0f) / 10000.0);
+    if (t.colour != 0)
+        o->setProperty ("colour", juce::String::toHexString ((juce::int64) (t.colour & 0xFFFFFF)).paddedLeft ('0', 6));
+    if (t.stereo != 0.0f)
+        o->setProperty ("stereo", juce::roundToInt (t.stereo * 1000.0f) / 1000.0);
+    if (t.invertPhase)
+        o->setProperty ("invertPhase", true);
+    if (t.swapChannels)
+        o->setProperty ("swap", true);
+    if (t.inputChannel >= 0) // external audio input: device channel (0-based), stereo pair or mono
+    {
+        o->setProperty ("input", t.inputChannel);
+        if (! t.inputStereo)
+            o->setProperty ("inputMono", true);
+    }
+    if (t.monitor != InputMonitor::automatic)
+        o->setProperty ("monitor", (int) t.monitor);
+    if (! (t.eq == TrackEq {})) // [gains dB, frequencies Hz, widths 0..1] of the 3 bands
+        o->setProperty ("eq", juce::Array<juce::var> { t.eq.gainDb[0], t.eq.gainDb[1], t.eq.gainDb[2], t.eq.hz[0], t.eq.hz[1], t.eq.hz[2],
+                                                       t.eq.width[0], t.eq.width[1], t.eq.width[2] });
+
+    if (! t.sends.empty())
+    {
+        juce::Array<juce::var> sends;
+
+        for (const auto& send : t.sends)
+            sends.add (juce::Array<juce::var> { send.target, juce::roundToInt (send.level * 10000.0f) / 10000.0 });
+
+        o->setProperty ("sends", sends);
+    }
+
+    juce::Array<juce::var> effects;
+
+    for (const auto& slot : t.effects)
+        effects.add (effectToVar (slot));
+
+    if (! effects.isEmpty())
+        o->setProperty ("effects", effects);
+
+    return juce::var (o.release());
+}
+
+MixerTrack mixerTrackFromVar (const juce::var& t)
+{
+    MixerTrack track;
+    track.name = t["name"].toString().toStdString();
+    track.volume = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("volume", unityFader));
+    track.pan = juce::jlimit (-1.0f, 1.0f, (float) t.getProperty ("pan", 0.0));
+    track.muted = (bool) t.getProperty ("muted", false);
+    track.solo = (bool) t.getProperty ("solo", false);
+    track.threaded = (bool) t.getProperty ("threaded", true);
+    track.toMaster = (bool) t.getProperty ("toMaster", true);
+    track.masterLevel = juce::jlimit (0.0f, maxFaderGain, (float) (double) t.getProperty ("masterLevel", 1.0));
+    track.stereo = juce::jlimit (-1.0f, 1.0f, (float) (double) t.getProperty ("stereo", 0.0));
+
+    if (t.hasProperty ("colour"))
+        track.colour = 0xFF000000u | (std::uint32_t) t["colour"].toString().getHexValue32();
+    track.invertPhase = (bool) t.getProperty ("invertPhase", false);
+    track.swapChannels = (bool) t.getProperty ("swap", false);
+    track.inputChannel = juce::jlimit (-1, 255, (int) t.getProperty ("input", -1));
+    track.inputStereo = ! (bool) t.getProperty ("inputMono", false);
+    track.monitor = (InputMonitor) juce::jlimit (0, 3, (int) t.getProperty ("monitor", (int) InputMonitor::automatic));
+
+    if (const auto& eq = t["eq"]; eq.isArray() && eq.size() == 9)
+        for (std::size_t b = 0; b < 3; ++b)
+        {
+            track.eq.gainDb[b] = juce::jlimit (-18.0f, 18.0f, (float) (double) eq[(int) b]);
+            track.eq.hz[b] = juce::jlimit (10.0f, 16000.0f, (float) (double) eq[(int) b + 3]);
+            track.eq.width[b] = juce::jlimit (0.0f, 1.0f, (float) (double) eq[(int) b + 6]);
+        }
+
+    if (auto* sends = t["sends"].getArray())
+        for (const auto& send : *sends)
+            if (send.isArray() && send.size() == 2)
+                track.sends.push_back ({ (int) send[0], juce::jlimit (0.0f, maxFaderGain, (float) (double) send[1]) });
+
+    if (auto* effects = t["effects"].getArray())
+        for (const auto& e : *effects)
+        {
+            if ((int) track.effects.size() >= maxEffectSlots)
+                continue;
+            if (auto slot = effectFromVar (e))
+                track.effects.push_back (std::move (*slot));
+        }
+
+    return track;
+}
+
 juce::String toJson (const Song& song)
 {
     auto root = std::make_unique<juce::DynamicObject>();
@@ -1308,60 +1410,7 @@ juce::String toJson (const Song& song)
     juce::Array<juce::var> mixer;
 
     for (const auto& t : song.mixer)
-    {
-        auto o = std::make_unique<juce::DynamicObject>();
-        o->setProperty ("name", str (t.name));
-        o->setProperty ("volume", t.volume);
-        o->setProperty ("pan", t.pan);
-        o->setProperty ("muted", t.muted);
-        o->setProperty ("solo", t.solo);
-        if (! t.threaded)
-            o->setProperty ("threaded", false);
-
-        if (! t.toMaster)
-            o->setProperty ("toMaster", false);
-        if (t.masterLevel != 1.0f)
-            o->setProperty ("masterLevel", juce::roundToInt (t.masterLevel * 10000.0f) / 10000.0);
-        if (t.colour != 0)
-            o->setProperty ("colour", juce::String::toHexString ((juce::int64) (t.colour & 0xFFFFFF)).paddedLeft ('0', 6));
-        if (t.stereo != 0.0f)
-            o->setProperty ("stereo", juce::roundToInt (t.stereo * 1000.0f) / 1000.0);
-        if (t.invertPhase)
-            o->setProperty ("invertPhase", true);
-        if (t.swapChannels)
-            o->setProperty ("swap", true);
-        if (t.inputChannel >= 0) // external audio input: device channel (0-based), stereo pair or mono
-        {
-            o->setProperty ("input", t.inputChannel);
-            if (! t.inputStereo)
-                o->setProperty ("inputMono", true);
-        }
-        if (t.monitor != InputMonitor::automatic)
-            o->setProperty ("monitor", (int) t.monitor);
-        if (! (t.eq == TrackEq {})) // [gains dB, frequencies Hz, widths 0..1] of the 3 bands
-            o->setProperty ("eq", juce::Array<juce::var> { t.eq.gainDb[0], t.eq.gainDb[1], t.eq.gainDb[2], t.eq.hz[0], t.eq.hz[1], t.eq.hz[2],
-                                                           t.eq.width[0], t.eq.width[1], t.eq.width[2] });
-
-        if (! t.sends.empty())
-        {
-            juce::Array<juce::var> sends;
-
-            for (const auto& send : t.sends)
-                sends.add (juce::Array<juce::var> { send.target, juce::roundToInt (send.level * 10000.0f) / 10000.0 });
-
-            o->setProperty ("sends", sends);
-        }
-
-        juce::Array<juce::var> effects;
-
-        for (const auto& slot : t.effects)
-            effects.add (effectToVar (slot));
-
-        if (! effects.isEmpty())
-            o->setProperty ("effects", effects);
-
-        mixer.add (juce::var (o.release()));
-    }
+        mixer.add (mixerTrackToVar (t));
 
     root->setProperty ("mixer", mixer);
     root->setProperty ("mode", song.mode == PlayMode::song ? "song" : "pattern");
@@ -1615,47 +1664,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
             if ((int) song.mixer.size() >= maxMixerTracks)
                 break;
 
-            MixerTrack track;
-            track.name = t["name"].toString().toStdString();
-            track.volume = juce::jlimit (0.0f, 1.0f, (float) t.getProperty ("volume", unityFader));
-            track.pan = juce::jlimit (-1.0f, 1.0f, (float) t.getProperty ("pan", 0.0));
-            track.muted = (bool) t.getProperty ("muted", false);
-            track.solo = (bool) t.getProperty ("solo", false);
-            track.threaded = (bool) t.getProperty ("threaded", true);
-            track.toMaster = (bool) t.getProperty ("toMaster", true);
-            track.masterLevel = juce::jlimit (0.0f, maxFaderGain, (float) (double) t.getProperty ("masterLevel", 1.0));
-            track.stereo = juce::jlimit (-1.0f, 1.0f, (float) (double) t.getProperty ("stereo", 0.0));
-
-            if (t.hasProperty ("colour"))
-                track.colour = 0xFF000000u | (std::uint32_t) t["colour"].toString().getHexValue32();
-            track.invertPhase = (bool) t.getProperty ("invertPhase", false);
-            track.swapChannels = (bool) t.getProperty ("swap", false);
-            track.inputChannel = juce::jlimit (-1, 255, (int) t.getProperty ("input", -1));
-            track.inputStereo = ! (bool) t.getProperty ("inputMono", false);
-            track.monitor = (InputMonitor) juce::jlimit (0, 3, (int) t.getProperty ("monitor", (int) InputMonitor::automatic));
-
-            if (const auto& eq = t["eq"]; eq.isArray() && eq.size() == 9)
-                for (std::size_t b = 0; b < 3; ++b)
-                {
-                    track.eq.gainDb[b] = juce::jlimit (-18.0f, 18.0f, (float) (double) eq[(int) b]);
-                    track.eq.hz[b] = juce::jlimit (10.0f, 16000.0f, (float) (double) eq[(int) b + 3]);
-                    track.eq.width[b] = juce::jlimit (0.0f, 1.0f, (float) (double) eq[(int) b + 6]);
-                }
-
-            if (auto* sends = t["sends"].getArray())
-                for (const auto& send : *sends)
-                    if (send.isArray() && send.size() == 2)
-                        track.sends.push_back ({ (int) send[0], juce::jlimit (0.0f, maxFaderGain, (float) (double) send[1]) });
-
-            if (auto* effects = t["effects"].getArray())
-                for (const auto& e : *effects)
-                {
-                    if ((int) track.effects.size() >= maxEffectSlots)
-                        continue;
-                    if (auto slot = effectFromVar (e))
-                        track.effects.push_back (std::move (*slot));
-                }
-
+            auto track = mixerTrackFromVar (t);
             song.mixer.push_back (std::move (track));
         }
 
@@ -1703,5 +1712,50 @@ std::optional<Song> load (const juce::File& file, juce::String& error)
         });
 
     return song;
+}
+
+juce::String mixerTrackStateToJson (const MixerTrack& track)
+{
+    // the track's own settings and effects; routing, audio input, mute and solo belong to the project
+    auto state = track;
+    state.sends.clear();
+    state.toMaster = true;
+    state.masterLevel = 1.0f;
+    state.inputChannel = -1;
+    state.monitor = InputMonitor::automatic;
+    state.muted = state.solo = false;
+    auto root = std::make_unique<juce::DynamicObject>();
+    root->setProperty ("format", "lynx-mixer-track");
+    root->setProperty ("version", 1);
+    root->setProperty ("track", mixerTrackToVar (state));
+    return juce::JSON::toString (juce::var (root.release()));
+}
+
+std::optional<MixerTrack> mixerTrackStateFromJson (const juce::String& json, juce::String& error)
+{
+    const auto root = juce::JSON::parse (json);
+    if (root["format"].toString() != "lynx-mixer-track" || ! root["track"].isObject())
+    {
+        error = utf8 ("not a LYNX mixer track state");
+        return std::nullopt;
+    }
+    return mixerTrackFromVar (root["track"]);
+}
+
+void applyMixerTrackState (MixerTrack& target, const MixerTrack& state, bool takeName)
+{
+    // FL's "Open mixer track state": the effects and the track's settings; the routing stays
+    if (takeName && ! state.name.empty())
+        target.name = state.name;
+    if (takeName || state.colour != 0)
+        target.colour = state.colour;
+    target.volume = state.volume;
+    target.pan = state.pan;
+    target.stereo = state.stereo;
+    target.invertPhase = state.invertPhase;
+    target.swapChannels = state.swapChannels;
+    target.eq = state.eq;
+    target.threaded = state.threaded;
+    target.effects = state.effects;
 }
 } // namespace lynx::ProjectFile

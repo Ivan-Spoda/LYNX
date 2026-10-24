@@ -279,4 +279,87 @@ bool anyEffectEnabled (const Song& song, int track) noexcept
     const auto& fx = song.mixer[(std::size_t) track].effects;
     return std::any_of (fx.begin(), fx.end(), [] (const EffectSlot& s) { return s.enabled; });
 }
+void resetToDefault (Song& song, const std::vector<int>& tracks)
+{
+    for (auto t : tracks)
+        if (t >= 0 && t < (int) song.mixer.size())
+        {
+            auto& m = song.mixer[(std::size_t) t];
+            m.volume = unityFader;
+            m.pan = 0.0f;
+            m.stereo = 0.0f;
+            m.invertPhase = m.swapChannels = false;
+            m.eq = TrackEq {};
+            m.muted = m.solo = false;
+        }
+}
+
+void resetRouting (Song& song, const std::vector<int>& tracks)
+{
+    for (auto t : tracks)
+        if (t > 0 && t < (int) song.mixer.size())
+        {
+            auto& m = song.mixer[(std::size_t) t];
+            m.sends.clear();
+            m.toMaster = true;
+            m.masterLevel = 1.0f;
+        }
+}
+
+int unrouteInto (Song& song, const std::vector<int>& tracks)
+{
+    int removed = 0;
+    for (int from = 1; from < (int) song.mixer.size(); ++from)
+    {
+        auto& m = song.mixer[(std::size_t) from];
+        for (auto t : tracks)
+        {
+            if (t == from)
+                continue;
+            if (t == 0 && m.toMaster && ! m.sends.empty())
+            {
+                m.toMaster = false; // (it still goes somewhere else)
+                ++removed;
+            }
+            const auto before = m.sends.size();
+            m.sends.erase (std::remove_if (m.sends.begin(), m.sends.end(), [t] (const MixerSend& s) { return s.target == t; }), m.sends.end());
+            removed += (int) (before - m.sends.size());
+        }
+        if (m.sends.empty() && ! m.toMaster)
+            m.toMaster = true;
+    }
+    return removed;
+}
+
+std::vector<int> destinationsOf (const Song& song, int track)
+{
+    std::vector<int> out;
+    if (track <= 0 || track >= (int) song.mixer.size())
+        return out;
+    const auto& m = song.mixer[(std::size_t) track];
+    if (m.toMaster)
+        out.push_back (0);
+    for (const auto& s : m.sends)
+        if (std::find (out.begin(), out.end(), s.target) == out.end())
+            out.push_back (s.target);
+    std::sort (out.begin(), out.end());
+    return out;
+}
+
+std::vector<int> sourcesOf (const Song& song, int track)
+{
+    std::vector<int> out;
+    for (int from = 1; from < (int) song.mixer.size(); ++from)
+        if (from != track && song.routes (from, track))
+            out.push_back (from);
+    return out;
+}
+
+int insertTracks (Song& song, int at, int count)
+{
+    int done = 0;
+    for (int i = 0; i < count && insertTrack (song, at + i); ++i)
+        ++done;
+    return done;
+}
 } // namespace lynx::mixerops

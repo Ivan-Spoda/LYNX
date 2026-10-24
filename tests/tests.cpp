@@ -15542,6 +15542,7 @@ TEST (flp_pattern_events_import)
 #include "Rea134Tests.inc"
 #include "Rea139Tests.inc"
 #include "Rea143Tests.inc"
+#include "Rea143aTests.inc"
 #include "AudioEditTests.inc"
 #include "InputTests.inc"
 #include "../asio/InputDrift.h"
@@ -15795,4 +15796,5 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Parity135fTests.inc"
 #include "Feat132Tests.inc"
 #include "Parity135sTests.inc"
+#include "Parity137Tests.inc"
 #include "Patcher141Tests.inc"
