@@ -136,7 +136,7 @@ saved settings are translated and the original stays in the project byte for byt
 | Type | Exact | Near-exact | Close | Approximate | Placeholder | Entries |
 |---|---:|---:|---:|---:|---:|---:|
 | Generators | 12 | 10 | 7 | 1 | 2 | 32 |
-| Effects | 34 | 10 | 1 | 8 | 1 | 54 |
+| Effects | 35 | 10 | 1 | 8 | 1 | 55 |
 
 (Some entries cover several FL plugins that share one LYNX engine, e.g. the sampler or Parametric EQ / EQ 2.)
 
@@ -220,6 +220,7 @@ instruments (built-in synth, sampler, drums) or any VST3/CLAP plugin.
 | Love Philter | Fruity Love Philter | Import | Exact | all 86 states, live and export |
 | Pitch Shifter | Pitch Shifter | Import | Exact | all 15 states and 70 random ones |
 | EQUO | EQUO | Import | Exact | the send output to another track is not routed |
+| Emphasizer | Emphasizer | Insert | Exact | every state, 22.05–96 kHz, with control changes (round 154) |
 | Gross Beat | Gross Beat | Import | Exact | all 41 states; MIDI control of the slots and spline curves missing |
 | Squeeze | Fruity Squeeze | Import | Near-exact | within 5·10⁻⁹ of the reference model, which is bit-exact with FL |
 | Effector | Effector | Insert | Near-exact | all 12 algorithms; reverb −100 dB |

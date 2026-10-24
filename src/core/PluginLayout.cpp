@@ -1125,6 +1125,27 @@ Layout lynxTune()
     return l;
 }
 
+Layout emphasizer()
+{
+    // round 154: INPUT GAIN and the big EMPHASIS knob over their captions, OUTPUT, the meter strip on the right; the
+    // bottom strip carries the name plate and the SOFT CLIPPING / LEVEL MATCHING / BYPASS switches
+    Layout l;
+    l.fl = "Emphasizer";
+    l.width = 512;
+    l.height = 98;
+    auto& v = l.items;
+    v.push_back (section (0, 0, 236, 74, nullptr, boxed));
+    v.push_back (knob (40, 44, 26, "Input gain", TR_NOOP ("INPUT GAIN"), 12, showValue));
+    v.push_back (knob (118, 44, 30, "Emphasis", TR_NOOP ("EMPHASIS"), 12, showValue));
+    v.push_back (knob (196, 44, 26, "Output", TR_NOOP ("OUTPUT"), 12, showValue));
+    v.push_back (display (240, 4, 268, 66, "meter"));
+    v.push_back (label (4, 78, 120, 16, "EMPHASIZER", alignLeft));
+    v.push_back (toggle (236, 78, 96, 16, "Soft clipping", TR_NOOP ("SOFT CLIPPING")));
+    v.push_back (toggle (336, 78, 104, 16, "Level matching", TR_NOOP ("LEVEL MATCHING")));
+    v.push_back (toggle (444, 78, 64, 16, "Bypass", TR_NOOP ("BYPASS")));
+    return l;
+}
+
 Layout fruitySqueeze()
 {
     // SQUARIZE (amount), PUNCHER (preserve, impact, relation, amount) on plates; FILTER (on, type, freq, res, pre / post);
@@ -3138,7 +3159,9 @@ const std::vector<EffectKind>& flLayoutKinds()
                                                  EffectKind::vocoder, EffectKind::frequencySplitter, EffectKind::fruityDelayBank,
                                                  EffectKind::equo, EffectKind::multibandDelay, EffectKind::convolver,
                                                  EffectKind::flPitchShifter, EffectKind::effector, EffectKind::hardcore, EffectKind::vocodex,
-                                                 EffectKind::fruitySend };
+                                                 EffectKind::fruitySend,
+                                                 // round 154
+                                                 EffectKind::emphasizer };
     return kinds;
 }
 
@@ -3193,6 +3216,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::hyperChorus: l = hyperChorus(); break;
         case EffectKind::fruityBalance: l = fruityBalance(); break;
         case EffectKind::squeeze: l = fruitySqueeze(); break;
+        case EffectKind::emphasizer: l = emphasizer(); break;
         case EffectKind::maximus: l = maximus(); break;
         case EffectKind::vintagePhaser: l = vintagePhaser(); break;
         case EffectKind::fruityPhaser: l = fruityPhaser(); break;

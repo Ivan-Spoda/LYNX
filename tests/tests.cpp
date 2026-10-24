@@ -84,6 +84,7 @@
 #include "core/TransistorBass.h"
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
+#include "core/EmphasizerFx.h"
 #include "core/Reeverb2.h"
 #include "core/LuxeVerb.h"
 #include "core/Denormals.h"
@@ -15820,3 +15821,59 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Vox145Tests.inc"
 #include "Vox148Tests.inc"
 #include "Natives142Tests.inc"
+
+TEST (emphasizer_matches_fl_engine)
+{
+    // REA_rodada154: FL's Emphasizer through the import (state → slot → effect) against goldens of the installation's
+    // Emphasizer_x64.dll (rate set before the state, 512-frame calls, 44.1 kHz): FNV-1a of the output's float bits
+    auto signal = [] {
+        std::vector<float> l (24000), r (24000);
+        std::uint32_t s = 12345;
+        const float amps[] { 0.3f, 1.5f, 0.05f, 3.0f, 0.8f, 0.0f, 2.0f, 0.4f };
+        for (int i = 0; i < 24000; ++i)
+        {
+            const float a = amps[(i / 3000) % 8];
+            s = s * 1664525u + 1013904223u;
+            l[(std::size_t) i] = (float) ((s >> 8) / 8388608.0 - 1.0) * a;
+            s = s * 1664525u + 1013904223u;
+            r[(std::size_t) i] = (float) ((s >> 8) / 8388608.0 - 1.0) * a;
+        }
+        return std::pair { l, r };
+    };
+    struct Case { std::array<int, 6> raw; std::uint64_t hash; };
+    const Case cases[] { { { 0, 5013, 0, 0, 0, 10000 }, 0x79682f3abfdac488ull }, { { 6000, 9000, 1, 0, 0, 8000 }, 0x4138a8ff577a39d6ull },
+                         { { 8000, 2000, 0, 1, 0, 10000 }, 0x1a2ac8bf371715daull }, { { 3000, 5013, 1, 0, 1, 10000 }, 0x57a8fa4d8b890ac0ull } };
+    for (const auto& c : cases)
+    {
+        std::vector<std::uint8_t> state (4 + 24 + 1, 0);
+        const std::int32_t version = 2;
+        std::memcpy (state.data(), &version, 4);
+        std::memcpy (state.data() + 4, c.raw.data(), 24);
+        state[28] = 1;
+        const auto slot = lynx::effectFromFl ("Emphasizer", state);
+        CHECK (slot && slot->kind == lynx::EffectKind::emphasizer);
+        if (! slot)
+            continue;
+        auto fx = lynx::makeEffect (slot->kind);
+        fx->prepare (44100.0);
+        auto [l, r] = signal();
+        for (int i = 0; i < 24000; i += 1000) // the host's blocks (the effect calls the engine with ≤ 512 frames)
+            fx->process (l.data() + i, r.data() + i, 1000, slot->params, 120.0);
+        std::uint64_t h = 0xcbf29ce484222325ull;
+        for (int i = 0; i < 24000; ++i)
+            for (float v : { l[(std::size_t) i], r[(std::size_t) i] })
+            {
+                std::uint32_t u;
+                std::memcpy (&u, &v, 4);
+                h = (h ^ u) * 0x100000001b3ull;
+            }
+        CHECK (h == c.hash);
+    }
+    // version 1 (no output control) keeps the 0 dB default; texts
+    const std::vector<std::uint8_t> v1 { 1, 0, 0, 0, 0, 0, 0, 0, 0x95, 0x13, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
+    const auto s1 = lynx::emphasizer::parse (v1);
+    CHECK (s1 && s1->raw[1] == 5013 && s1->raw[5] == 10000);
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::emphasizer, 0, 0.5f, 120.0) == "+12.0 dB");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::emphasizer, 5, 1.0f, 120.0) == "0.0 dB");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::emphasizer, 2, 1.0f, 120.0) == "Soft");
+}

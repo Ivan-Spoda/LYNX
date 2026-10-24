@@ -187,6 +187,7 @@ const std::pair<const char*, EffectKind> flEffectTable[] = {
         { "Vintage Phaser", EffectKind::vintagePhaser },     { "Fruity Squeeze", EffectKind::squeeze },
         { "Hardcore", EffectKind::hardcore },
         { "Multiband Delay", EffectKind::delay },
+        { "Emphasizer", EffectKind::emphasizer },
 };
 } // namespace
 

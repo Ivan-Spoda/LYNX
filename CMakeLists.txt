@@ -81,6 +81,7 @@ add_library(lynx_core STATIC
     src/core/HarmlessFx.cpp
     src/core/SytrusEngine.cpp
     src/core/VintagePhaser.cpp
+    src/core/EmphasizerFx.cpp
     src/core/Reeverb2.cpp
     src/core/LuxeVerb.cpp
     src/core/IldspMath.cpp
