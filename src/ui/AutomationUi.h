@@ -21,7 +21,9 @@ std::unique_ptr<juce::Component> makeAutomationEditor (AudioEngine& engine, int 
 // A parameter's menu items, in FL's order (REA round 143 / 146): Edit events in the pattern, Edit events in piano
 // roll, Init song with this position, Delete initial value, Create automation clip; remote control: Link to MIDI
 // controller, Override global link..., internal controllers, unlink.
-void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const AutomationTarget& target);
+// The parameter menu's automation and remote-control items; with `headers`, under FL's section titles "Automation" and
+// "Remote control" (REA round 149 [EXEC]: FL's parameter menu).
+void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const AutomationTarget& target, bool headers = false);
 // Opens the Piano roll with the target's pattern events in its bottom lane (the main window sets it).
 extern std::function<void (const AutomationTarget&)> onEditEventsInPianoRoll;
 

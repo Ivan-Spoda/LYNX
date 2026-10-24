@@ -2277,7 +2277,7 @@ ui::ValueSpec countSpec (const juce::String& name, int maximum, int defaultValue
 // Arpeggiator).
 // FL's Root note keyboard (Misc tab, REA round 149): every key 0…127 (C0…G10, C5 = 60), the channel's root marked;
 // a click sets it. LYNX's own drawing.
-class RootKeyboard final : public juce::Component
+class RootKeyboard final : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     std::function<void (int)> onPick;
@@ -2530,7 +2530,7 @@ public:
         trackMid = knob ([this, name] {
                              const auto key = trackKey.getToggleState();
                              auto s = countSpec (name() + " - " + tr ("Tracking: the middle value (no offset)"), key ? 131 : 128, key ? 60 : 100,
-                                                 [key] (int v) { return key ? juce::MidiMessage::getMidiNoteName (120 - v, true, true, 4) : juce::String (v); });
+                                                 [key] (int v) { return key ? juce::MidiMessage::getMidiNoteName (120 - v, true, true, 5) : juce::String (v); }); // FL: C5 = 60
                              return s;
                          },
                          [trackingOf] (const ChannelDef& d) { return (double) trackingOf (d).mid; },
@@ -3085,6 +3085,18 @@ public:
           modulation (modulationWindow)
     {
         setUsingNativeTitleBar (true);
+        // FL names the window after the channel and its mixer track (REA round 149 [EXEC]: "FL Studio VSTi (Master)",
+        // "Synth Bass (Synth Bass)")
+        if (const auto& song = engine.getSong(); channel >= 0 && channel < (int) song.channels.size())
+        {
+            const auto& def = song.channels[(std::size_t) channel];
+            const auto t = def.mixerTrack;
+            const auto track = t <= 0 || t >= (int) song.mixer.size() ? tr ("Master")
+                               : song.mixer[(std::size_t) t].name.empty() ? tr ("Insert {0}", { juce::String (t) })
+                                                                          : juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str());
+            setName (juce::String::fromUTF8 (def.name.c_str()) + " (" + track + ")"
+                     + (modulation ? " - " + tr ("Envelope / instrument") : juce::String()));
+        }
 
         if (modulation)
             setContentOwned (new ModulationPanel (engine, channel), true);

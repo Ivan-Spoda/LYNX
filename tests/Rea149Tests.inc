@@ -251,3 +251,17 @@ TEST (rea149_consolidate_keeps_the_tempo_map)
     CHECK (std::abs (render.tempoAt (0.0) - 140.0) < 0.5 && std::abs (song.tempoAt ((double) start) - 140.0) < 0.5);
     CHECK (std::abs (render.bpm - 140.0) < 0.5);
 }
+
+TEST (rea149_create_group_names_unnamed_tracks)
+{
+    using namespace lynx;
+    // FL's Create group [DECOMP FUN_012aa200]: the selected tracks without a name take the current track's
+    auto song = Song::makeDefault();
+    song.mixer.resize (8);
+    for (auto& t : song.mixer)
+        t.name.clear();
+    song.mixer[4].name = "Drums";
+    song.mixer[5].name = "Snare";
+    mixerops::createGroup (song, { 3, 4, 5 }, 4);
+    CHECK (song.mixer[3].name == "Drums" && song.mixer[5].name == "Snare" && song.mixer[6].name.empty());
+}

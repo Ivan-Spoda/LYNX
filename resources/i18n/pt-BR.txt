@@ -4085,3 +4085,4 @@ countries: br
 "Notify about rendering mode" = "Avisar sobre o modo de renderização"
 "Let the plugin know when rendering to an audio file" = "Avisar o plugin quando estiver renderizando para um arquivo de áudio"
 "Compatibility" = "Compatibilidade"
+"Remote control" = "Controle remoto"

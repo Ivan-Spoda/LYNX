@@ -3613,9 +3613,8 @@ juce::PopupMenu MainComponent::makeLastTweakedMenu (int which)
     for (int a = 0; a < (int) song.automations.size(); ++a)
         if (song.automations[(std::size_t) a].target == *target)
             clip = a;
-    menu.addSectionHeader (tr ("Automation"));
-    addAutomationItem (menu, engine, *target);
-    menu.addItem (tr ("Edit automation clip..."), clip >= 0, false, [this, clip] { openAutomationEditor (engine, clip); });
+    juce::ignoreUnused (clip);
+    addAutomationItem (menu, engine, *target, true);
     menu.addSectionHeader (tr ("Value"));
     const auto value = engine.currentTargetValue (*target);
     menu.addItem (tr ("Copy value"), value >= 0.0f, false, [value] { lastTweakedClipboard() = value; });
