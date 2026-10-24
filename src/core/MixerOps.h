@@ -61,6 +61,22 @@ std::vector<int> sourcesOf (const Song& song, int track);
 // "Insert multiple...": `count` blank inserts at `at`; returns how many were inserted (the mixer may fill up).
 int insertTracks (Song& song, int at, int count);
 
+// --- FL's mixer groups and docking (REA round 146a) -----------------------------------------------------
+// The order the strips are shown in: the tracks docked left, then the middle ones, then those docked right (each block
+// by number).
+std::vector<int> displayOrder (const Song& song);
+// The group of `track`: the run of tracks around it, in display order and in its dock block, from the nearest track with
+// a separator (at or before it) up to the next separator. Inserts only (the Master is never part of a group).
+std::vector<int> groupOf (const Song& song, int track);
+// "Group › Create group": a separator on the first track of each run of `tracks` and on the track after it, so the
+// selection becomes a group; the tracks without a colour take the colour of `current` (FL's FUN_012aa200).
+void createGroup (Song& song, const std::vector<int>& tracks, int current);
+// "Group › Auto color group": the tracks of `track`'s group take its colour. Returns how many changed.
+int autoColorGroup (Song& song, int track);
+// "Group › Separator" and "Layout › Dock to" for the selected tracks (inserts; the Master can be docked).
+void setSeparator (Song& song, const std::vector<int>& tracks, bool on);
+void dockTracks (Song& song, const std::vector<int>& tracks, MixerDock dock);
+
 // All effects of the insert on or off (the "effects" switch).
 void setAllEffectsEnabled (Song& song, int track, bool enabled);
 bool anyEffectEnabled (const Song& song, int track) noexcept;

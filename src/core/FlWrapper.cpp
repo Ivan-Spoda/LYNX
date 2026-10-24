@@ -329,4 +329,17 @@ std::vector<std::uint8_t> writeFlVst2State (const FlVst2State& s)
     }
     return out;
 }
+
+const std::vector<WrapperOption>& wrapperOptions()
+{
+    static const std::vector<WrapperOption> options = {
+        { "Processing", "Use fixed size buffers", "Constant 2 ms blocks, for plugins that need equal buffers (adds latency)", &PluginRef::fixedBuffers, true, false },
+        { "Processing", "Process maximum size buffers", "With fixed size buffers: the whole device buffer instead of 2 ms blocks", &PluginRef::maxSizeBuffers, true, true },
+        { "Processing", "Use maximum buffer size from host", "With fixed size buffers: prepare the plugin for the host's largest block", &PluginRef::hostMaxBuffer, true, true },
+        { "Processing", "Allow threaded processing", "Allow the plugin to be multi-threaded (off: always on the audio thread)", &PluginRef::threaded, false, false },
+        { "Processing", "Allow smart disable", "Allow smart disable for the plugin (off: it is always processed)", &PluginRef::allowSmartDisable, false, false },
+        { "Bridging", "Make bridged", "Load the plugin in a separate process (bridged)", &PluginRef::separateProcess, true, false },
+    };
+    return options;
+}
 } // namespace lynx

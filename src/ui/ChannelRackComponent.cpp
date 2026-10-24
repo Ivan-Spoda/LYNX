@@ -2200,7 +2200,10 @@ void ChannelRackComponent::openPluginWindow (int channel)
             return;
         }
         PluginWindows::open (instrument, plugin->getInstance(),
-                             juce::String::fromUTF8 (engine.getSong().channels[(std::size_t) channel].name.c_str()));
+                             juce::String::fromUTF8 (engine.getSong().channels[(std::size_t) channel].name.c_str()),
+                             { &engine, [channel] (Song& song) -> PluginRef* {
+                                  return channel < (int) song.channels.size() ? &song.channels[(std::size_t) channel].plugin : nullptr;
+                              } });
         return;
     }
 

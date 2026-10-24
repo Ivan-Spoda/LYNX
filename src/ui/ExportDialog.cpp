@@ -1,4 +1,6 @@
 #include "ui/ExportDialog.h"
+
+#include "core/PlaylistOps.h"
 #include "platform/Paths.h"
 #include "ui/WindowOwner.h"
 
@@ -675,6 +677,36 @@ void bounceInsertToAudio (AudioEngine& engine, int track)
 
         engineRef->editSong ([&] (Song& s) { applyBounce (s, track, file.getFullPathName().toStdString(), length); });
     }, tr ("Rendering insert to audio...")))->launchThread();
+}
+
+void consolidatePlaylistTrack (AudioEngine& engine, int track, bool fromSongStart)
+{
+    engine.capturePluginStates();
+    const auto& song = engine.getSong();
+    Song render;
+    std::int64_t start = 0, musicTicks = 0;
+    if (! trackmodes::makeConsolidateSong (song, track, fromSongStart, render, start, musicTicks))
+        return;
+
+    const auto name = track < (int) song.playlistTracks.size() && ! song.playlistTracks[(std::size_t) track].name.empty()
+                          ? juce::String::fromUTF8 (song.playlistTracks[(std::size_t) track].name.c_str())
+                          : "Track " + juce::String (track + 1);
+    const auto folder = juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("LYNX/Renders");
+    folder.createDirectory();
+    const auto file = folder.getNonexistentChildFile (juce::File::createLegalFileName (name + " (consolidated)"), ".wav");
+
+    ExportSettings settings;
+    settings.format = ExportSettings::Format::wav32Float;
+    settings.sampleRate = engine.getTransport().sampleRate.load();
+    settings.tailSeconds = 2.0;
+    const auto length = musicTicks + (std::int64_t) (settings.tailSeconds * song.tempoAt ((double) (start + musicTicks)) * ppq / 60.0);
+
+    auto job = std::make_unique<ExportJob> (render, settings, file);
+    auto* engineRef = &engine;
+    (new ExportThread (std::move (job), file, [engineRef, track, file, start, length] (bool ok) {
+        if (ok)
+            engineRef->editSong ([&] (Song& s) { trackmodes::applyConsolidate (s, track, file.getFullPathName().toStdString(), start, length); });
+    }, tr ("Consolidating track...")))->launchThread();
 }
 
 std::unique_ptr<juce::Component> makeExportPanel (AudioEngine& engine, int format)

@@ -13,6 +13,9 @@ void showExportDialog (AudioEngine& engine, const juce::File& suggestedFolder, c
 // "Render to audio" (freeze): the insert becomes an audio clip on a new insert with the same
 // routing, and the original is muted. Runs on a background thread with progress.
 void bounceInsertToAudio (AudioEngine& engine, int track);
+// FL's Playlist track menu "Consolidate track(s)" (REA round 146a): the track's clips are rendered (through the mixer,
+// from the track's first clip or from the song start) into one audio clip that takes their place on the track.
+void consolidatePlaylistTrack (AudioEngine& engine, int track, bool fromSongStart);
 
 // Panel only (for --snapshot mode; `format`: 0 WAV, 1 MP3, 2 OGG, 3 FLAC with loop/stem options set). Nothing is saved.
 std::unique_ptr<juce::Component> makeExportPanel (AudioEngine& engine, int format = 0);
