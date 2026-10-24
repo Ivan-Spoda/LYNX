@@ -20,7 +20,7 @@ measured black-box without driving its GUI; the screenshot `eb/ed_pat_c.png` sho
 [MANUAL] (docs/specs/echoboy.md §): up to 16 taps on a 1–8-beat pattern, a grid of ½ … 1/64, a Shape menu (Decay,
 Reverse, Swell, Fade, Nonlin), pattern presets.
 
-LYNX (all appended after `lofi`, Even = round 137's measured law, so older projects sound the same):
+LYNX (all appended after round 136's `tapeVoicing`, Even = round 137's measured law, so older projects sound the same):
 
 | Parameter | Values | Law |
 |---|---|---|
@@ -46,7 +46,7 @@ shaped again), FB bal. (±100 %, each side's feedback, Dual's FB Balance), Diffu
 diffused on their way out, the loop stays clean), Wobble shape (sine, triangle, square, saw, random) and Sync (free,
 1/16 … 2 bars) for the LFO modes. Every default is the old sound (tested: identical output).
 
-The slot's parameter array grew from 96 to 128 values (`maxEffectParams`, Song.h): Echoform now has 101
+The slot's parameter array grew from 96 to 128 values (`maxEffectParams`, Song.h): Echoform now has 102
 parameters. Saved projects store parameters by index, so older files load unchanged.
 
 ## 3. Hush De-esser: DeEsser's Attn meter hold
@@ -56,6 +56,5 @@ The GR bar now holds its deepest reduction (a line and the number at the foot of
 
 ## Where I stopped
 
-- Note for round 138 (vox138): its `tapeVoicing` is appended right after `lofi`, where this round put
-  `rhythmEdit` (round 144's parameters: `rhythmEdit` … `loopTreble`, indices 75 … 100). Whichever lands second
-  appends its parameters after the other's last one.
+- Round 138 (vox138) landed first with `tapeVoicing` at index 75 (right after `lofi`); round 144's parameters
+  follow it: `rhythmEdit` … `loopTreble` = indices 76 … 101 (Echoform: 102 parameters).

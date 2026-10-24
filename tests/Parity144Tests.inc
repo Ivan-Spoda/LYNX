@@ -20,8 +20,8 @@ TEST (echoform_rhythm_editor_defaults_round144)
     using namespace lynx;
     namespace e = echosuite::echoform;
     CHECK ((int) effectInfo (EffectKind::echoform).params.size() == e::paramCount);
-    CHECK (e::rhythmEdit == e::lofi + 1);
-    CHECK (e::paramCount <= maxEffectParams); // round 144: 101 parameters (the slot holds 128)
+    CHECK (e::rhythmEdit == e::tapeVoicing + 1); // appended after round 136's tape voicing
+    CHECK (e::paramCount <= maxEffectParams); // round 144: 102 parameters (the slot holds 128)
     const auto p = makeEffectSlot (EffectKind::echoform).params;
     CHECK (e::rhythmEditOf (p[e::rhythmEdit]) == e::RhythmEdit::even);
     CHECK (e::rhythmShapeOf (p[e::rhythmShape]) == e::RhythmShape::decay);

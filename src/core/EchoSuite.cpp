@@ -654,6 +654,13 @@ double lowCutHz (float v) noexcept { return 10.0 + 1990.0 * clamp01 (v); }
 double highCutHz (float v) noexcept { return 200.0 + 19800.0 * clamp01 (v); }
 double outputDb (float v) noexcept { return -18.0 + 36.0 * clamp01 (v); }
 int hybridOf (float v) noexcept { return v < 0.25f ? 0 : (v < 0.75f ? 1 : 2); }
+int tapeVoicingOf (float v) noexcept { return std::clamp ((int) std::lround (clamp01 (v) * tapeVoicingCount), 0, tapeVoicingCount); }
+float tapeVoicingValue (int k) noexcept { return (float) std::clamp (k, 0, tapeVoicingCount) / (float) tapeVoicingCount; }
+const char* tapeVoicingName (int k) noexcept
+{
+    static const char* names[tapeVoicingCount + 1] { "off", "ping-pong tape", "studio tape", "studio tape (hot)" };
+    return names[std::clamp (k, 0, tapeVoicingCount)];
+}
 float hybridValue (int h) noexcept { return h <= 0 ? 0.0f : (h == 1 ? 0.5f : 1.0f); }
 Mode modeOf (float v) noexcept { return (Mode) std::clamp ((int) std::floor (clamp01 (v) * (float) modeCount), 0, modeCount - 1); }
 float modeValue (Mode m) noexcept { return ((float) m + 0.5f) / (float) modeCount; }
@@ -729,6 +736,7 @@ public:
         envelope = 0.0f;
         duckGr = 0.0;
         hyb.dirty = true;
+        tape.dirty = true;
     }
 
     // round 135w: 2 = input peak, 3 = output peak of the last block (linear, the editor's output meter and clip lamp)
@@ -745,6 +753,12 @@ public:
         for (int i = 0; i < n; ++i)
             inPeak = std::max (inPeak, std::max (std::abs (l[i]), std::abs (r[i])));
         meterIn.store (inPeak, std::memory_order_relaxed);
+        if (tapeVoicingOf (p[tapeVoicing]) != 0)
+        {
+            tapeProcess (l, r, n, p, bpm);
+            return;
+        }
+        tape.dirty = true;
         if (hybridOf (p[hybrid]) != 0)
             hybridProcess (l, r, n, p, bpm);
         else
@@ -1327,6 +1341,133 @@ private:
         }
     }
 
+    // ---- the tape voicing (round 136) ------------------------------------------------------------------------------
+    // [EXEC] black-box impulse responses of the official EchoBoy trial at her saved states (REA_rodada136 §4), our own
+    // code: each output side is z[n] = Σ_k g_k·F(v)[n − d_k] + G·F(z)[n − P], v = the input (both sides summed for the
+    // ping-pong, each its own otherwise) through a soft saturation, F = a pass's colour (the tap and a one-pole tail
+    // b·ρ^(m−1)), d_k = m_k·T + offset samples (T = the note at the tempo; the offsets measured with the trial's 32-sample
+    // latency removed), G = the loop gain per period P; the edited ping-pong style adds eight diffusion taps around each
+    // first tap; the pass colour is a 3rd-order IIR fitted to the deconvolved pass kernel (−21 dB ping-pong, −57 dB
+    // studio tape). No delay modulation was found (constant integer delays); her hiss-level noise is not reproduced.
+    struct TapeSide
+    {
+        int taps;
+        double mult[2];
+        int off[2];
+        double gain[2]; // gain[1] is relative to gain[0] at the reference loop gain, scaled by √(G / g0)
+    };
+    struct TapeVoicingData
+    {
+        bool sum;
+        double satC, satP;
+        double b[4], a[4];         // the pass colour: a 3rd-order IIR, unity tap (a[0] = 1)
+        bool ghosts;
+        double g0;                 // the loop gain the second-tap ratios were measured at
+        TapeSide side[2];
+        double periodMult;
+    };
+    static const TapeVoicingData& tapeData (int k) noexcept
+    {
+        static const TapeVoicingData v[tapeVoicingCount] {
+            // ping-pong, edited style (her 9 + 6 + 3 main states): L one beat + 38, R two beats + 43, loop two beats;
+            // the saturation constant is the per-channel one doubled (both inputs are summed before it)
+            { true, 2.64, 1.585, { 1.02697244, -2.98057822, 2.88052472, -0.926918896 }, { 1, -2.92001423, 2.84046497, -0.920450366 }, true, 0.356, { { 1, { 1.0, 0.0 }, { 38, 0 }, { 0.3887, 0.0 } }, { 1, { 2.0, 0.0 }, { 43, 0 }, { 0.3887, 0.0 } } }, 2.0 },
+            // studio tape, single: L at T − 184 and 2T + 296, R at T + 200 and 2T − 280, loop 2T
+            { false, 1.8895, 3.7594, { 1.00009827, -2.77614305, 2.55245962, -0.776414786 }, { 1, -2.81491464, 2.63055012, -0.815634356 }, false, 0.0574, { { 2, { 1.0, 2.0 }, { -184, 296 }, { 0.5748, 0.2592 } }, { 2, { 1.0, 2.0 }, { 200, -280 }, { 0.5748, 0.2592 } } }, 2.0 },
+            // studio tape with its saturation up (her 1/8-note states)
+            { false, 3.5838, 1.4594, { 1.00009827, -2.77614305, 2.55245962, -0.776414786 }, { 1, -2.81491464, 2.63055012, -0.815634356 }, false, 0.0466, { { 2, { 1.0, 2.0 }, { -184, 296 }, { 0.6100, 0.2350 } }, { 2, { 1.0, 2.0 }, { 200, -280 }, { 0.6100, 0.2350 } } }, 2.0 },
+        };
+        return v[std::clamp (k - 1, 0, tapeVoicingCount - 1)];
+    }
+    struct TapeState
+    {
+        Line in[2], z[2];
+        double passX[2][2][3] {}, passY[2][2][3] {}, loopX[2][3] {}, loopY[2][3] {};
+        bool dirty = true;
+    } tape;
+
+    // the pass colour (direct form I, 3rd order)
+    static double colour (const TapeVoicingData& v, double x, double* xh, double* yh) noexcept
+    {
+        const double y = v.b[0] * x + v.b[1] * xh[0] + v.b[2] * xh[1] + v.b[3] * xh[2] - v.a[1] * yh[0] - v.a[2] * yh[1] - v.a[3] * yh[2];
+        xh[2] = xh[1]; xh[1] = xh[0]; xh[0] = x;
+        yh[2] = yh[1]; yh[1] = yh[0]; yh[0] = y;
+        return y;
+    }
+
+    static double tapeSide (double x, double c, double p) noexcept
+    {
+        return x / std::pow (1.0 + std::pow (std::abs (x / c), p), 1.0 / p);
+    }
+
+    void tapeProcess (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept
+    {
+        const auto& v = tapeData (tapeVoicingOf (p[tapeVoicing]));
+        if (tape.in[0].buf.empty() || tape.dirty)
+        {
+            for (int c = 0; c < 2; ++c)
+            {
+                if (tape.in[c].buf.empty())
+                {
+                    tape.in[c].allocate (sr * 4.6 + 1300.0);
+                    tape.z[c].allocate (sr * 4.6 + 1300.0);
+                }
+                tape.in[c].clear();
+                tape.z[c].clear();
+                for (int k = 0; k < 2; ++k)
+                    for (int j = 0; j < 3; ++j)
+                        tape.passX[c][k][j] = tape.passY[c][k][j] = 0.0;
+                for (int j = 0; j < 3; ++j)
+                    tape.loopX[c][j] = tape.loopY[c][j] = 0.0;
+            }
+            tape.dirty = false;
+        }
+        const double T = sideMs (p, false, bpm) * sr / 1000.0;
+        const double maxD = tape.in[0].maxDelay() - 700.0;
+        const double G = std::clamp (feedbackGain (p[feedback]), 0.0, 1.2);
+        const double r2 = v.g0 > 0.0 ? std::sqrt (G / v.g0) : 0.0;
+        const int P = (int) std::clamp (std::lround (v.periodMult * T), 2L, (long) maxD);
+        float dryGain = 1.0f, wetGain = 0.0f;
+        equalPowerMix (p[mix], dryGain, wetGain); // [EXEC] her mix 50 / 53 % states: dry cos, wet sin
+        wetGain *= (float) std::pow (10.0, outputDb (p[output]) / 20.0);
+        static constexpr int ghostOff[2][8] { { -595, -493, -366, -300, 300, 366, 493, 595 },
+                                              { -641, -519, -465, -331, 331, 465, 519, 641 } }; // [EXEC] per side
+        static constexpr double ghostGain[8] { -0.1532, -0.1532, -0.1532, -0.1532, 0.1481, 0.1481, 0.1481, 0.1481 };
+        int d[2][2];
+        for (int c = 0; c < 2; ++c)
+            for (int k = 0; k < 2; ++k)
+                d[c][k] = (int) std::clamp (std::lround (v.side[c].mult[k] * T) + v.side[c].off[k], 1L, (long) maxD);
+        for (int i = 0; i < n; ++i)
+        {
+            const double xl = l[i], xr = r[i];
+            double out[2];
+            for (int c = 0; c < 2; ++c)
+            {
+                const double raw = v.sum ? xl + xr : (c == 0 ? xl : xr);
+                const double sat = tapeSide (raw, v.satC, v.satP);
+                const auto& sd = v.side[c];
+                double acc = 0.0;
+                for (int k = 0; k < sd.taps; ++k)
+                {
+                    const double g = k == 0 ? sd.gain[0] : sd.gain[0] * sd.gain[1] * r2;
+                    double x = tape.in[c].tap (d[c][k]);
+                    if (v.ghosts)
+                        for (int j = 0; j < 8; ++j)
+                            x += ghostGain[j] * tape.in[c].tap (d[c][k] + ghostOff[c][j]);
+                    acc += g * colour (v, x, tape.passX[c][k], tape.passY[c][k]);
+                }
+                // the loop: G·F(z)[n − P]
+                const double y = colour (v, tape.z[c].tap (P), tape.loopX[c], tape.loopY[c]);
+                const double z = acc + G * y;
+                tape.in[c].push ((float) sat); // (after the reads: tap (d) = x[n − d])
+                tape.z[c].push ((float) z);
+                out[c] = z;
+            }
+            l[i] = dryGain * (float) xl + wetGain * (float) out[0];
+            r[i] = dryGain * (float) xr + wetGain * (float) out[1];
+        }
+    }
+
     double sr = 48000.0;
     std::array<Channel, 2> ch;
     Butter8 steep;
@@ -1895,6 +2036,7 @@ const EffectInfo& echoformInfo()
                                      { "Tap 6", 1.0f }, { "Tap 7", 1.0f }, { "Tap 8", 1.0f }, { "Tap 9", 1.0f }, { "Tap 10", 1.0f },
                                      { "Tap 11", 1.0f }, { "Tap 12", 1.0f }, { "Tap 13", 1.0f }, { "Tap 14", 1.0f }, { "Tap 15", 1.0f },
                                      { "LoFi", 0.0f },
+                                     { "Tape voicing", 0.0f }, // round 136 (after round 137's)
                                      // round 144: the rhythm editor (appended; Even = the round-137 pattern)
                                      { "Rhythm edit", 0.0f }, { "Rhythm grid", 3.5f / 6.0f }, { "Rhythm shape", 0.0f },
                                      { "Tap 1 time", 1.0f / 16.0f }, { "Tap 2 time", 2.0f / 16.0f }, { "Tap 3 time", 3.0f / 16.0f },
@@ -1993,6 +2135,7 @@ std::string paramText (EffectKind kind, int param, float v)
             case pairs: return v >= 0.5f ? "pairs" : "alternate";
             case phaseL: case phaseR: return v >= 0.5f ? "inverted" : "normal";
             case hybrid: return hybridOf (v) == 0 ? "off" : (hybridOf (v) == 1 ? "clean" : "analog");
+            case tapeVoicing: return tapeVoicingName (tapeVoicingOf (v));
             case tempoSource: return v >= 0.5f ? "own BPM" : "project";
             case ownBpm: return fmt ("%.1f BPM", bpmOf (v));
             case startSide: return v >= 0.5f ? "right" : "left";

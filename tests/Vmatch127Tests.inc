@@ -13,29 +13,36 @@ lynx::PluginIdentity named (const char* name)
 
 TEST (panman_substitute_moves_the_balance_round127)
 {
+    // round 136: the substitute is Auto-pan's Rhythm voicing (her most used PanMan state as the fallback): a 1 kHz tone
+    // must swing between the sides (round 113's preset was a pass-through, round 127's a ±50 % balance)
     using namespace lynx;
     const auto id = vm127::named ("PanMan");
     const auto* e = findPluginSubstitute (id, false);
     CHECK (e != nullptr && e->effect == EffectKind::autoPan);
     if (e == nullptr)
         return;
-    auto slot = makeSubstituteSlot (*e);
-    slot.params[autopan::analogStage] = 0.0f; // round 135: the analog stage's DC blocker would remove the constant test signal
-    // render a constant 1.0 for two beats at 120 BPM: the balance must swing (round 113's preset was a pass-through)
+    const auto slot = makeSubstituteSlot (*e);
     auto fx = makeEffect (slot);
     fx->prepare (48000.0);
     fx->setSongPosition (0.0);
-    std::vector<float> l (48000, 1.0f), r (48000, 1.0f);
+    std::vector<float> l (48000), r (48000);
+    for (int i = 0; i < 48000; ++i)
+        l[(size_t) i] = r[(size_t) i] = 0.25f * (float) std::sin (2.0 * 3.141592653589793 * 1000.0 * i / 48000.0);
     for (int i = 0; i < 48000; i += 480)
     {
-        fx->setSongPosition (i / 48000.0 * 2.0 * 960.0); // 120 BPM: two beats per second, 960 ticks per beat
+        fx->setSongPosition (i / 48000.0 * 2.0 * 960.0);
         fx->process (l.data() + i, r.data() + i, 480, slot.params, 120.0);
     }
-    const auto [lmin, lmax] = std::minmax_element (l.begin(), l.end());
-    const auto [rmin, rmax] = std::minmax_element (r.begin(), r.end());
-    // round 135: her usual PanMan setting (an equal-power LFO, 150° wide, analog stage): each side swings far
-    CHECK (*lmax > 0.6f && *rmax > 0.6f);
-    CHECK (*lmin < 0.2f && *rmin < 0.2f);
+    float lmin = 9, lmax = 0, rmin = 9, rmax = 0;
+    for (int i = 4800; i + 480 <= 48000; i += 480)
+    {
+        double a = 0, b = 0;
+        for (int k = i; k < i + 480; ++k) { a += l[(size_t) k] * l[(size_t) k]; b += r[(size_t) k] * r[(size_t) k]; }
+        const auto ea = (float) (std::sqrt (2.0 * a / 480.0) / 0.25), eb = (float) (std::sqrt (2.0 * b / 480.0) / 0.25);
+        lmin = std::min (lmin, ea); lmax = std::max (lmax, ea); rmin = std::min (rmin, eb); rmax = std::max (rmax, eb);
+    }
+    CHECK (lmax > 0.95f && rmax > 0.95f);
+    CHECK (lmin < 0.2f && rmin < 0.2f);
 }
 
 namespace vm127
@@ -128,7 +135,7 @@ TEST (auto_tune_pro_extra_controls_translate_round127)
         const auto s = vm127::tuneSlot (vm127::autoTuneState (2, 0, { { 4, 20 }, { 3, 20 }, { 74, -5 }, { 92, 60 }, { 10, 2 }, { 70, 1 }, { 71, 120 }, { 9, 75 } }), n);
         CHECK (std::abs (t::referenceHz (s.params[t::reference]) - 440.0 * std::exp2 (20.0 / 1200.0)) < 0.01);
         CHECK (t::transposeSemitones (s.params[t::transpose]) == -5 && std::abs (s.params[t::mix] - 0.6f) < 1e-6f);
-        CHECK (t::rangeIndex (s.params[t::range]) == 2 && std::abs (t::formantSemitones (s.params[t::formantShift]) + 12.0 * std::log2 (1.2)) < 0.01);
+        CHECK (t::rangeIndex (s.params[t::range]) == 2 && std::abs (t::formantSemitones (s.params[t::formantShift]) + 0.0146 * std::pow (20.0, 1.4)) < 0.01); // round 138's measured throat law
         CHECK (std::abs (s.params[t::tracking] - 0.6f) < 1e-6f);
     }
     // Classic mode: no formant correction, no Flex-Tune, no transpose; Bass Instrument → Instrument

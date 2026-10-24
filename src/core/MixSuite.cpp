@@ -7,6 +7,7 @@
 
 #include "core/Biquad.h"
 #include "core/Effects.h"
+#include "core/EmberClassic.h"
 #include "core/LrCrossover.h"
 #include "core/VoiceMatch.h"
 
@@ -1462,6 +1463,8 @@ public:
         sr = rate;
         dry.setLength (Oversampler::latency());
         dc.set (sr, 8.0);
+        classic.prepare (sr); // round 136: the Classic voicing (allocates here, never in process)
+        classicOn = false;
         for (auto& d : bandDry)
             d.setLength (Oversampler::latency());
         for (auto& d : bandDc)
@@ -1473,6 +1476,7 @@ public:
 
     void reset() noexcept override
     {
+        classic.reset();
         for (auto& o : os)
             o.reset();
         dry.reset();
@@ -1512,6 +1516,12 @@ public:
 private:
     void chunk (float* l, float* r, int n, const EffectParams& p) noexcept
     {
+        if (on (p[voicing])) // round 136: the Classic voicing (core/EmberClassic.h) replaces the whole engine
+        {
+            chunkClassic (l, r, n, p);
+            return;
+        }
+        classicOn = false;
         if (const auto inDb = inputDb (p[inputGain]); std::abs (inDb) > 1e-9) // round 128: the input gain
         {
             const auto g = (float) dbToGain (inDb);
@@ -1865,6 +1875,36 @@ private:
     std::array<float, maxBlock> wl {}, wr {};
     float makeup = 1.0f, lastDrive = -1.0f;
     Style lastStyle = Style::tube;
+    // round 136: the Classic voicing
+    emberclassic::Engine classic;
+    emberclassic::Settings classicSet;
+    bool classicOn = false;
+
+    void chunkClassic (float* l, float* r, int n, const EffectParams& p) noexcept
+    {
+        emberclassic::Settings c;
+        c.style = emberclassic::styleOf (p[classicStyle]);
+        c.drive = emberclassic::driveUnits (p[classicDrive]);
+        c.punish = on (p[classicPunish]);
+        c.lowCutHz = emberclassic::lowCutHz (p[classicLowCut]);
+        c.thump = on (p[classicThump]);
+        c.toneDb = emberclassic::toneDb (p[classicTone]);
+        c.highCutHz = emberclassic::highCutHz (p[classicHighCut]);
+        c.steep = on (p[classicSteep]);
+        c.mix = std::clamp ((double) p[classicMix], 0.0, 1.0);
+        c.outputDb = emberclassic::outputDb (p[classicOutput]);
+        if (! classicOn || ! (c == classicSet))
+        {
+            if (! classicOn)
+                classic.reset();
+            classic.set (c);
+            classicSet = c;
+            classicOn = true;
+        }
+        const auto inPeak = Meters::peak (l, r, n);
+        classic.process (l, r, n);
+        meters.set (0.0f, 0.0f, inPeak, Meters::peak (l, r, n));
+    }
     // multiband mode
     std::array<LrSplit, 3> split;
     LrSplit ap2Low, ap3Low, ap3Mid;
@@ -1953,7 +1993,11 @@ const EffectInfo& emberInfo()
                                      { "B4 feedback", 0.0f }, { "B4 fb freq.", 0.6990f }, { "B4 dynamics", 0.5f },
                                      // round 135 (the Decapitator role)
                                      { "Punish", 0.0f }, { "Thump", 0.0f }, { "Steep", 0.0f }, { "Voice", 0.0f }, { "Wide cuts", 0.0f },
-                                     { "Low cut (wide)", 0.0f }, { "High cut (wide)", 1.0f } } };
+                                     { "Low cut (wide)", 0.0f }, { "High cut (wide)", 1.0f },
+                                     // round 136: the Classic voicing (EmberClassic.h)
+                                     { "Voicing", 0.0f }, { "Classic style", 0.0f }, { "Classic drive", 0.0f }, { "Classic punish", 0.0f },
+                                     { "Classic low cut", 0.0f }, { "Classic thump", 0.0f }, { "Classic tone", 0.5f }, { "Classic high cut", 1.0f },
+                                     { "Classic steep", 0.0f }, { "Classic mix", 1.0f }, { "Classic output", 1.0f } } };
     return info;
 }
 
@@ -2165,6 +2209,17 @@ std::string paramText (EffectKind kind, int param, float v)
             case band1Mix: case band2Mix: case band3Mix: case band4Mix: return fmt ("%.0f%%", v * 100.0);
             case band1Level: case band2Level: case band3Level: case band4Level: return fmt ("%+.1f dB", bandLevelDb (v));
             case inputGain: return fmt ("%+.1f dB", inputDb (v));
+            // round 136: the Classic voicing, in the reference's own units
+            case voicing: return on (v) ? "Classic" : "Ember";
+            case classicStyle: { static const char* names[] = { "A", "E", "N", "T", "P" }; return names[emberclassic::styleOf (v)]; }
+            case classicDrive: return fmt ("%.1f", emberclassic::driveUnits (v));
+            case classicPunish: case classicThump: return onOff (v);
+            case classicSteep: return on (v) ? "steep" : "gentle";
+            case classicLowCut: return hzText (emberclassic::lowCutHz (v));
+            case classicTone: return fmt ("%+.1f dB", emberclassic::toneDb (v));
+            case classicHighCut: return hzText (emberclassic::highCutHz (v));
+            case classicMix: return fmt ("%.0f%%", v * 100.0);
+            case classicOutput: return fmt ("%+.1f dB", emberclassic::outputDb (v));
             default:
                 if (param >= band1On && param < band1On + maxBands * extraFields)
                     switch ((param - band1On) % extraFields)
