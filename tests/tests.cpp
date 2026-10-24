@@ -15820,3 +15820,4 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Vox145Tests.inc"
 #include "Vox148Tests.inc"
 #include "Natives142Tests.inc"
+#include "Rea153Tests.inc"

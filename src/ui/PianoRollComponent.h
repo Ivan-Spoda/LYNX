@@ -183,7 +183,28 @@ private:
     juce::ComboBox chordBox; // chord created on each click (like FL's "stamp")
     juce::TextButton slideButton { "Slide" }; // new notes slide (like FL's slide tool)
     juce::ComboBox scaleBox; // scale highlighted on the keyboard rows
+    // note colour groups (FL's 16 note colours; REA round 153): new notes get `noteColour`; the swatch opens a menu
+    // that picks it, colours the selection and selects by colour
+    class ColourSwatch final : public juce::Button
+    {
+    public:
+        ColourSwatch() : juce::Button ("noteColour") {}
+        int colourIndex = 0;
+        void paintButton (juce::Graphics& g, bool over, bool down) override;
+    };
+    ColourSwatch colourButton;
+    int noteColour = 0;
+    void showColourMenu();
+    void colourSelection (int colour);   // one undo step
+    void selectByColour (int colour);    // the channel's notes of that colour
+    juce::PopupMenu selectMenu();        // FL's Select submenu (invert, odd, random, muted, overlapping, stacked, colour)
+    // chord readout (FL 2026's chord detection): the chord of the held MIDI / typing-piano keys, else of the
+    // selected notes
+    juce::Label chordLabel;
+    void updateChordReadout();
+    void showKeyMenu (int key); // right-click on the keyboard: key labels of the channel
     std::vector<int> chordIntervals() const;
+    bool chordTopDown = false; // the chord stamp puts the clicked key on top (FL 2026's top-down mode)
     bool inScale (int key) const;
     int scaleRoot() const;  // 0..11
     int scaleIndex() const; // index into notetools::scales(), 0 = none

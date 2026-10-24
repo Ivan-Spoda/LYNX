@@ -216,6 +216,7 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
             e.channel = clip.channel;
             e.key = audioClipKey (clipIndex);
             e.velocity = clip.gain;
+            e.pan = clip.pan;
             e.fadeIn = (float) ((double) clip.fadeIn / tps);
             e.fadeOut = (float) ((double) clip.fadeOut / tps);
 

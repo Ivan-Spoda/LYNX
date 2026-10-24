@@ -80,6 +80,7 @@ std::optional<Parsed> parse (const juce::File& file, juce::String& error)
                 n.length = std::max<std::int64_t> (1, end - n.start);
                 n.key = m.getNoteNumber();
                 n.velocity = m.getFloatVelocity();
+                n.colour = juce::jlimit (0, noteColourCount - 1, m.getChannel() - 1); // FL: MIDI channel = note colour
                 notes.push_back (n);
                 channels.push_back (juce::jlimit (0, 15, m.getChannel() - 1));
             }
@@ -235,8 +236,9 @@ bool savePattern (const Song& song, int patternIndex, const juce::File& file, ju
     {
         auto& seq = byChannel[n.channel];
         const auto velocity = (juce::uint8) juce::jlimit (1, 127, juce::roundToInt (n.velocity * 127.0f));
-        seq.addEvent (juce::MidiMessage::noteOn (1, n.key, velocity), (double) n.start);
-        seq.addEvent (juce::MidiMessage::noteOff (1, n.key), (double) (n.start + std::max<std::int64_t> (1, n.length)));
+        const auto midiChannel = juce::jlimit (1, 16, n.colour + 1); // FL: the note colour is the MIDI channel
+        seq.addEvent (juce::MidiMessage::noteOn (midiChannel, n.key, velocity), (double) n.start);
+        seq.addEvent (juce::MidiMessage::noteOff (midiChannel, n.key), (double) (n.start + std::max<std::int64_t> (1, n.length)));
     }
 
     juce::MidiFile midi;

@@ -9,6 +9,7 @@
 
 #include "core/NoteEdit.h"
 #include "core/PlaylistOps.h"
+#include "core/TempoDetect.h"
 #include "ui/ExportDialog.h"
 #include "engine/Text.h"
 #include "ui/BrowserComponent.h"
@@ -2648,6 +2649,17 @@ void PlaylistComponent::showRulerMenu (int x)
     }
 
     menu.addSeparator();
+    {
+        // FL's Select submenu (REA round 153)
+        juce::PopupMenu select;
+        const auto overlapping = clipops::overlappingClips (song), stacked = clipops::stackedClips (song), muted = clipops::mutedClips (song);
+        select.addItem (tr ("Overlapping clips ({0})", { juce::String ((int) overlapping.size()) }), ! overlapping.empty(), false,
+                        [this, overlapping] { setSelection (overlapping); });
+        select.addItem (tr ("Stacked clips: hidden duplicates ({0})", { juce::String ((int) stacked.size()) }), ! stacked.empty(), false,
+                        [this, stacked] { setSelection (stacked); });
+        select.addItem (tr ("Muted clips ({0})", { juce::String ((int) muted.size()) }), ! muted.empty(), false, [this, muted] { setSelection (muted); });
+        menu.addSubMenu (tr ("Select"), select);
+    }
     menu.addItem (tr ("Ripple editing (resizing and deleting move the later clips)") + "\tShift+S", true, ripple, [this] { setRipple (! ripple); });
     {
         juce::PopupMenu zoom;
@@ -2957,6 +2969,49 @@ juce::PopupMenu PlaylistComponent::buildClipMenu (int index, int mouseX)
         }
         fit.addItem (tr ("Original speed (no stretch)"), true, channel.sampler.stretchBeats <= 0.0f, [fitTo] { fitTo (0.0f, false); });
         menu.addSubMenu (tr ("Fit to tempo"), fit, sample != nullptr);
+
+        // FL's "Detect tempo" (REA round 153; LYNX's own detector, core/TempoDetect): a range to fold the result
+        // into, then fit the clip to the project tempo or take its tempo for the project
+        {
+            juce::PopupMenu detect;
+            struct Range { double low, high; };
+            for (const auto r : { Range { 70.0, 140.0 }, Range { 90.0, 180.0 }, Range { 60.0, 200.0 } })
+                detect.addItem (tr ("{0}-{1} BPM", { juce::String (r.low, 0), juce::String (r.high, 0) }), [this, sample, fitTo, r] {
+                    if (sample == nullptr)
+                        return;
+                    tempodetect::Options options;
+                    options.minBpm = r.low;
+                    options.maxBpm = r.high;
+                    const auto found = tempodetect::detect (sample->leftData(), sample->isStereo() ? sample->rightData() : nullptr,
+                                                            sample->frames(), sample->sampleRate, options);
+                    if (found.bpm <= 0.0)
+                    {
+                        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Detect tempo"),
+                                                                tr ("No steady tempo was found in this sample."));
+                        return;
+                    }
+                    const auto songBpm = engine.getSong().bpm;
+                    auto* window = new juce::AlertWindow (tr ("Detect tempo"),
+                                                          tr ("Detected tempo: {0} BPM ({1} beats in the sample). The project plays at {2} BPM.",
+                                                              { juce::String (found.bpm, 2), juce::String (found.beats, 2), juce::String (songBpm, 2) }),
+                                                          juce::MessageBoxIconType::NoIcon);
+                    window->addButton (tr ("Fit the clip to the project tempo"), 1);
+                    window->addButton (tr ("Use it as the project tempo"), 2);
+                    window->addButton (tr ("Use it, rounded to a whole BPM"), 3);
+                    window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+                    window->enterModalState (true, juce::ModalCallbackFunction::create ([this, found, fitTo] (int result) {
+                                                 if (result == 1)
+                                                     fitTo ((float) (std::round (found.beats * 4.0) / 4.0), true);
+                                                 else if (result == 2 || result == 3)
+                                                 {
+                                                     const auto bpm = juce::jlimit (minTempo, maxTempo, result == 3 ? std::round (found.bpm) : found.bpm);
+                                                     engine.editSong ([bpm] (Song& s) { s.bpm = bpm; });
+                                                 }
+                                             }),
+                                             true);
+                });
+            menu.addSubMenu (tr ("Detect tempo"), detect, sample != nullptr);
+        }
 
         if (clip.fadeIn > 0 || clip.fadeOut > 0)
             menu.addItem (tr ("Remove fades"), [this, targets] {
