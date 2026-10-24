@@ -1688,7 +1688,7 @@ Layout compressorLayout()
     v.push_back (when (dial (217, 252, 34, "RC ratio", TR_NOOP ("Ratio")), "Ranges", 0.5f, 1.0f));
     v.push_back (tabs (318, 7, 90, 16, "Ranges", TR_NOOP ("LYNX|RComp")));
     // round 152: the vintage voicing's static curve — measured at every ratio (new instances) or round 150's (older projects)
-    v.push_back (when (tabs (196, 7, 116, 16, "Vintage curve", TR_NOOP ("Old|Measured")), "Voicing", 0.5f, 1.0f));
+    v.push_back (when (tabs (12, 7, 104, 16, "Vintage curve", TR_NOOP ("Old|Measured")), "Voicing", 0.5f, 1.0f));
     v.push_back (dial (300, 252, 30, "Mix", TR_NOOP ("Mix")));
     v.push_back (dial (370, 252, 30, "Trim", TR_NOOP ("Trim"), bipolar));
     return l;
