@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <map>
+#include <optional>
 #include <vector>
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -14,6 +15,11 @@ namespace lynx
 {
 // The built-in effects offered in the slot menus and the quick-add palette, in menu order.
 const std::vector<EffectKind>& addableEffects();
+// The FL engines among them need the user's FL installation (core/NativeEngines.h, round 142): whether one can be
+// added here, its menu name ("(beta)", "(requires FL Studio)") and a new slot (nullopt = not available here)
+bool addableEffectAvailable (EffectKind kind);
+juce::String addableEffectName (EffectKind kind);
+std::optional<EffectSlot> newAddableEffect (EffectKind kind, double bpm = 120.0);
 
 // External audio input of the inserts (REA_rodada88): FL's "Audio input source" of a mixer track.
 namespace mixerinput
