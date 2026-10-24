@@ -89,7 +89,7 @@ steadiness; Multiply's delays and band; a saturation type without a voicing; the
 
 ## Where I stopped
 
-- Done: §2, §3, PARITY rows (Echo Style menu, Saturation, saturation type, Multiply) and the score note.
+- Done: §2, §3, PARITY rows (Echo Style menu, Saturation, saturation type, Multiply) and the score note. Editor: Voicing / Sat. menus and the Mult. tabs in the Style edit row (`D:\lynx-work\parity147\a\ui\Echoform.png`). build-local with the FL Data dir: 1 645 927 checks, 0 failures; Windows build OK.
 - Not done: the chorus / "fat" styles' several modulated voices (LYNX: one wobble per side; the measured tone and
   level match, the comb-like movement of two voices does not); EchoBoy's Style Edit details per voicing (per-repeat
   decay, Mid Res) and its own saturation-type menu (editor only, not a host parameter); the styles' behaviour in
