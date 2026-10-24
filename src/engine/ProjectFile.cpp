@@ -522,8 +522,11 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
     slot.smartDisable = (bool) e.getProperty ("smartDisable", true);
 
     if (auto* params = e["params"].getArray())
+    {
         for (int i = 0; i < params->size() && i < maxEffectParams; ++i)
             slot.params[(std::size_t) i] = juce::jlimit (0.0f, 1.0f, (float) (double) (*params)[i]);
+        upgradeLoadedEffectParams (slot, (std::size_t) params->size()); // engines that changed since the file was saved
+    }
 
     slot.plugin = pluginFromVar (e["plugin"]);
     if (*kind != EffectKind::plugin && e.hasProperty ("substituteFor"))

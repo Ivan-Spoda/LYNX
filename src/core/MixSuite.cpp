@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 
 #include "core/Biquad.h"
@@ -132,6 +133,9 @@ struct Meters
         in.store (inPeak, std::memory_order_relaxed);
         out.store (outPeak, std::memory_order_relaxed);
     }
+    // round 147: a level for the second meter slot when an engine has no second reduction (Hush: the detector's
+    // energy, −60 … 0 dB as 0 … 1)
+    void setDetector (float db) noexcept { gr1.store (std::clamp ((db + 60.0f) / 60.0f, 0.0f, 1.0f), std::memory_order_relaxed); }
 };
 
 // ---- oversampler design ----
@@ -298,6 +302,15 @@ double eGateRangeDb (float v) noexcept { return lin (v, 0.0, 40.0); }
 double eGateThresholdDb (float v) noexcept { return lin (v, -30.0, 10.0); }
 bool eVoicing (const EffectParams& p) noexcept { return on (p[voicing]); }
 bool vocalVoicing (const EffectParams& p) noexcept { return on (p[vocal]); }
+double autoMakeupDb (const EffectParams& p) noexcept
+{
+    if (p[compRatio] <= 0.0005f || ! on (p[dynOn]))
+        return 0.0;
+    vmatch::echannel::Settings e;
+    e.compRatio = ratio (p[compRatio]);
+    e.compThreshold = std::clamp (compThresholdDb (p[compThreshold]) + 18.0, -20.0, 10.0);
+    return vmatch::echannel::compMakeupDb (e);
+}
 
 // round 145: the Vocal strip voicing's settings (the reference's own laws, core/VoxStrip.h)
 voxstrip::Settings vocalSettings (const EffectParams& p) noexcept
@@ -451,6 +464,8 @@ public:
         {
             const auto inPeak = Meters::peak (l, r, n);
             console.process (l, r, n, consoleSettings (p));
+            if (on (p[analog]))
+                addAnalogNoise (l, r, n);
             meters.set (console.compReductionDb(), console.gateReductionDb(), inPeak, Meters::peak (l, r, n));
             return;
         }
@@ -458,7 +473,8 @@ public:
         side.design (p, sr);
         const auto inPeak = Meters::peak (l, r, n);
         const auto inGain = (float) dbToGain (trimDb (p[input]));
-        const auto outGain = (float) (dbToGain (trimDb (p[output])) * (on (p[phase]) ? -1.0 : 1.0));
+        // round 147b: + the console's automatic make-up when switched on
+        const auto outGain = (float) (dbToGain (trimDb (p[output]) + (on (p[autoMakeup]) ? autoMakeupDb (p) : 0.0)) * (on (p[phase]) ? -1.0 : 1.0));
         const bool eq = on (p[eqOn]), dyn = on (p[dynOn]), eqFirst = ! on (p[order]), fts = on (p[filtersToSidechain]);
 
         // compressor
@@ -539,10 +555,36 @@ public:
             l[i] = a * outGain;
             r[i] = b * outGain;
         }
+        if (on (p[analog]))
+            addAnalogNoise (l, r, n);
         meters.set (maxComp, maxGate, inPeak, Meters::peak (l, r, n));
     }
 
 private:
+    // round 147b: ANALOG — [EXEC] the reference console with Analog on adds, at its very output (whatever the input,
+    // output or compressor settings), white noise of −110.7 dBFS RMS per channel, the two channels uncorrelated; its
+    // harmonics are unchanged (H2 … H5 of a 1 kHz / −20 dBFS and a 100 Hz / −6 dBFS sine within 0.4 dB). Gaussian
+    // (Irwin–Hall, four uniforms) from a small xorshift generator, one per channel.
+    void addAnalogNoise (float* l, float* r, int n) noexcept
+    {
+        constexpr float sigma = 2.91e-6f; // 10^(−110.73 / 20)
+        const auto gauss = [] (std::uint32_t& st) noexcept {
+            float sum = 0.0f;
+            for (int k = 0; k < 4; ++k)
+            {
+                st ^= st << 13; st ^= st >> 17; st ^= st << 5;
+                sum += (float) (st >> 8) * (1.0f / 16777216.0f);
+            }
+            return (sum - 2.0f) * 1.7320508f; // variance 4/12 → 1
+        };
+        for (int i = 0; i < n; ++i)
+        {
+            l[i] += sigma * gauss (noiseL);
+            r[i] += sigma * gauss (noiseR);
+        }
+    }
+    std::uint32_t noiseL = 0x9e3779b9u, noiseR = 0x85ebca6bu;
+
     // E voicing: Ridge's controls in the console's units (the shared ranges use Ridge's own laws)
     static vmatch::echannel::Settings consoleSettings (const EffectParams& p) noexcept
     {
@@ -851,6 +893,7 @@ private:
             for (int i = 0; i < n; ++i)
                 delay.process (l[i], r[i]);
             meters.set (classicEngine.reductionDb(), 0.0f, inPeak, Meters::peak (l, r, n));
+            meters.setDetector (classicEngine.detectorDb());
             return;
         }
         const auto f = std::min (hz (p[frequency]), sr * 0.45);
@@ -882,7 +925,7 @@ private:
         const auto attack = coef (ahead ? std::max (delayMs, 0.03) * 0.001 / 3.0 : 0.0005, sr);
         const auto out = (float) dbToGain (lin (p[output], -12.0, 12.0));
         constexpr double knee = 3.0;
-        double maxGr = 0.0;
+        double maxGr = 0.0, maxDet = 0.0;
 
         // gain reduction (dB) wanted for a detected level `s` (and the full-band level in allround mode)
         auto wanted = [&] (double s, double full) {
@@ -938,6 +981,7 @@ private:
             {
                 const auto s = std::max (sA, sB);
                 env = s > env ? s : release * env + (1.0 - release) * s;
+                maxDet = std::max (maxDet, env);
                 const auto want = wanted (env, full);
                 gr = want > gr ? attack * gr + (1.0 - attack) * want : release * gr + (1.0 - release) * want;
                 gA = gB = (float) dbToGain (-gr);
@@ -950,6 +994,7 @@ private:
                 for (int c = 0; c < 2; ++c)
                 {
                     envCh[c] = ss[c] > envCh[c] ? ss[c] : release * envCh[c] + (1.0 - release) * ss[c];
+                    maxDet = std::max (maxDet, envCh[c]);
                     const auto want = wanted (envCh[c], full);
                     grCh[c] = want > grCh[c] ? attack * grCh[c] + (1.0 - attack) * want : release * grCh[c] + (1.0 - release) * want;
                     maxGr = std::max (maxGr, grCh[c]);
@@ -1038,6 +1083,7 @@ private:
             }
         }
         meters.set ((float) maxGr, 0.0f, inPeak, Meters::peak (l, r, n));
+        meters.setDetector ((float) gainToDb (maxDet)); // round 147: the energy the threshold is compared with
         scL = scR = nullptr;
     }
 
@@ -1371,6 +1417,13 @@ double toneDb (float v) noexcept { return lin (v, -18.0, 18.0); }
 double feedbackAmount (float v) noexcept { return lin (v, 0.0, 1.0); }
 double feedbackHz (float v) noexcept { return logMap (v, 10.0, 1000.0); }
 double dynamicsAmount (float v) noexcept { return lin (v, -1.0, 1.0); }
+double panOf (float v) noexcept { return std::clamp ((double) v * 2.0 - 1.0, -1.0, 1.0); }
+std::pair<float, float> panScales (double pan) noexcept
+{
+    pan = std::clamp (pan, -1.0, 1.0);
+    return { (float) (pan > 0.0 ? 1.0 - pan : 1.0), (float) (pan < 0.0 ? 1.0 + pan : 1.0) };
+}
+bool midSide (const EffectParams& p) noexcept { return on (p[channelMode]); }
 int bandParam (int band, int field) noexcept
 {
     if (band <= 0)
@@ -1552,8 +1605,25 @@ public:
 
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
+        // round 147: mid / side — M = (L + R) / 2 on channel 0, S = (R − L) / 2 on channel 1 (the trial's sign: a
+        // left-only tone's even harmonics land on the right), decoded L = M − S, R = M + S
+        const bool ms = midSide (p);
+        if (ms)
+            for (int i = 0; i < n; ++i)
+            {
+                const auto m = 0.5f * (l[i] + r[i]), sd = 0.5f * (r[i] - l[i]);
+                l[i] = m;
+                r[i] = sd;
+            }
         for (int off = 0; off < n; off += maxBlock)
             chunk (l + off, r + off, std::min (maxBlock, n - off), p);
+        if (ms)
+            for (int i = 0; i < n; ++i)
+            {
+                const auto m = l[i], sd = r[i];
+                l[i] = m - sd;
+                r[i] = m + sd;
+            }
     }
 
 private:
@@ -1583,6 +1653,12 @@ private:
         const auto vk = voiceIndex (p[voice]);
         const auto s = vk > 0 ? voiceStyle (vk) : styleOf (p[style]);
         const auto drv = (float) dbToGain (driveDb (p[drive]) + (on (p[punish]) ? punishDb : 0.0));
+        // round 147: the drive pan — the far channel's drive × (1 − |pan|) (in dB, the trial's 0 … 100 % scale)
+        const auto [dsA, dsB] = panScales (panOf (p[bandDrivePanParam (0)]));
+        const bool drivePanned = dsA != 1.0f || dsB != 1.0f;
+        const auto drvA = drivePanned ? (float) dbToGain (driveDb (p[drive]) * dsA + (on (p[punish]) ? punishDb : 0.0)) : drv;
+        const auto drvB = drivePanned ? (float) dbToGain (driveDb (p[drive]) * dsB + (on (p[punish]) ? punishDb : 0.0)) : drv;
+        const auto [panA, panB] = panScales (panOf (p[bandPanParam (0)]));
         const bool tape = s == Style::tape && vk == 0;
         const auto [lc, hc] = configureCuts (p);
         configureVoice (vk);
@@ -1601,6 +1677,8 @@ private:
             lastStyle = s;
         }
         const auto comp = on (p[autoGain]) ? makeup : 1.0f;
+        const auto compA = drivePanned && on (p[autoGain]) ? autoMakeup (s, drvA) : comp;
+        const auto compB = drivePanned && on (p[autoGain]) ? autoMakeup (s, drvB) : comp;
 
         for (int i = 0; i < n; ++i)
         {
@@ -1620,8 +1698,8 @@ private:
                 a = emphasis.process (a, 0);
                 b = emphasis.process (b, 1);
             }
-            wl[(std::size_t) i] = a * drv;
-            wr[(std::size_t) i] = b * drv;
+            wl[(std::size_t) i] = a * drvA;
+            wr[(std::size_t) i] = b * drvB;
         }
 
         // round 128: band 1's power, mute, feedback, dynamics and tone (single-band mode)
@@ -1646,7 +1724,7 @@ private:
 
         for (int i = 0; i < n; ++i)
         {
-            auto a = dc.process (wl[(std::size_t) i], 0) * comp, b = dc.process (wr[(std::size_t) i], 1) * comp;
+            auto a = dc.process (wl[(std::size_t) i], 0) * compA, b = dc.process (wr[(std::size_t) i], 1) * compB;
             if (tape)
             {
                 a = deemphasis.process (a, 0);
@@ -1669,6 +1747,8 @@ private:
             dry.process (da, db);
             if (! powered) { a = da; b = db; }  // switched off: the band passes clean
             if (muted) { a = 0.0f; b = 0.0f; }
+            a *= panA; // round 147: the band's pan
+            b *= panB;
             l[i] = (da + (a - da) * mx) * out;
             r[i] = (db + (b - db) * mx) * out;
         }
@@ -1716,6 +1796,7 @@ private:
 
         std::array<Style, maxBands> st {};
         std::array<float, maxBands> drv {}, bmix {}, lvl {}, comp {};
+        std::array<float, maxBands> drvB {}, compB {}, panA {}, panB {}; // round 147: channel 1's drive, the band pan
         bool anySolo = false;
         for (int b = 0; b < nb; ++b) anySolo = anySolo || bandState (p[(std::size_t) bandExtra (b, 1)]) == BandState::solo;
         for (int b = 0; b < nb; ++b)
@@ -1725,6 +1806,21 @@ private:
             bmix[(std::size_t) b] = std::clamp (p[(std::size_t) bandParam (b, 2)], 0.0f, 1.0f);
             lvl[(std::size_t) b] = (float) dbToGain (bandLevelDb (p[(std::size_t) bandParam (b, 3)]));
             comp[(std::size_t) b] = autoOn ? autoMakeup (st[(std::size_t) b], drv[(std::size_t) b]) : 1.0f;
+            // round 147: drive pan (channel 0's drive stays in drv) and band pan
+            const auto [dsA, dsB] = panScales (panOf (p[(std::size_t) bandDrivePanParam (b)]));
+            const auto dDb = driveDb (p[(std::size_t) bandParam (b, 1)]);
+            drvB[(std::size_t) b] = drv[(std::size_t) b];
+            compB[(std::size_t) b] = comp[(std::size_t) b];
+            if (dsA != 1.0f || dsB != 1.0f)
+            {
+                drv[(std::size_t) b] = (float) dbToGain (dDb * dsA) * punishGain;
+                drvB[(std::size_t) b] = (float) dbToGain (dDb * dsB) * punishGain;
+                comp[(std::size_t) b] = autoOn ? autoMakeup (st[(std::size_t) b], drv[(std::size_t) b]) : 1.0f;
+                compB[(std::size_t) b] = autoOn ? autoMakeup (st[(std::size_t) b], drvB[(std::size_t) b]) : 1.0f;
+            }
+            const auto [pa, pb] = panScales (panOf (p[(std::size_t) bandPanParam (b)]));
+            panA[(std::size_t) b] = pa;
+            panB[(std::size_t) b] = pb;
             bandOs[(std::size_t) b][0].setFactor (factor);
             bandOs[(std::size_t) b][1].setFactor (factor);
         }
@@ -1774,7 +1870,7 @@ private:
                 dryBand[0][(std::size_t) i] = da;
                 dryBand[1][(std::size_t) i] = db;
                 bl[i] *= drv[(std::size_t) b];
-                br[i] *= drv[(std::size_t) b];
+                br[i] *= drvB[(std::size_t) b];
             }
             const auto s = st[(std::size_t) b];
             // round 128: the band's feedback, dynamics, tone, power and solo / mute
@@ -1793,17 +1889,18 @@ private:
                 bandOs[(std::size_t) b][0].process (bl, n, curve);
                 bandOs[(std::size_t) b][1].process (br, n, curve);
             }
-            const auto m = bmix[(std::size_t) b], g = lvl[(std::size_t) b], k = comp[(std::size_t) b];
+            const auto m = bmix[(std::size_t) b], g = lvl[(std::size_t) b], k = comp[(std::size_t) b], kB = compB[(std::size_t) b];
+            const auto gA = g * panA[(std::size_t) b], gB = g * panB[(std::size_t) b];
             const bool post = ex.toneOn || ex.dyn != 0.0;
             const bool powered = on (p[(std::size_t) bandExtra (b, 0)]);
             const auto state = bandState (p[(std::size_t) bandExtra (b, 1)]);
             const bool silent = state == BandState::mute || (anySolo && state != BandState::solo);
             for (int i = 0; i < n; ++i)
             {
-                auto wa = bandDc[(std::size_t) b].process (bl[i], 0) * k, wb = bandDc[(std::size_t) b].process (br[i], 1) * k;
+                auto wa = bandDc[(std::size_t) b].process (bl[i], 0) * k, wb = bandDc[(std::size_t) b].process (br[i], 1) * kB;
                 if (post) ex.post (wa, wb, dryBand[0][(std::size_t) i], dryBand[1][(std::size_t) i]);
-                auto ya = (dryBand[0][(std::size_t) i] + (wa - dryBand[0][(std::size_t) i]) * m) * g;
-                auto yb = (dryBand[1][(std::size_t) i] + (wb - dryBand[1][(std::size_t) i]) * m) * g;
+                auto ya = (dryBand[0][(std::size_t) i] + (wa - dryBand[0][(std::size_t) i]) * m) * gA;
+                auto yb = (dryBand[1][(std::size_t) i] + (wb - dryBand[1][(std::size_t) i]) * m) * gB;
                 if (! powered) { ya = dryBand[0][(std::size_t) i]; yb = dryBand[1][(std::size_t) i]; }
                 if (silent) { ya = 0.0f; yb = 0.0f; }
                 if (b == 0)
@@ -1991,7 +2088,9 @@ const EffectInfo& ridgeInfo()
                                      { "High band", 1.0f }, { "High freq.", 0.0f }, { "High gain", 0.5f },
                                      { "Compander", 0.0f }, { "Expander threshold", 0.0f }, { "Compander threshold", 1.0f },
                                      { "Compander ratio", 0.504899f }, { "Compander attack", 0.0f }, { "Compander release", 0.049762f },
-                                     { "Make-up", 0.0f }, { "Soft knee", 0.0f }, { "Drive", 0.0f } } };
+                                     { "Make-up", 0.0f }, { "Soft knee", 0.0f }, { "Drive", 0.0f },
+                                     // round 147b
+                                     { "Auto make-up", 0.0f }, { "Analog", 0.0f } } };
     return info;
 }
 
@@ -2052,7 +2151,11 @@ const EffectInfo& emberInfo()
                                      // round 136: the Classic voicing (EmberClassic.h)
                                      { "Voicing", 0.0f }, { "Classic style", 0.0f }, { "Classic drive", 0.0f }, { "Classic punish", 0.0f },
                                      { "Classic low cut", 0.0f }, { "Classic thump", 0.0f }, { "Classic tone", 0.5f }, { "Classic high cut", 1.0f },
-                                     { "Classic steep", 0.0f }, { "Classic mix", 1.0f }, { "Classic output", 1.0f } } };
+                                     { "Classic steep", 0.0f }, { "Classic mix", 1.0f }, { "Classic output", 1.0f },
+                                     // round 147 (Saturn 2's channel mode, drive pan and band pan)
+                                     { "Channel mode", 0.0f },
+                                     { "B1 drive pan", 0.5f }, { "B2 drive pan", 0.5f }, { "B3 drive pan", 0.5f }, { "B4 drive pan", 0.5f },
+                                     { "B1 pan", 0.5f }, { "B2 pan", 0.5f }, { "B3 pan", 0.5f }, { "B4 pan", 0.5f } } };
     return info;
 }
 
@@ -2307,6 +2410,19 @@ std::string paramText (EffectKind kind, int param, float v)
             case classicHighCut: return hzText (emberclassic::highCutHz (v));
             case classicMix: return fmt ("%.0f%%", v * 100.0);
             case classicOutput: return fmt ("%+.1f dB", emberclassic::outputDb (v));
+            // round 147
+            case channelMode: return on (v) ? "Mid/Side" : "Left/Right";
+            case band1DrivePan: case band2DrivePan: case band3DrivePan: case band4DrivePan:
+            {
+                const auto pan = panOf (v);
+                return std::abs (pan) < 0.005 ? std::string ("centre") : fmt ("%.0f%% ", std::abs (pan) * 100.0) + (pan < 0.0 ? "L/M" : "R/S");
+            }
+            case band1Pan: case band2Pan: case band3Pan: case band4Pan:
+            {
+                const auto [a, b] = panScales (panOf (v));
+                const auto db = [] (float g) { return g <= 0.0f ? std::string ("-inf") : fmt ("%.1f", gainToDb (g)); };
+                return std::abs (panOf (v)) < 0.005 ? std::string ("centre") : db (a) + " / " + db (b) + " dB";
+            }
             default:
                 if (param >= band1On && param < band1On + maxBands * extraFields)
                     switch ((param - band1On) % extraFields)

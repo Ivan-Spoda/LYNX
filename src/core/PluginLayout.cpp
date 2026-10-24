@@ -9,6 +9,7 @@
 #include <mutex>
 #include <string>
 
+#include "core/EchoSuite.h"
 #include "core/Effects.h"
 #include "core/MaximusFx.h"
 #include "core/MultibandDelayFx.h"
@@ -1025,7 +1026,7 @@ Layout lynxTune()
     // BYPASS / REMOVE modes and LATCH (round 128).
     Layout l;
     l.width = 800;
-    l.height = 610;
+    l.height = 622;
     l.pages = { TR_NOOP ("Pitch graph"), TR_NOOP ("Advanced"), TR_NOOP ("Real-time") }; // round 135w: + Real-time
     auto& v = l.items;
     auto menu = [&v] (float x, float y, float w, const char* param, const char* caption, const char* options, int steps = 0) {
@@ -1118,8 +1119,9 @@ Layout lynxTune()
         rt (io);
     }
     // --- the keyboard: BYPASS / REMOVE modes, LATCH, four octaves (a key edits its note name in every octave)
-    v.push_back (section (0, 482, 800, 128, TR_NOOP ("TARGET NOTES")));
-    v.push_back (display (8, 502, 784, 102, "tunekeys"));
+    // round 147: + the range bar, the range presets, Reset scale and the view's navigation (the real-time corrector's)
+    v.push_back (section (0, 482, 800, 140, TR_NOOP ("TARGET NOTES")));
+    v.push_back (display (8, 502, 784, 114, "tunekeys"));
     return l;
 }
 
@@ -1620,6 +1622,7 @@ Layout ridgeStrip()
     v.push_back (dial (410, 150, 32, "Comp. release", TR_NOOP ("Release")));
     v.push_back (dial (490, 150, 28, "Comp. mix", TR_NOOP ("Mix")));
     v.push_back (toggle (296, 206, 110, 20, "Fast attack", TR_NOOP ("Fast attack")));
+    v.push_back (toggle (414, 206, 136, 20, "Auto make-up", TR_NOOP ("Auto make-up"))); // round 147b: the console's
     v.push_back (section (284, 244, 272, 196, TR_NOOP ("Expander / gate")));
     v.push_back (dial (480, 296, 46, "Gate threshold", TR_NOOP ("Threshold"), big));
     v.push_back (dial (330, 290, 32, "Gate range", TR_NOOP ("Range")));
@@ -1631,6 +1634,7 @@ Layout ridgeStrip()
     v.push_back (meter (292, 484, 256, 12, 1, TR_NOOP ("Gate")));
     v.push_back (toggle (292, 508, 84, 20, "Dynamics on", TR_NOOP ("Dyn in")));
     v.push_back (tabs (384, 508, 164, 20, "Order", TR_NOOP ("EQ>Dyn|Dyn>EQ")));
+    v.push_back (toggle (292, 540, 84, 20, "Analog", TR_NOOP ("Analog"))); // round 147b: the console emulation's colour
     // the GAIN block (round 129, the reference's): input trim and phase, the output fader beside the input / output
     // level meter with its peak read-outs
     v.push_back (section (284, 580, 272, 132, TR_NOOP ("Gain")));
@@ -1896,6 +1900,27 @@ Layout emberLayout()
     v.push_back (toggle (12, 726, 110, 20, "Wide cuts", TR_NOOP ("Wide cuts")));
     v.push_back (dial (340, 712, 22, "Low cut (wide)", TR_NOOP ("Low cut")));
     v.push_back (dial (440, 712, 22, "High cut (wide)", TR_NOOP ("High cut")));
+    // round 147 (Saturn 2): the channel mode and each band's drive pan / pan
+    l.height = 870;
+    v.push_back (section (4, 760, 512, 106, TR_NOOP ("Stereo")));
+    v.push_back (tabs (12, 784, 140, 20, "Channel mode", TR_NOOP ("L/R|M/S"), { 0.0f, 1.0f }));
+    v.push_back (label (170, 778, 80, 14, TR_NOOP ("Drive pan")));
+    v.push_back (label (170, 818, 80, 14, TR_NOOP ("Pan")));
+    static const char* const drivePans[] { "B1 drive pan", "B2 drive pan", "B3 drive pan", "B4 drive pan" };
+    static const char* const pans[] { "B1 pan", "B2 pan", "B3 pan", "B4 pan" };
+    for (int b = 0; b < 4; ++b)
+        for (int r = 0; r < 2; ++r)
+        {
+            const auto cy = 792.0f + 40.0f * (float) r;
+            auto k = knob (280.0f + 60.0f * (float) b, cy, 16, r == 0 ? drivePans[b] : pans[b], nullptr, cy + 9.0f, noCaption | bipolar, 0);
+            k.colour = b;
+            if (b > 0)
+            {
+                k.whenParam = "Bands";
+                k.whenMin = 0.17f + 0.333f * (float) (b - 1);
+            }
+            v.push_back (k);
+        }
     return l;
 }
 
@@ -2056,6 +2081,29 @@ Layout prismMultiband()
     v.push_back (tabs (402, 566, 150, 20, "Oversampling", "Off|2x|4x", { 0.0f, 0.5f, 1.0f }));
     v.push_back (label (570, 566, 40, 20, TR_NOOP ("Pan")));
     v.push_back (tabs (612, 566, 110, 20, "Pan mode", "L/R|M/S"));
+    // round 147: Dynamic phase's engine (classic = projects saved before round 147) and each band's expert settings
+    v.push_back (tabs (736, 566, 156, 20, "Dynamic engine", TR_NOOP ("Classic|Measured")));
+    v.push_back (section (8, 596, 884, 64, TR_NOOP ("Expert (selected band)"), boxed));
+    static const char* links[6] { "B1 link", "B2 link", "B3 link", "B4 link", "B5 link", "B6 link" };
+    static const char* linkModes[6] { "B1 link mode", "B2 link mode", "B3 link mode", "B4 link mode", "B5 link mode", "B6 link mode" };
+    static const char* scFree[6] { "B1 SC filter", "B2 SC filter", "B3 SC filter", "B4 SC filter", "B5 SC filter", "B6 SC filter" };
+    static const char* scLow[6] { "B1 SC low", "B2 SC low", "B3 SC low", "B4 SC low", "B5 SC low", "B6 SC low" };
+    static const char* scHigh[6] { "B1 SC high", "B2 SC high", "B3 SC high", "B4 SC high", "B5 SC high", "B6 SC high" };
+    for (int b = 0; b < 6; ++b)
+    {
+        auto add = [&] (LayoutItem i) { i.colour = b; v.push_back (onPage (std::move (i), b)); };
+        add (tabs (16, 626, 150, 22, scFree[b], TR_NOOP ("Band|Free")));
+        add (dial (210, 630, 20, scLow[b], TR_NOOP ("SC low")));
+        add (dial (290, 630, 20, scHigh[b], TR_NOOP ("SC high")));
+        add (dial (420, 630, 20, links[b], TR_NOOP ("Stereo link")));
+        add (tabs (480, 626, 130, 22, linkModes[b], TR_NOOP ("Mid|Side")));
+    }
+    // round 147: each crossover's own slope (0 = the global one)
+    static const char* xs[5] { "Crossover 1 slope", "Crossover 2 slope", "Crossover 3 slope", "Crossover 4 slope", "Crossover 5 slope" };
+    static const char* xsCaption[5] { TR_NOOP ("Slope 1"), TR_NOOP ("Slope 2"), TR_NOOP ("Slope 3"), TR_NOOP ("Slope 4"), TR_NOOP ("Slope 5") };
+    for (int k = 0; k < 5; ++k)
+        v.push_back (dial (660.0f + 52.0f * (float) k, 630, 16, xs[k], xsCaption[k]));
+    l.height = 668;
     return l;
 }
 
@@ -2782,6 +2830,27 @@ Layout echoformLayout()
     v.push_back (off (menuOf (492, 402, 130, 20, "Mod shape", TR_NOOP ("Shape"), TR_NOOP ("Sine|Triangle|Square|Saw|Random"), stepCentres (5))));
     v.push_back (off (label (640, 404, 40, 20, TR_NOOP ("Sync"))));
     v.push_back (off (menuOf (682, 402, 110, 20, "Mod sync", TR_NOOP ("Sync"), TR_NOOP ("Free|1/16|1/8|1/4|1/2|1 bar|2 bars"), stepCentres (7))));
+    // ---- round 147: the measured echo voicings (EchoBoy's style role), the saturation curve and PrimalTap's Multiply
+    {
+        std::vector<float> voicings;
+        for (int k = 0; k <= echosuite::echoform::voicingCount; ++k)
+            voicings.push_back (echosuite::echoform::voicingValue (k));
+        v.push_back (off (label (640, 372, 52, 20, TR_NOOP ("Voicing"))));
+        v.push_back (off (menuOf (694, 372, 100, 20, "Echo voicing", TR_NOOP ("Echo voicing"),
+                                  TR_NOOP ("Off|Mastering reel|Studio reel|Cartridge echo|Multi-head tape|Valve tape|Worn cassette|Pedal BBD|"
+                                           "Compact BBD|Oil drum|Magnetic drum|Phone line|Medium wave|Broadcast FM|Distant station|"
+                                           "Walkie-talkie|Pristine digital|Warm analog|Digital ensemble|Analog ensemble|Pedal ensemble|"
+                                           "Seasick|Hot glow|Thick|Battered|Squashed|Fuzzed|Honky|Haze|Smeared|Scattered|Roomy"),
+                                  voicings)));
+        std::vector<float> types;
+        for (int k = 0; k <= echosuite::echoform::satTypeCount; ++k)
+            types.push_back (echosuite::echoform::satTypeValue (k));
+        v.push_back (off (label (800, 372, 38, 20, TR_NOOP ("Sat."))));
+        v.push_back (off (menuOf (840, 372, 100, 20, "Saturation type", TR_NOOP ("Saturation type"),
+                                  TR_NOOP ("Auto|Clean|Tape|Tube|Squash|Grit|Ceiling"), types)));
+        v.push_back (off (label (800, 402, 38, 20, TR_NOOP ("Mult."))));
+        v.push_back (off (tabs (840, 402, 100, 20, "Multiply", TR_NOOP ("1x|2x|4x|8x"), { 0.0f, 1.0f / 3.0f, 2.0f / 3.0f, 1.0f })));
+    }
     return l;
 }
 

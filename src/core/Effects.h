@@ -34,6 +34,9 @@ std::string formatEffectParam (EffectKind kind, int param, float value01, double
 std::string formatEffectParam (EffectKind kind, int param, float value01, double bpm, const EffectParams& context);
 
 EffectSlot makeEffectSlot (EffectKind kind);
+// A slot loaded from a project that stored `savedCount` parameters: parameters added later that switch an engine
+// to a newer construction get the value that keeps the old sound (round 147: Prism's measured Dynamic phase).
+void upgradeLoadedEffectParams (EffectSlot& slot, std::size_t savedCount) noexcept;
 
 // 7-band parametric EQ. Parameters: band b uses [4b .. 4b+3] = type, frequency, gain, Q;
 // [28] = output; [29 + b] = cut slope (1 to 4 biquads: 12/24/36/48 dB per octave).

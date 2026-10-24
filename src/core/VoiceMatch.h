@@ -54,6 +54,8 @@ bool lowPass (const Settings& s, double sampleRate, Biquad& out);
 double responseDb (const Settings& s, double sampleRate, double hz);
 // The compressor's static output level (dBFS peak of a sine) for a steady sine input level, from the model
 double compStaticGainDb (const Settings& s, double sineDbfs);
+// round 147b: the console's automatic make-up (dB) for its threshold and ratio (measured with the dynamics law; 0 at 1:1)
+double compMakeupDb (const Settings& s) noexcept;
 
 class Channel
 {
@@ -96,10 +98,13 @@ public:
     void reset() noexcept;
     void process (float* l, float* r, int n, const Settings& s) noexcept;
     float reductionDb() const noexcept { return last; }
+    // round 147: the block's highest detector energy in the threshold's own scale (DeEsser's Energy Detector meter)
+    float detectorDb() const noexcept { return lastDet; }
 
 private:
     void design (const Settings& s) noexcept;
     double sr = 48000.0, designedHz = -1.0;
+    float lastDet = -120.0f;
     bool designedBp = false;
     Biquad sc1, sc2;
     double lpB = 0.0, lpA = 0.0, lpX[2] {}, lpY[2] {};
