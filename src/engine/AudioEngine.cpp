@@ -2311,14 +2311,17 @@ std::shared_ptr<Effect> AudioEngine::getEffect (int track, int slot) const
 
 void AudioEngine::setPluginsRenderMode (bool offline)
 {
+    // FL's "Notify about rendering mode" off: that plugin is not told (round 149)
     for (std::size_t i = 0; i < song.channels.size(); ++i)
         if (auto* p = dynamic_cast<PluginInstrument*> (getChannelInstrument ((int) i).get()))
-            p->setRenderMode (offline);
+            if (song.channels[i].plugin.notifyRender)
+                p->setRenderMode (offline);
 
     for (std::size_t t = 0; t < song.mixer.size(); ++t)
         for (std::size_t s = 0; s < song.mixer[t].effects.size(); ++s)
             if (auto* p = dynamic_cast<PluginEffect*> (getEffect ((int) t, (int) s).get()))
-                p->setRenderMode (offline);
+                if (song.mixer[t].effects[s].plugin.notifyRender)
+                    p->setRenderMode (offline);
 
     // the plugins inside Patchers (REA_rodada141)
     std::function<void (patcher::Graph*)> graphMode = [&] (patcher::Graph* graph) {

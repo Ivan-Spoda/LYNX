@@ -58,6 +58,14 @@ public:
     virtual void setSongPosition (double /*ticks*/) noexcept {}
     // No voice sounding: render would only produce silence (the mixer skips the channel until a note arrives).
     virtual bool idle() const noexcept { return false; }
+    // The notes it sent out in its renders since the last call (a hosted plugin's MIDI output, FL's wrapper "Output
+    // port", round 149): fills `out` with up to `max` and returns how many.
+    struct MidiOutNote
+    {
+        int key = 60;
+        float velocity = 0.0f; // 0 = note off
+    };
+    virtual int takeMidiOutput (MidiOutNote* /*out*/, int /*max*/) noexcept { return 0; }
     // Extra outputs to other mixer inserts (a generator Patcher's extra "To LYNX" outputs, REA_rodada141): the rack
     // calls beginChunk (n) before a chunk's render() calls, which then also add each extra output's audio (gains
     // applied) into auxOutputData (k, side) from the chunk's start; auxOutputTrack (k) = the insert it feeds.

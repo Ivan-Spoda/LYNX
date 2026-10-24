@@ -19,6 +19,7 @@ struct WrapperContext
 {
     AudioEngine* engine = nullptr;
     std::function<PluginRef* (Song&)> find;
+    bool channel = false; // a Channel rack plugin (the MIDI output port applies)
 };
 // `owner` is the adapter (PluginInstrument/PluginEffect) that holds the plugin.
 void open (std::shared_ptr<void> owner, juce::AudioPluginInstance& plugin, const juce::String& title, WrapperContext context = {});

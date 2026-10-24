@@ -557,11 +557,26 @@ bool makeConsolidateSong (const Song& song, int track, bool fromSongStart, Song&
             start = std::min (start, c.start);
         end = std::max (end, c.end());
     }
+    // the automation clips of the other tracks play too (round 149): the tempo map (a song with tempo changes renders
+    // at its own tempi) and what they automate; the stretch before `start` is cut off
+    for (const auto& c : song.playlist)
+        if (c.track != track && c.kind == ClipKind::automation && ! c.muted && c.end() > start && ! song.isTrackMuted (c.track))
+        {
+            auto a = c;
+            if (a.start < start)
+            {
+                a.offset += start - a.start;
+                a.length -= start - a.start;
+                a.start = start;
+            }
+            clips.push_back (a);
+        }
     for (auto& c : clips)
         c.start -= start;
     musicLength = end - start;
 
     out = song;
+    out.bpm = song.tempoAt ((double) start); // the tempo where the render starts (without a tempo clip there)
     out.playlist = std::move (clips);
     for (auto& t : out.playlistTracks)
         t.muted = false;
