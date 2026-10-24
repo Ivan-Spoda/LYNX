@@ -21,6 +21,17 @@ Scores are 0–10 (10 = a user of the original finds every control and every pie
 Round 128 covers the FabFilter / Slate / Antares roles (below). Round 129 covers the Waves / SSL / Valhalla roles
 (its own section).
 
+## Round 144: what changed (config / design, after 137 → after 144)
+
+Round 144 (`docs/analise/REA_rodada144.md`, sub-rounds `REA_rodada144a.md` / `REA_rodada144b.md`).
+
+| LYNX engine | Original | Config 137 → 144 | Design 137 → 144 | Round-144 changes |
+|---|---|---|---|---|
+| Echoform | EchoBoy / PrimalTap | 8 → 9 | 7 → 8 | rhythm editor (Even / Free / Grid taps, Shape, 12 LYNX patterns), Style edit row (input, loop EQ, FB balance, diffusion loop / post, wobble shape / sync) |
+| Lattice Mod | ValhallaUberMod | 8 → 9 | 9 → 9 | DelaySync measured (18 steps, 2750 ms cap) and translated |
+| Facet EQ | Pro-Q 4 | 9 → 9 | 8 → 8 | linear-phase resolution Low … Maximum (the trial's latencies), translated |
+| Hush De-esser | DeEsser | 9 → 9 | 6 → 7 | the GR meter's held peak (click to reset) |
+
 ## Round 137: what changed (config / design, after 135 → after 137)
 
 Round 137 (`docs/analise/REA_rodada137.md`) took the biggest remaining ❌ / ⚠️ rows and re-measured rows marked "not
@@ -767,7 +778,7 @@ Trial on this PC: yes (no screenshot this round).
 | Gestures | slider drag, value-window typing | drag, Ctrl fine, wheel, reset, right-click entry, line/arrow drags | ✅ | |
 | Saved-state translation | — | frequency (×0.81), threshold (+5 dB), Split/Wide, HP/BP, Monitor translated; range fixed at 12 dB | ✅ | round 113 §3c |
 
-**Scores:** configuration 7/10 (every Waves control exists, plus extras), design 5/10. The scrolling-waveform
+**Scores:** configuration 7/10 (every Waves control exists, plus extras), design 5/10. **After round 144**: configuration 9/10, design 7/10 (round 135w: 9 / 6; round 144: the GR meter's held peak). The scrolling-waveform
 editor is Pro-DS-like. A DeEsser user finds Threshold, Freq, HP/BP, Split/Wide and Monitor (as "Audition")
 quickly. What they miss: the side-chain energy meter beside the threshold, the Attn peak hold, the output meter,
 presets, and the Waves defaults.
