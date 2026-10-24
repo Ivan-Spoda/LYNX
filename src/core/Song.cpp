@@ -865,7 +865,7 @@ std::int64_t swingDelay (std::int64_t start, float swing, float channelMix) noex
 
 bool PatcherDoc::operator== (const PatcherDoc& o) const
 {
-    return nodes == o.nodes && wires == o.wires && inputX == o.inputX && inputY == o.inputY && outputX == o.outputX && outputY == o.outputY
+    return nodes == o.nodes && wires == o.wires && published == o.published && inputX == o.inputX && inputY == o.inputY && outputX == o.outputX && outputY == o.outputY
            && outputTracks == o.outputTracks;
 }
 

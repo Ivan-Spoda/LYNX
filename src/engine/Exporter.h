@@ -46,7 +46,8 @@ public:
     ExportJob (const Song& song, const exportopts::Options& options, const juce::File& output);
     ~ExportJob();
 
-    // progress(0..1) returns false to cancel. On error or cancellation the file is deleted.
+    // progress(0..1) returns false to cancel. On error or cancellation the file is deleted. With several formats
+    // (Options::moreFormats) every file is written from the one render: `output`, then the same name per extension.
     bool run (const std::function<bool (double)>& progress, juce::String& error);
 
     double getMusicSeconds() const noexcept { return musicSeconds; }
@@ -55,6 +56,7 @@ public:
 
 private:
     bool writeBuffered (std::vector<float>& left, std::vector<float>& right, juce::String& error);
+    bool writeFile (const exportopts::Options& o, const juce::File& file, float* left, float* right, int frames, int channels, juce::String& error);
 
     std::unique_ptr<AudioEngine> engine;
     exportopts::Options options;

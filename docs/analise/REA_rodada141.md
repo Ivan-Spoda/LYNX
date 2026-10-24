@@ -51,7 +51,9 @@ The state format was documented in rounds 14/20 (chunks, nodes `5000…5001`, po
   - audio ports: node input 0 = main, 1 = side-chain (fed through `Effect::setSidechain`); node output 0 = main,
     k = bus k; host input 0 = the slot's input, 1 = the slot's side-chain (`EffectSlot::sidechain`); host output 0 =
     main, k = extra output k.
-  - MIDI: "From LYNX" notes → instruments (the generator Patcher's channel notes, MIDI-channel aware for plugins).
+  - MIDI: "From LYNX" notes → instruments (the generator Patcher's channel notes, MIDI-channel aware for plugins), and
+    "From LYNX" notes → "To LYNX" **MIDI port N** (FL's "MIDI port N" pin): the rack routes the channel's notes to every
+    plugin channel whose MIDI input port is N, like a MIDI Out on MIDI channel 1 (`RackState::buildMidiRoutes`).
   - control: a node's control output k (Peak Controller: 0 peak+LFO, 1 peak, 2 LFO; Formula Controller: 0; Envelope
     Controller channel: 0…7) → a parameter of the target (built-in: LYNX's parameter index; plugin: its parameter).
 - `patcher::Graph` runs it as FL does (§1): cable sums with gains, disabled cables skipped, order by dependencies
@@ -119,13 +121,18 @@ FL renders vs LYNX's `renderwav` (un-normalized, same length):
 
 ## 5. Not done / limits
 
-- MIDI between nodes and out of the Patcher ("MIDI port N" pins), MIDI into effect plugins.
-- FL's published Patcher parameters (`1100`) as automation targets: automations of an imported Patcher slot still
-  drop. Control smoothing inside FL not traced (§1).
+- MIDI between nodes (a plugin's MIDI output into another node) and MIDI into effect plugins.
+- Published parameters: FL's `1100` records become `PatcherDoc::published` (Patcher parameter k → node parameter,
+  with the value map), and an imported automation of the Patcher slot's parameter k drives it (the rack binds it like a
+  plugin parameter); LYNX's editor cannot publish new ones yet. Pattern-event automation of a Patcher still drops
+  (FL's raw range of Patcher parameters not known). Control smoothing inside FL not traced (§1).
 - Instrument nodes have no editor in the Patcher beyond a plugin's own window (built-in instruments keep their
   imported settings).
 - Extra outputs of an *effect* Patcher: only the first one reaches an insert.
 
 ## Where I stopped
 
-Runtime, import, save/load, editor and tests are in; see the report of round 141 for what landed.
+Runtime, import (graph, positions, control cables, side-chain, extra outputs, published parameters), save/load,
+editor (`--patchershot prefix [project]` renders every Patcher's editor to PNG), selftest round trip and tests are in.
+Next candidates: MIDI between nodes, publishing parameters from LYNX's editor, a
+parameter panel for instrument nodes, more than one extra output on an effect Patcher.

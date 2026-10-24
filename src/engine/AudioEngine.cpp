@@ -680,6 +680,16 @@ void AudioEngine::finishAudioTake()
     if (length <= 0)
         return;
 
+    // FL's "Enable recording markers": only the parts inside the Start / Stop recording ranges become clips
+    const auto parts = recordOptions.recordingMarkers && song.mode == PlayMode::song ? punchParts (punchRanges (song.markers()), start, length, offset)
+                                                                                     : std::vector<ClipPart> { { start, length, offset } };
+    if (parts.empty()) // the whole take was outside the ranges
+    {
+        for (auto& take : done)
+            take.file.deleteFile();
+        return;
+    }
+
     struct Made
     {
         std::string path, name;
@@ -703,14 +713,18 @@ void AudioEngine::finishAudioTake()
             c.mixerTrack = m.track > 0 && m.track < (int) s.mixer.size() ? m.track : s.nextFreeInsert();
             s.channels.push_back (c);
 
-            Clip clip;
-            clip.kind = ClipKind::audio;
-            clip.channel = (int) s.channels.size() - 1;
-            clip.track = playlistTrack++;
-            clip.start = start;
-            clip.length = length;
-            clip.offset = offset;
-            s.playlist.push_back (clip);
+            for (const auto& part : parts)
+            {
+                Clip clip;
+                clip.kind = ClipKind::audio;
+                clip.channel = (int) s.channels.size() - 1;
+                clip.track = playlistTrack;
+                clip.start = part.start;
+                clip.length = part.length;
+                clip.offset = part.offset;
+                s.playlist.push_back (clip);
+            }
+            ++playlistTrack;
         }
     });
 }
@@ -1045,9 +1059,21 @@ void AudioEngine::updateRecording()
 
     RecordedEvent e;
 
+    // FL's "Enable recording markers" (song mode): a note that starts outside the Start / Stop recording ranges is
+    // not recorded (its release finds no held note and is ignored too)
+    const auto punch = recordOptions.recordingMarkers && song.mode == PlayMode::song ? punchRanges (song.markers()) : std::vector<PunchRange> {};
+    auto outsidePunch = [this, &punch] (const RecordedEvent& ev) {
+        if (punch.empty() || ! ev.on)
+            return false;
+        auto tick = ev.tick;
+        if (! song.hasLoop())
+            tick = std::fmod (std::max (0.0, tick), (double) std::max<std::int64_t> (1, song.songLength()));
+        return ! inPunchRanges (punch, tick);
+    };
+
     while (midiRecordQueue.pop (e))
     {
-        if (! recordOptions.recordNotes) // recording filter: notes off
+        if (! recordOptions.recordNotes || outsidePunch (e)) // recording filter: notes off
             continue;
         beginTake();
         recorder.add (song, e);
@@ -1055,7 +1081,7 @@ void AudioEngine::updateRecording()
 
     for (const auto& ui : uiRecorded)
     {
-        if (! recordOptions.recordNotes)
+        if (! recordOptions.recordNotes || outsidePunch (ui))
             continue;
         beginTake();
         recorder.add (song, ui);
@@ -1080,7 +1106,12 @@ void AudioEngine::updateRecording()
     if (song.mode == PlayMode::song && ! song.hasLoop()) // (the position loops over the song)
         placeClipAt %= std::max<std::int64_t> (1, song.songLength());
     editSong ([&] (Song& s) {
-        commitTake (s.patterns[(std::size_t) s.currentPattern], notes, options.mode, options.quantise, takeClearedChannels);
+        TakeQuantize q;
+        q.grid = options.quantise;
+        q.starts = options.quantiseStarts;
+        q.end = options.noteEnd;
+        q.stepSequencer = options.toStepSequencer;
+        commitTake (s.patterns[(std::size_t) s.currentPattern], notes, options.mode, q, takeClearedChannels);
 
         if (options.placeSongClip && s.mode == PlayMode::song && ! takeHasUndoStep)
             placePatternClipAt (s, s.currentPattern, placeClipAt);

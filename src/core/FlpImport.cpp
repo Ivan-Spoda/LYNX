@@ -844,6 +844,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.sampler.cut = true;
 
         def.synth.mono = c.monoFlag || c.maxVoices == 1;
+        def.maxPolyphony = std::clamp (c.maxVoices, 0, 128); // FL's Polyphony › Max (0 = unlimited)
 
         // channel porta and slide time: n = round((27^(v/1024) - 1) * 48/26) ticks of 1/192 beat
         // (REA_rodada6 §4); the time also applies to notes with their own porta
@@ -2065,8 +2066,15 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             else if (c.kind == 1)
             {
                 w.kind = PatchWire::Kind::midi;
-                if (w.from != patchFromHost || w.to < 0)
-                    continue; // (MIDI between nodes / out of the Patcher: not passed yet)
+                if (w.from != patchFromHost)
+                    continue; // (MIDI out of a node: not passed yet)
+                if (w.to == patchToHost) // "MIDI port N": the notes go to the plugins on that MIDI port
+                {
+                    const auto number = dst->name.rfind ("MIDI port ", 0) == 0 ? std::atoi (dst->name.c_str() + 10) : dst->index;
+                    if (number < 0 || number > 255)
+                        continue;
+                    w.toPort = number;
+                }
             }
             else
             {
@@ -2114,6 +2122,34 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 }
             }
             doc.wires.push_back (std::move (w));
+        }
+
+        // the Patcher's published parameters (record 1100): Patcher parameter k → the node's parameter behind that port
+        for (const auto& [portId, k] : graph->exposed)
+        {
+            const auto* port = portOf (portId);
+            if (port == nullptr || k < 0 || k > 4096 || port->node < 0 || (std::size_t) port->node >= nodeOf.size() || nodeOf[(std::size_t) port->node] < 0
+                || port->kind != 2 || ! port->input)
+                continue;
+            PatchParam p;
+            p.node = nodeOf[(std::size_t) port->node];
+            const auto& target = doc.nodes[(std::size_t) p.node];
+            const auto& flTarget = graph->nodes[(std::size_t) port->node];
+            if (target.generator ? target.channel.instrument == InstrumentKind::plugin : target.effect.kind == EffectKind::plugin)
+                p.param = port->index;
+            else if (const auto map = target.generator ? std::nullopt : effectParamFromFl (canonicalFlEffectName (flTarget.plugin), port->index))
+            {
+                p.param = map->param;
+                if (map->convert)
+                    for (int i = 0; i < 33; ++i)
+                        p.curve.push_back (std::clamp (map->convert ((float) i / 32.0f), 0.0f, 1.0f));
+            }
+            else
+                continue;
+            p.name = patcher::nodeName (target) + " " + std::to_string (port->index + 1);
+            if ((int) doc.published.size() <= k)
+                doc.published.resize ((std::size_t) k + 1);
+            doc.published[(std::size_t) k] = std::move (p);
         }
         return doc;
     };
@@ -2328,6 +2364,9 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 }
 
                 auto fx = std::move (*made);
+                // FL's per-plugin "Smart disable" (0xD4 flag 0x20, REA round 139): off = processed even in silence
+                if (slot.wrapperFlags >= 0)
+                    fx.smartDisable = (slot.wrapperFlags & 0x20) != 0;
 
                 // sidechain (REA_rodada22 §1): Fruity Limiter (i32 at 0xA4, v ≥ 6; only the compressor detector and only
                 // with Comp threshold < 0 dB) and Fruity Compressor (i32 at 0x20, v3)
@@ -2598,6 +2637,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 {
                     // the exact Reeverbs keep FL's controls as (raw − min) / range: FL's normalised value as is
                     if (target.param < 0 || target.param >= (fx.kind == EffectKind::reeverb2 ? 15 : reeverb1ParamCount))
+                        target.kind = AutomationTargetKind::none;
+                }
+                else if (target.kind == AutomationTargetKind::effectParam && fx.kind == EffectKind::patcher)
+                {
+                    // the Patcher's own parameter k: one it publishes (REA_rodada141), FL's normalised value as is
+                    if (target.param < 0 || target.param >= (int) fx.patcher.published.size() || fx.patcher.published[(std::size_t) target.param].node < 0)
                         target.kind = AutomationTargetKind::none;
                 }
                 else if (target.kind == AutomationTargetKind::effectParam && fx.kind != EffectKind::plugin)
@@ -2949,6 +2994,8 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             marker.name.erase (0, marker.name.find_first_not_of (' '));
             marker.name.erase (marker.name.find_last_not_of (' ') + 1);
 
+            if (m.type != 8 && m.type > 0 && m.type < 256)
+                marker.action = m.type; // FL's marker action (9 Start recording, 10 Stop recording, ...)
             if (m.type == 8 && m.numerator >= 1 && m.numerator <= 32 && m.denominator >= 1 && m.denominator <= 32)
             {
                 marker.numerator = m.numerator;

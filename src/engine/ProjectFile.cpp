@@ -253,6 +253,10 @@ juce::var pluginToVar (const PluginRef& p)
         o->setProperty ("threaded", false);
     if (p.maxSizeBuffers)
         o->setProperty ("maxSizeBuffers", true);
+    if (! p.allowSmartDisable)
+        o->setProperty ("allowSmartDisable", false);
+    if (p.hostMaxBuffer)
+        o->setProperty ("hostMaxBuffer", true);
     if (p.midiInPort >= 0)
         o->setProperty ("midiInPort", p.midiInPort);
     return juce::var (o.release());
@@ -270,6 +274,8 @@ PluginRef pluginFromVar (const juce::var& v)
     p.separateProcess = (bool) v.getProperty ("separateProcess", false);
     p.threaded = (bool) v.getProperty ("threaded", true);
     p.maxSizeBuffers = (bool) v.getProperty ("maxSizeBuffers", false);
+    p.allowSmartDisable = (bool) v.getProperty ("allowSmartDisable", true);
+    p.hostMaxBuffer = (bool) v.getProperty ("hostMaxBuffer", false);
     p.midiInPort = juce::jlimit (-1, 255, (int) v.getProperty ("midiInPort", -1));
     return p;
 }
@@ -326,6 +332,18 @@ juce::var patcherToVar (const PatcherDoc& doc)
     }
     o->setProperty ("wires", wires);
     o->setProperty ("io", juce::Array<juce::var> { doc.inputX, doc.inputY, doc.outputX, doc.outputY });
+    if (! doc.published.empty()) // [node, parameter, name, curve…] per Patcher parameter
+    {
+        juce::Array<juce::var> published;
+        for (const auto& p : doc.published)
+        {
+            juce::Array<juce::var> entry { p.node, p.param, str (p.name) };
+            for (const auto v : p.curve)
+                entry.add (juce::roundToInt (v * 10000.0f) / 10000.0);
+            published.add (entry);
+        }
+        o->setProperty ("published", published);
+    }
     if (! doc.outputTracks.empty())
     {
         juce::Array<juce::var> tracks;
@@ -392,6 +410,18 @@ PatcherDoc patcherFromVar (const juce::var& v, const Song& song)
         doc.outputX = (float) (double) io[2];
         doc.outputY = (float) (double) io[3];
     }
+    if (auto* published = v["published"].getArray())
+        for (const auto& p : *published)
+            if (p.isArray() && p.size() >= 3)
+            {
+                PatchParam param;
+                param.node = juce::jlimit (-1, count - 1, (int) p[0]);
+                param.param = juce::jmax (0, (int) p[1]);
+                param.name = p[2].toString().toStdString();
+                for (int k = 3; k < p.size(); ++k)
+                    param.curve.push_back (juce::jlimit (0.0f, 1.0f, (float) (double) p[k]));
+                doc.published.push_back (std::move (param));
+            }
     if (auto* tracks = v["outputTracks"].getArray())
         for (const auto& t : *tracks)
             doc.outputTracks.push_back (juce::jlimit (-1, maxMixerTracks - 1, (int) t));
@@ -411,6 +441,8 @@ juce::var effectToVar (const EffectSlot& slot)
 
     if (slot.mix < 1.0f)
         e->setProperty ("mix", juce::roundToInt (slot.mix * 10000.0f) / 10000.0);
+    if (! slot.smartDisable)
+        e->setProperty ("smartDisable", false);
     if (slot.sidechain >= 0)
         e->setProperty ("sidechain", slot.sidechain);
     if (slot.sidechain2 >= 0)
@@ -487,6 +519,7 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
     slot.kind = *kind;
     slot.enabled = (bool) e.getProperty ("on", true);
     slot.mix = juce::jlimit (0.0f, 1.0f, (float) (double) e.getProperty ("mix", 1.0));
+    slot.smartDisable = (bool) e.getProperty ("smartDisable", true);
 
     if (auto* params = e["params"].getArray())
         for (int i = 0; i < params->size() && i < maxEffectParams; ++i)
@@ -709,6 +742,8 @@ juce::var channelToVar (const ChannelDef& c)
     }
 
     o->setProperty ("mixer", c.mixerTrack);
+    if (c.maxPolyphony > 0)
+        o->setProperty ("maxPolyphony", c.maxPolyphony);
 
     if (c.colour != 0)
         o->setProperty ("colour", juce::String::toHexString ((juce::int64) (c.colour & 0xFFFFFF)).paddedLeft ('0', 6));
@@ -897,6 +932,7 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
                 }
             }
     def.mixerTrack = juce::jlimit (0, maxMixerTracks - 1, (int) c.getProperty ("mixer", 0));
+    def.maxPolyphony = juce::jlimit (0, 128, (int) c.getProperty ("maxPolyphony", 0));
     def.plugin = pluginFromVar (c["plugin"]);
 
     if (c.hasProperty ("colour"))
@@ -1253,7 +1289,12 @@ juce::String toJson (const Song& song)
             {
                 juce::Array<juce::var> markers;
                 for (const auto& m : a.markers)
-                    markers.add (juce::Array<juce::var> { (juce::int64) m.tick, str (m.name), m.numerator, m.denominator });
+                {
+                    juce::Array<juce::var> one { (juce::int64) m.tick, str (m.name), m.numerator, m.denominator };
+                    if (m.action != 0) // FL's marker action (Start / Stop recording...)
+                        one.add (m.action);
+                    markers.add (one);
+                }
                 o->setProperty ("markers", markers);
             }
 
@@ -1547,9 +1588,10 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
             if (auto* markers = a["markers"].getArray())
                 for (const auto& m : *markers)
-                    if (m.isArray() && m.size() == 4)
+                    if (m.isArray() && (m.size() == 4 || m.size() == 5))
                         arrangement.markers.push_back ({ juce::jmax<juce::int64> (0, (juce::int64) m[0]), m[1].toString().toStdString(),
-                                                         juce::jlimit (0, 32, (int) m[2]), juce::jlimit (1, 32, (int) m[3]) });
+                                                         juce::jlimit (0, 32, (int) m[2]), juce::jlimit (1, 32, (int) m[3]),
+                                                         m.size() == 5 ? juce::jlimit (0, 255, (int) m[4]) : 0 });
 
             std::stable_sort (arrangement.markers.begin(), arrangement.markers.end(), [] (const Marker& x, const Marker& y) { return x.tick < y.tick; });
             song.arrangements.push_back (std::move (arrangement));

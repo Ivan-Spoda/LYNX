@@ -714,6 +714,11 @@ void MainComponent::resized()
         toolbarEditor->toFront (false);
     }
     workspace.setBounds (getLocalBounds().withTrimmedTop (toolbarHeight + tray));
+    if (setupOverlay != nullptr)
+    {
+        setupOverlay->setBounds (getLocalBounds());
+        setupOverlay->toFront (false);
+    }
 }
 
 // --- toolbar layout ------------------------------------------------------------------------------
@@ -1220,6 +1225,20 @@ void MainComponent::loadUiSettings()
              : key == "disarmOnStop" ? o.disarmOnStop : o.startsPlayback) = on;
             engine.setRecordOptions (o);
         }
+        else if (key == "recordToStepSequencer" || key == "recordingMarkers" || key == "recordNoteEnd")
+        {
+            auto o = engine.getRecordOptions();
+            if (key == "recordNoteEnd")
+                o.noteEnd = (NoteEnd) juce::jlimit (0, 2, line.fromFirstOccurrenceOf ("=", false, false).trim().getIntValue());
+            else
+                (key == "recordToStepSequencer" ? o.toStepSequencer : o.recordingMarkers) = on;
+            engine.setRecordOptions (o);
+        }
+        else if (key == "recordQuantiseStarts")
+        {
+            recordQuantiseOn = on;
+            updateRecordQuantise();
+        }
     }
 
     startup = StartupOptions::load();
@@ -1257,7 +1276,11 @@ void MainComponent::saveUiSettings()
                                       + "\nrecordNotes=" + juce::String (engine.getRecordOptions().recordNotes ? 1 : 0)
                                       + "\nrecordAudio=" + juce::String (engine.getRecordOptions().recordAudio ? 1 : 0)
                                       + "\nrecordStartsPlayback=" + juce::String (engine.getRecordOptions().startsPlayback ? 1 : 0)
-                                      + "\ndisarmOnStop=" + juce::String (engine.getRecordOptions().disarmOnStop ? 1 : 0) + "\n");
+                                      + "\ndisarmOnStop=" + juce::String (engine.getRecordOptions().disarmOnStop ? 1 : 0)
+                                      + "\nrecordQuantiseStarts=" + juce::String (recordQuantiseOn ? 1 : 0)
+                                      + "\nrecordNoteEnd=" + juce::String ((int) engine.getRecordOptions().noteEnd)
+                                      + "\nrecordToStepSequencer=" + juce::String (engine.getRecordOptions().toStepSequencer ? 1 : 0)
+                                      + "\nrecordingMarkers=" + juce::String (engine.getRecordOptions().recordingMarkers ? 1 : 0) + "\n");
 }
 
 // --- transport -----------------------------------------------------------------------------------
@@ -1602,7 +1625,7 @@ void MainComponent::updateRecordQuantise()
     // the global grid sets the record quantise; "none" and the zoom-dependent grids record as played
     std::int64_t ticks = 0;
 
-    if (recordQuantiseOn)
+    // (the grid is kept even with "Note start time" off: "Note end time" uses it too)
     {
         const auto& option = grid::options()[(std::size_t) juce::jlimit (0, (int) grid::options().size() - 1, EditorGlobals::get().getGridOption())];
         if (option.kind == grid::Kind::ticks)
@@ -1611,12 +1634,38 @@ void MainComponent::updateRecordQuantise()
             ticks = (std::int64_t) ppq * juce::jmax (1, engine.getSong().beatsPerBar);
     }
 
-    if (engine.getRecordOptions().quantise != ticks)
+    if (engine.getRecordOptions().quantise != ticks || engine.getRecordOptions().quantiseStarts != recordQuantiseOn)
     {
         auto o = engine.getRecordOptions();
         o.quantise = ticks;
+        o.quantiseStarts = recordQuantiseOn;
         engine.setRecordOptions (o);
     }
+}
+
+void MainComponent::addRecordQuantizeItems (juce::PopupMenu& menu)
+{
+    const auto o = engine.getRecordOptions();
+    auto set = [this] (std::function<void (AudioEngine::RecordOptions&)> change) {
+        auto options = engine.getRecordOptions();
+        change (options);
+        engine.setRecordOptions (options);
+        saveUiSettings();
+    };
+    // FL's record menu "Quantize" items (REA round 139), to the global snap
+    menu.addItem (tr ("Note start time"), ! o.toStepSequencer, recordQuantiseOn && ! o.toStepSequencer, [this] {
+        recordQuantiseOn = ! recordQuantiseOn;
+        updateRecordQuantise();
+        saveUiSettings();
+    });
+    menu.addItem (tr ("Note end time"), ! o.toStepSequencer, o.noteEnd == NoteEnd::quantize && ! o.toStepSequencer, [set] {
+        set ([] (AudioEngine::RecordOptions& r) { r.noteEnd = r.noteEnd == NoteEnd::quantize ? NoteEnd::keepEnd : NoteEnd::quantize; });
+    });
+    menu.addItem (tr ("Leave note duration"), ! o.toStepSequencer, o.noteEnd == NoteEnd::keepLength && ! o.toStepSequencer, [set] {
+        set ([] (AudioEngine::RecordOptions& r) { r.noteEnd = r.noteEnd == NoteEnd::keepLength ? NoteEnd::keepEnd : NoteEnd::keepLength; });
+    });
+    menu.addItem (tr ("Record to step sequencer"), true, o.toStepSequencer,
+                  [set] { set ([] (AudioEngine::RecordOptions& r) { r.toStepSequencer = ! r.toStepSequencer; }); });
 }
 
 void MainComponent::addRecordOptions (juce::PopupMenu& menu)
@@ -1643,10 +1692,11 @@ void MainComponent::addRecordOptions (juce::PopupMenu& menu)
     menu.addItem (tr ("Replace: a recorded channel's old notes are cleared"), true, o.mode == RecordMode::replace,
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.mode = RecordMode::replace; }); });
     menu.addSeparator();
-    menu.addItem (tr ("Quantise recorded notes to the global grid"), true, recordQuantiseOn, [this] {
-        recordQuantiseOn = ! recordQuantiseOn;
-        updateRecordQuantise();
-    });
+    {
+        juce::PopupMenu quantize;
+        addRecordQuantizeItems (quantize);
+        menu.addSubMenu (tr ("Quantize recorded notes to the global snap"), quantize);
+    }
     menu.addItem (tr ("Song mode: place a pattern clip where recording starts"), true, o.placeSongClip,
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.placeSongClip = ! r.placeSongClip; }); });
 }
@@ -1817,6 +1867,11 @@ void MainComponent::showRecordMenu()
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.startsPlayback = ! r.startsPlayback; }); });
     menu.addItem (tr ("Disarm the inserts when recording stops"), true, o.disarmOnStop,
                   [set] { set ([] (AudioEngine::RecordOptions& r) { r.disarmOnStop = ! r.disarmOnStop; }); });
+    menu.addItem (tr ("Enable recording markers (Start / Stop recording markers in the Playlist)"), true, o.recordingMarkers,
+                  [set] { set ([] (AudioEngine::RecordOptions& r) { r.recordingMarkers = ! r.recordingMarkers; }); });
+    // FL's "Quantize" section (REA round 139): to the global snap
+    menu.addSectionHeader (tr ("Quantize"));
+    addRecordQuantizeItems (menu);
     menu.addItem (tr ("Record into the audio editor..."), [this] { openAudioEditor (engine); });
     menu.addSeparator();
     menu.addItem (tr ("Arm the selected mixer insert for audio (choose its input)..."), [this] { armSelectedInsertForAudio(); });
@@ -3326,9 +3381,42 @@ void MainComponent::showMissingFiles (bool afterOpening)
         });
 }
 
-void MainComponent::exportAudio()
+void MainComponent::switchSmartDisableForAll()
 {
-    showExportDialog (engine, currentFile.getParentDirectory(), projectName);
+    // FL's Tools › Macros › "Switch smart disable for all plugins" (FLEngine FUN_0124d430, REA round 139): every
+    // effect slot of every insert is set to smart disable
+    engine.editSong ([] (Song& s) {
+        for (auto& track : s.mixer)
+            for (auto& slot : track.effects)
+                slot.smartDisable = true;
+    });
+}
+
+void MainComponent::exportAudio (int format)
+{
+    showExportDialog (engine, currentFile.getParentDirectory(), projectName, format);
+}
+
+void MainComponent::exportMidiFile()
+{
+    // FL's File › Export › "MIDI file...": the arrangement's notes (or the current pattern's) as a Standard MIDI File
+    const auto folder = currentFile.existsAsFile() ? currentFile.getParentDirectory() : juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+    const auto name = projectName.isNotEmpty() ? projectName : juce::String ("LYNX");
+    fileChooser = std::make_unique<juce::FileChooser> (tr ("Export MIDI file"), folder.getChildFile (name + ".mid"), "*.mid");
+    juce::Component::SafePointer<MainComponent> safe (this);
+    fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
+                              [safe] (const juce::FileChooser& fc) {
+                                  auto file = fc.getResult();
+                                  if (safe == nullptr || file == juce::File())
+                                      return;
+                                  if (! file.hasFileExtension (".mid;.midi"))
+                                      file = file.withFileExtension (".mid");
+                                  juce::String error;
+                                  if (! MidiFileIo::saveSong (safe->engine.getSong(), file, error))
+                                      juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not export"), error);
+                                  else
+                                      file.revealToUser();
+                              });
 }
 
 void MainComponent::save (bool askForFile)
@@ -3393,12 +3481,48 @@ void MainComponent::save (bool askForFile)
 
 juce::StringArray MainComponent::getMenuBarNames()
 {
-    return { tr ("File"), tr ("Edit"), tr ("View"), tr ("Patterns"), tr ("Options"), tr ("Help") };
+    // FL's menu bar order (REA round 139): FILE EDIT ADD PATTERNS VIEW OPTIONS TOOLS HELP
+    return { tr ("File"), tr ("Edit"), tr ("Add"), tr ("Patterns"), tr ("View"), tr ("Options"), tr ("Tools"), tr ("Help") };
 }
 
-juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
+juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String&)
 {
     juce::PopupMenu menu;
+    // the bar's position → the menu built below (0 File, 1 Edit, 2 View, 3 Patterns, 4 Options, 5 Help, 10 Add, 11 Tools)
+    static constexpr int menus[] = { 0, 1, 10, 3, 2, 4, 11, 5 };
+    const auto index = juce::isPositiveAndBelow (barIndex, (int) std::size (menus)) ? menus[barIndex] : 5;
+
+    if (index == 10)
+    {
+        // FL's ADD menu: a channel (LYNX's instruments and the installed plugins), a pattern, the plugin tools
+        menu.addSectionHeader (tr ("Channel"));
+        rack.addInstrumentItems (menu, -1);
+        menu.addSectionHeader (tr ("Other"));
+        menu.addItem (tr ("Pattern"), [this] { newPatternButton.onClick(); });
+        menu.addItem (tr ("Plugin manager..."), [this] { showPluginManager(); });
+        return menu;
+    }
+
+    if (index == 11)
+    {
+        // FL's TOOLS menu, with the tools LYNX has (REA round 139)
+        menu.addItem (tr ("Browser find") + shortcutText ("browser.search"), [this] {
+            showPanel (Panel::browser);
+            browser.focusSearch();
+        });
+        menu.addItem (tr ("One-click audio recording: arm the selected insert..."), [this] { armSelectedInsertForAudio(); });
+        menu.addItem (tr ("Plugin performance monitor..."), [this] { showPluginMonitor (engine); });
+        menu.addSectionHeader (tr ("Macros"));
+        menu.addItem (tr ("Stop sound (all notes off)"), [this] { engine.panic(); });
+        menu.addItem (tr ("Select unused channels"), [this] {
+            showPanel (Panel::channelRack);
+            rack.selectUnused();
+        });
+        menu.addItem (tr ("Switch smart disable for all plugins"), [this] { switchSmartDisableForAll(); });
+        menu.addItem (tr ("Delete unused recordings and save project..."), [this] { deleteUnusedRecordingsAndSave(); });
+        menu.addItem (tr ("Collect project samples into a folder..."), [this] { collectSamples(); });
+        return menu;
+    }
 
     if (index == 0)
     {
@@ -3421,29 +3545,56 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             });
         menu.addSubMenu (tr ("New from template"), templates);
         menu.addItem (tr ("Open...") + shortcutText ("file.open"), [this] { chooseFileToOpen(); });
+        menu.addSeparator();
 
-        juce::PopupMenu recentMenu;
-        for (int i = 0; i < recent.getNumFiles(); ++i)
-        {
-            const auto file = recent.getFile (i);
-            recentMenu.addItem (file.getFileName() + "  (" + file.getParentDirectory().getFullPathName() + ")", file.existsAsFile(),
-                                false, [this, file] { confirmDiscard ([this, file] { openFile (file); }); });
-        }
-        if (recent.getNumFiles() == 0)
-            recentMenu.addItem (tr ("(none)"), false, false, [] {});
-        menu.addSubMenu (tr ("Open recent"), recentMenu);
-
+        // FL's order (REA round 139): saving, then Export, then the recent projects listed in the menu itself
         menu.addItem (tr ("Save") + shortcutText ("file.save"), [this] { save (false); });
         menu.addItem (tr ("Save as...") + shortcutText ("file.saveAs"), [this] { save (true); });
         menu.addItem (tr ("Save new version") + shortcutText ("file.saveNewVersion"), [this] { saveNewVersion(); });
         menu.addItem (tr ("Save to new project folder..."), [this] { saveToNewProjectFolder(); });
         menu.addItem (tr ("Save as template..."), [this] { saveAsTemplate(); });
         menu.addItem (tr ("Delete unused recordings and save..."), [this] { deleteUnusedRecordingsAndSave(); });
-        menu.addItem (tr ("Revert to last backup..."), [this] { revertToLastBackup(); });
         menu.addSeparator();
-        menu.addItem (tr ("Export audio...") + shortcutText ("file.export"), [this] { exportAudio(); });
-        menu.addItem (tr ("Export project with samples (.zip)..."), [this] { exportPackage(); });
-        menu.addItem (tr ("Collect project samples into a folder..."), [this] { collectSamples(); });
+        {
+            // FL's File › Export (REA round 139): one entry per format, then the formats of the last export
+            juce::PopupMenu exports;
+            exports.addItem (tr ("Wave file..."), [this] { exportAudio (0); });
+            exports.addItem (tr ("MP3 file..."), [this] { exportAudio (1); });
+            exports.addItem (tr ("OGG file..."), [this] { exportAudio (2); });
+            exports.addItem (tr ("FLAC file..."), [this] { exportAudio (3); });
+            exports.addItem (tr ("MIDI file..."), [this] { exportMidiFile(); });
+            exports.addItem (tr ("Last exported format(s)...") + shortcutText ("file.export"), [this] { exportAudio(); });
+            exports.addSeparator();
+            exports.addItem (tr ("Project with samples (.zip)..."), [this] { exportPackage(); });
+            exports.addItem (tr ("Project data files (collect the samples into a folder)..."), [this] { collectSamples(); });
+            menu.addSubMenu (tr ("Export"), exports);
+        }
+
+        menu.addSectionHeader (tr ("Recent projects"));
+        const auto shown = juce::jmin (recent.getNumFiles(), 10);
+        for (int i = 0; i < shown; ++i)
+        {
+            const auto file = recent.getFile (i);
+            juce::PopupMenu::Item item (file.getFileName());
+            item.shortcutKeyDescription = file.getParentDirectory().getFileName(); // its folder on the right
+            item.setEnabled (file.existsAsFile()).setAction ([this, file] { confirmDiscard ([this, file] { openFile (file); }); });
+            menu.addItem (std::move (item));
+        }
+        if (recent.getNumFiles() > shown)
+        {
+            juce::PopupMenu more;
+            for (int i = shown; i < recent.getNumFiles(); ++i)
+            {
+                const auto file = recent.getFile (i);
+                more.addItem (file.getFileName() + "  (" + file.getParentDirectory().getFullPathName() + ")", file.existsAsFile(),
+                              false, [this, file] { confirmDiscard ([this, file] { openFile (file); }); });
+            }
+            menu.addSubMenu (tr ("More recent projects"), more);
+        }
+        if (recent.getNumFiles() == 0)
+            menu.addItem (tr ("(none)"), false, false, [] {});
+        menu.addSeparator();
+        menu.addItem (tr ("Revert to last backup..."), [this] { revertToLastBackup(); });
         menu.addItem (tr ("Open autosave folder"), [] {
             autosaveFolder().createDirectory();
             autosaveFolder().startAsProcess();
@@ -3761,10 +3912,25 @@ void MainComponent::showHelp()
 
 void MainComponent::showSetupWizard()
 {
-    lynx::showSetupWizard (engine, [safe = juce::Component::SafePointer<MainComponent> (this)] (const juce::String& language) {
-        if (safe != nullptr)
-            safe->showLanguageChoice (language);
-    });
+    // on top of the main window (round 140), so the DAW is visible behind it from the first start on
+    if (setupOverlay != nullptr)
+        return;
+    auto safe = juce::Component::SafePointer<MainComponent> (this);
+    setupOverlay = lynx::makeSetupWizardOverlay (
+        engine,
+        [safe] (const juce::String& language) {
+            if (safe != nullptr)
+                safe->showLanguageChoice (language);
+        },
+        [safe] {
+            juce::MessageManager::callAsync ([safe] { // the overlay's own button is still running
+                if (safe != nullptr)
+                    safe->setupOverlay.reset();
+            });
+        });
+    addAndMakeVisible (*setupOverlay);
+    setupOverlay->setBounds (getLocalBounds());
+    setupOverlay->toFront (true);
 }
 
 void MainComponent::showImportReport()

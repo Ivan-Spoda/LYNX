@@ -105,6 +105,7 @@ struct Channel
     int panAdj = 0, volAdj = 12800;
 
     std::vector<std::uint8_t> pluginState; // the generator's 0xD5 (e.g. 3x Osc state)
+    int wrapperFlags = -1;                 // the generator's 0xD4 u16 at +16 (0x10 generator, 0x20 smart disable; −1 = none)
 
     int swingMix = 128;          // 0x61: 0..128
     int cutGroup = 0, cutBy = 0; // 0x84
@@ -297,6 +298,8 @@ struct MixerInsert
         int index = 0;      // 0..9 (0x62; files without it, FL <= 11: the slot field of the plugin's 0xD4)
         std::string plugin; // internal name (0xC9), e.g. "Fruity Limiter"
         std::vector<std::uint8_t> state; // the plugin's 0xD5 (e.g. Fruity Wrapper blob)
+        // the plugin's 0xD4 u16 at +16 (wrapper flags, REA round 139): 0x20 = "Smart disable" (−1 = not in the file)
+        int wrapperFlags = -1;
     };
     std::vector<Slot> slots;
 };
@@ -333,6 +336,10 @@ struct Project
 // `channelPreset`: FL channel preset file (.fst): the events belong to a single channel (index 0),
 // without the new-channel event.
 Project parseProject (std::span<const std::uint8_t> file, bool channelPreset = false);
+
+// The FL version that saved a project ("21.2.3.4060"), read from the start of the file only (event 0xC7 comes among
+// the first events; the Browser's details box, REA round 139). "" when the bytes are not an FL project / no version.
+std::string readSavedVersion (std::span<const std::uint8_t> head);
 
 // Utilities exposed for tests
 std::uint32_t parseVersionNumber (const std::string& version);

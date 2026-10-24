@@ -100,6 +100,7 @@ public:
     class FileTree;     // the folder tree / search results (implementation detail)
     class PreviewStrip; // waveform of the selected sample
     class TabBar;       // ALL / PROJECT / STARRED
+    class DetailsBox;   // date, size / version and folder of the selection (FL's details box)
 
     // starred files and folders (one path per line in the settings folder)
     bool isStarred (const juce::File& file) const { return starred.contains (file.getFullPathName()); }
@@ -129,6 +130,7 @@ private:
     std::unique_ptr<FileTree> tree, results;
     std::unique_ptr<juce::Viewport> treeView, resultsView;
     std::unique_ptr<PreviewStrip> strip;
+    std::unique_ptr<DetailsBox> details;
     std::unique_ptr<TabBar> tabs;
     class SearchJob;
     std::unique_ptr<SearchJob> job;
