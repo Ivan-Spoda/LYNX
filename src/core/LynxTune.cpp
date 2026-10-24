@@ -555,10 +555,12 @@ public:
             // round 148: the overlap-add of shifted grains loses the highs' incoherent part (two-period Hann grains at
             // half overlap keep 0.75 of their power: -1.25 dB) — [EXEC] her takes at retune 0 / 20: 0.5–1.5 dB darker than
             // Auto-Tune Pro above 4 kHz. A first-order shelf (+1 dB from 5 kHz) is faded in while a correction of 5 cents or
-            // more is being applied (halves the difference: 10 kHz -1.0 -> -0.4 dB, 16 kHz -1.3 -> -0.6 dB) [model]
+            // more is being applied to a voiced sound (about halves the difference: 10 kHz -1.0 -> -0.5 dB, 16 kHz -1.3 -> -0.8 dB) [model]
             {
                 const double a = std::exp (-2.0 * 3.141592653589793 * 5000.0 / sr);
-                activity += (1.0 - std::exp (-1.0 / (0.03 * sr))) * (std::min (1.0, std::abs (semis - trans) / 0.05) - activity);
+                // (voiced only: unvoiced sounds pass as plain overlap-add, untouched)
+                const double want = unvoicedFor > 0.0 ? 0.0 : std::min (1.0, std::abs (semis - trans) / 0.05);
+                activity += (1.0 - std::exp (-1.0 / (0.01 * sr))) * (want - activity);
                 constexpr double lift = 0.12201845430196334; // 10^(1/20) - 1
                 for (int c = 0; c < 2; ++c)
                 {

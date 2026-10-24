@@ -76,8 +76,9 @@ wobble stays at the dry signal's analysis floor, < 1.2 c).
 darker at 4–6 kHz and 1.0–1.5 dB at 10–16 kHz; the trial itself is within 0.5 dB of the dry take below 12 kHz. [model]
 The cause is the overlap-add: two-period Hann grains at half overlap keep their coherent (harmonic) part but only 0.75
 of the power of what is incoherent from grain to grain — the breath and the sibilant highs (−1.25 dB). A first-order
-shelf, +1 dB from 5 kHz, is now faded in while a correction of 5 c or more is applied (none on an in-tune voice):
-10 kHz −1.0 → −0.4 dB, 16 kHz −1.3 → −0.6 dB on go, kw −1.0 → −0.5 / −1.5 → −1.0, lu within ±0.6 dB.
+shelf, +1 dB from 5 kHz, is now faded in while a correction of 5 c or more is applied to a voiced sound (none on an
+in-tune voice, none on consonants): 10 kHz −1.0 → −0.5 dB, 16 kHz −1.3 → −0.8 dB on go, kw −1.0 → −0.5 / −1.5 → −1.0,
+lu within ±0.5 dB.
 
 ## 2. SSL 4K E (Complete Access) measured; Ridge Strip's 4K voicing [EXEC]
 
@@ -163,7 +164,8 @@ projects (their parity is rounds 144 / 147 / 150's).
     that is loud *and* stands out switches the reduction on (hysteresis 3.9 / −4.1 dB), range × (L − thr + 4.1) /
     (0.1 − thr), looked ahead by the look-ahead time inside a fixed 15 ms latency (720 samples at 48 kHz, as the
     trial), wide band = the whole signal × the gain; split band [model]: only the part above the high-pass.
-  - `translate = pro-ds`: Single Vocal → the Vocal voicing, Allround → Hush's own engine in its allround mode.
+  - `translate = pro-ds`: Single Vocal → the Vocal voicing, Allround → Hush's own engine in its allround mode; the
+    panel has a "Vocal detector" switch (pt-BR "Detector vocal").
 
 | her state → take | before (Hush defaults) | now | (doing nothing) | GR frames: rms error / trial max / LYNX max |
 |---|---|---|---|---|
