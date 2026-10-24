@@ -230,8 +230,9 @@ vendor = Soundtoys
 # round 129 (docs/PARITY.md): LYNX's multi-mode echo plays EchoBoy's role. Round 136: her states play Echoform's Tape
 # voicing (the loop structures measured on the official trial, REA_rodada136 §4), recognised by the hash of the encoded
 # preset (not decoded here); any other state: round 129's tape echo, 1/4 note at the project tempo, 25 % feedback, 25 % mix
+# (round 147: in the Studio reel voicing — EchoBoy's default style, measured black-box, REA_rodada147a)
 lynx = Echoform
-preset = Mode=0.0415; Sync L=0.6248; Note L=0.4498; Feedback=0.125; Mix=0.25
+preset = Mode=0.0415; Sync L=0.6248; Note L=0.4498; Feedback=0.125; Mix=0.25; Echo voicing=0.064516
 # [DATA] VST2 unique ID from real projects
 vst2 = StEB
 names = EchoBoy; EchoBoyJr; EchoBoy Jr

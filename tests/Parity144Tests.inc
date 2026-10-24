@@ -203,7 +203,7 @@ TEST (echoform_style_edit_round144)
     using namespace lynx;
     namespace e = echosuite::echoform;
     const auto d = makeEffectSlot (EffectKind::echoform).params;
-    CHECK (e::inputLevel == e::rhythmTimeLast + 1 && e::loopTreble + 1 == e::paramCount);
+    CHECK (e::inputLevel == e::rhythmTimeLast + 1 && e::loopTreble + 1 == e::voicing);
     CHECK (formatEffectParam (EffectKind::echoform, e::inputLevel, d[e::inputLevel], 120.0) == "+0.0 dB");
     CHECK (formatEffectParam (EffectKind::echoform, e::loopMid, d[e::loopMid], 120.0) == "+0.0 dB");
     CHECK (formatEffectParam (EffectKind::echoform, e::loopBass, 1.0f, 120.0) == "+18.0 dB");
