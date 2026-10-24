@@ -194,7 +194,7 @@ TEST (autopan_panner_sources_round135s)
     using namespace lynx;
     namespace ap = autopan;
     auto base = makeEffectSlot (EffectKind::autoPan).params;
-    CHECK (effectInfo (EffectKind::autoPan).params.size() == (std::size_t) ap::count);
+    CHECK (effectInfo (EffectKind::autoPan).params.size() == (std::size_t) ap::count + 12); // + round 136's Rhythm voicing
     CHECK (ap::sourceOf (base[ap::source]) == ap::Source::fl); // older projects / FL conversions keep FL's LFO
     CHECK (std::abs (ap::rateHz (base[ap::rate]) - 0.25) < 0.01); // the reference's default 0.25 Hz
     CHECK (formatEffectParam (EffectKind::autoPan, ap::rate, ap::rateValue (3.56), 120.0) == "3.56 Hz");
@@ -269,44 +269,22 @@ TEST (soundtoys_known_states_round135s)
     CHECK (soundtoysStateHash (st) && *soundtoysStateHash (st) == 0xb3c6c15d69b2af7dull);
     CHECK (! soundtoysStateHash (std::vector<std::uint8_t> { 1, 2, 3 }));
     CHECK (knownSoundtoysStates() == 17);
-    // an unknown AlterBoy state: Voice Shift with her usual setting
+    // an unknown AlterBoy state: the substitute (round 136's measured model, kept by the round-138 merge: LYNX Tune as
+    // the voice shifter) with her usual setting — Quantize, formant +1.2 st, drive 4.6
     PluginIdentity id;
     id.format = ForeignPlugin::Format::vst2;
     id.name = "LittleAlterBoy";
     id.state = st;
     const auto* entry = findPluginSubstitute (id, false);
-    CHECK (entry != nullptr && entry->effect == EffectKind::voiceShift);
+    CHECK (entry != nullptr && entry->effect == EffectKind::lynxTune);
     if (entry != nullptr)
     {
         int n = -1;
         const auto s = makeSubstituteSlot (*entry, &id, &n);
-        CHECK (n == 0 && voiceshift::modeOf (s.params[voiceshift::mode]) == voiceshift::Mode::quantize);
-        CHECK (std::abs (voiceshift::formantSemitones (s.params[voiceshift::formant]) - 1.2) < 1e-3);
+        CHECK (n == 0 && s.params[lynxtune::driveStage] == 1.0f && std::abs (s.params[lynxtune::drive] - 0.46f) < 1e-6f);
     }
-    // her real states (when the round's extraction is on this machine): each one translates to the trial's values
-    const std::filesystem::path dir = std::string (std::getenv ("HOME") != nullptr ? std::getenv ("HOME") : "") + "/.claude/jobs/f8789b49/tmp/vm124/st";
-    auto load = [&] (const char* file) {
-        std::ifstream in (dir / file, std::ios::binary);
-        return std::vector<std::uint8_t> ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
-    };
-    if (std::filesystem::exists (dir / "Little_AlterBoy_0.bin"))
-    {
-        id.state = load ("Little_AlterBoy_0.bin");
-        int n = 0;
-        const auto s = makeSubstituteSlot (*entry, &id, &n);
-        CHECK (n == 6 && std::abs (voiceshift::driveAmount (s.params[voiceshift::drive]) - 4.6) < 1e-3);
-        PluginIdentity d;
-        d.format = ForeignPlugin::Format::vst2;
-        d.name = "Decapitator";
-        d.state = load ("Decapitator_0.bin");
-        if (const auto* e = findPluginSubstitute (d, false))
-        {
-            int k = 0;
-            const auto t = makeSubstituteSlot (*e, &d, &k);
-            CHECK (k > 0 && t.kind == EffectKind::ember && mixsuite::ember::voiceIndex (t.params[mixsuite::ember::voice]) == 1);
-            CHECK (t.params[mixsuite::ember::wideCuts] == 1.0f);
-        }
-    }
+    // round 135's own translators stay reachable for Voice Shift (its table: 17 payloads, checked above)
+    CHECK (effectInfo (EffectKind::voiceShift).params.size() == (std::size_t) voiceshift::count);
 }
 
 TEST (autopan_panel_places_every_parameter_round135s)

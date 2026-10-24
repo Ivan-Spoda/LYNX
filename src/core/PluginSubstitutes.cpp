@@ -569,7 +569,7 @@ names = PanMan
 # state: her most used one (a 3.56 Hz left / right triangle over 151 degrees, analog). (Round 135's rhythmic-panner
 # sources — free LFO, rhythm steps — stay available on the same effect; vox138 kept round 136's measured voicing for
 # the substitute.)
-preset = Voicing=1; Rhythm rate=0.8505; Sync=0; Width=0.7171; Offset=0.5; Rhythm smoothing=0.9925; Pattern=0; Amount=0.9981; Start phase=0.9917; Rhythm analog=0.5; Rhythm output=0.5
+preset = Depth=0.918; Source=0.5; Rate=0.8505; Smoothing=1; Analog=1; Voicing=1; Rhythm rate=0.8505; Sync=0; Width=0.7171; Offset=0.5; Rhythm smoothing=0.9925; Pattern=0; Amount=0.9981; Start phase=0.9917; Rhythm analog=0.5; Rhythm output=0.5
 translate = soundtoys-panman
 
 [soundtoys-littlealterboy]
