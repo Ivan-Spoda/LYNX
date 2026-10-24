@@ -2875,6 +2875,14 @@ Layout echoformLayout()
                                   TR_NOOP ("Auto|Clean|Tape|Tube|Squash|Grit|Ceiling"), types)));
         v.push_back (off (label (800, 402, 38, 20, TR_NOOP ("Mult."))));
         v.push_back (off (tabs (840, 402, 100, 20, "Multiply", TR_NOOP ("1x|2x|4x|8x"), { 0.0f, 1.0f / 3.0f, 2.0f / 3.0f, 1.0f })));
+        // round 150: the voicing's measured stereo behaviour (L/R offset in Single / Dual, the ping-pong law) and the
+        // offset itself (EchoBoy's Tweak L/R Offset), on the Rhythm row while Rhythm is off and a voicing is chosen
+        const auto withVoicing = [&off] (LayoutItem i) { return off (when (std::move (i), "Echo voicing", 0.5f / 31.0f, 1.0f)); };
+        v.push_back (withVoicing (label (380, 320, 50, 20, TR_NOOP ("Stereo"))));
+        v.push_back (withVoicing (tabs (432, 320, 130, 20, "Voicing stereo", TR_NOOP ("Classic|Measured"), { 0.0f, 1.0f })));
+        v.push_back (withVoicing (label (572, 320, 68, 20, TR_NOOP ("L/R offset"))));
+        v.push_back (withVoicing (slider (Item::hslider, 642, 322, 70, 16, "L/R offset", nullptr, noCaption)));
+        v.push_back (withVoicing (value (714, 320, 52, 20, "L/R offset")));
     }
     return l;
 }

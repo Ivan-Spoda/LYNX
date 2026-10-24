@@ -4125,3 +4125,6 @@ countries: br
 "What this band's detector hears: the plug-in's input or the external side chain (global: the External SC switch)" = "O que o detector desta banda escuta: a entrada do plug-in ou o side chain externo (global: a chave de SC externo)"
 "Measured: the reference's attack, release and soft range (a range-limited band recovers at once); classic: the detector of projects saved before round 150" = "Medido: o ataque, o release e o range suave da referência (uma banda limitada pelo range se recupera na hora); clássico: o detector dos projetos salvos antes da rodada 150"
 "LYNX|RComp" = "LYNX|RComp"
+# round 150 (parity150a): Echoform's voicings — measured stereo behaviour, EchoBoy's L/R offset
+"L/R offset" = "Desvio L/R"
+"Voicing stereo" = "Estéreo da voz"

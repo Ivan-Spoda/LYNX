@@ -3337,6 +3337,10 @@ void upgradeLoadedEffectParams (EffectSlot& slot, std::size_t savedCount) noexce
     // round 150: … and before its measured detector keeps the round-108 detector
     if (slot.kind == EffectKind::prismMultiband && savedCount <= (std::size_t) dyn::prism::detectorLaw)
         slot.params[(std::size_t) dyn::prism::detectorLaw] = 0.0f;
+    // round 150: Echoform saved before the voicings' measured stereo behaviour keeps the round-147 voicings
+    if (slot.kind == EffectKind::echoform && savedCount <= (std::size_t) echosuite::echoform::voicingStereo
+        && slot.params.size() > (std::size_t) echosuite::echoform::voicingStereo)
+        slot.params[(std::size_t) echosuite::echoform::voicingStereo] = 0.0f;
 }
 
 std::unique_ptr<Effect> makeParallelEffect (const EffectSlot& slot)
