@@ -30,7 +30,9 @@
 #include "core/SynthPresets.h"
 #include "core/PluginLayout.h"
 #include "engine/Text.h"
+#include "core/RackOps.h"
 #include "ui/ControllerEditors.h"
+#include "ui/ValueControl.h"
 #include "ui/I18n.h"
 #include "ui/PluginSkin.h"
 #include "ui/Theme.h"
@@ -40,6 +42,8 @@ namespace lynx
 {
 namespace
 {
+void showModulationFor (juce::Component& from, AudioEngine& engine, int channel);
+
 // Cutoff and pitch envelopes (FL's channel envelopes), used by the synth and the sampler.
 class ModEnvelopeEditor final : public juce::Component
 {
@@ -1525,7 +1529,7 @@ public:
         filterType.onChange = [this] { apply(); };
         addAndMakeVisible (filterType);
         modulationButton.setButtonText (tr ("Modulation (envelopes and LFOs)..."));
-        modulationButton.onClick = [this] { openChannelModulation (engine, channel); };
+        modulationButton.onClick = [this] { showModulationFor (*this, engine, channel); };
         addAndMakeVisible (modulationButton);
         regionEnd.setDoubleClickReturnValue (true, 1.0);
         regionStart.setTooltip (tr ("Where the sample starts playing (fraction of the file)"));
@@ -1798,7 +1802,7 @@ public:
         addAndMakeVisible (ring);
 
         modulationButton.setButtonText (tr ("Modulation (envelopes and LFOs)..."));
-        modulationButton.onClick = [this] { openChannelModulation (engine, channel); };
+        modulationButton.onClick = [this] { showModulationFor (*this, engine, channel); };
         addAndMakeVisible (modulationButton);
 
         for (auto* s : { &attack, &decay, &release })
@@ -2141,6 +2145,550 @@ private:
     juce::ComboBox presetBox;
 };
 
+// --- FL's channel window frame (REA round 143b) --------------------------------------------------------------
+// FL 2026 draws every channel's settings window the same way: a header strip with the channel's tabs on the left
+// (the instrument / plugin page, the wrench "Miscellaneous functions" page) and ON, PAN, VOL and TRACK on the right
+// [EXEC: FL 2026 build 5654, "Detailed settings" of a generator and of a sampler]. LYNX does the same around its own
+// instrument pages, in its own style; the envelopes and LFOs of the synth and the sampler are the "Envelope /
+// instrument" tab instead of a second window.
+
+// A small rotary control with LYNX's control contract (drag, Ctrl = fine, wheel, Alt / middle-click / double-click
+// reset, right-click menu with automation items when the spec has a target); the hint bar shows its name and value.
+class FrameKnob final : public juce::Component,
+                        public ui::HintSource
+{
+public:
+    FrameKnob (AudioEngine& e, std::function<ui::ValueSpec()> makeSpec, std::function<double()> get, std::function<void (double)> set,
+               juce::String caption)
+        : engine (e), specOf (std::move (makeSpec)), getter (std::move (get)), setter (std::move (set)), label (std::move (caption))
+    {
+        setRepaintsOnMouseActivity (true);
+    }
+
+    ui::Hint hintAt (juce::Point<int>) override { return ui::valueHint (specOf(), getter(), ui::valueGestures()); }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto spec = specOf();
+        auto area = getLocalBounds().toFloat();
+        const auto caption = area.removeFromBottom (13.0f);
+        const auto valueArea = area.removeFromBottom (13.0f);
+        const auto size = juce::jmin (area.getWidth(), area.getHeight());
+        const auto v = (float) juce::jlimit (0.0, 1.0, (getter() - spec.minimum) / juce::jmax (1e-9, spec.maximum - spec.minimum));
+        theme::drawKnob (g, juce::Rectangle<float> (size, size).withCentre (area.getCentre()), v, spec.minimum < 0.0,
+                         isMouseOverOrDragging() ? theme::colour::accent : theme::colour::knobArc, isMouseOver());
+        g.setFont (theme::font (theme::type::caption));
+        g.setColour (theme::colour::textPrimary);
+        g.drawText (spec.text (getter()), valueArea, juce::Justification::centred);
+        g.setColour (theme::colour::textSecondary);
+        g.drawText (theme::caps (label), caption, juce::Justification::centred);
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu())
+        {
+            ui::showValueMenu (*this, &engine, specOf(), getter(), setter);
+            return;
+        }
+        if (ui::isResetClick (e))
+        {
+            setter (specOf().defaultValue);
+            repaint();
+            return;
+        }
+        drag.begin (e, getter());
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (! drag.isActive())
+            return;
+        const auto spec = specOf();
+        setter (drag.update (e, spec));
+        ui::showValueTip (*this, getLocalBounds(), spec.text (getter()));
+        repaint();
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        drag.end();
+        ui::hideValueTip();
+    }
+
+    void mouseDoubleClick (const juce::MouseEvent&) override
+    {
+        setter (specOf().defaultValue);
+        repaint();
+    }
+
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
+    {
+        if (const auto v = ui::wheelValue (getter(), e, wheel, specOf()))
+        {
+            setter (*v);
+            ui::flashValueTip (*this, getLocalBounds(), specOf().text (getter()));
+            repaint();
+        }
+    }
+
+private:
+    AudioEngine& engine;
+    std::function<ui::ValueSpec()> specOf;
+    std::function<double()> getter;
+    std::function<void (double)> setter;
+    juce::String label;
+    ui::ValueDrag drag;
+};
+
+juce::String channelNameOf (const Song& song, int channel)
+{
+    if (channel < 0 || channel >= (int) song.channels.size())
+        return "?";
+    const auto& n = song.channels[(std::size_t) channel].name;
+    return n.empty() ? tr ("Channel {0}", { juce::String (channel + 1) }) : juce::String::fromUTF8 (n.c_str());
+}
+
+// An integer spec shown as a number, 0 as "--" (FL's empty number boxes).
+ui::ValueSpec countSpec (const juce::String& name, int maximum, int defaultValue, std::function<juce::String (int)> text = {})
+{
+    ui::ValueSpec spec;
+    spec.name = name;
+    spec.maximum = maximum;
+    spec.defaultValue = defaultValue;
+    spec.interval = 1.0;
+    spec.pixelsForRange = juce::jlimit (60.0, 400.0, 5.0 * maximum);
+    spec.toText = [text] (double v) {
+        const auto i = juce::roundToInt (v);
+        if (text)
+            return text (i);
+        return i == 0 ? juce::String ("--") : juce::String (i);
+    };
+    spec.fromText = [] (const juce::String& t) -> std::optional<double> {
+        const auto digits = t.retainCharacters ("0123456789");
+        return digits.isEmpty() ? std::optional<double> (0.0) : std::optional<double> (digits.getDoubleValue());
+    };
+    return spec;
+}
+
+// The wrench tab: FL's "Miscellaneous functions" with what LYNX's channels have (Levels, Polyphony, Time, Group,
+// Arpeggiator).
+class MiscPanel final : public juce::Component,
+                        private juce::ChangeListener
+{
+public:
+    static constexpr int preferredWidth = 600, preferredHeight = 300;
+
+    MiscPanel (AudioEngine& e, int c) : engine (e), channel (c)
+    {
+        const auto name = [this] { return channelNameOf (engine.getSong(), channel); };
+        auto knob = [this] (std::function<ui::ValueSpec()> spec, std::function<double (const ChannelDef&)> get,
+                            std::function<void (ChannelDef&, double)> set, const char* caption) {
+            auto k = std::make_unique<FrameKnob> (
+                engine, std::move (spec), [this, get] { return current() != nullptr ? get (*current()) : 0.0; },
+                [this, set] (double v) {
+                    if (current() == nullptr)
+                        return;
+                    engine.editSong ([ch = channel, set, v] (Song& s) {
+                        if (ch < (int) s.channels.size())
+                            set (s.channels[(std::size_t) ch], v);
+                    });
+                },
+                tr (caption));
+            addAndMakeVisible (*k);
+            knobs.push_back (std::move (k));
+            return knobs.back().get();
+        };
+
+        // Levels adjustment
+        pan = knob ([this, name] {
+                        auto s = ui::panSpec (name() + " - " + tr ("Pan"));
+                        s.target = AutomationTarget { AutomationTargetKind::channelPan, channel };
+                        return s;
+                    },
+                    [] (const ChannelDef& d) { return (double) d.pan; }, [] (ChannelDef& d, double v) { d.pan = (float) v; }, TR_NOOP ("Pan"));
+        volume = knob ([this, name] {
+                           auto s = ui::percentSpec (name() + " - " + tr ("Volume"), 0.78);
+                           s.target = AutomationTarget { AutomationTargetKind::channelVolume, channel };
+                           return s;
+                       },
+                       [] (const ChannelDef& d) { return (double) d.volume; }, [] (ChannelDef& d, double v) { d.volume = (float) v; },
+                       TR_NOOP ("Vol"));
+        // Polyphony
+        maxPoly = knob ([name] { return countSpec (name() + " - " + tr ("Maximum polyphony (-- = no limit)"), 64, 0); },
+                        [] (const ChannelDef& d) { return (double) d.maxPolyphony; },
+                        [] (ChannelDef& d, double v) { d.maxPolyphony = juce::jlimit (0, 64, juce::roundToInt (v)); }, TR_NOOP ("Max"));
+        slide = knob (
+            [name] {
+                ui::ValueSpec s;
+                s.name = name() + " - " + tr ("Portamento time");
+                s.maximum = 2.0;
+                s.defaultValue = 0.125;
+                s.toText = [] (double v) { return tr ("{0} beats", { juce::String (v, 3) }); };
+                s.fromText = [] (const juce::String& t) -> std::optional<double> { return t.retainCharacters ("0123456789.,").replaceCharacter (',', '.').getDoubleValue(); };
+                return s;
+            },
+            [] (const ChannelDef& d) { return (double) channelPortamentoBeats (d); },
+            [] (ChannelDef& d, double v) { setChannelPortamento (d, channelPortamento (d), (float) v); }, TR_NOOP ("Slide"));
+        porta.setButtonText (tr ("Porta"));
+        porta.setTooltip (tr ("Portamento: each note glides from the previous one's pitch (the Slide knob sets the time)"));
+        porta.onClick = [this] { edit ([on = porta.getToggleState()] (ChannelDef& d) { setChannelPortamento (d, on, channelPortamentoBeats (d)); }); };
+        mono.setButtonText (tr ("Mono"));
+        mono.setTooltip (tr ("Mono: one voice; a new note takes over the sounding one"));
+        mono.onClick = [this] { edit ([on = mono.getToggleState()] (ChannelDef& d) { setChannelMono (d, on); }); };
+        // Time
+        swing = knob ([name] { return ui::percentSpec (name() + " - " + tr ("Swing mix"), 1.0); },
+                      [] (const ChannelDef& d) { return (double) d.swingMix; }, [] (ChannelDef& d, double v) { d.swingMix = (float) v; },
+                      TR_NOOP ("Swing"));
+        // Group
+        cut = knob ([this, name] { return countSpec (name() + " - " + tr ("Cut: notes of this channel stop the channels cut by this group"), 
+                                                     juce::jmax (99, current() != nullptr ? current()->cutGroup : 0), 0,
+                                                     [this] (int g) { return juce::String (cutGroupText (g, channel)); }); },
+                    [] (const ChannelDef& d) { return (double) d.cutGroup; }, [] (ChannelDef& d, double v) { d.cutGroup = juce::jmax (0, juce::roundToInt (v)); },
+                    TR_NOOP ("Cut group"));
+        cutBy = knob ([this, name] { return countSpec (name() + " - " + tr ("By: this channel is cut by the channels of this group"),
+                                                       juce::jmax (99, current() != nullptr ? current()->cutBy : 0), 0,
+                                                       [this] (int g) { return juce::String (cutGroupText (g, channel)); }); },
+                      [] (const ChannelDef& d) { return (double) d.cutBy; }, [] (ChannelDef& d, double v) { d.cutBy = juce::jmax (0, juce::roundToInt (v)); },
+                      TR_NOOP ("Cut by"));
+        cutSelf.setButtonText (tr ("Cut self"));
+        cutSelf.setClickingTogglesState (true);
+        cutSelf.setTooltip (tr ("Cut self: a new note of this channel stops its own sounding note (hi-hats, 808s)"));
+        cutSelf.onClick = [this] { edit ([on = cutSelf.getToggleState(), ch = channel] (ChannelDef& d) { setChannelCutsItself (d, ch, on); }); };
+        // Arpeggiator
+        arpDirection.addItemList ({ tr ("Off"), tr ("Up"), tr ("Down"), tr ("Up and down"), tr ("Random") }, 1);
+        arpDirection.setTooltip (tr ("Arpeggiator direction (Off = the notes play as written)"));
+        arpDirection.onChange = [this] { edit ([d = arpDirection.getSelectedId() - 1] (ChannelDef& c) { c.arp.direction = juce::jlimit (0, 4, d); }); };
+        for (const auto& [text, beats] : arpSpeeds())
+            arpTime.addItem (tr (text), arpTime.getNumItems() + 1);
+        arpTime.setTooltip (tr ("Arpeggiator time: the length of each step"));
+        arpTime.onChange = [this] {
+            const auto i = arpTime.getSelectedId() - 1;
+            if (i >= 0 && i < (int) arpSpeeds().size())
+                edit ([b = arpSpeeds()[(std::size_t) i].second] (ChannelDef& c) { c.arp.stepBeats = b; });
+        };
+        arpRange = knob ([name] { return countSpec (name() + " - " + tr ("Arpeggiator range (octaves)"), 4, 1); },
+                         [] (const ChannelDef& d) { return (double) d.arp.range; },
+                         [] (ChannelDef& d, double v) { d.arp.range = juce::jlimit (1, 4, juce::roundToInt (v)); }, TR_NOOP ("Range"));
+        arpGate = knob ([name] { return ui::percentSpec (name() + " - " + tr ("Arpeggiator gate"), 0.5); },
+                        [] (const ChannelDef& d) { return (double) d.arp.gate; },
+                        [] (ChannelDef& d, double v) { d.arp.gate = juce::jlimit (0.05f, 1.0f, (float) v); }, TR_NOOP ("Gate"));
+        arpRepeat = knob ([name] { return countSpec (name() + " - " + tr ("Arpeggiator repeat (times each note plays)"), 4, 1); },
+                          [] (const ChannelDef& d) { return (double) d.arp.repeat; },
+                          [] (ChannelDef& d, double v) { d.arp.repeat = juce::jlimit (1, 4, juce::roundToInt (v)); }, TR_NOOP ("Repeat"));
+
+        for (auto* b : { &porta, &mono })
+            addAndMakeVisible (b);
+        addAndMakeVisible (cutSelf);
+        addAndMakeVisible (arpDirection);
+        addAndMakeVisible (arpTime);
+        refresh();
+        engine.addChangeListener (this);
+        setSize (preferredWidth, preferredHeight);
+    }
+
+    ~MiscPanel() override { engine.removeChangeListener (this); }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (theme::colour::bg2);
+        for (const auto& [area, title] : sections)
+        {
+            g.setColour (theme::colour::bg3);
+            g.fillRoundedRectangle (area.toFloat(), 4.0f);
+            g.setColour (theme::colour::textSecondary);
+            g.setFont (theme::font (theme::type::caption, true));
+            g.drawText (theme::caps (title), area.withHeight (20).reduced (8, 0), juce::Justification::centredLeft);
+        }
+    }
+
+    void resized() override
+    {
+        sections.clear();
+        auto area = getLocalBounds().reduced (8);
+        auto section = [this] (juce::Rectangle<int> r, const juce::String& title) {
+            sections.push_back ({ r, title });
+            return r.withTrimmedTop (20).reduced (6, 4);
+        };
+        constexpr int knobW = 56;
+        auto top = area.removeFromTop (130);
+        {
+            auto levels = section (top.removeFromLeft (2 * knobW + 16), tr ("Levels adjustment"));
+            pan->setBounds (levels.removeFromLeft (knobW).withHeight (70));
+            volume->setBounds (levels.removeFromLeft (knobW).withHeight (70));
+        }
+        top.removeFromLeft (8);
+        {
+            auto poly = section (top.removeFromLeft (2 * knobW + 16), tr ("Polyphony"));
+            auto knobsRow = poly.removeFromTop (70);
+            maxPoly->setBounds (knobsRow.removeFromLeft (knobW));
+            slide->setBounds (knobsRow.removeFromLeft (knobW));
+            auto toggles = poly.removeFromTop (22);
+            porta.setBounds (toggles.removeFromLeft (knobW));
+            mono.setBounds (toggles.removeFromLeft (knobW));
+        }
+        top.removeFromLeft (8);
+        {
+            auto time = section (top.removeFromLeft (knobW + 16), tr ("Time"));
+            swing->setBounds (time.removeFromLeft (knobW).withHeight (70));
+        }
+        area.removeFromTop (8);
+        auto bottom = area.removeFromTop (130);
+        {
+            auto group = section (bottom.removeFromLeft (2 * knobW + 16), tr ("Group"));
+            auto row = group.removeFromTop (70);
+            cut->setBounds (row.removeFromLeft (knobW));
+            cutBy->setBounds (row.removeFromLeft (knobW));
+            cutSelf.setBounds (group.removeFromTop (24).reduced (4, 0));
+        }
+        bottom.removeFromLeft (8);
+        {
+            auto arp = section (bottom, tr ("Arpeggiator"));
+            auto boxes = arp.removeFromLeft (130);
+            arpDirection.setBounds (boxes.removeFromTop (24));
+            boxes.removeFromTop (8);
+            arpTime.setBounds (boxes.removeFromTop (24));
+            arp.removeFromLeft (8);
+            for (auto* k : { arpRange, arpGate, arpRepeat })
+                k->setBounds (arp.removeFromLeft (knobW).withHeight (70));
+        }
+    }
+
+private:
+    static const std::vector<std::pair<const char*, float>>& arpSpeeds()
+    {
+        static const std::vector<std::pair<const char*, float>> speeds { { "1/4", 1.0f },  { "1/8", 0.5f },
+                                                                         { TR_NOOP ("1/8 triplet"), 1.0f / 3.0f }, { "1/16", 0.25f },
+                                                                         { TR_NOOP ("1/16 triplet"), 1.0f / 6.0f }, { "1/32", 0.125f } };
+        return speeds;
+    }
+
+    const ChannelDef* current() const
+    {
+        const auto& channels = engine.getSong().channels;
+        return channel >= 0 && channel < (int) channels.size() ? &channels[(std::size_t) channel] : nullptr;
+    }
+
+    void edit (std::function<void (ChannelDef&)> change)
+    {
+        if (updating || current() == nullptr)
+            return;
+        engine.editSong ([ch = channel, change] (Song& s) {
+            if (ch < (int) s.channels.size())
+                change (s.channels[(std::size_t) ch]);
+        });
+    }
+
+    void refresh()
+    {
+        const auto* c = current();
+        if (c == nullptr)
+            return;
+        updating = true;
+        porta.setToggleState (channelPortamento (*c), juce::dontSendNotification);
+        porta.setEnabled (channelHasPortamento (*c));
+        slide->setEnabled (channelHasPortamento (*c));
+        mono.setToggleState (channelMono (*c), juce::dontSendNotification);
+        mono.setEnabled (channelHasMono (*c));
+        cutSelf.setToggleState (channelCutsItself (*c), juce::dontSendNotification);
+        arpDirection.setSelectedId (juce::jlimit (0, 4, c->arp.direction) + 1, juce::dontSendNotification);
+        int speed = 0;
+        for (int i = 0; i < (int) arpSpeeds().size(); ++i)
+            if (std::abs (arpSpeeds()[(std::size_t) i].second - c->arp.stepBeats) < 1e-4f)
+                speed = i + 1;
+        arpTime.setSelectedId (speed, juce::dontSendNotification);
+        if (speed == 0)
+            arpTime.setText (tr ("{0} beats", { juce::String (c->arp.stepBeats, 3) }), juce::dontSendNotification);
+        updating = false;
+        repaint();
+    }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
+
+    AudioEngine& engine;
+    int channel;
+    bool updating = false;
+    std::vector<std::unique_ptr<FrameKnob>> knobs;
+    FrameKnob *pan = nullptr, *volume = nullptr, *maxPoly = nullptr, *slide = nullptr, *swing = nullptr, *cut = nullptr, *cutBy = nullptr,
+              *arpRange = nullptr, *arpGate = nullptr, *arpRepeat = nullptr;
+    juce::ToggleButton porta, mono;
+    juce::TextButton cutSelf;
+    juce::ComboBox arpDirection, arpTime;
+    std::vector<std::pair<juce::Rectangle<int>, juce::String>> sections;
+};
+
+// The frame: header strip (tabs on the left; ON, PAN, VOL, TRACK on the right) over the page of the selected tab.
+class ChannelFrame final : public juce::Component,
+                           private juce::ChangeListener
+{
+public:
+    static constexpr int headerHeight = 52;
+
+    ChannelFrame (AudioEngine& e, int c, std::unique_ptr<juce::Component> instrumentPage, std::unique_ptr<juce::Component> envelopePage)
+        : engine (e), channel (c)
+    {
+        auto addPage = [this] (std::unique_ptr<juce::Component> page, const juce::String& title, const juce::String& tip) {
+            auto button = std::make_unique<juce::TextButton> (title);
+            button->setTooltip (tip);
+            button->setClickingTogglesState (true);
+            button->setRadioGroupId (1);
+            const auto index = (int) pages.size();
+            button->onClick = [this, index] { showTab (index); };
+            addAndMakeVisible (*button);
+            addChildComponent (*page);
+            sizes.push_back ({ juce::jmax (1, page->getWidth()), juce::jmax (1, page->getHeight()) });
+            tabs.push_back (std::move (button));
+            pages.push_back (std::move (page));
+        };
+        if (instrumentPage != nullptr) // (none: a channel whose instrument has its own window, e.g. a hosted plugin)
+            addPage (std::move (instrumentPage), tr ("Plugin"), tr ("The instrument's own settings"));
+        if (envelopePage != nullptr)
+            addPage (std::move (envelopePage), tr ("Envelope / instrument"), tr ("Envelope / instrument settings: the filter and pitch envelopes and the LFOs"));
+        addPage (std::make_unique<MiscPanel> (engine, channel), tr ("Misc"), tr ("Miscellaneous functions: levels, polyphony, time, cut groups, arpeggiator"));
+
+        on.setButtonText (tr ("On"));
+        on.setTooltip (tr ("Channel on / off (mute)"));
+        on.onClick = [this] {
+            const auto muted = ! on.getToggleState();
+            engine.editSong ([ch = channel, muted] (Song& s) {
+                if (ch < (int) s.channels.size())
+                    s.channels[(std::size_t) ch].muted = muted;
+            });
+        };
+        addAndMakeVisible (on);
+        const auto name = [this] { return channelNameOf (engine.getSong(), channel); };
+        auto headerKnob = [this] (std::function<ui::ValueSpec()> spec, std::function<double (const ChannelDef&)> get, std::function<void (Song&, int, double)> set,
+                                  const char* caption) {
+            auto k = std::make_unique<FrameKnob> (
+                engine, std::move (spec),
+                [this, get] { return channel < (int) engine.getSong().channels.size() ? get (engine.getSong().channels[(std::size_t) channel]) : 0.0; },
+                [this, set] (double v) {
+                    engine.editSong ([ch = channel, set, v] (Song& s) {
+                        if (ch < (int) s.channels.size())
+                            set (s, ch, v);
+                    });
+                },
+                tr (caption));
+            addAndMakeVisible (*k);
+            header.push_back (std::move (k));
+        };
+        headerKnob ([this, name] {
+                        auto s = ui::panSpec (name() + " - " + tr ("Pan"));
+                        s.target = AutomationTarget { AutomationTargetKind::channelPan, channel };
+                        return s;
+                    },
+                    [] (const ChannelDef& d) { return (double) d.pan; }, [] (Song& s, int ch, double v) { s.channels[(std::size_t) ch].pan = (float) v; },
+                    TR_NOOP ("Pan"));
+        headerKnob ([this, name] {
+                        auto s = ui::percentSpec (name() + " - " + tr ("Volume"), 0.78);
+                        s.target = AutomationTarget { AutomationTargetKind::channelVolume, channel };
+                        return s;
+                    },
+                    [] (const ChannelDef& d) { return (double) d.volume; },
+                    [] (Song& s, int ch, double v) { s.channels[(std::size_t) ch].volume = (float) v; }, TR_NOOP ("Vol"));
+        headerKnob ([this, name] {
+                        return countSpec (name() + " - " + tr ("Target mixer track"), juce::jmax (1, (int) engine.getSong().mixer.size() - 1), 0,
+                                          [] (int t) { return t == 0 ? tr ("Master") : juce::String (t); });
+                    },
+                    [] (const ChannelDef& d) { return (double) d.mixerTrack; },
+                    [] (Song& s, int ch, double v) {
+                        s.channels[(std::size_t) ch].mixerTrack = juce::jlimit (0, juce::jmax (0, (int) s.mixer.size() - 1), juce::roundToInt (v));
+                    },
+                    TR_NOOP ("Track"));
+
+        int width = MiscPanel::preferredWidth, height = MiscPanel::preferredHeight;
+        for (auto& p : pages)
+        {
+            width = juce::jmax (width, p->getWidth());
+            height = juce::jmax (height, p->getHeight());
+        }
+        refresh();
+        engine.addChangeListener (this);
+        setSize (width, headerHeight + height);
+        showTab (0);
+    }
+
+    ~ChannelFrame() override { engine.removeChangeListener (this); }
+
+    void showTab (int index)
+    {
+        index = juce::jlimit (0, (int) pages.size() - 1, index);
+        current = index;
+        for (int i = 0; i < (int) pages.size(); ++i)
+        {
+            pages[(std::size_t) i]->setVisible (i == index);
+            tabs[(std::size_t) i]->setToggleState (i == index, juce::dontSendNotification);
+        }
+    }
+
+    int getTab() const noexcept { return current; }
+    int tabCount() const noexcept { return (int) pages.size(); }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (theme::colour::bg2);
+        g.setColour (theme::colour::bg3);
+        g.fillRect (getLocalBounds().removeFromTop (headerHeight));
+        g.setColour (theme::colour::border);
+        g.drawHorizontalLine (headerHeight - 1, 0.0f, (float) getWidth());
+    }
+
+    void resized() override
+    {
+        auto tabsArea = getLocalBounds().removeFromTop (headerHeight).reduced (8, 6);
+        for (auto& t : tabs)
+        {
+            const auto w = juce::jmax (64, juce::Font (theme::font (theme::type::body)).getStringWidth (t->getButtonText()) + 24);
+            t->setBounds (tabsArea.removeFromLeft (w).withSizeKeepingCentre (w, 26));
+            tabsArea.removeFromLeft (4);
+        }
+        auto right = getLocalBounds().removeFromTop (headerHeight).reduced (6, 2);
+        for (auto it = header.rbegin(); it != header.rend(); ++it)
+            (*it)->setBounds (right.removeFromRight (48));
+        on.setBounds (right.removeFromRight (52).withSizeKeepingCentre (52, 24));
+        // each page keeps its own size (some scale their drawing with it), centred under the header
+        const auto body = getLocalBounds().withTrimmedTop (headerHeight);
+        for (std::size_t i = 0; i < pages.size(); ++i)
+        {
+            const auto w = juce::jmin (body.getWidth(), sizes[i].x), h = juce::jmin (body.getHeight(), sizes[i].y);
+            pages[i]->setBounds (body.getX() + (body.getWidth() - w) / 2, body.getY(), w, h);
+        }
+    }
+
+private:
+    void refresh()
+    {
+        if (channel < (int) engine.getSong().channels.size())
+            on.setToggleState (! engine.getSong().channels[(std::size_t) channel].muted, juce::dontSendNotification);
+        for (auto& k : header)
+            k->repaint();
+    }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
+
+    AudioEngine& engine;
+    int channel;
+    int current = 0;
+    std::vector<std::unique_ptr<juce::TextButton>> tabs;
+    std::vector<std::unique_ptr<juce::Component>> pages;
+    std::vector<juce::Point<int>> sizes;
+    std::vector<std::unique_ptr<FrameKnob>> header;
+    juce::ToggleButton on;
+};
+
+bool hasEnvelopeTab (InstrumentKind kind) noexcept
+{
+    return kind == InstrumentKind::synth || kind == InstrumentKind::sampler;
+}
+
+void showModulationFor (juce::Component& from, AudioEngine& engine, int channel)
+{
+    if (auto* frame = from.findParentComponentOfClass<ChannelFrame>(); frame != nullptr && frame->tabCount() > 2)
+        frame->showTab (1);
+    else
+        openChannelModulation (engine, channel);
+}
+
 class SettingsWindow final : public juce::DocumentWindow
 {
 public:
@@ -2153,33 +2701,10 @@ public:
 
         if (modulation)
             setContentOwned (new ModulationPanel (engine, channel), true);
-        else if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::synth)
-            setContentOwned (new SynthPanel (engine, channel), true);
-        else if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::controller)
-        {
-            if (parseKeyboardController (engine.getSong().channels[(std::size_t) channel].controllerState))
-                setContentOwned (new ControllerPanel (engine, channel), true);
-            else
-                setContentOwned (makeEnvelopeControllerEditor (engine, channel).release(), true); // editable (round 133)
-        }
-        else if (engine.getSong().channels[(std::size_t) channel].instrument == InstrumentKind::midiOut)
-            setContentOwned (makeMidiOutEditor (engine, channel).release(), true);
-        else if (const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
-                 kind == InstrumentKind::sakura || kind == InstrumentKind::drumpad || kind == InstrumentKind::boobass
-                 || kind == InstrumentKind::drumsynth || kind == InstrumentKind::harmless || kind == InstrumentKind::harmor
-                 || kind == InstrumentKind::gms || kind == InstrumentKind::morphine
-                 || kind == InstrumentKind::ogun || kind == InstrumentKind::minisynth
-                 || kind == InstrumentKind::dx10 || kind == InstrumentKind::kepler || kind == InstrumentKind::poizone
-                 || kind == InstrumentKind::fruitkick || kind == InstrumentKind::bassdrum || kind == InstrumentKind::toxic
-                 || kind == InstrumentKind::threeosc
-                 || kind == InstrumentKind::autogun || kind == InstrumentKind::transistorbass
-                 || kind == InstrumentKind::simsynth || kind == InstrumentKind::wasp || kind == InstrumentKind::plucked
-                 || kind == InstrumentKind::beepmap || kind == InstrumentKind::sawer || kind == InstrumentKind::flkeys
-                 || kind == InstrumentKind::granulizer || kind == InstrumentKind::drumaxx
-                 || kind == InstrumentKind::slayer || kind == InstrumentKind::fruitydance || kind == InstrumentKind::sytrus)
-            setContentOwned (new ModelPanel (engine, channel), true);
+        else if (! hasChannelSettings (engine.getSong().channels[(std::size_t) channel].instrument))
+            setContentOwned (new ChannelFrame (engine, channel, nullptr, nullptr), true); // the Misc tab alone
         else
-            setContentOwned (new SettingsPanel (engine, channel), true);
+            setContentOwned (makeChannelFrame (engine, channel).release(), true);
 
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
@@ -2229,6 +2754,15 @@ void openWindow (AudioEngine& engine, int channel, bool modulation)
 void openChannelSettings (AudioEngine& engine, int channel)
 {
     openWindow (engine, channel, false);
+}
+
+void openChannelMisc (AudioEngine& engine, int channel)
+{
+    openWindow (engine, channel, false);
+    for (auto& w : windows())
+        if (w->getChannel() == channel && ! w->isModulation())
+            if (auto* frame = dynamic_cast<ChannelFrame*> (w->getContentComponent()))
+                frame->showTab (frame->tabCount() - 1);
 }
 
 void openChannelModulation (AudioEngine& engine, int channel)
@@ -2300,6 +2834,15 @@ void closeChannelSettings (int channel)
 std::unique_ptr<juce::Component> makeChannelModulationPanel (AudioEngine& engine, int channel)
 {
     return std::make_unique<ModulationPanel> (engine, channel);
+}
+
+std::unique_ptr<juce::Component> makeChannelFrame (AudioEngine& engine, int channel, int tab)
+{
+    const auto kind = engine.getSong().channels[(std::size_t) channel].instrument;
+    auto frame = std::make_unique<ChannelFrame> (engine, channel, makeChannelSettingsPanel (engine, channel),
+                                                 hasEnvelopeTab (kind) ? std::make_unique<ModulationPanel> (engine, channel) : nullptr);
+    frame->showTab (tab < 0 ? frame->tabCount() - 1 : tab);
+    return frame;
 }
 
 std::unique_ptr<juce::Component> makeChannelSettingsPanel (AudioEngine& engine, int channel)

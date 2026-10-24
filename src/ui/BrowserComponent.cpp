@@ -482,6 +482,19 @@ public:
         rebuild();
     }
 
+    // FL's folder "Expand all": the folder and its sub-folders open (on disk: down to `depth` levels, so a big
+    // library is not scanned at once)
+    void expandFolder (Node& n, int depth)
+    {
+        n.expanded = true;
+        load (n);
+        if (depth > 1)
+            for (auto& c : n.children)
+                if (c->folder)
+                    expandFolder (*c, depth - 1);
+        rebuild();
+    }
+
     void rebuild()
     {
         rows.clear();
@@ -1201,7 +1214,10 @@ private:
         if (n.kind != Kind::item)
         {
             if (n.folder)
-                browser.showFolderMenu (n.file);
+                browser.showFolderMenu (n.file, [safe, node = &n] {
+                    if (safe != nullptr)
+                        safe->expandFolder (*node, 3);
+                });
             else
                 browser.showFileMenu (n.file);
             return;
@@ -1994,34 +2010,75 @@ void BrowserComponent::fileSelected (const juce::File& file, bool preview)
     results->repaint();
 }
 
+// FL's Browser menus (REA round 143b, [EXEC] FL 2026: right-click on a sample, a folder, a plugin): the file's actions
+// first, then a "System" section (open the parent folder, locate the file, delete it) and a "Tags" section (Favorite);
+// a folder: Expand all / Collapse all, then System (Open). LYNX keeps its own "Add folder..." and "Refresh".
+void BrowserComponent::addSystemItems (juce::PopupMenu& menu, const juce::File& file)
+{
+    menu.addSectionHeader (tr ("System"));
+    menu.addItem (tr ("Open parent folder"), [file] { file.getParentDirectory().startAsProcess(); });
+    menu.addItem (tr ("Locate file"), [file] { file.revealToUser(); });
+    menu.addItem (tr ("Copy the file path"), [file] { juce::SystemClipboard::copyTextToClipboard (file.getFullPathName()); });
+    menu.addItem (tr ("Delete file..."), file.existsAsFile(), false, [this, file] { confirmDeleteFile (file); });
+    menu.addSectionHeader (tr ("Tags"));
+    menu.addItem (tr ("Starred"), true, isStarred (file), [this, file] { setStarred (file, ! isStarred (file)); });
+}
+
+void BrowserComponent::confirmDeleteFile (const juce::File& file)
+{
+    juce::Component::SafePointer<BrowserComponent> safe (this);
+    juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::WarningIcon, tr ("Delete file"),
+                                        tr ("Move \"{0}\" to the recycle bin?", { file.getFileName() }), tr ("Delete"), tr ("Cancel"), nullptr,
+                                        juce::ModalCallbackFunction::create ([safe, file] (int result) {
+                                            if (result == 0 || safe == nullptr)
+                                                return;
+                                            if (! file.moveToTrash())
+                                                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Delete file"),
+                                                                                        tr ("The file could not be deleted."));
+                                            safe->rebuildRoots();
+                                        }));
+}
+
 void BrowserComponent::showFileMenu (const juce::File& file)
 {
-    if (! isAudio (file))
-    {
-        showFolderMenu (file.getParentDirectory());
-        return;
-    }
     juce::PopupMenu menu;
     menu.addSectionHeader (file.getFileName());
-    menu.addItem (tr ("Send to the selected channel"), onLoadIntoChannel != nullptr, false, [this, file] { onLoadIntoChannel (file); });
-    menu.addItem (tr ("Open in a new channel"), [this, file] { openFile (file); });
-    menu.addItem (tr ("Send to the Playlist as an audio clip"), onSendToPlaylist != nullptr, false, [this, file] { onSendToPlaylist (file); });
-    menu.addSeparator();
-    menu.addItem (tr ("Edit in the audio editor..."), [this, file] { openAudioEditor (engine, file); });
-    menu.addItem (tr ("Show in the file manager"), [file] { file.revealToUser(); });
-    menu.addItem (tr ("Starred"), true, isStarred (file), [this, file] { setStarred (file, ! isStarred (file)); });
+
+    if (isAudio (file))
+    {
+        menu.addItem (tr ("Send to the selected channel"), onLoadIntoChannel != nullptr, false, [this, file] { onLoadIntoChannel (file); });
+        menu.addItem (tr ("Open in a new channel"), [this, file] { openFile (file); });
+        menu.addSeparator();
+        menu.addItem (tr ("Send to the Playlist as an audio clip"), onSendToPlaylist != nullptr, false, [this, file] { onSendToPlaylist (file); });
+        menu.addSeparator();
+        menu.addItem (tr ("Edit in the audio editor..."), [this, file] { openAudioEditor (engine, file); });
+    }
+    else if (file.hasFileExtension ("lynx;flp"))
+        menu.addItem (tr ("Open project"), onOpenProject != nullptr, false, [this, file] { onOpenProject (file); });
+    else if (file.hasFileExtension ("mid;midi"))
+        menu.addItem (tr ("Open MIDI file"), onOpenProject != nullptr, false, [this, file] { onOpenProject (file); });
+    else if (file.hasFileExtension ("fst;gmsynth"))
+        menu.addItem (tr ("Open in a new channel"), [this, file] { openFile (file); });
+
+    addSystemItems (menu, file);
     menu.addSeparator();
     menu.addItem (tr ("Collapse all folders"), [this] { tree->collapseAll(); });
     menu.addItem (tr ("Add folder..."), [this] { addUserFolder(); });
     menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
 }
 
-void BrowserComponent::showFolderMenu (const juce::File& folder)
+void BrowserComponent::showFolderMenu (const juce::File& folder, std::function<void()> expandAll)
 {
     juce::PopupMenu menu;
     menu.addSectionHeader (folder.getFileName());
-    menu.addItem (tr ("Collapse all folders"), [this] { tree->collapseAll(); });
-    menu.addItem (tr ("Show in the file manager"), [folder] { folder.revealToUser(); });
+    menu.addItem (tr ("Expand all"), expandAll != nullptr, false, [expandAll] { expandAll(); });
+    menu.addItem (tr ("Collapse all"), [this] { tree->collapseAll(); });
+    menu.addSeparator();
+    menu.addItem (tr ("Refresh"), [this] { rebuildRoots(); });
+    menu.addSectionHeader (tr ("System"));
+    menu.addItem (tr ("Open"), [folder] { folder.startAsProcess(); });
+    menu.addItem (tr ("Copy the file path"), [folder] { juce::SystemClipboard::copyTextToClipboard (folder.getFullPathName()); });
+    menu.addSectionHeader (tr ("Tags"));
     menu.addItem (tr ("Starred"), folder.isDirectory(), isStarred (folder), [this, folder] { setStarred (folder, ! isStarred (folder)); });
     menu.addSeparator();
     menu.addItem (tr ("Add folder..."), [this] { addUserFolder(); });
