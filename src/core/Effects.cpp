@@ -3306,6 +3306,9 @@ void upgradeLoadedEffectParams (EffectSlot& slot, std::size_t savedCount) noexce
     // round 147: Prism Multiband saved before its measured Dynamic phase engine keeps the round-108 construction
     if (slot.kind == EffectKind::prismMultiband && savedCount <= (std::size_t) dyn::prism::dynamicEngine)
         slot.params[(std::size_t) dyn::prism::dynamicEngine] = 0.0f;
+    // round 150: … and before its measured detector keeps the round-108 detector
+    if (slot.kind == EffectKind::prismMultiband && savedCount <= (std::size_t) dyn::prism::detectorLaw)
+        slot.params[(std::size_t) dyn::prism::detectorLaw] = 0.0f;
 }
 
 std::unique_ptr<Effect> makeParallelEffect (const EffectSlot& slot)

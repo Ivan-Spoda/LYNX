@@ -1513,13 +1513,14 @@ public:
     }
 
 private:
-    enum { idPrev = 1, idNext, idClose, idRange, idAnalyzer, idClassic, idExpert, idSolo0 = 20, idMute0 = 30 };
+    enum { idPrev = 1, idNext, idClose, idRange, idAnalyzer, idClassic, idExpert, idClassicDet, idSplit, idFree, idSolo0 = 20, idMute0 = 30 };
     int selected = 0, hoverBand = -1, dragBand = -1, dragEdge = -1;
     bool expert = false; // round 147: the band panel's expert part (side-chain filtering, stereo link), view only
     double rangeView = 12.0;
     int analyzer = 3; // 0 off, 1 pre, 2 post, 3 pre + post (view only)
     juce::Point<float> dragStart;
     float dragX0[dyn::prism::bands - 1] {};
+    float dragLo0 = 0.0f, dragHi0 = 0.0f; // round 150: the free band's edges when its drag started
 
     juce::String title() const override { return "Prism Multiband"; }
     juce::String gestures() const override { return tr ("Drag a node: range (up / down), band (left / right)  -  drag an edge: crossover  -  double-click: new band  -  wheel: threshold"); }
@@ -1553,14 +1554,107 @@ private:
         if (i >= nb()) return p.getRight();
         return xForHz (xoHz (i - 1), p);
     }
+    // round 150: the free layout (Pro-MB's): each band has its own edges, the room between bands passes untouched
+    bool isFree() const { return v (dyn::prism::bandLayout) >= 0.5f; }
+    dyn::prism::Layout layout() const
+    {
+        const auto* fx = current();
+        if (fx != nullptr) return dyn::prism::layoutOf (fx->params);
+        EffectParams p {};
+        const auto& in = effectInfo (EffectKind::prismMultiband);
+        for (std::size_t k = 0; k < in.params.size(); ++k) p[k] = in.params[k].defaultValue;
+        return dyn::prism::layoutOf (p);
+    }
+    float edgeXOfHz (double hz) const
+    {
+        const auto p = plot();
+        if (hz <= 0.0) return p.getX();
+        return juce::jlimit (p.getX(), p.getRight(), xForHz (hz, p));
+    }
+    float bandLoX (int b) const
+    {
+        if (! isFree()) return edgeX (b);
+        const auto L = layout();
+        return L.segmentOf[(std::size_t) b] < 0 ? plot().getRight() : edgeXOfHz (L.loHz[(std::size_t) b]);
+    }
+    float bandHiX (int b) const
+    {
+        if (! isFree()) return edgeX (b + 1);
+        const auto L = layout();
+        if (L.segmentOf[(std::size_t) b] < 0) return plot().getRight();
+        return L.hiHz[(std::size_t) b] <= 0.0 ? plot().getRight() : edgeXOfHz (L.hiHz[(std::size_t) b]);
+    }
     // every per-band parameter of band b (fields, look-ahead, pan)
     static std::vector<int> bandParams (int b)
     {
+        using namespace dyn::prism;
         std::vector<int> out;
-        for (int f = 0; f < dyn::prism::fieldsPerBand; ++f) out.push_back (bp (b, f));
-        out.push_back (dyn::prism::bandLookaheadParam (b));
-        out.push_back (dyn::prism::bandPanParam (b));
+        for (int f = 0; f < fieldsPerBand; ++f) out.push_back (bp (b, f));
+        out.push_back (bandLookaheadParam (b));
+        out.push_back (bandPanParam (b));
+        // round 147 / 150: the expert panel, the free layout's edges / slopes and the side-chain input go with the band
+        for (const int base : { (int) bandLink0, (int) bandLinkMode0, (int) bandScFree0, (int) bandScLow0, (int) bandScHigh0,
+                                (int) bandLo0, (int) bandHi0, (int) bandLoSlope0, (int) bandHiSlope0, (int) bandScInput0 })
+            out.push_back (base + b);
         return out;
+    }
+    // round 150: a new free band around `hz` (an octave wide, inside the gap there), the defaults of a band
+    void addFreeBand (double hz)
+    {
+        using namespace dyn::prism;
+        const auto n = nb();
+        if (n >= bands) return;
+        const auto L = layout();
+        double lo = hz / std::sqrt (2.0), hi = hz * std::sqrt (2.0);
+        for (int b = 0; b < n; ++b) // stay inside the gap
+        {
+            if (L.segmentOf[(std::size_t) b] < 0) continue;
+            const auto blo = L.loHz[(std::size_t) b], bhi = L.hiHz[(std::size_t) b] > 0.0 ? L.hiHz[(std::size_t) b] : 30000.0;
+            if (bhi <= hz) lo = std::max (lo, bhi);
+            if (blo >= hz) hi = std::min (hi, blo);
+        }
+        if (hi < lo * 1.1) return;
+        std::vector<std::pair<int, float>> c;
+        const auto& in = effectInfo (kind);
+        for (const auto k : bandParams (n)) c.push_back ({ k, in.params[(std::size_t) k].defaultValue });
+        c.push_back ({ bandLo0 + n, edgeValue (lo) });
+        c.push_back ({ bandHi0 + n, edgeValue (hi) });
+        c.push_back ({ bp (n, fEnabled), 1.0f });
+        c.push_back ({ bandCountParam, bandCountValue (n + 1) });
+        set (c);
+        selected = n;
+    }
+    // round 150: switching the layout keeps the sound — the free bands take the split's crossovers and slopes, the
+    // split takes the free bands' edges (between two bands: the middle of their gap)
+    void setLayout (bool free)
+    {
+        using namespace dyn::prism;
+        if (free == isFree()) return;
+        const auto L = layout();
+        std::vector<std::pair<int, float>> c;
+        const auto n = nb();
+        if (free)
+        {
+            for (int b = 0; b < n; ++b)
+            {
+                c.push_back ({ bandLo0 + b, edgeValue (L.loHz[(std::size_t) b] > 0.0 ? L.loHz[(std::size_t) b] : 30.0) });
+                c.push_back ({ bandHi0 + b, edgeValue (L.hiHz[(std::size_t) b] > 0.0 ? L.hiHz[(std::size_t) b] : 30000.0) });
+                c.push_back ({ bandLoSlope0 + b, slopeValue (L.loSlope[(std::size_t) b]) });
+                c.push_back ({ bandHiSlope0 + b, slopeValue (L.hiSlope[(std::size_t) b]) });
+            }
+            c.push_back ({ bandLayout, 1.0f });
+        }
+        else
+        {
+            for (int k = 0; k + 1 < n; ++k)
+            {
+                const auto a = L.hiHz[(std::size_t) k] > 0.0 ? L.hiHz[(std::size_t) k] : 18000.0;
+                const auto b = L.loHz[(std::size_t) (k + 1)] > 0.0 ? L.loHz[(std::size_t) (k + 1)] : a;
+                c.push_back ({ crossoverParam (k), crossoverValue (std::sqrt (a * b)) });
+            }
+            c.push_back ({ bandLayout, 0.0f });
+        }
+        set (c);
     }
     // split band b at `hz`: the bands above move up one, the new band (b + 1) starts as a copy of b
     void splitBand (int b, double hz)
@@ -1617,7 +1711,7 @@ private:
     }
     juce::Point<float> node (int b) const
     {
-        return { 0.5f * (edgeX (b) + edgeX (b + 1)), gainY (dyn::prism::rangeDb (v (bp (b, dyn::prism::fRange)))) };
+        return { 0.5f * (bandLoX (b) + bandHiX (b)), gainY (dyn::prism::rangeDb (v (bp (b, dyn::prism::fRange)))) };
     }
     int nodeAt (juce::Point<float> p) const
     {
@@ -1628,12 +1722,27 @@ private:
     int edgeAt (juce::Point<float> p) const
     {
         if (! plot().contains (p)) return -1;
+        if (isFree()) // round 150: 2b + 1 = band b's low edge, 2b + 2 its high edge
+        {
+            for (int b = 0; b < nb(); ++b)
+            {
+                if (std::abs (bandLoX (b) - p.x) < 5.0f && bandLoX (b) > plot().getX() + 1.0f) return 2 * b + 1;
+                if (std::abs (bandHiX (b) - p.x) < 5.0f && bandHiX (b) < plot().getRight() - 1.0f) return 2 * b + 2;
+            }
+            return -1;
+        }
         for (int i = 1; i < nb(); ++i)
             if (std::abs (edgeX (i) - p.x) < 5.0f) return i;
         return -1;
     }
-    int bandAtX (float x) const
+    int bandAtX (float x) const // round 150: −1 in a gap of the free layout
     {
+        if (isFree())
+        {
+            for (int b = 0; b < nb(); ++b)
+                if (x >= bandLoX (b) && x < bandHiX (b)) return b;
+            return -1;
+        }
         for (int b = 0; b < nb(); ++b)
             if (x < edgeX (b + 1)) return b;
         return nb() - 1;
@@ -1651,8 +1760,8 @@ private:
         const auto p = plot();
         for (int b = 0; b < nb(); ++b)
         {
-            const auto x = edgeX (b) + 4.0f;
-            if (edgeX (b + 1) - edgeX (b) < 40.0f) continue;
+            const auto x = bandLoX (b) + 4.0f;
+            if (bandHiX (b) - bandLoX (b) < 40.0f) continue;
             out.push_back (button ({ x, p.getY() + 4.0f, 18.0f, 16.0f }, idSolo0 + b, "S", v (bp (b, fSolo)) >= 0.5f, tr ("Solo the band")));
             out.push_back (button ({ x, p.getY() + 22.0f, 18.0f, 16.0f }, idMute0 + b, "M", ! bandOn (b), tr ("Bypass the band (the band passes untouched)")));
         }
@@ -1688,13 +1797,24 @@ private:
                 add (tabs ({ x0 + 10.0f, a.getY() + 26.0f, 100.0f, 22.0f }, bandScFree0 + b, "Band|Free"));
                 add (knob ({ x0 + 4.0f, a.getY() + 52.0f, 56.0f, 66.0f }, bandScLow0 + b, tr ("Low"), 0));
                 add (knob ({ x0 + 58.0f, a.getY() + 52.0f, 56.0f, 66.0f }, bandScHigh0 + b, tr ("High"), 0));
-                // the band's own slopes (Pro-MB's per-band slopes): its lower / upper crossover's slope, or the global one
-                if (b > 0)
-                    add (menu ({ x0 + 4.0f, a.getY() + 122.0f, 54.0f, 20.0f }, xoverSlope0 + b - 1, tr ("Low slope"), "Global|12|24|48"));
-                if (b < nb() - 1)
-                    add (menu ({ x0 + 60.0f, a.getY() + 122.0f, 54.0f, 20.0f }, xoverSlope0 + b, tr ("High slope"), "Global|12|24|48"));
+                // the band's own slopes (Pro-MB's per-band slopes): the free layout's continuous 6 … 48 dB/oct, or the
+                // split layout's lower / upper crossover's slope (or the global one)
+                if (isFree())
+                {
+                    add (menu ({ x0 + 4.0f, a.getY() + 122.0f, 54.0f, 20.0f }, bandLoSlope0 + b, tr ("Low slope"), "6|12|18|24|30|36|42|48"));
+                    add (menu ({ x0 + 60.0f, a.getY() + 122.0f, 54.0f, 20.0f }, bandHiSlope0 + b, tr ("High slope"), "6|12|18|24|30|36|42|48"));
+                }
+                else
+                {
+                    if (b > 0)
+                        add (menu ({ x0 + 4.0f, a.getY() + 122.0f, 54.0f, 20.0f }, xoverSlope0 + b - 1, tr ("Low slope"), "Global|12|24|48"));
+                    if (b < nb() - 1)
+                        add (menu ({ x0 + 60.0f, a.getY() + 122.0f, 54.0f, 20.0f }, xoverSlope0 + b, tr ("High slope"), "Global|12|24|48"));
+                }
                 add (knob ({ x0 + 126.0f, a.getY() + 22.0f, 84.0f, 92.0f }, bandLink0 + b, tr ("Link"), 1));
                 add (tabs ({ x0 + 132.0f, a.getY() + 122.0f, 74.0f, 22.0f }, bandLinkMode0 + b, "Mid|Side"));
+                // round 150: the band's own side-chain input (the reference's per band choice)
+                add (menu ({ x0 + 4.0f, a.getY() + 144.0f, 110.0f, 20.0f }, bandScInput0 + b, tr ("Input"), "Global|Plug-in|External"));
             }
             out.push_back (button ({ a.getRight() - 72.0f, a.getY() + 8.0f, 20.0f, 20.0f }, idPrev, "<", false, tr ("Previous / next band")));
             out.push_back (button ({ a.getRight() - 50.0f, a.getY() + 8.0f, 20.0f, 20.0f }, idNext, ">", false, tr ("Previous / next band")));
@@ -1711,9 +1831,26 @@ private:
         out.push_back (button ({ 436.0f, cy - 11.0f, 150.0f, 22.0f }, idAnalyzer, tr ("Analyzer:") + " " + tr (analyzerNames[analyzer]) + (specFrozen ? " *" : ""), false,
                                tr ("Spectrum analyzer: off, pre, post or pre + post; speed; freeze")));
         // round 147: a project saved before the measured Dynamic phase keeps its classic engine; one click updates it
-        if (v (dynamicEngine) < 0.5f && phaseOf (v (processingMode)) == Phase::dynamic)
-            out.push_back (button ({ 592.0f, cy - 11.0f, 118.0f, 22.0f }, idClassic, tr ("Classic dynamic"), true,
-                                   tr ("This project's Dynamic phase runs the engine it was saved with (before round 147). Click to use the measured one (Pro-MB's response).")));
+        // round 150: the layout (split = contiguous bands on crossovers; free = Pro-MB's bands anywhere, the gaps pass
+        // untouched) and the old-project indicators, in the column right of the display (the bottom bar is full)
+        {
+            const auto x = p.getRight() + 6.0f;
+            out.push_back (button ({ x, p.getY() + 28.0f, 30.0f, 20.0f }, idSplit, tr ("Split"), ! isFree(),
+                                   tr ("Split layout: the bands sit side by side on crossovers")));
+            out.push_back (button ({ x + 32.0f, p.getY() + 28.0f, 30.0f, 20.0f }, idFree, tr ("Free"), isFree(),
+                                   tr ("Free layout (as Pro-MB): each band has its own edges and slopes; the room between bands passes untouched")));
+            auto y = p.getY() + 54.0f;
+            // round 147: a project saved before the measured Dynamic phase keeps its classic engine; one click updates it
+            if (v (dynamicEngine) < 0.5f && phaseOf (v (processingMode)) == Phase::dynamic)
+            {
+                out.push_back (button ({ x, y, 62.0f, 20.0f }, idClassic, tr ("Classic"), true,
+                                       tr ("This project's Dynamic phase runs the engine it was saved with (before round 147). Click to use the measured one (Pro-MB's response).")));
+                y += 24.0f;
+            }
+            if (v (detectorLaw) < 0.5f)
+                out.push_back (button ({ x, y, 62.0f, 20.0f }, idClassicDet, tr ("Old det."), true,
+                                       tr ("This project's bands use the detector they were saved with (before round 150). Click to use the measured one (Pro-MB's attack, release and range).")));
+        }
         out.push_back (barValue ({ bar.getRight() - 312.0f, cy - 11.0f, 92.0f, 22.0f }, mix, tr ("Mix")));
         out.push_back (barValue ({ bar.getRight() - 216.0f, cy - 11.0f, 100.0f, 22.0f }, input, tr ("In")));
         out.push_back (barValue ({ bar.getRight() - 112.0f, cy - 11.0f, 104.0f, 22.0f }, output, tr ("Out")));
@@ -1728,6 +1865,8 @@ private:
         else if (c.id == idRange) rangeView = rangeView >= 30.0 ? 3.0 : rangeView >= 12.0 ? 30.0 : rangeView >= 6.0 ? 12.0 : 6.0;
         else if (c.id == idAnalyzer) { showAnalyzerMenu(); return; }
         else if (c.id == idClassic) set ({ { dynamicEngine, 1.0f } });
+        else if (c.id == idClassicDet) set ({ { detectorLaw, 1.0f } });
+        else if (c.id == idSplit || c.id == idFree) setLayout (c.id == idFree);
         else if (c.id == idExpert) expert = ! expert;
         else if (c.id >= idSolo0 && c.id < idSolo0 + bands) set ({ { bp (c.id - idSolo0, fSolo), v (bp (c.id - idSolo0, fSolo)) >= 0.5f ? 0.0f : 1.0f } });
         else if (c.id >= idMute0 && c.id < idMute0 + bands) set ({ { bp (c.id - idMute0, fEnabled), bandOn (c.id - idMute0) ? 0.0f : 1.0f } });
@@ -1779,7 +1918,8 @@ private:
             set (c);
         });
         m.addSeparator();
-        m.addItem (tr ("Split the band"), nb() < bands, false, [this, b] { splitBand (b, std::sqrt ((b > 0 ? xoHz (b - 1) : 30.0) * (b < nb() - 1 ? xoHz (b) : 18000.0))); });
+        if (! isFree())
+            m.addItem (tr ("Split the band"), nb() < bands, false, [this, b] { splitBand (b, std::sqrt ((b > 0 ? xoHz (b - 1) : 30.0) * (b < nb() - 1 ? xoHz (b) : 18000.0))); });
         m.addItem (tr ("Remove the band"), nb() > 1, false, [this, b] { removeBand (b); });
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
     }
@@ -1799,6 +1939,8 @@ private:
             dragBand = b;
             dragStart = p;
             for (int i = 0; i < nb() - 1; ++i) dragX0[i] = edgeX (i + 1);
+            dragLo0 = bandLoX (b);
+            dragHi0 = bandHiX (b);
             return true;
         }
         if (const auto i = edgeAt (p); i > 0 && ! e.mods.isPopupMenu())
@@ -1807,6 +1949,20 @@ private:
             return true;
         }
         const auto b = bandAtX (p.x);
+        if (b < 0) // round 150: a gap of the free layout
+        {
+            if (e.mods.isPopupMenu() && nb() < bands)
+            {
+                const auto hz = hzForX (p.x, plot());
+                juce::PopupMenu m;
+                m.addItem (tr ("New band here"), [this, hz] { addFreeBand (hz); });
+                m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+                return false;
+            }
+            selected = -1;
+            repaint();
+            return false;
+        }
         if (e.mods.isPopupMenu()) { showBandMenu (b); return false; }
         selected = selected == b ? -1 : b; // a click on a band opens its panel, a second click closes it
         repaint();
@@ -1816,6 +1972,15 @@ private:
     void moveEdge (int i, float x, std::vector<std::pair<int, float>>& c) const
     {
         using namespace dyn::prism;
+        if (isFree()) // round 150: one band's own edge (2b + 1 low, 2b + 2 high), kept inside the display and the band
+        {
+            const auto b = (i - 1) / 2;
+            const bool high = (i - 1) % 2 != 0;
+            const auto pl = plot();
+            const auto xx = high ? juce::jlimit (bandLoX (b) + 12.0f, pl.getRight() - 2.0f, x) : juce::jlimit (pl.getX() + 2.0f, bandHiX (b) - 12.0f, x);
+            c.push_back ({ (high ? bandHi0 : bandLo0) + b, edgeValue (juce::jlimit (30.0, 30000.0, hzForX (xx, pl))) });
+            return;
+        }
         const auto lo = i > 1 ? edgeX (i - 1) + 12.0f : plot().getX() + 4.0f;
         const auto hi = i < nb() - 1 ? edgeX (i + 1) - 12.0f : plot().getRight() - 4.0f;
         const auto hz = hzForX (juce::jlimit (lo, hi, x), plot());
@@ -1830,7 +1995,8 @@ private:
         {
             moveEdge (dragEdge, e.position.x, c);
             set (c);
-            ui::showValueTip (*this, juce::Rectangle<int> (16, 16).withCentre (e.position.toInt()), tr ("Crossover") + " " + text (crossoverParam (dragEdge - 1)));
+            const auto prm = isFree() ? ((dragEdge - 1) % 2 != 0 ? bandHi0 : bandLo0) + (dragEdge - 1) / 2 : crossoverParam (dragEdge - 1);
+            ui::showValueTip (*this, juce::Rectangle<int> (16, 16).withCentre (e.position.toInt()), tr ("Crossover") + " " + text (prm));
             return;
         }
         if (dragBand < 0) return;
@@ -1842,7 +2008,15 @@ private:
         if (std::abs (d.x) > 3.0f && ! (e.mods.isShiftDown() && std::abs (d.y) > std::abs (d.x)))
         {
             // move the band: its edges follow the mouse (the outer bands move one edge)
-            if (b > 0) c.push_back ({ crossoverParam (b - 1), crossoverValue (juce::jlimit (30.0, 18000.0, hzForX (dragX0[b - 1] + d.x * fine, plot()))) });
+            if (isFree()) // round 150: the free band's own edges (an edge at the display's end stays there)
+            {
+                const auto pl = plot();
+                if (dragLo0 > pl.getX() + 1.0f)
+                    c.push_back ({ bandLo0 + b, edgeValue (juce::jlimit (30.0, 30000.0, hzForX (dragLo0 + d.x * fine, pl))) });
+                if (dragHi0 < pl.getRight() - 1.0f)
+                    c.push_back ({ bandHi0 + b, edgeValue (juce::jlimit (30.0, 30000.0, hzForX (dragHi0 + d.x * fine, pl))) });
+            }
+            else if (b > 0) c.push_back ({ crossoverParam (b - 1), crossoverValue (juce::jlimit (30.0, 18000.0, hzForX (dragX0[b - 1] + d.x * fine, plot()))) });
             if (b < nb() - 1) c.push_back ({ crossoverParam (b), crossoverValue (juce::jlimit (30.0, 18000.0, hzForX (dragX0[b] + d.x * fine, plot()))) });
         }
         set (c);
@@ -1855,6 +2029,17 @@ private:
         if (! plot().contains (e.position)) return false;
         // round 135: double-click on a node = on / off; on the empty display = a new band there (the band under the
         // mouse splits at that frequency), as the reference creates bands anywhere
+        if (isFree()) // round 150: on a node = on / off; in a gap = a new band there (up to six)
+        {
+            if (const auto nodeB = nodeAt (e.position); nodeB >= 0)
+            {
+                set ({ { bp (nodeB, fEnabled), bandOn (nodeB) ? 0.0f : 1.0f } });
+                selected = nodeB;
+            }
+            else if (bandAtX (e.position.x) < 0)
+                addFreeBand (hzForX (e.position.x, plot()));
+            return true;
+        }
         if (const auto nodeB = nodeAt (e.position); nodeB >= 0 || nb() >= bands)
         {
             const auto b = nodeB >= 0 ? nodeB : bandAtX (e.position.x);
@@ -1892,6 +2077,8 @@ private:
             h.text = tr ("Band node: drag up / down = range, left / right = move the band (Shift: one direction, Ctrl: fine); wheel = threshold; Alt-click = bypass; right-click = menu");
         else if (edgeAt (p) > 0)
             h.text = tr ("Crossover: drag left or right");
+        else if (isFree() && bandAtX (p.x) < 0)
+            h.text = tr ("Free layout: this range passes untouched; double-click = a new band here (up to six)");
         else
             h.text = tr ("Click a band to open its panel; double-click = a new band here (up to six); right-click = band menu");
         h.hasMenu = true;
@@ -1931,7 +2118,7 @@ private:
         for (int b = 0; b < nb(); ++b)
         {
             const auto c = peqview::bandColour (b);
-            const auto region = juce::Rectangle<float> (edgeX (b), p.getY(), edgeX (b + 1) - edgeX (b), p.getHeight());
+            const auto region = juce::Rectangle<float> (bandLoX (b), p.getY(), juce::jmax (0.0f, bandHiX (b) - bandLoX (b)), p.getHeight());
             const auto on = bandOn (b);
             g.setColour (c.withAlpha (on ? (b == selected ? 0.16f : 0.08f) : 0.02f));
             g.fillRect (region);
@@ -1948,12 +2135,22 @@ private:
                 g.fillRect (region.withTop (juce::jmin (ly, gainY (0.0))).withBottom (juce::jmax (ly, gainY (0.0))));
             }
         }
-        for (int i = 1; i < nb(); ++i)
-        {
-            g.setColour (std::abs (mouse.x - edgeX (i)) < 5.0f && p.contains (mouse) ? colour::textPrimary : colour::textSecondary.withAlpha (0.5f));
+        const auto edgeLine = [&] (float x) {
+            g.setColour (std::abs (mouse.x - x) < 5.0f && p.contains (mouse) ? colour::textPrimary : colour::textSecondary.withAlpha (0.5f));
             const auto dashes = std::array<float, 2> { 3.0f, 3.0f };
-            g.drawDashedLine (juce::Line<float> (edgeX (i), p.getY(), edgeX (i), p.getBottom()), dashes.data(), 2, 1.0f);
+            g.drawDashedLine (juce::Line<float> (x, p.getY(), x, p.getBottom()), dashes.data(), 2, 1.0f);
+        };
+        if (isFree()) // round 150: each band's own edges
+        {
+            for (int b = 0; b < nb(); ++b)
+            {
+                if (bandLoX (b) > p.getX() + 1.0f) edgeLine (bandLoX (b));
+                if (bandHiX (b) < p.getRight() - 1.0f) edgeLine (bandHiX (b));
+            }
         }
+        else
+            for (int i = 1; i < nb(); ++i)
+                edgeLine (edgeX (i));
         // the summed response with the live band gains
         juce::Path resp;
         for (int i = 0; i <= 300; ++i)

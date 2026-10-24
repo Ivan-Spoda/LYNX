@@ -131,8 +131,8 @@ TEST (prism_promb_mode_translation_round144b)
         const auto slot = makeSubstituteSlot (*entry, &id, nullptr);
         CHECK (m::phaseOf (slot.params[m::processingMode]) == m::Phase::minimum);
         CHECK (m::oversamplingOf (slot.params[m::oversampling]) == 4);
-        // the band pan, mid / side (state −0.5 = side −6 dB; our band 2: band 1 is the gap below 300 Hz)
-        CHECK (slot.params[m::panMode] == 1.0f && std::abs (slot.params[(std::size_t) m::bandPanParam (1)] - 0.25f) < 1e-6f);
+        // the band pan, mid / side (state −0.5 = side −6 dB; round 150: the free layout, our band 1)
+        CHECK (slot.params[m::panMode] == 1.0f && std::abs (slot.params[(std::size_t) m::bandPanParam (0)] - 0.25f) < 1e-6f);
     }
 }
 

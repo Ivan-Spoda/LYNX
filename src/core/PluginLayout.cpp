@@ -2103,7 +2103,25 @@ Layout prismMultiband()
     static const char* xsCaption[5] { TR_NOOP ("Slope 1"), TR_NOOP ("Slope 2"), TR_NOOP ("Slope 3"), TR_NOOP ("Slope 4"), TR_NOOP ("Slope 5") };
     for (int k = 0; k < 5; ++k)
         v.push_back (dial (660.0f + 52.0f * (float) k, 630, 16, xs[k], xsCaption[k]));
-    l.height = 668;
+    // round 150: the free layout (each band's own edges and slopes), the band's side-chain input, the detector
+    v.push_back (section (8, 666, 884, 64, TR_NOOP ("Free layout (selected band)"), boxed));
+    static const char* lo[6] { "B1 low", "B2 low", "B3 low", "B4 low", "B5 low", "B6 low" };
+    static const char* hi[6] { "B1 high", "B2 high", "B3 high", "B4 high", "B5 high", "B6 high" };
+    static const char* ls[6] { "B1 low slope", "B2 low slope", "B3 low slope", "B4 low slope", "B5 low slope", "B6 low slope" };
+    static const char* hs[6] { "B1 high slope", "B2 high slope", "B3 high slope", "B4 high slope", "B5 high slope", "B6 high slope" };
+    static const char* sci[6] { "B1 SC input", "B2 SC input", "B3 SC input", "B4 SC input", "B5 SC input", "B6 SC input" };
+    for (int b = 0; b < 6; ++b)
+    {
+        auto add = [&] (LayoutItem i) { i.colour = b; v.push_back (onPage (std::move (i), b)); };
+        add (dial (180, 700, 20, lo[b], TR_NOOP ("Low edge")));
+        add (dial (250, 700, 20, ls[b], TR_NOOP ("Low slope")));
+        add (dial (320, 700, 20, hi[b], TR_NOOP ("High edge")));
+        add (dial (390, 700, 20, hs[b], TR_NOOP ("High slope")));
+        add (tabs (450, 696, 220, 22, sci[b], TR_NOOP ("Global|Plug-in|External"), { 0.0f, 0.5f, 1.0f }));
+    }
+    v.push_back (tabs (16, 696, 140, 22, "Band layout", TR_NOOP ("Split|Free")));
+    v.push_back (tabs (700, 696, 180, 22, "Detector", TR_NOOP ("Classic|Measured")));
+    l.height = 738;
     return l;
 }
 

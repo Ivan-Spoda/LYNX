@@ -262,73 +262,36 @@ int fromProMB (const State& s, EffectSlot& slot)
         p[(std::size_t) k] = clamp01 (v);
         ++n;
     };
-    struct Ref { int index; double lo, hi; };
+    // round 150: the free layout — each reference band (enabled or disabled; "unused" ones are left out) keeps its own
+    // edges and slopes (the same value laws), in order of its low edge; the room between bands passes untouched
+    struct Ref { int index; double lo, hi; bool on; };
     std::array<Ref, 6> used {};
     int count = 0;
     for (int b = 0; b < 6; ++b)
-        if (roundIndex (s.at ((std::size_t) (22 * b))) == 1)
+    {
+        const auto state = roundIndex (s.at ((std::size_t) (22 * b)));
+        if (state == 0 || state == 1)
             used[(std::size_t) count++] = { b, std::pow (2.0, (double) s.at ((std::size_t) (22 * b + 1))),
-                                            std::pow (2.0, (double) s.at ((std::size_t) (22 * b + 3))) };
+                                            std::pow (2.0, (double) s.at ((std::size_t) (22 * b + 3))), state == 1 };
+    }
     if (count == 0)
         return 0;
-    std::sort (used.begin(), used.begin() + count, [] (const Ref& a, const Ref& b) { return a.lo * a.hi < b.lo * b.hi; });
-    // our contiguous bands (up to six, round 135): each used reference band in order, with a disabled gap band where the
-    // reference leaves room below / between (gaps are dropped first when there are more than six)
-    struct Seg { int ref; double lo, hi; };
-    std::array<Seg, 16> segs {};
-    int nseg = 0;
-    double edge = 30.0;
-    for (int k = 0; k < count; ++k)
-    {
-        const auto& u = used[(std::size_t) k];
-        if (u.lo > edge * 1.12)
-            segs[(std::size_t) nseg++] = { -1, edge, u.lo };
-        segs[(std::size_t) nseg++] = { u.index, std::max (edge, u.lo), std::max (u.hi, std::max (edge, u.lo) * 1.06) };
-        edge = segs[(std::size_t) (nseg - 1)].hi;
-    }
-    if (edge < 16000.0)
-        segs[(std::size_t) nseg++] = { -1, edge, 30000.0 };
-    while (nseg > bands)
-    {
-        int gap = -1;
-        for (int k = nseg - 1; k >= 0; --k)
-            if (segs[(std::size_t) k].ref < 0)
-            {
-                gap = k;
-                break;
-            }
-        if (gap < 0)
-        {
-            nseg = bands; // more than six reference bands: the six lowest
-            break;
-        }
-        // give the gap to a neighbour
-        if (gap > 0)
-            segs[(std::size_t) (gap - 1)].hi = segs[(std::size_t) gap].hi;
-        else
-            segs[1].lo = segs[0].lo;
-        for (int k = gap; k + 1 < nseg; ++k)
-            segs[(std::size_t) k] = segs[(std::size_t) (k + 1)];
-        --nseg;
-    }
-    // unused bands of ours sit above everything, disabled; round 135: up to six bands (four at least, as before)
-    const int nb = std::max (legacyBands, std::min (nseg, bands));
-    set (Global::bandCountParam, bandCountValue (nb));
+    std::stable_sort (used.begin(), used.begin() + count, [] (const Ref& a, const Ref& b) { return a.lo < b.lo; });
+    set (Global::bandLayout, 1.0f);
+    set (Global::bandCountParam, bandCountValue (count));
     double la = 0.0;
-    for (int b = 0; b < nb; ++b)
+    for (int b = 0; b < count; ++b)
     {
-        if (b < nb - 1)
-        {
-            const auto hz = b + 1 < nseg ? segs[(std::size_t) b].hi : 17000.0 + 300.0 * b;
-            set (crossoverParam (b), crossoverValue (hz));
-        }
-        if (b >= nseg || segs[(std::size_t) b].ref < 0)
-        {
-            set (param (b, fEnabled), 0.0f);
-            continue;
-        }
-        const auto base = (std::size_t) (22 * segs[(std::size_t) b].ref);
-        set (param (b, fEnabled), 1.0f);
+        const auto& u = used[(std::size_t) b];
+        const auto base = (std::size_t) (22 * u.index);
+        set (bandLo0 + b, edgeValue (u.lo));
+        set (bandHi0 + b, edgeValue (u.hi));
+        set (bandLoSlope0 + b, clamp01 (s.at (base + 2)));
+        set (bandHiSlope0 + b, clamp01 (s.at (base + 4)));
+        // the split layout's crossovers follow the bands (for a switch to the split layout in the editor)
+        if (b < count - 1)
+            set (crossoverParam (b), crossoverValue (std::sqrt (u.hi * used[(std::size_t) (b + 1)].lo)));
+        set (param (b, fEnabled), u.on ? 1.0f : 0.0f);
         set (param (b, fMode), s.at (base + 5) >= 0.5f ? 1.0f : 0.0f);
         static constexpr double thresholds[3] { -90.0, -72.0, -48.0 };
         const auto tn = std::clamp ((double) s.at (base + 6), 0.0, 1.0);
@@ -346,34 +309,17 @@ int fromProMB (const State& s, EffectSlot& slot)
         set (bandPanParam (b), (float) ((std::clamp ((double) s.at (base + 14), -1.0, 1.0) + 1.0) * 0.5)); // round 144: mid / side
         // round 147: the expert panel (read black-box from the trial's states; the reference ignores it while its
         // Expert mode, slot 142, is off): 15 side-chain filtering (0 band, 1 free), 16 / 17 its low / high (log2 Hz),
-        // 18 side-chain input (0 plug-in, 1 external), 19 stereo link (the parameter's own value), 20 link mode
-        if (s.at (142) >= 0.5f)
+        // 18 side-chain input (0 plug-in, 1 external; round 150: per band), 19 stereo link, 20 link mode
+        const bool expert = s.at (142) >= 0.5f;
+        set (bandScInput0 + b, expert && s.at (base + 18) >= 0.5f ? 1.0f : 0.5f);
+        if (expert)
         {
             set (bandLink0 + b, clamp01 (s.at (base + 19)));
             set (bandLinkMode0 + b, s.at (base + 20) >= 0.5f ? 1.0f : 0.0f);
             set (bandScFree0 + b, s.at (base + 15) >= 0.5f ? 1.0f : 0.0f);
             set (bandScLow0 + b, scFilterValue (std::pow (2.0, (double) s.at (base + 16))));
             set (bandScHigh0 + b, scFilterValue (std::pow (2.0, (double) s.at (base + 17))));
-            if (s.at (base + 18) >= 0.5f)
-                set (Global::scExternal, 1.0f);
         }
-        if (b == 0)
-        {
-            // the slope: the steeper of the band's sides, to our nearest
-            const auto dbOct = 6.0 + 42.0 * std::max (s.at (base + 2), s.at (base + 4));
-            set (Global::slope, dbOct < 18.0 ? 0.0f : (dbOct < 36.0 ? 0.5f : 1.0f));
-        }
-    }
-    // round 147: each crossover's own slope — the band below's high slope, or the band above's low slope (gaps)
-    for (int k = 0; k + 1 < std::min (nb, nseg); ++k)
-    {
-        const auto& lo = segs[(std::size_t) k];
-        const auto& hi = segs[(std::size_t) (k + 1)];
-        const auto norm = lo.ref >= 0 ? s.at ((std::size_t) (22 * lo.ref + 4)) : (hi.ref >= 0 ? s.at ((std::size_t) (22 * hi.ref + 2)) : -1.0f);
-        if (norm < 0.0f)
-            continue;
-        const auto dbOct = 6.0 + 42.0 * std::clamp ((double) norm, 0.0, 1.0);
-        set (xoverSlope0 + k, crossoverSlopeValue (dbOct < 18.0 ? 12 : (dbOct < 36.0 ? 24 : 48)));
     }
     set (Global::lookahead, s.at (141) >= 0.5f ? linValue (la, 0.0, 20.0) : 0.0f);
     set (Global::mix, clamp01 (s.at (133)));
