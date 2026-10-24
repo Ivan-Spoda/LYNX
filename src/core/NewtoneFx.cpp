@@ -647,10 +647,347 @@ std::unique_ptr<Effect> make (std::shared_ptr<const SampleData> source)
 
 std::unique_ptr<Effect> make (std::shared_ptr<const SampleData> source, const std::vector<std::uint8_t>& state)
 {
-    if (source != nullptr)
-        if (const auto s = parse (state); s && ! s->tracks.empty() && ! s->tracks.front().timeWarp)
-            if (auto edited = renderEdits (*source, s->tracks.front()))
-                return std::make_unique<Engine> (std::move (edited));
-    return make (std::move (source));
+    return make (renderedSource (std::move (source), state));
+}
+
+// ------------------------------------------------------------------------------------------------- LYNX's projects
+namespace
+{
+template <typename T>
+void put (std::vector<std::uint8_t>& out, T v)
+{
+    const auto* p = reinterpret_cast<const std::uint8_t*> (&v);
+    out.insert (out.end(), p, p + sizeof (T));
+}
+
+struct Reader
+{
+    const std::vector<std::uint8_t>& d;
+    std::size_t at = 0;
+    bool ok = true;
+    template <typename T>
+    T get()
+    {
+        T v {};
+        if (at + sizeof (T) > d.size())
+        {
+            ok = false;
+            return v;
+        }
+        std::memcpy (&v, d.data() + at, sizeof (T));
+        at += sizeof (T);
+        return v;
+    }
+};
+
+constexpr std::uint32_t nativeVersion = 1;
+
+double median (std::vector<double> v)
+{
+    if (v.empty())
+        return 0.0;
+    std::nth_element (v.begin(), v.begin() + (std::ptrdiff_t) (v.size() / 2), v.end());
+    return v[v.size() / 2];
+}
+} // namespace
+
+Track analyseNotes (const SampleData& source)
+{
+    Track t;
+    const auto n = (std::int64_t) source.frames();
+    t.frames = n;
+    if (n <= 0)
+        return t;
+    const auto fs = source.sampleRate > 0.0 ? source.sampleRate : 44100.0;
+    std::vector<float> mono (source.leftData(), source.leftData() + n);
+    if (source.isStereo())
+        for (std::int64_t i = 0; i < n; ++i)
+            mono[(std::size_t) i] = 0.5f * (mono[(std::size_t) i] + source.rightData()[i]);
+
+    const int hop = std::max (64, (int) std::lround (256.0 * fs / 44100.0));
+    const auto frames = vocal::analysePitch (mono.data(), (int) n, fs, hop, 60.0, 1000.0);
+    float loudest = 0.0f;
+    for (const auto& f : frames)
+        loudest = std::max (loudest, f.level);
+    const auto floor = loudest * 0.02f; // (−34 dB under the loudest frame: breaths and room tone are not notes)
+
+    // a frame's pitch, smoothed over its neighbours (vibrato stays inside a note)
+    std::vector<double> note (frames.size(), -1.0);
+    for (std::size_t k = 0; k < frames.size(); ++k)
+        if (frames[k].hz > 0.0 && frames[k].level >= floor)
+            note[k] = vocal::hzToNote (frames[k].hz);
+    auto smooth = [&] (std::size_t k) {
+        std::vector<double> v;
+        for (auto j = k >= 2 ? k - 2 : 0; j <= std::min (frames.size() - 1, k + 2); ++j)
+            if (note[j] >= 0.0)
+                v.push_back (note[j]);
+        return median (v);
+    };
+
+    const auto minFrames = std::max<std::size_t> (2, (std::size_t) std::lround (0.06 * fs / hop)); // notes ≥ 60 ms
+    const auto smoothTime = 0.015 * fs;
+    auto close = [&] (std::size_t a, std::size_t b) { // frames [a, b) → a note
+        if (b <= a || b - a < minFrames)
+            return;
+        std::vector<double> v;
+        for (auto k = a; k < b; ++k)
+            if (note[k] >= 0.0)
+                v.push_back (note[k]);
+        Note p;
+        p.origStart = p.curStart = std::clamp<std::int64_t> ((std::int64_t) a * hop - hop / 2, 0, n);
+        p.origEnd = p.curEnd = std::clamp<std::int64_t> ((std::int64_t) b * hop - hop / 2, p.origStart, n);
+        if (! t.pitches.empty() && p.origStart < t.pitches.back().origEnd)
+            p.origStart = p.curStart = t.pitches.back().origEnd;
+        if (p.origEnd <= p.origStart)
+            return;
+        p.origPitch = median (v);
+        p.smoothIn = p.smoothOut = smoothTime;
+        t.pitches.push_back (p);
+    };
+
+    std::size_t start = 0;
+    bool inNote = false;
+    double centre = 0.0;
+    int away = 0;
+    for (std::size_t k = 0; k <= frames.size(); ++k)
+    {
+        const auto voiced = k < frames.size() && note[k] >= 0.0;
+        if (! inNote)
+        {
+            if (voiced)
+                inNote = true, start = k, centre = note[k], away = 0;
+            continue;
+        }
+        const auto here = voiced ? smooth (k) : -1.0;
+        if (! voiced || std::abs (here - centre) > 0.7)
+        {
+            // a gap or a new pitch held for 3 frames ends the note (one-frame glitches and slides stay in it)
+            if (! voiced || ++away >= 3)
+            {
+                const auto end = voiced ? k - (std::size_t) (away - 1) : k;
+                close (start, end);
+                inNote = voiced;
+                start = end;
+                centre = voiced ? here : 0.0;
+                away = 0;
+            }
+            continue;
+        }
+        away = 0;
+        centre += 0.1 * (here - centre); // (follows a slow drift)
+    }
+    t.notes = (int) t.pitches.size();
+    return t;
+}
+
+std::vector<std::uint8_t> writeNative (const Track& track)
+{
+    std::vector<std::uint8_t> out { 'L', 'X', 'N', 'T' };
+    put (out, nativeVersion);
+    put (out, (std::int64_t) track.frames);
+    put (out, track.globalFormant);
+    put (out, (std::uint32_t) track.pitches.size());
+    for (const auto& p : track.pitches)
+    {
+        for (const auto v : { p.origStart, p.origEnd, p.curStart, p.curEnd })
+            put (out, v);
+        for (const auto v : { p.origPitch, p.shift, p.stretch, p.volume, p.formant, p.drift, p.smoothIn, p.smoothOut, p.fadeInTime, p.fadeOutTime,
+                              p.fadeInGain, p.fadeOutGain, p.vibPeriod, p.vibAmpStart, p.vibAmpEnd, p.tremAmp })
+            put (out, v);
+        put (out, (std::uint8_t) (p.enabled ? 1 : 0));
+    }
+    return out;
+}
+
+std::optional<Track> parseNative (const std::vector<std::uint8_t>& state)
+{
+    if (state.size() < 8 || std::memcmp (state.data(), "LXNT", 4) != 0)
+        return std::nullopt;
+    Reader r { state, 4 };
+    if (r.get<std::uint32_t>() != nativeVersion)
+        return std::nullopt;
+    Track t;
+    t.frames = r.get<std::int64_t>();
+    t.globalFormant = r.get<double>();
+    const auto count = r.get<std::uint32_t>();
+    if (! r.ok || count > 100000)
+        return std::nullopt;
+    for (std::uint32_t i = 0; i < count && r.ok; ++i)
+    {
+        Note p;
+        for (auto* v : { &p.origStart, &p.origEnd, &p.curStart, &p.curEnd })
+            *v = r.get<std::int64_t>();
+        for (auto* v : { &p.origPitch, &p.shift, &p.stretch, &p.volume, &p.formant, &p.drift, &p.smoothIn, &p.smoothOut, &p.fadeInTime, &p.fadeOutTime,
+                         &p.fadeInGain, &p.fadeOutGain, &p.vibPeriod, &p.vibAmpStart, &p.vibAmpEnd, &p.tremAmp })
+            *v = r.get<double>();
+        p.enabled = r.get<std::uint8_t>() != 0;
+        t.pitches.push_back (p);
+    }
+    if (! r.ok || r.at != state.size())
+        return std::nullopt;
+    t.notes = (int) t.pitches.size();
+    t.edited = std::any_of (t.pitches.begin(), t.pitches.end(), [&t] (const Note& p) { return p.edited (t.globalFormant); });
+    return t;
+}
+
+std::optional<Track> trackOf (const std::vector<std::uint8_t>& state)
+{
+    if (auto t = parseNative (state))
+        return t;
+    if (const auto s = parse (state); s && ! s->tracks.empty() && ! s->tracks.front().timeWarp)
+        return s->tracks.front();
+    return std::nullopt;
+}
+
+std::vector<std::uint8_t> writeWarp (const WarpMap& map)
+{
+    std::vector<std::uint8_t> out { 'L', 'X', 'N', 'W' };
+    put (out, nativeVersion);
+    put (out, (std::int64_t) map.frames);
+    put (out, (std::uint32_t) map.markers.size());
+    for (const auto& m : map.markers)
+    {
+        put (out, m.source);
+        put (out, m.output);
+    }
+    return out;
+}
+
+std::optional<WarpMap> parseWarp (const std::vector<std::uint8_t>& state)
+{
+    if (state.size() < 8 || std::memcmp (state.data(), "LXNW", 4) != 0)
+        return std::nullopt;
+    Reader r { state, 4 };
+    if (r.get<std::uint32_t>() != nativeVersion)
+        return std::nullopt;
+    WarpMap m;
+    m.frames = r.get<std::int64_t>();
+    const auto count = r.get<std::uint32_t>();
+    if (! r.ok || count > 100000)
+        return std::nullopt;
+    for (std::uint32_t i = 0; i < count && r.ok; ++i)
+    {
+        WarpMarker w;
+        w.source = r.get<std::int64_t>();
+        w.output = r.get<std::int64_t>();
+        // (markers must increase on both axes)
+        if (w.source <= 0 || w.output <= 0 || (! m.markers.empty() && (w.source <= m.markers.back().source || w.output <= m.markers.back().output)))
+            return std::nullopt;
+        m.markers.push_back (w);
+    }
+    if (! r.ok || r.at != state.size())
+        return std::nullopt;
+    return m;
+}
+
+namespace
+{
+// the markers with the implicit start and end ones: (source, output) points, increasing
+std::vector<std::pair<double, double>> warpPoints (const WarpMap& map, std::int64_t frames)
+{
+    std::vector<std::pair<double, double>> pts { { 0.0, 0.0 } };
+    for (const auto& m : map.markers)
+        if ((double) m.source < (double) frames)
+            pts.push_back ({ (double) m.source, (double) m.output });
+    const auto& last = pts.back();
+    const auto slope = pts.size() >= 2 ? (last.second - pts[pts.size() - 2].second) / std::max (1.0, last.first - pts[pts.size() - 2].first) : 1.0;
+    if ((double) frames > last.first)
+        pts.push_back ({ (double) frames, last.second + slope * ((double) frames - last.first) });
+    return pts;
+}
+} // namespace
+
+std::int64_t warpedLength (const WarpMap& map, std::int64_t frames)
+{
+    return (std::int64_t) std::llround (warpPoints (map, frames).back().second);
+}
+
+double warpToOutput (const WarpMap& map, std::int64_t frames, double source)
+{
+    const auto pts = warpPoints (map, frames);
+    for (std::size_t i = 1; i < pts.size(); ++i)
+        if (source <= pts[i].first || i + 1 == pts.size())
+        {
+            const auto& a = pts[i - 1];
+            const auto& b = pts[i];
+            return a.second + (source - a.first) * (b.second - a.second) / std::max (1e-9, b.first - a.first);
+        }
+    return source;
+}
+
+double warpToSource (const WarpMap& map, std::int64_t frames, double output)
+{
+    const auto pts = warpPoints (map, frames);
+    for (std::size_t i = 1; i < pts.size(); ++i)
+        if (output <= pts[i].second || i + 1 == pts.size())
+        {
+            const auto& a = pts[i - 1];
+            const auto& b = pts[i];
+            return a.first + (output - a.second) * (b.first - a.first) / std::max (1e-9, b.second - a.second);
+        }
+    return output;
+}
+
+std::shared_ptr<SampleData> renderWarp (const SampleData& source, const WarpMap& map)
+{
+    const auto n = (std::int64_t) source.frames();
+    if (n <= 0)
+        return nullptr;
+    const auto pts = warpPoints (map, n);
+    bool moved = false;
+    for (const auto& [a, b] : pts)
+        moved = moved || std::abs (a - b) > 0.5;
+    if (! moved)
+        return nullptr;
+
+    auto out = std::make_shared<SampleData>();
+    out->sampleRate = source.sampleRate;
+    const auto stereo = source.isStereo();
+    for (std::size_t i = 1; i < pts.size(); ++i)
+    {
+        const auto a = (std::int64_t) std::llround (pts[i - 1].first), b = (std::int64_t) std::llround (pts[i].first);
+        const auto wantStart = (std::int64_t) std::llround (pts[i - 1].second), wantEnd = (std::int64_t) std::llround (pts[i].second);
+        if (b <= a || wantEnd <= wantStart)
+            continue;
+        SampleData piece;
+        piece.sampleRate = source.sampleRate;
+        piece.left.assign (source.leftData() + a, source.leftData() + b);
+        if (stereo)
+            piece.right.assign (source.rightData() + a, source.rightData() + b);
+        const auto ratio = (double) (wantEnd - wantStart) / (double) (b - a);
+        std::shared_ptr<SampleData> stretched;
+        if (std::abs (ratio - 1.0) > 1e-6)
+            stretched = timeStretch (piece, ratio);
+        const auto& src = stretched != nullptr ? *stretched : piece;
+        // each piece lands exactly where its markers say (the stretcher's length is trimmed / padded)
+        const auto length = (std::size_t) (wantEnd - wantStart);
+        out->left.resize ((std::size_t) wantStart, 0.0f);
+        if (stereo)
+            out->right.resize ((std::size_t) wantStart, 0.0f);
+        for (std::size_t k = 0; k < length; ++k)
+        {
+            const auto inside = k < src.frames();
+            out->left.push_back (inside ? src.leftData()[k] : 0.0f);
+            if (stereo)
+                out->right.push_back (inside ? (src.isStereo() ? src.rightData()[k] : src.leftData()[k]) : 0.0f);
+        }
+    }
+    return out;
+}
+
+std::shared_ptr<const SampleData> renderedSource (std::shared_ptr<const SampleData> source, const std::vector<std::uint8_t>& state)
+{
+    if (source == nullptr)
+        return source;
+    if (const auto warp = parseWarp (state))
+    {
+        if (auto warped = renderWarp (*source, *warp))
+            return warped;
+        return source;
+    }
+    if (const auto t = trackOf (state))
+        if (auto edited = renderEdits (*source, *t))
+            return edited;
+    return source;
 }
 } // namespace lynx::newtonefx

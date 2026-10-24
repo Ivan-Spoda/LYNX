@@ -280,6 +280,7 @@ if(LYNX_BUILD_APP)
         src/ui/ExportDialog.cpp
         src/ui/AutomationUi.cpp
         src/ui/ControllerEditors.cpp
+        src/ui/NewtoneEditor.cpp
         src/ui/ChannelSettings.cpp
         src/ui/BrowserComponent.cpp
         src/ui/Theme.cpp

@@ -31,6 +31,8 @@
 #include "ui/PluginSkin.h"
 #include "ui/ChannelSettings.h"
 #include "ui/ControllerEditors.h"
+#include "ui/NewtoneEditor.h"
+#include "core/NewtoneFx.h"
 #include "core/FormulaController.h"
 #include "core/MidiControls.h"
 #include "core/FlSynths.h"
@@ -3179,6 +3181,63 @@ private:
                 saveWindow (lynx::makeArrangementsPanel (offline), "-arrangements.png");
                 saveWindow (lynx::makePluginMonitorPanel (offline), "-plugin-monitor.png");
                 saveWindow (lynx::makeTouchKeyboardPanel (offline), "-touch-keyboard.png");
+            }
+            {
+                // round 142: the Newtone / Newtime editors on a synthetic sung line (A3 B3 C4 · E4), one note moved
+                const auto wav = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("lynx-snapshot-newtone.wav");
+                {
+                    juce::AudioBuffer<float> line (1, 44100 * 2);
+                    const double hz[] = { 220.0, 246.94, 261.63, 0.0, 329.63 };
+                    double ph = 0.0;
+                    for (int i = 0; i < line.getNumSamples(); ++i)
+                    {
+                        const auto f0 = hz[std::min (4, i / 17640)];
+                        ph += 2.0 * juce::MathConstants<double>::pi * f0 * (1.0 + 0.004 * std::sin (2.0 * juce::MathConstants<double>::pi * 5.5 * i / 44100.0)) / 44100.0;
+                        float v = 0.0f;
+                        for (int h = 1; f0 > 0.0 && h < 8; ++h)
+                            v += (float) (0.3 / h * std::sin (h * ph));
+                        line.setSample (0, i, v);
+                    }
+                    wav.deleteFile();
+                    juce::WavAudioFormat format;
+                    std::unique_ptr<juce::OutputStream> out (wav.createOutputStream().release());
+                    if (auto* w = out != nullptr ? format.createWriterFor (out.get(), 44100.0, 1, 16, {}, 0) : nullptr)
+                    {
+                        out.release();
+                        std::unique_ptr<juce::AudioFormatWriter> writer (w);
+                        writer->writeFromAudioSampleBuffer (line, 0, line.getNumSamples());
+                    }
+                }
+                if (const auto sample = offline.getSampleLibrary().load (wav.getFullPathName()))
+                {
+                    auto notes = lynx::newtonefx::analyseNotes (*sample);
+                    if (notes.pitches.size() > 1)
+                        notes.pitches[1].shift = 2.0;
+                    lynx::newtonefx::WarpMap warp;
+                    warp.frames = (std::int64_t) sample->frames();
+                    warp.markers = { { 22050, 33075 } };
+                    int at = 0;
+                    offline.editSong ([&] (lynx::Song& song) {
+                        if (song.mixer.size() < 2)
+                            song.mixer.resize (2);
+                        auto& fx = song.mixer[1].effects;
+                        auto tone = lynx::makeEffectSlot (lynx::EffectKind::newtone);
+                        tone.samplePath = wav.getFullPathName().toStdString();
+                        tone.state = lynx::newtonefx::writeNative (notes);
+                        auto time = lynx::makeEffectSlot (lynx::EffectKind::newtime);
+                        time.samplePath = tone.samplePath;
+                        time.state = lynx::newtonefx::writeWarp (warp);
+                        at = (int) fx.size();
+                        fx.push_back (tone);
+                        fx.push_back (time);
+                    }, false);
+                    saveWindow (lynx::makeNewtoneEditor (offline, 1, at), "-newtone.png");
+                    saveWindow (lynx::makeNewtoneEditor (offline, 1, at + 1), "-newtime.png");
+                    offline.editSong ([at] (lynx::Song& song) {
+                        auto& fx = song.mixer[1].effects;
+                        fx.erase (fx.begin() + at, fx.begin() + at + 2);
+                    }, false);
+                }
             }
 
             if (! offline.getSong().automations.empty())

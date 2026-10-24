@@ -2,6 +2,7 @@
 
 #include "../tools/WavReader.h"
 #include "core/NativeEngines.h"
+#include "core/VocalPitch.h"
 
 namespace natives142
 {
@@ -199,4 +200,91 @@ TEST (natives142_engines_from_the_fl_installation)
         const auto slot = natives::makeSlot (kind, fl);
         CHECK (slot && ! slot->state.empty());
     }
+}
+
+TEST (natives142_newtone_and_newtime_native_projects)
+{
+    using namespace lynx;
+    // a "sung" line: four notes (A3, B3, C4, rest, E4) with a light vibrato
+    SampleData s;
+    s.sampleRate = 44100.0;
+    const double hz[] = { 220.0, 246.94, 261.63, 0.0, 329.63 };
+    double ph = 0.0;
+    for (const auto f0 : hz)
+        for (int i = 0; i < 17640; ++i)
+        {
+            const auto f = f0 * (1.0 + 0.004 * std::sin (2.0 * M_PI * 5.5 * i / 44100.0));
+            ph += 2.0 * M_PI * f / 44100.0;
+            float v = 0.0f;
+            if (f0 > 0.0)
+                for (int h = 1; h < 8; ++h)
+                    v += (float) (0.3 / h * std::sin (h * ph));
+            s.left.push_back (v);
+        }
+
+    // the analysis finds the four notes at their pitches, nothing edited
+    auto t = newtonefx::analyseNotes (s);
+    CHECK (t.pitches.size() == 4 && t.frames == (std::int64_t) s.frames());
+    const double expected[] = { 57.0, 59.0, 60.0, 64.0 };
+    for (std::size_t k = 0; k < std::min<std::size_t> (4, t.pitches.size()); ++k)
+    {
+        CHECK (std::abs (t.pitches[k].origPitch - expected[k]) < 0.1);
+        CHECK (! t.pitches[k].edited (1.0) && t.pitches[k].curStart == t.pitches[k].origStart);
+    }
+    CHECK (newtonefx::renderEdits (s, t) == nullptr); // (unedited: the source plays as it is)
+
+    // LYNX's own state round-trips; trackOf reads it
+    auto state = newtonefx::writeNative (t);
+    auto back = newtonefx::parseNative (state);
+    CHECK (back && back->pitches.size() == t.pitches.size() && ! back->edited);
+    CHECK (newtonefx::trackOf (state).has_value() && ! newtonefx::parseNative ({ 1, 2, 3 }));
+    state.push_back (0);
+    CHECK (! newtonefx::parseNative (state)); // (trailing bytes: not ours)
+
+    // a note moved up two semitones sounds there; the slot plays the edited sample in slave mode
+    if (t.pitches.size() == 4)
+    {
+        t.pitches[1].shift = 2.0;
+        const auto edited = newtonefx::writeNative (t);
+        CHECK (newtonefx::parseNative (edited)->edited);
+        auto src = std::make_shared<SampleData> (s);
+        const auto rendered = newtonefx::renderedSource (src, edited);
+        CHECK (rendered != nullptr && rendered != src && rendered->frames() == s.frames());
+        const auto frames = vocal::analysePitch (rendered->leftData() + 22050, 8000, 44100.0, 512);
+        double note = 0.0;
+        for (const auto& f : frames)
+            if (f.hz > 0.0)
+            {
+                note = vocal::hzToNote (f.hz);
+                break;
+            }
+        CHECK (std::abs (note - 61.0) < 0.3);
+
+        auto slot = makeEffectSlot (EffectKind::newtone);
+        slot.params[0] = 1.0f;
+        slot.state = edited;
+        auto fx = newtonefx::make (src, slot.state);
+        fx->prepare (44100.0);
+        fx->setPlaying (true);
+        fx->setSongPosition (0.0);
+        std::vector<float> l (512, 0.0f), r (512, 0.0f);
+        fx->process (l.data(), r.data(), 512, slot.params, 120.0);
+        CHECK (std::abs (l[100] - rendered->leftData()[100]) < 1e-6f);
+    }
+
+    // Newtime: a marker stretches the first second to 1.5 s; the rest follows; the map round-trips
+    newtonefx::WarpMap m;
+    m.frames = (std::int64_t) s.frames();
+    m.markers = { { 44100, 66150 } };
+    CHECK (newtonefx::warpedLength (m, m.frames) == 66150 + (m.frames - 44100) * 3 / 2); // (the last slope goes on)
+    CHECK (std::abs (newtonefx::warpToOutput (m, m.frames, 22050.0) - 33075.0) < 1e-6);
+    CHECK (std::abs (newtonefx::warpToSource (m, m.frames, 33075.0) - 22050.0) < 1e-6);
+    const auto warped = newtonefx::renderWarp (s, m);
+    CHECK (warped != nullptr && (std::int64_t) warped->frames() == newtonefx::warpedLength (m, m.frames));
+    const auto map = newtonefx::parseWarp (newtonefx::writeWarp (m));
+    CHECK (map && *map == m);
+    newtonefx::WarpMap bad = m;
+    bad.markers.push_back ({ 40000, 70000 }); // (not increasing)
+    CHECK (! newtonefx::parseWarp (newtonefx::writeWarp (bad)));
+    CHECK (newtonefx::renderWarp (s, newtonefx::WarpMap {}) == nullptr);
 }
