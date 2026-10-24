@@ -846,7 +846,11 @@ protected:
     {
         return specMinHz * std::pow (specMaxHz / specMinHz, juce::jlimit (0.0, 1.0, (double) ((x - a.getX()) / a.getWidth())));
     }
-    static double tiltDb (double f) { return 4.5 * std::log2 (juce::jmax (10.0, f) / 1000.0); }
+    // round 144 (Pro-MB's analyser options): the tilt in dB/oct around 1 kHz (4.5 as before) and the resolution
+    // (0 low … 3 maximum = the whole FFT window, as before: lower ones analyse a shorter, faster window)
+    double specTilt = 4.5;
+    int specResolution = 3;
+    double tiltDb (double f) const { return specTilt * std::log2 (juce::jmax (10.0, f) / 1000.0); }
 
     void updateSpectrum()
     {
@@ -889,12 +893,17 @@ protected:
         {
             auto& ring = which == 0 ? tap.pre : tap.post;
             std::fill (fftData.begin(), fftData.end(), 0.0f);
-            for (int i = 0; i < fftSize; ++i)
-                fftData[(std::size_t) i] = ring[(std::size_t) ((written - (std::uint32_t) fftSize + (std::uint32_t) i) & (ProcessTimes::AnalyzerTap::size - 1))]
-                                               .load (std::memory_order_relaxed) * window[(std::size_t) i];
+            const int len = fftSize >> (3 - juce::jlimit (0, 3, specResolution)); // the newest `len` samples, zero-padded
+            for (int i = 0; i < len; ++i)
+            {
+                const auto w = len == fftSize ? window[(std::size_t) i]
+                                              : 0.5f - 0.5f * std::cos (2.0f * juce::MathConstants<float>::pi * (float) i / (float) len);
+                fftData[(std::size_t) i] = ring[(std::size_t) ((written - (std::uint32_t) len + (std::uint32_t) i) & (ProcessTimes::AnalyzerTap::size - 1))]
+                                               .load (std::memory_order_relaxed) * w;
+            }
             fft.performFrequencyOnlyForwardTransform (fftData.data(), true);
             auto& out = which == 0 ? specPre : specPost;
-            const auto norm = 4.0f / (float) fftSize;
+            const auto norm = 4.0f / (float) len;
             for (int i = 0; i < columns; ++i)
             {
                 const auto f0 = hzForX (a.getX() + a.getWidth() * ((float) i - 0.5f) / (float) (columns - 1), a);

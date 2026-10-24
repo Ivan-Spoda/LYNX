@@ -538,8 +538,16 @@ public:
         juce::PopupMenu menu;
         const auto m = (int) phase (param01 (phaseParam));
         for (int k = 0; k < phaseCount; ++k)
-            menu.addItem (tr (phaseNames[k]) + (k == 0 ? juce::String() : "  (" + tr ("latency {0} samples", { juce::String (latencyFor ((Phase) k, displayRate())) }) + ")"),
+            menu.addItem (tr (phaseNames[k]) + (k == 0 ? juce::String() : "  (" + tr ("latency {0} samples", { juce::String (latencyFor ((Phase) k, displayRate(), facet::resolution (param01 (resolutionParam)))) }) + ")"),
                           true, m == k, [this, k] { set ({ { phaseParam, phaseValue ((Phase) k) } }); });
+        // round 144: the linear-phase resolution (the reference's Low … Maximum): a longer FIR reaches lower
+        // frequencies, at the cost of latency and CPU
+        menu.addSectionHeader (tr ("Linear phase resolution"));
+        static const char* const resolutions[] { TR_NOOP ("Low resolution"), TR_NOOP ("Medium resolution"), TR_NOOP ("High resolution"), TR_NOOP ("Very high resolution"), TR_NOOP ("Maximum resolution") };
+        const auto res = facet::resolution (param01 (resolutionParam));
+        for (int k = 0; k < facet::resolutionCount; ++k)
+            menu.addItem (tr (resolutions[k]) + "  (" + tr ("latency {0} samples", { juce::String (latencyFor (Phase::linear, displayRate(), k)) }) + ")",
+                          true, res == k, [this, k] { set ({ { resolutionParam, facet::resolutionValue (k) } }); });
         // round 135: the character (the reference's Clean / Subtle / Warm)
         menu.addSectionHeader (tr ("Character"));
         static const char* const characters[] { TR_NOOP ("Clean"), TR_NOOP ("Subtle"), TR_NOOP ("Warm") };
@@ -927,7 +935,9 @@ public:
                     caption = tr ("Processing:");
                     value = tr (phaseNames[(int) phase (param01 (phaseParam))]);
                     static const char* const characters[] { TR_NOOP ("Clean"), TR_NOOP ("Subtle"), TR_NOOP ("Warm") };
-                    if (const auto ch = facet::character (param01 (characterParam)); ch > 0) value << juce::String::fromUTF8 (" Â· ") << tr (characters[ch]);
+                    if (const auto ch = facet::character (param01 (characterParam)); ch > 0) value << juce::String::fromUTF8 (" · ") << tr (characters[ch]);
+                    static const char* const resShort[] { TR_NOOP ("Low resolution"), TR_NOOP ("Medium resolution"), TR_NOOP ("High resolution"), TR_NOOP ("Very high resolution"), TR_NOOP ("Maximum resolution") };
+                    if (phase (param01 (phaseParam)) == Phase::linear) value << juce::String::fromUTF8 (" · ") << tr (resShort[facet::resolution (param01 (resolutionParam))]); // round 144
                 }
                 else if (c.type == Ctl::analyzer) { caption = tr ("Analyzer:"); value = tr (analyzerShort[(int) analyzer (param01 (analyzerParam))]); }
                 else
@@ -976,7 +986,7 @@ public:
             }
         }
         // latency of the processing mode (PDC compensates it)
-        const auto lat = latencyFor (phase (param01 (phaseParam)), displayRate());
+        const auto lat = latencyFor (phase (param01 (phaseParam)), displayRate(), facet::resolution (param01 (resolutionParam)));
         if (lat > 0)
         {
             g.setColour (colour::textDisabled);

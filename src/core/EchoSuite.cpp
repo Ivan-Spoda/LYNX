@@ -434,24 +434,168 @@ double rhythmLengthMs (const EffectParams& p, double bpm) noexcept
     return std::min (19000.0, (double) rhythmBeatsOf (p[rhythmLength]) * 60000.0 / tempoFor (p, bpm));
 }
 
+double inputLevelDb (float v) noexcept { return 48.0 * ((double) clamp01 (v) - 0.5); }
+double loopEqDb (float v) noexcept { return 36.0 * ((double) clamp01 (v) - 0.5); }
+int modShapeOf (float v) noexcept { return std::clamp ((int) (clamp01 (v) * 5.0f), 0, 4); }
+int modSyncOf (float v) noexcept { return std::clamp ((int) (clamp01 (v) * 7.0f), 0, 6); }
+double modSyncBeats (int index) noexcept
+{
+    static constexpr double beats[7] = { 0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0 };
+    return beats[std::clamp (index, 0, 6)];
+}
+
+// round 144: the rhythm editor's laws (LYNX's own [model]; Even keeps the measured round-137 law)
+RhythmEdit rhythmEditOf (float v) noexcept
+{
+    v = clamp01 (v);
+    return v < 1.0f / 3.0f ? RhythmEdit::even : (v < 2.0f / 3.0f ? RhythmEdit::free : RhythmEdit::grid);
+}
+int rhythmGridOf (float v) noexcept { return std::clamp ((int) (clamp01 (v) * 6.0f), 0, 5); }
+double rhythmGridBeats (int index) noexcept { return 2.0 / (double) (1 << std::clamp (index, 0, 5)); }
+RhythmShape rhythmShapeOf (float v) noexcept { return (RhythmShape) std::clamp ((int) (clamp01 (v) * 5.0f), 0, 4); }
+
+double rhythmShapeDb (RhythmShape shape, double decayDb, double u) noexcept
+{
+    u = std::clamp (u, 0.0, 1.0);
+    switch (shape)
+    {
+        case RhythmShape::reverse: return -decayDb * (1.0 - u);                 // the last slot loudest
+        case RhythmShape::swell: return -decayDb * std::abs (1.0 - 2.0 * u);    // quiet ends, the middle loudest
+        case RhythmShape::fade: // a straight fade in level (not in dB) down to −decay at the last slot
+        {
+            const auto end = std::pow (10.0, -decayDb / 20.0);
+            return 20.0 * std::log10 (std::max (1.0e-6, 1.0 - (1.0 - end) * u));
+        }
+        case RhythmShape::nonlin: return -decayDb * u * u * u;                  // holds, then falls steeply
+        case RhythmShape::decay: default: return -decayDb * u;                  // the measured law
+    }
+}
+
+double rhythmTapMs (const EffectParams& p, int k, double bpm) noexcept
+{
+    const auto length = rhythmLengthMs (p, bpm);
+    const auto beatMs = 60000.0 / tempoFor (p, bpm);
+    auto ms = (double) clamp01 (p[rhythmTime1 + std::clamp (k, 0, 14)]) * length;
+    if (rhythmEditOf (p[rhythmEdit]) == RhythmEdit::grid)
+    {
+        const auto step = rhythmGridBeats (rhythmGridOf (p[rhythmGrid])) * beatMs;
+        ms = std::round (ms / step) * step;
+        if (ms >= length - 0.5) // the pattern end is where it starts again: the last grid line before it
+            ms = std::floor ((length - 0.5) / step) * step;
+        if (ms < 0.5)
+            ms = std::min (step, std::floor ((length - 0.5) / step) * step);
+    }
+    return std::clamp (ms, 1.0, std::max (1.0, length - 1.0));
+}
+
+float rhythmTimeValue (const EffectParams& p, double ms, double bpm) noexcept
+{
+    const auto length = rhythmLengthMs (p, bpm);
+    if (rhythmEditOf (p[rhythmEdit]) == RhythmEdit::grid)
+    {
+        const auto step = rhythmGridBeats (rhythmGridOf (p[rhythmGrid])) * 60000.0 / tempoFor (p, bpm);
+        ms = std::max (step, std::round (ms / step) * step);
+    }
+    return clamp01 ((float) (ms / std::max (1.0, length)));
+}
+
 // the pattern without allocating (the audio thread): up to 15 heard taps, returns their count
 int rhythmPattern (const EffectParams& p, double bpm, std::array<RhythmTap, 16>& taps, double& slot0) noexcept
 {
     const auto spacing = rhythmSpacingMs (p, bpm), length = rhythmLengthMs (p, bpm);
-    const auto slots = std::clamp (std::min (rhythmRepeatsOf (p[rhythmRepeats]), (int) std::floor (length / spacing + 1e-6) + 1), 1, 16);
+    const auto edit = rhythmEditOf (p[rhythmEdit]);
+    // Even: the slots that fit in the length (measured); Free / Grid: every tap sits inside the length by construction
+    const auto slots = edit == RhythmEdit::even
+                           ? std::clamp (std::min (rhythmRepeatsOf (p[rhythmRepeats]), (int) std::floor (length / spacing + 1e-6) + 1), 1, 16)
+                           : rhythmRepeatsOf (p[rhythmRepeats]);
     const auto decay = rhythmDecayDb (p[rhythmDecay]);
+    const auto shape = rhythmShapeOf (p[rhythmShape]);
     std::array<double, 16> g {};
     double power = 0.0;
     for (int k = 0; k < slots; ++k)
     {
-        g[(std::size_t) k] = slots > 1 ? std::pow (10.0, -decay * (double) k / (double) (slots - 1) / 20.0) : 1.0;
+        g[(std::size_t) k] = slots > 1 ? std::pow (10.0, rhythmShapeDb (shape, decay, (double) k / (double) (slots - 1)) / 20.0) : 1.0;
         power += g[(std::size_t) k] * g[(std::size_t) k];
     }
     const auto norm = 1.0 / std::sqrt (power);
     slot0 = g[0] * norm;
     for (int k = 1; k < slots; ++k)
-        taps[(std::size_t) (k - 1)] = { spacing * (double) k, g[(std::size_t) k] * norm * (double) clamp01 (p[rhythmTap1 + k - 1]) };
+        taps[(std::size_t) (k - 1)] = { edit == RhythmEdit::even ? spacing * (double) k : rhythmTapMs (p, k - 1, bpm),
+                                        g[(std::size_t) k] * norm * (double) clamp01 (p[rhythmTap1 + k - 1]) };
     return slots - 1;
+}
+
+namespace
+{
+#ifndef TR_NOOP
+ #define TR_NOOP(text) text // marks a literal for translation (tools/i18n_keys.py scans core too)
+#endif
+// LYNX's own tap patterns (positions in grid steps, levels 0 … 1); written for Echoform, not taken from any product
+struct RhythmPreset
+{
+    const char* name;
+    int beats;   // pattern length
+    int grid;    // 0 … 5 = 1/2 … 1/64; −1 = Free times given in beats
+    std::array<double, 15> at;
+    std::array<float, 15> level;
+    int count;
+};
+constexpr float F = 1.0f;
+const RhythmPreset rhythmPresets[] {
+    { TR_NOOP ("Gallop"), 2, 3, { 2, 3, 6, 7 }, { 0.8f, F, 0.8f, F }, 4 },
+    { TR_NOOP ("Offbeat eighths"), 2, 2, { 1, 3 }, { F, F }, 2 },
+    { TR_NOOP ("Dotted bounce"), 2, 3, { 3, 6 }, { F, 0.75f }, 2 },
+    { TR_NOOP ("Tresillo"), 4, 2, { 3, 6 }, { F, F }, 2 },
+    { TR_NOOP ("Son clave 3-2"), 8, 2, { 3, 6, 10, 12 }, { F, F, 0.85f, 0.85f }, 4 },
+    { TR_NOOP ("Rumba clave"), 8, 2, { 3, 7, 10, 12 }, { F, F, 0.85f, 0.85f }, 4 },
+    { TR_NOOP ("Ghost sixteenths"), 2, 3, { 1, 2, 3, 5, 6, 7 }, { 0.35f, F, 0.35f, 0.35f, F, 0.35f }, 6 },
+    { TR_NOOP ("Stutter"), 1, 4, { 1, 2, 3, 4, 5, 6 }, { F, 0.9f, 0.8f, 0.7f, 0.6f, 0.5f }, 6 },
+    { TR_NOOP ("Build-up"), 2, 3, { 4, 6, 7 }, { 0.45f, 0.7f, F }, 3 },
+    { TR_NOOP ("Triplet roll"), 2, -1, { 1.0 / 3.0, 2.0 / 3.0, 1.0, 4.0 / 3.0, 5.0 / 3.0 }, { F, 0.85f, 0.7f, 0.85f, F }, 5 },
+    { TR_NOOP ("Swing eighths"), 2, -1, { 2.0 / 3.0, 1.0, 5.0 / 3.0 }, { 0.7f, F, 0.7f }, 3 },
+    { TR_NOOP ("Long and short"), 8, 2, { 3, 4, 11, 12 }, { F, 0.5f, F, 0.5f }, 4 },
+};
+} // namespace
+
+int rhythmPresetCount() noexcept { return (int) std::size (rhythmPresets); }
+const char* rhythmPresetName (int index) noexcept
+{
+    return index >= 0 && index < rhythmPresetCount() ? rhythmPresets[index].name : "";
+}
+
+std::vector<std::pair<int, float>> rhythmPresetEdits (int index)
+{
+    std::vector<std::pair<int, float>> e;
+    if (index < 0 || index >= rhythmPresetCount())
+        return e;
+    const auto& r = rhythmPresets[index];
+    const auto grid = r.grid < 0 ? 3 : r.grid;
+    e.push_back ({ rhythm, 1.0f });
+    e.push_back ({ rhythmEdit, r.grid < 0 ? 0.5f : 1.0f });
+    e.push_back ({ rhythmGrid, ((float) grid + 0.5f) / 6.0f });
+    e.push_back ({ rhythmLength, (float) (r.beats - 1) / 7.0f });
+    e.push_back ({ rhythmRepeats, (float) r.count / 15.0f }); // count taps = count + 1 slots
+    for (int k = 0; k < 15; ++k)
+    {
+        const auto beatsAt = k < r.count ? (r.grid < 0 ? r.at[(std::size_t) k] : r.at[(std::size_t) k] * rhythmGridBeats (r.grid))
+                                         : (double) r.beats * (double) (k + 1) / 16.0;
+        e.push_back ({ rhythmTime1 + k, clamp01 ((float) (beatsAt / (double) r.beats)) });
+        e.push_back ({ rhythmTap1 + k, k < r.count ? r.level[(std::size_t) k] : 1.0f });
+    }
+    return e;
+}
+
+std::vector<std::pair<int, float>> rhythmFreeFromEven (const EffectParams& p, double bpm)
+{
+    std::vector<std::pair<int, float>> e;
+    const auto length = rhythmLengthMs (p, bpm);
+    const auto spacing = rhythmSpacingMs (p, bpm);
+    const auto heard = (int) rhythmTaps (p, bpm).size();
+    e.push_back ({ rhythmEdit, 0.5f });
+    e.push_back ({ rhythmRepeats, (float) heard / 15.0f });
+    for (int k = 0; k < heard; ++k)
+        e.push_back ({ rhythmTime1 + k, clamp01 ((float) (spacing * (double) (k + 1) / std::max (1.0, length))) });
+    return e;
 }
 
 std::vector<RhythmTap> rhythmTaps (const EffectParams& p, double bpm, double* slot0)
@@ -547,6 +691,8 @@ public:
             c.pitch.prepare (sr);
             for (auto& a : c.diff)
                 a.line.allocate (sr * 0.05);
+            for (auto& a : c.diffOut) // round 144: the diffusion after the loop
+                a.line.allocate (sr * 0.05);
         }
         reset();
     }
@@ -560,6 +706,8 @@ public:
             c.pitch.reset();
             c.shifter.reset();
             for (auto& a : c.diff)
+                a.line.clear();
+            for (auto& a : c.diffOut)
                 a.line.clear();
             for (auto& a : c.phaser)
                 a = {};
@@ -581,6 +729,9 @@ public:
         }
         steep.reset();
         lofiLp.reset();
+        eqBass.reset();
+        eqMid.reset();
+        eqTreble.reset();
         lfoPhase = 0.0;
         envelope = 0.0f;
         duckGr = 0.0;
@@ -663,7 +814,22 @@ private:
         const auto diffAmount = clamp01 (p[diffusion]);
         const auto diffScale = 0.25 + 0.75 * (double) clamp01 (p[diffSize]);
         const auto duck = clamp01 (p[ducking]);
-        const auto rate = modRateHz (p[modRate]);
+        // round 144: the LFO locked to a note value of the tempo (Mod sync), else its free rate
+        const auto syncBeats = modSyncBeats (modSyncOf (p[modSync]));
+        const auto rate = syncBeats > 0.0 ? tempoFor (p, bpm) / 60.0 / syncBeats : modRateHz (p[modRate]);
+        const auto lfoShape = modShapeOf (p[modShape]);
+        const auto inG = (float) std::pow (10.0, inputLevelDb (p[inputLevel]) / 20.0);
+        const auto fbBal = (float) bipolar (p[fbBalance]);
+        const auto fbL = 1.0f - std::max (0.0f, fbBal), fbR = 1.0f + std::min (0.0f, fbBal);
+        const bool postDiff = p[diffPost] >= 0.5f;
+        const auto bassDb = loopEqDb (p[loopBass]), midDb = loopEqDb (p[loopMid]), trebleDb = loopEqDb (p[loopTreble]);
+        const bool loopEq = std::abs (bassDb) > 1e-3 || std::abs (midDb) > 1e-3 || std::abs (trebleDb) > 1e-3;
+        if (loopEq)
+        {
+            eqBass.shelf (sr, 120.0, bassDb, false);
+            eqMid.peaking (sr, 1200.0, 0.7, midDb);
+            eqTreble.shelf (sr, std::min (5000.0, 0.4 * sr), trebleDb, true);
+        }
         const auto depth = (double) clamp01 (p[modDepth]);
         const auto wowV = (double) clamp01 (p[wow]), flutterV = (double) clamp01 (p[flutter]);
         const auto fShift = shiftHz (p[shift]), fDetune = shiftDetuneHz (p[shiftDetune]);
@@ -732,8 +898,21 @@ private:
                                    + flutterAmountMs * flutterV * 0.7 * (s.flutter1.next (18.0, sr) + s.flutter2.next (26.0, sr));
                         break;
                     case ModSource::sine:
-                        modMs[c] = modAmountMs * depth * depth * std::sin (twoPi * (lfoPhase + (c == 1 ? 0.25 : 0.0)));
+                    {
+                        auto ph = lfoPhase + (c == 1 ? 0.25 : 0.0);
+                        ph -= std::floor (ph);
+                        double w = 0.0;
+                        switch (lfoShape) // round 144: the LFO's wave (0 = the sine as before)
+                        {
+                            case 1: w = 1.0 - 4.0 * std::abs (ph - 0.5); break;                            // triangle
+                            case 2: w = std::tanh (6.0 * std::sin (twoPi * ph)) / std::tanh (6.0); break; // square (soft edges)
+                            case 3: w = 2.0 * ph - 1.0; break;                                             // saw
+                            case 4: w = 0.5 * s.drift.next (rate * 2.0, sr); break;                        // random
+                            default: w = std::sin (twoPi * ph); break;
+                        }
+                        modMs[c] = modAmountMs * depth * depth * w;
                         break;
+                    }
                     case ModSource::random:
                         modMs[c] = 0.5 * modAmountMs * depth * depth * 0.5 * s.drift.next (rate * 2.0, sr);
                         break;
@@ -847,7 +1026,7 @@ private:
 
             // loop inputs per style
             const auto mono = 0.5f * (in[0] + in[1]);
-            const auto feed = freezeOn ? 0.0f : 1.0f; // frozen: the input stays out of the loop
+            const auto feed = freezeOn ? 0.0f : inG; // frozen: the input stays out of the loop; round 144: Input level
             float loopIn[2];
             if (st == Style::pingPong && pairsOn)
             {
@@ -864,8 +1043,8 @@ private:
             else
             {
                 const auto mine = 1.0f - crossV;
-                loopIn[0] = feed * in[0] + (float) loopG * (mine * fbSig[0] + crossV * fbSig[1]);
-                loopIn[1] = feed * in[1] + (float) loopG * (mine * fbSig[1] + crossV * fbSig[0]);
+                loopIn[0] = feed * in[0] + fbL * (float) loopG * (mine * fbSig[0] + crossV * fbSig[1]);
+                loopIn[1] = feed * in[1] + fbR * (float) loopG * (mine * fbSig[1] + crossV * fbSig[0]);
             }
 
             // write path: diffusion, character, cuts, a soft limit (feedback above 100 % stays bounded)
@@ -878,11 +1057,13 @@ private:
                     s.line.push (u);
                     continue;
                 }
-                if (diffAmount > 0.0f)
+                if (diffAmount > 0.0f && ! postDiff)
                     for (std::size_t k = 0; k < 4; ++k)
                         u = s.diff[k].process (u, diffMs[k] * diffScale * 0.001 * sr * (c == 1 ? 1.07 : 1.0), 0.65f * diffAmount);
                 u = character (s, c, u, md, ageV, driveGain);
                 u = s.highCut.lp (s.lowCut.hp (u));
+                if (loopEq) // round 144: the loop EQ shapes every repeat again
+                    u = eqTreble.process (eqMid.process (eqBass.process (u, c), c), c);
                 if (lofiOn)
                     u = lofiLp.process (u, c);
                 s.line.push (softLimit (u));
@@ -905,6 +1086,12 @@ private:
             else
                 duckGr = 0.0;
 
+            // round 144: Diffusion post: the echoes diffused on their way out (the loop stays clean)
+            if (postDiff && diffAmount > 0.0f)
+                for (int c = 0; c < 2; ++c)
+                    for (std::size_t k = 0; k < 4; ++k)
+                        echo[c] = ch[(std::size_t) c].diffOut[k].process (echo[c], diffMs[k] * diffScale * 0.001 * sr * (c == 1 ? 1.07 : 1.0), 0.65f * diffAmount);
+
             // balance of the echoes, width (M / S of the echoes) and the equal-power mix
             echo[0] *= 1.0f - std::max (0.0f, balanceV);
             echo[1] *= 1.0f + std::min (0.0f, balanceV);
@@ -922,6 +1109,7 @@ private:
         PitchShifter pitch;
         Shifter shifter;
         std::array<Allpass, 4> diff;
+        std::array<Allpass, 4> diffOut; // round 144: Diffusion post
         std::array<Ap1, 6> phaser;
         OnePole shelf, tapeLp1, tapeLp2, hifiLp, hifiHp, lowCut, highCut;
         RandomLfo wow, flutter1, flutter2, drift;
@@ -1284,6 +1472,7 @@ private:
     std::array<Channel, 2> ch;
     Butter8 steep;
     Butter8 lofiLp; // round 137: the LoFi switch
+    Biquad eqBass, eqMid, eqTreble; // round 144: the loop EQ (both channels)
     Shaper shaper;
     ModSource modulation = ModSource::tape;
     double modAmountMs = 6.1;
@@ -1580,6 +1769,36 @@ namespace lattice
 {
 int inputPanOf (float v) noexcept { return std::clamp ((int) std::lround (clamp01 (v) * 8.0f), 0, 8); }
 
+namespace
+{
+// the older Sync law (by length; kept for projects saved before round 144)
+double syncBeats (int index) noexcept
+{
+    static constexpr double beats[18] = { 0.0, 1.0 / 16, 1.0 / 12, 3.0 / 32, 1.0 / 8, 1.0 / 6, 3.0 / 16, 1.0 / 4, 1.0 / 3,
+                                          3.0 / 8, 1.0 / 2, 2.0 / 3, 3.0 / 4, 1.0, 4.0 / 3, 3.0 / 2, 2.0, 4.0 };
+    return beats[std::clamp (index, 0, 17)];
+}
+} // namespace
+
+int delaySyncIndex (float v) noexcept { return std::clamp ((int) std::floor (clamp01 (v) * 17.0f + 1e-5f), 0, 17); }
+
+double delaySyncBeats (int index) noexcept
+{
+    // straight 1/16 … 2/1, dotted 1/16. … 1/1., triplet 1/16T … 1/1T (quarter notes)
+    static constexpr double beats[18] = { 0.0, 0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 0.375, 0.75, 1.5, 3.0, 6.0,
+                                          1.0 / 6.0, 1.0 / 3.0, 2.0 / 3.0, 4.0 / 3.0, 8.0 / 3.0 };
+    return beats[std::clamp (index, 0, 17)];
+}
+
+double syncedDelayMs (const EffectParams& p, double bpm) noexcept
+{
+    const auto tempo = bpm > 1.0 ? bpm : 120.0;
+    if (const auto b = delaySyncBeats (delaySyncIndex (p[delaySync])); b > 0.0)
+        return std::min (delaySyncCapMs, b * 60000.0 / tempo);
+    const auto old = syncBeats ((int) std::lround (clamp01 (p[sync]) * 17.0f));
+    return old > 0.0 ? old * 60000.0 / tempo : 0.0;
+}
+
 int tapCount (float v) noexcept
 {
     static constexpr int counts[10] = { 1, 1, 2, 3, 3, 3, 4, 8, 8, 16 };
@@ -1620,12 +1839,6 @@ double tapLevel (const EffectParams& p, int tap, int taps) noexcept
 
 namespace
 {
-double syncBeats (int index) noexcept
-{
-    static constexpr double beats[18] = { 0.0, 1.0 / 16, 1.0 / 12, 3.0 / 32, 1.0 / 8, 1.0 / 6, 3.0 / 16, 1.0 / 4, 1.0 / 3,
-                                          3.0 / 8, 1.0 / 2, 2.0 / 3, 3.0 / 4, 1.0, 4.0 / 3, 3.0 / 2, 2.0, 4.0 };
-    return beats[std::clamp (index, 0, 17)];
-}
 
 class LatticeMod final : public Effect
 {
@@ -1672,10 +1885,8 @@ public:
         equalPowerMix (p[mix], dryGain, wetGain);
         const auto nTaps = tapCount (p[lattice::taps]);
         const auto half = on (p[halfSpeed]);
-        const auto syncB = syncBeats ((int) std::lround (clamp01 (p[sync]) * 17.0f));
-        const auto delayScale = syncB > 0.0 && delayMs (p[delay]) > 0.0
-                                    ? (syncB * 60000.0 / (bpm > 1.0 ? bpm : 120.0)) * (half ? 2.0 : 1.0) / (delayMs (p[delay]) * (half ? 2.0 : 1.0))
-                                    : 1.0;
+        const auto syncMs = syncedDelayMs (p, bpm); // round 144: the reference's DelaySync law, else the older one
+        const auto delayScale = syncMs > 0.0 && delayMs (p[delay]) > 0.0 ? syncMs / delayMs (p[delay]) : 1.0;
         std::array<std::array<double, 16>, 2> tap {};
         std::array<double, 16> gains {};
         for (int k = 0; k < nTaps; ++k)
@@ -1825,7 +2036,18 @@ const EffectInfo& echoformInfo()
                                      { "Tap 6", 1.0f }, { "Tap 7", 1.0f }, { "Tap 8", 1.0f }, { "Tap 9", 1.0f }, { "Tap 10", 1.0f },
                                      { "Tap 11", 1.0f }, { "Tap 12", 1.0f }, { "Tap 13", 1.0f }, { "Tap 14", 1.0f }, { "Tap 15", 1.0f },
                                      { "LoFi", 0.0f },
-                                     { "Tape voicing", 0.0f } } }; // round 136 (after round 137's)
+                                     { "Tape voicing", 0.0f }, // round 136 (after round 137's)
+                                     // round 144: the rhythm editor (appended; Even = the round-137 pattern)
+                                     { "Rhythm edit", 0.0f }, { "Rhythm grid", 3.5f / 6.0f }, { "Rhythm shape", 0.0f },
+                                     { "Tap 1 time", 1.0f / 16.0f }, { "Tap 2 time", 2.0f / 16.0f }, { "Tap 3 time", 3.0f / 16.0f },
+                                     { "Tap 4 time", 4.0f / 16.0f }, { "Tap 5 time", 5.0f / 16.0f }, { "Tap 6 time", 6.0f / 16.0f },
+                                     { "Tap 7 time", 7.0f / 16.0f }, { "Tap 8 time", 8.0f / 16.0f }, { "Tap 9 time", 9.0f / 16.0f },
+                                     { "Tap 10 time", 10.0f / 16.0f }, { "Tap 11 time", 11.0f / 16.0f }, { "Tap 12 time", 12.0f / 16.0f },
+                                     { "Tap 13 time", 13.0f / 16.0f }, { "Tap 14 time", 14.0f / 16.0f }, { "Tap 15 time", 15.0f / 16.0f },
+                                     // round 144: the Style-Edit-role controls (appended; the defaults = the old sound)
+                                     { "Input level", 0.5f }, { "FB balance", 0.5f }, { "Diffusion post", 0.0f },
+                                     { "Mod shape", 0.0f }, { "Mod sync", 0.0f },
+                                     { "Loop bass", 0.5f }, { "Loop mid", 0.5f }, { "Loop treble", 0.5f } } };
     return info;
 }
 
@@ -1856,7 +2078,8 @@ const EffectInfo& latticeInfo()
                                      { "Noise", 0.3333333f }, { "Rotate", 0.5f }, { "Smoothing", 0.0990991f }, { "Colour", 0.0f },
                                      { "Sync", 0.0f }, { "Taps", 1.5f / 24.0f } /* round 129: two taps (one a side), the reference default */, { "Diffusion on", 0.0f }, { "Drive on", 0.0f },
                                      { "Drive post", 1.0f }, { "Half speed", 0.0f },
-                                     { "Input pan", 0.125f } /* round 137: index 1 = stereo, the reference default */ } };
+                                     { "Input pan", 0.125f } /* round 137: index 1 = stereo, the reference default */,
+                                     { "Delay sync", 0.0f } /* round 144: the reference's DelaySync law, free */ } };
     return info;
 }
 
@@ -1935,7 +2158,35 @@ std::string paramText (EffectKind kind, int param, float v)
             case rhythmTap1 + 6: case rhythmTap1 + 7: case rhythmTap1 + 8: case rhythmTap1 + 9: case rhythmTap1 + 10: case rhythmTap1 + 11:
             case rhythmTap1 + 12: case rhythmTap1 + 13: case rhythmTapLast: return pct (v * 100.0);
             case lofi: return v >= 0.5f ? "on" : "off";
+            case inputLevel: return fmt ("%+.1f dB", inputLevelDb (v));
+            case fbBalance: return fmt ("%+.0f%%", 100.0 * bipolar (v));
+            case diffPost: return v >= 0.5f ? "post" : "loop";
+            case modShape:
+            {
+                static const char* const shapes[5] = { "sine", "triangle", "square", "saw", "random" };
+                return shapes[modShapeOf (v)];
+            }
+            case modSync:
+            {
+                static const char* const syncs[7] = { "free", "1/16", "1/8", "1/4", "1/2", "1 bar", "2 bars" };
+                return syncs[modSyncOf (v)];
+            }
+            case loopBass: case loopMid: case loopTreble: return fmt ("%+.1f dB", loopEqDb (v));
+            case rhythmEdit: return rhythmEditOf (v) == RhythmEdit::even ? "even" : rhythmEditOf (v) == RhythmEdit::free ? "free" : "grid";
+            case rhythmGrid:
+            {
+                static const char* const grids[6] = { "1/2", "1/4", "1/8", "1/16", "1/32", "1/64" };
+                return grids[rhythmGridOf (v)];
+            }
+            case rhythmShape:
+            {
+                static const char* const shapes[5] = { "decay", "reverse", "swell", "fade", "nonlin" };
+                return shapes[(int) rhythmShapeOf (v)];
+            }
             case era: return eraOf (v) == 0 ? "past" : eraOf (v) == 1 ? "present" : "future";
+            case rhythmTime1: case rhythmTime1 + 1: case rhythmTime1 + 2: case rhythmTime1 + 3: case rhythmTime1 + 4: case rhythmTime1 + 5:
+            case rhythmTime1 + 6: case rhythmTime1 + 7: case rhythmTime1 + 8: case rhythmTime1 + 9: case rhythmTime1 + 10: case rhythmTime1 + 11:
+            case rhythmTime1 + 12: case rhythmTime1 + 13: case rhythmTimeLast: return fmt ("%.1f%% of the pattern", v * 100.0);
             case rhythmLength: return rhythmBeatsOf (v) == 1 ? std::string ("1 beat") : fmt ("%.0f beats", (double) rhythmBeatsOf (v));
             default: return fmt ("%.2f", v);
         }
@@ -2009,6 +2260,12 @@ std::string paramText (EffectKind kind, int param, float v)
             case diffOn: case driveOn: return on (v) ? "on" : "off";
             case drivePost: return on (v) ? "post" : "pre";
             case halfSpeed: return on (v) ? "1/2x" : "1x";
+            case delaySync:
+            {
+                static const char* const names[18] = { "free", "free", "1/16", "1/8", "1/4", "1/2", "1/1", "2/1", "1/16.", "1/8.",
+                                                       "1/4.", "1/2.", "1/1.", "1/16T", "1/8T", "1/4T", "1/2T", "1/1T" };
+                return names[delaySyncIndex (v)];
+            }
             case inputPan:
             {
                 static const char* const names[9] = { "stereo", "stereo", "swapped", "mono", "mono left", "mono right", "stereo", "stereo", "stereo" };

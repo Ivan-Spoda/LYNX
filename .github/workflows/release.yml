@@ -243,7 +243,7 @@ jobs:
           apt-get update -q
           apt-get install -y -q gcc-13 g++-13 cmake ninja-build pkg-config file binutils xvfb xauth x11-utils \
             fonts-dejavu-core libasound2-dev libjack-jackd2-dev libx11-dev libxrandr-dev libxinerama-dev \
-            libxcursor-dev libxext-dev libxcomposite-dev libfreetype-dev libfontconfig1-dev libgl-dev desktop-file-utils
+            libxcursor-dev libxext-dev libxcomposite-dev libfreetype-dev libfontconfig1-dev libgl-dev desktop-file-utils zsync
           ldd --version | head -1
           g++-13 --version | head -1
 
