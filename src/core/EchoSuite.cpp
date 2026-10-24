@@ -2453,7 +2453,7 @@ std::string paramText (EffectKind kind, int param, float v)
             case loopBass: case loopMid: case loopTreble: return fmt ("%+.1f dB", loopEqDb (v));
             case voicing: return voicingName (voicingOf (v));
             case satType: return satTypeName (satTypeOf (v));
-            case multiply: return fmt ("%dx", multiplyOf (v));
+            case multiply: return std::to_string (multiplyOf (v)) + "x";
             case rhythmEdit: return rhythmEditOf (v) == RhythmEdit::even ? "even" : rhythmEditOf (v) == RhythmEdit::free ? "free" : "grid";
             case rhythmGrid:
             {
