@@ -225,6 +225,7 @@ TEST (rea149_consolidate_keeps_the_tempo_map)
     auto song = Song::makeDefault();
     song.playlist.clear();
     song.bpm = 120.0;
+    song.mode = PlayMode::song;
     Automation tempo;
     tempo.target = { AutomationTargetKind::tempo, 0 };
     tempo.points = { { 0, valueFromTempo (100.0) }, { 4 * ppq * 4, valueFromTempo (100.0) }, { 4 * ppq * 4 + 1, valueFromTempo (140.0) },
