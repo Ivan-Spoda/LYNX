@@ -124,6 +124,10 @@ std::vector<Action> makeActions()
         { "pianoRoll.articulate", TR_NOOP ("Articulate..."), Context::pianoRoll, { chord ('L', alt) } },
         { "pianoRoll.riffMachine", TR_NOOP ("Riff machine..."), Context::pianoRoll, { chord ('E', alt) } },
         { "pianoRoll.chordProgression", TR_NOOP ("Generate chord progression..."), Context::pianoRoll, { chord ('P', alt) } },
+        // note colours and the Select menu (REA round 153: FL's keys from its piano roll manual)
+        { "pianoRoll.colourSelected", TR_NOOP ("Colour the selected notes with the note colour"), Context::pianoRoll, { chord ('C', alt) } },
+        { "pianoRoll.selectByColour", TR_NOOP ("Select the notes of the same colour"), Context::pianoRoll, { chord ('C', shift) } },
+        { "pianoRoll.invertSelection", TR_NOOP ("Invert the note selection"), Context::pianoRoll, { chord ('I', shift) } },
         { "pianoRoll.zoomIn", TR_NOOP ("Zoom in"), Context::pianoRoll, { chord (pageUp) } },
         { "pianoRoll.zoomOut", TR_NOOP ("Zoom out"), Context::pianoRoll, { chord (pageDown) } },
         { "pianoRoll.zoom1", TR_NOOP ("Zoom: one bar"), Context::pianoRoll, { chord ('1', shift) }, true },

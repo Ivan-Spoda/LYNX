@@ -142,6 +142,9 @@ public:
     // Note played live (PC keyboard, preview). UI thread.
     // `record` = goes into the recording if recording is on (Piano Roll preview doesn't).
     void sendLiveNote (int channel, int key, float velocity, bool on, bool record = false);
+    // The keys held right now on MIDI inputs and the typing piano (as played, before the scale snap), ascending; for
+    // the Piano Roll's chord readout (any thread).
+    std::vector<int> heldInputKeys() const;
 
     // Scale snap for played notes (MIDI input and the PC keyboard): scale index into notetools::scales()
     // (0 = off) and its root (0..11). Any thread.
@@ -453,6 +456,9 @@ private:
     LiveEventQueue liveEvents;   // UI -> audio
     LiveEventQueue midiEvents;   // MIDI thread -> audio
     InputHeldNotes midiHeld;     // MIDI thread: what each held MIDI key started
+    std::atomic<std::uint64_t> heldKeyBits[2] {}; // keys held on MIDI inputs / the typing piano (chord readout)
+    std::atomic<std::uint8_t> heldKeyCount[128] {};
+    void markHeldKey (int key, bool on) noexcept;
     KeyLedger playedKeys;        // UI thread: the keys the typing piano started (after the scale snap)
     SpscQueue<RecordedEvent, 1024> midiRecordQueue; // MIDI thread -> UI (recording)
 

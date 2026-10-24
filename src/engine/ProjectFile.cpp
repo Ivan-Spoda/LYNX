@@ -1339,7 +1339,8 @@ juce::String toJson (const Song& song)
                                           juce::roundToInt (n.velocity * 1000.0f) / 1000.0 };
 
             // [.., pan, fine pitch, muted] only when not default
-            const auto extra = n.release != 0.5f || n.modX != 0.5f || n.modY != 0.5f; // [.., release, mod X, mod Y]
+            // [.., release, mod X, mod Y (, colour)]
+            const auto extra = n.release != 0.5f || n.modX != 0.5f || n.modY != 0.5f || n.colour != 0;
             if (n.pan != 0.0f || n.finePitch != 0.0f || n.muted || n.slide || n.porta || extra)
             {
                 note.add (juce::roundToInt (n.pan * 1000.0f) / 1000.0);
@@ -1351,6 +1352,8 @@ juce::String toJson (const Song& song)
                 if (extra)
                     for (auto v : { n.release, n.modX, n.modY })
                         note.add (juce::roundToInt (v * 1000.0f) / 1000.0);
+                if (n.colour != 0)
+                    note.add (n.colour);
             }
 
             notes.add (note);
@@ -1617,6 +1620,8 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                             note.modX = juce::jlimit (0.0f, 1.0f, (float) (double) n[11]);
                             note.modY = juce::jlimit (0.0f, 1.0f, (float) (double) n[12]);
                         }
+                        if (n.size() >= 14)
+                            note.colour = juce::jlimit (0, noteColourCount - 1, (int) n[13]);
                     }
 
                     if (note.channel >= 0 && note.channel < (int) song.channels.size())

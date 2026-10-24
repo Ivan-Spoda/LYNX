@@ -119,6 +119,23 @@ inline juce::Colour noteColour (float velocity)
     return colour::noteSoft.interpolatedWith (colour::noteHard, juce::jlimit (0.0f, 1.0f, velocity));
 }
 
+// Note colour groups (REA round 153): group 0 is LYNX's note colour, groups 1..15 LYNX's own hue wheel; the velocity
+// sets the brightness, as for group 0.
+inline juce::Colour noteGroupHue (int group)
+{
+    if (group <= 0)
+        return colour::noteHard;
+    return juce::Colour::fromHSV (std::fmod (0.02f + (float) group / 16.0f, 1.0f), 0.62f, 0.95f, 1.0f);
+}
+
+inline juce::Colour noteGroupColour (int group, float velocity)
+{
+    if (group <= 0)
+        return noteColour (velocity);
+    const auto hue = noteGroupHue (group);
+    return hue.withMultipliedBrightness (0.68f + 0.32f * juce::jlimit (0.0f, 1.0f, velocity));
+}
+
 // A user/channel colour toned down to sit on the dark surfaces without shouting.
 inline juce::Colour tame (juce::Colour c)
 {
