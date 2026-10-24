@@ -399,7 +399,7 @@ public:
         right.removeFromTop (4);
         {
             auto also = right.removeFromTop (22);
-            alsoLabel.setBounds (also.removeFromLeft (labelWidth));
+            alsoLabel.setBounds (also.removeFromLeft (labelWidth - 22));
             const auto w = also.getWidth() / 4;
             for (auto& t : alsoToggles)
                 t.setBounds (also.removeFromLeft (w));
