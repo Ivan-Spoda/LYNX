@@ -4216,3 +4216,9 @@ countries: br
 # round 152 (parity152): Prism's model revision
 "Model" = "Modelo"
 "Round 150|Round 152" = "Rodada 150|Rodada 152"
+# round 152 (parity152): Auto-pan's trigger sources (the PanMan role)
+"Clock|Ping-pong|Random step" = "Relógio|Pingue-pongue|Passo aleatório"
+"Divider" = "Divisor"
+"Off|HP|LP" = "Desl.|PA|PB"
+"Trigger now" = "Disparar agora"
+"Random steps" = "Passos aleatórios"

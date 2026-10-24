@@ -1629,6 +1629,17 @@ public:
             s.feel = -0.25 + 0.5 * std::clamp ((double) p[rb + 17], 0.0, 1.0);
             s.groove = -0.25 + 0.5 * std::clamp ((double) p[rb + 18], 0.0, 1.0);
             s.beyond = p[rb + 19] >= 0.5f;
+            if (p.size() > rb + 26) // round 152: the trigger sources and the Random source (appended)
+            {
+                s.trigger = p[rb + 20] < 0.25f ? 0 : (p[rb + 20] < 0.75f ? 1 : 2);
+                s.trigAudio = p[rb + 21] < 0.999f; // fully up = no audio trigger (the manual one still works)
+                s.trigThresholdDb = -60.0 + 60.0 * std::clamp ((double) p[rb + 21], 0.0, 1.0);
+                s.divider = 1 + (int) std::lround (11.0 * std::clamp ((double) p[rb + 22], 0.0, 1.0));
+                s.trigFilter = p[rb + 23] < 0.25f ? 0 : (p[rb + 23] < 0.75f ? 1 : 2);
+                s.trigFreqHz = 20.0 * std::pow (1000.0, std::clamp ((double) p[rb + 24], 0.0, 1.0));
+                s.manual = p[rb + 25];
+                s.randomSteps = p[rb + 26] >= 0.5f;
+            }
             if (! (s == rhythmSet))
             {
                 rhythm.set (s);
@@ -2518,7 +2529,12 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                         // a project saved before round 150 keeps the clipped angle)
                                                         { "Rate mod", 0.5f }, { "Offset mod", 0.5f }, { "Width mod", 0.5f },
                                                         { "Env threshold", 40.0f / 60.0f }, { "Env range", 10.0f / 39.0f },
-                                                        { "Feel", 0.5f }, { "Groove", 0.5f }, { "Beyond speakers", 1.0f } } };
+                                                        { "Feel", 0.5f }, { "Groove", 0.5f }, { "Beyond speakers", 1.0f },
+                                                        // round 152: the trigger sources (Ping-pong / Random step), their
+                                                        // threshold, divider, filter and manual trigger; the Random source
+                                                        { "Trigger", 0.0f }, { "Trig threshold", 40.0f / 60.0f }, { "Divider", 0.0f },
+                                                        { "Trig filter", 0.0f }, { "Trig freq", 0.5f }, { "Manual trigger", 0.0f },
+                                                        { "Random steps", 0.0f } } };
     static const EffectInfo vocoderInfo { "Vocoder", { { "Bands", 0.4f }, { "Order", 0.5f }, { "Listen", 1.0f }, { "Swap L/R", 0.0f },
                                                        { "Min freq.", 0.0f }, { "Max freq.", 1.0f }, { "Scale", 0.5f }, { "Invert", 0.0f },
                                                        { "Formant", 0.5f }, { "Width", 45.0f / 195.0f }, { "Attack", 10.0f / 990.0f },
@@ -3165,6 +3181,14 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                     case 23: std::snprintf (text, sizeof (text), "%.1f dB", 1.0f + 39.0f * v); break;
                     case 24: case 25: std::snprintf (text, sizeof (text), "%+.3f", -0.25f + 0.5f * v); break;
                     case 26: return v >= 0.5f ? "fold" : "clip";
+                    case 27: return v < 0.25f ? "off (clock)" : (v < 0.75f ? "ping-pong" : "random step");
+                    case 28: if (v >= 0.999f) return "off (manual only)";
+                             std::snprintf (text, sizeof (text), "%.1f dB", -60.0f + 60.0f * v); break;
+                    case 29: std::snprintf (text, sizeof (text), "%d", 1 + (int) std::lround (11.0f * v)); break;
+                    case 30: return v < 0.25f ? "off" : (v < 0.75f ? "high pass" : "low pass");
+                    case 31: std::snprintf (text, sizeof (text), "%.0f Hz", 20.0 * std::pow (1000.0, (double) v)); break;
+                    case 32: return "Trigger";
+                    case 33: return v >= 0.5f ? "on" : "off";
                     default: std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f); break;
                 }
             }

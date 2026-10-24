@@ -79,7 +79,22 @@ its fuller panel (**Full**) and gets a **Plate** view (appended **View**, Full |
 Cut on the left, the big Decay with its ∞ under it, Mod and Mix on the right, the Measured plate switch. The Little
 Plate substitute opens in it (its preset sets View = Plate). pt-BR "Completo|Placa".
 
-## 4. Prism's free layout by hand in the running app
+## 4. Auto-pan ← PanMan: the trigger sources and the Random source
+
+PanMan has two audio-triggered sources (PingPong, Random Step) with a trigger threshold, a 1 … 12 divider, a filter on
+the detector and a manual trigger, and a Random source on its clock [MANUAL docs/specs/panman.md]. The sources are not
+host parameters, so their laws could not be measured black-box (round 150a); LYNX's are [model]. Auto-pan's Rhythm
+voicing gets a **Trigger** row (appended, 43 parameters): **Trigger** Clock | Ping-pong | Random step, **Thresh.**
+(−60 … 0 dB, fully up = audio off, default −20 dB as the Tweak envelope's measured default), **Divider** 1 … 12,
+**Trig filter** Off | HP | LP (12 dB/oct, the detector only) with **Freq** (20 Hz … 20 kHz), **Trigger now** (a push
+button), **Random steps**. The detector: the input (before the analog stage) through the filter into a peak follower
+(30 ms release); a rise past the threshold counts once and re-arms 6 dB under it; every `divider` counts the pan moves —
+to the other side (Ping-pong, starting on the left) or to a random place (Random step) — gliding over Smoothing ×
+250 ms (at least 55 samples, the clock's own shortest glide). Random steps: each step of the clock a reproducible random
+place (a hash of the step's number since the song start, so renders repeat). Defaults = the old sound (Clock, off).
+pt-BR: "Relógio|Pingue-pongue|Passo aleatório", "Divisor", "Disparar agora", "Passos aleatórios".
+
+## 5. Prism's free layout by hand in the running app
 
 (pending)
 
@@ -87,7 +102,9 @@ Plate substitute opens in it (its preset sets View = Plate). pt-BR "Completo|Pla
 
 tests/Parity152Tests.inc: the gain-stage attack at 50 / 75 / 100 % against the trial (and round 150's law for old
 projects), the upgrade; the narrow Dynamic-phase bands (curve and tone, six measured cases, the 0.8-octave minimum);
-Foil's View (texts, the two views' controls). Prism's parameter-count checks follow the appended parameter.
+Foil's View (texts, the two views' controls); Auto-pan's trigger sources (ping-pong per burst, divider 2, a threshold
+above the bursts, the manual trigger, random steps by trigger and on the clock, reproducible). Prism's and Auto-pan's
+parameter-count checks follow the appended parameters.
 
 ## Where I stopped
 

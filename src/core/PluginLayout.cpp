@@ -2398,6 +2398,17 @@ Layout withRhythmVoicing (Layout l)
     add (dial (530, 318, 30, "Feel", TR_NOOP ("Feel"), bipolar));
     add (dial (610, 318, 30, "Groove", TR_NOOP ("Groove"), bipolar));
     add (toggle (664, 308, 86, 20, "Beyond speakers", TR_NOOP ("Beyond")));
+    // round 152: PanMan's trigger sources (the input past a threshold, or the manual trigger, moves the pan every
+    // `divider` triggers: to the other side, or to a random place), the detector's filter, and the Random source
+    l.height = 444;
+    add (section (4, 360, 752, 80, TR_NOOP ("Trigger")));
+    add (tabs (14, 390, 230, 22, "Trigger", TR_NOOP ("Clock|Ping-pong|Random step"), { 0.0f, 0.5f, 1.0f }));
+    add (dial (284, 398, 30, "Trig threshold", TR_NOOP ("Thresh.")));
+    add (stepper (318, 390, 84, 22, "Divider", TR_NOOP ("Divider"), 11));
+    add (tabs (412, 390, 132, 22, "Trig filter", TR_NOOP ("Off|HP|LP"), { 0.0f, 0.5f, 1.0f }));
+    add (dial (578, 398, 30, "Trig freq", TR_NOOP ("Freq")));
+    add (toggle (618, 380, 132, 20, "Manual trigger", TR_NOOP ("Trigger now"), plugui::momentary));
+    add (toggle (618, 410, 132, 20, "Random steps", TR_NOOP ("Random steps")));
     return l;
 }
 

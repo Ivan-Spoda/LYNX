@@ -106,3 +106,99 @@ TEST (foil_plate_view_round152)
         CHECK ((shown["Size"] == 1) == (view < 0.5f) && (shown["Mod depth"] == 1));
     }
 }
+
+namespace p152
+{
+// Auto-pan's Rhythm voicing, digital, the full width, centred, with the round-152 trigger settings
+inline lynx::EffectParams triggerPan (float trigger, float thresholdV, int divider)
+{
+    using namespace lynx;
+    auto p = makeEffectSlot (EffectKind::autoPan).params;
+    constexpr int rb = autopan::count;
+    p[rb] = 1.0f;          // the Rhythm voicing
+    p[rb + 4] = 180.0f / 210.0f;
+    p[rb + 6] = 0.0f;      // smoothing 0 (the shortest glide)
+    p[rb + 10] = 0.0f;     // digital
+    p[rb + 20] = trigger;
+    p[rb + 21] = thresholdV;
+    p[rb + 22] = (float) (divider - 1) / 11.0f;
+    return p;
+}
+// a quiet 1 kHz bed (−40 dBFS) with bursts (−6 dBFS, 50 ms) every 400 ms from 0.2 s; the pan (degrees, −90 = left)
+// read from the bed 150 … 350 ms after each burst
+inline std::vector<double> burstPans (const lynx::EffectParams& p, int bursts, std::vector<float>* flipAt = nullptr)
+{
+    using namespace lynx;
+    auto fx = makeEffect (EffectKind::autoPan);
+    fx->prepare (48000.0);
+    const int n = (int) (48000.0 * (0.2 + 0.4 * bursts + 0.2));
+    std::vector<float> a ((std::size_t) n), b;
+    for (int i = 0; i < n; ++i)
+    {
+        const double t = i / 48000.0, u = t - 0.2 - 0.4 * std::floor ((t - 0.2) / 0.4);
+        const bool loud = t >= 0.2 && u < 0.05;
+        a[(std::size_t) i] = (float) ((loud ? 0.5 : 0.01) * std::sin (2.0 * 3.14159265358979 * 1000.0 * t));
+    }
+    b = a;
+    auto q = p;
+    for (int at = 0; at < n; at += 256)
+    {
+        if (flipAt != nullptr) // the manual trigger pressed at these times (s)
+            for (const auto when : *flipAt)
+                if (when * 48000.0 >= at && when * 48000.0 < at + 256)
+                    q[(std::size_t) autopan::count + 25] = q[(std::size_t) autopan::count + 25] >= 0.5f ? 0.0f : 1.0f;
+        fx->process (a.data() + at, b.data() + at, std::min (256, n - at), q, 120.0);
+    }
+    std::vector<double> out;
+    for (int k = 0; k < bursts; ++k)
+    {
+        const int from = (int) (48000.0 * (0.2 + 0.4 * k + 0.15)), to = (int) (48000.0 * (0.2 + 0.4 * k + 0.35));
+        double sl = 0.0, sr = 0.0;
+        for (int i = from; i < to; ++i)
+        {
+            sl += (double) a[(std::size_t) i] * a[(std::size_t) i];
+            sr += (double) b[(std::size_t) i] * b[(std::size_t) i];
+        }
+        out.push_back (2.0 * std::atan2 (std::sqrt (sr), std::sqrt (sl)) * 180.0 / 3.14159265358979 - 90.0);
+    }
+    return out;
+}
+} // namespace p152
+
+TEST (autopan_trigger_sources_round152)
+{
+    using namespace lynx;
+    constexpr int rb = autopan::count;
+    const auto& info = effectInfo (EffectKind::autoPan);
+    CHECK (info.params.size() == (std::size_t) rb + 27 && std::string (info.params[rb + 26].name) == "Random steps");
+    CHECK (formatEffectParam (EffectKind::autoPan, rb + 20, 0.5f, 120.0) == "ping-pong" && formatEffectParam (EffectKind::autoPan, rb + 22, 1.0f, 120.0) == "12");
+    CHECK (formatEffectParam (EffectKind::autoPan, rb + 21, 1.0f, 120.0) == "off (manual only)");
+    // Ping-pong, threshold −20 dB: each burst moves the pan to the other side (it starts on the left)
+    auto pp = p152::burstPans (p152::triggerPan (0.5f, 40.0f / 60.0f, 1), 4);
+    std::printf ("  Auto-pan ping-pong: %.1f %.1f %.1f %.1f deg\n", pp[0], pp[1], pp[2], pp[3]);
+    CHECK (pp[0] > 40.0 && pp[1] < -40.0 && pp[2] > 40.0 && pp[3] < -40.0);
+    // divider 2: every second burst
+    auto pd = p152::burstPans (p152::triggerPan (0.5f, 40.0f / 60.0f, 2), 4);
+    CHECK (pd[0] < -40.0 && pd[1] > 40.0 && pd[2] > 40.0 && pd[3] < -40.0);
+    // a threshold above the bursts: nothing moves; the manual trigger still does
+    auto ph = p152::burstPans (p152::triggerPan (0.5f, 1.0f, 1), 3);
+    CHECK (ph[0] < -40.0 && ph[1] < -40.0 && ph[2] < -40.0);
+    std::vector<float> presses { 0.62f };
+    auto pm = p152::burstPans (p152::triggerPan (0.5f, 1.0f, 1), 3, &presses);
+    CHECK (pm[0] < -40.0 && pm[1] > 40.0 && pm[2] > 40.0);
+    // Random step: the pan lands in different places, within the width
+    auto pr = p152::burstPans (p152::triggerPan (1.0f, 40.0f / 60.0f, 1), 6);
+    double lo = 1e9, hi = -1e9;
+    for (const auto d : pr) { lo = std::min (lo, d); hi = std::max (hi, d); CHECK (std::abs (d) <= 90.5); }
+    CHECK (hi - lo > 40.0);
+    // the Random source on the clock: reproducible, different places per step
+    auto pc = p152::triggerPan (0.0f, 40.0f / 60.0f, 1);
+    pc[rb + 26] = 1.0f;
+    pc[rb + 2] = 1.0f;     // synced to beats
+    pc[rb + 3] = (float) ((std::log2 (1.6) + 4.0) / 10.0); // 1.6 beats per period = 0.8 s at 120 BPM: 0.4 s per step
+    pc[rb + 9] = 0.1875f;  // the steps change at 0.25 + 0.4·k s, between the read windows
+    const auto r1 = p152::burstPans (pc, 5), r2 = p152::burstPans (pc, 5);
+    double spread = 0.0;
+    for (int k = 0; k < 5; ++k) { CHECK (std::abs (r1[(std::size_t) k] - r2[(std::size_t) k]) < 1e-9); spread = std::max (spread, std::abs (r1[(std::size_t) k] - r1[0])); }
+    CHECK (spread > 10.0);
+}
