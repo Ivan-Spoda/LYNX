@@ -143,10 +143,17 @@ N −16.6, T −12.1, P −12.5 dB (A: −25.2 dB; with A's curve they were −8
 `EmberClassic.cpp` `styleTable`; her states all use style A, so this is for everyone else's Decapitator states and
 the Classic style buttons.
 
+High drive (style A, round 136's open item): with the low-drive constants the null falls from −17.5 dB at drive 5 to
+−10.6 dB at drive 10. A refit on drives 6 / 8 / 10 (stairs, bursts) and her takes at 6 / 8 reaches −18.0 dB there (takes
+at drive 6: go −22.9, kwe −24.7, lu −22.8 dB, were −17.4 / −21.9 / −20.7), but it loses the even harmonics at low
+level (1 kHz at −30 dBFS, drive 6: H2 −53 dBc vs the trial's −28.5); with the bias terms held at the low-drive values
+it reaches −17.2 dB and still H2 −42. Not adopted — the curve needs a level-dependent even-harmonic term that the
+null alone does not fit (fits `Ahi1`, `Ahi2` in `D:\lynx-work\vox136\lab`).
+
 ## Where I stopped
 - Done: §0 (round 136 merged and landed), §1 trials, §2 archive, §3 Auto-Tune Pro measured, §4, §5.
-- Not done (round 136's list, in order): Decapitator at drive ≥ 5 (data in
-  `D:\lynx-work\vox136`, Soundtoys trial until 2026-11-22), Punish's curve, EchoBoy's Dual and the ping-pong kernel's
+- Not done (round 136's list, in order): Decapitator at drive ≥ 5 (§5: tried, not adopted) and Punish's curve
+  (data in `D:\lynx-work\vox136`, Soundtoys trial until 2026-11-22), EchoBoy's Dual and the ping-pong kernel's
   last −21 dB, PanMan's first ~200 ms after a reset, the RComp / CLA-2A / NS1 residue (Waves in demo mode: mute-masked
   measurements). Auto-Tune Pro: tracking / input-type analysis from the archive, the upper-note tie, LYNX Tune's HF loss.
 - Next trials by expiry: Complete Access (Slate / SSL / LiquidSonics / sonible) 2026-11-03, FabFilter ~11-16,
