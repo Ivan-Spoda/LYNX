@@ -3722,3 +3722,7 @@ countries: br
 "{0} bar(s) at {1} BPM" = "{0} compasso(s) a {1} BPM"
 "{0} notes. Drag: pitch (Alt: free), Ctrl+drag: time, double-click: snap, right-click: menu" = "{0} notas. Arrastar: afinação (Alt: livre), Ctrl+arrastar: tempo, duplo clique: ajustar, botão direito: menu"
 "{0} warp markers. Double-click: add a marker, drag it to move that point, right-click: remove" = "{0} marcadores de warp. Duplo clique: adicionar um marcador, arrastar: mover esse ponto, botão direito: remover"
+"Plugin database" = "Banco de plugins"
+"Installed" = "Instalados"
+"Plugin database: LYNX's built-in generators and effects, FL's engines and the installed plugins" = "Banco de plugins: geradores e efeitos embutidos do LYNX, motores do FL e os plugins instalados"
+"[double-click] add it (generators: a new channel; effects: into the selected insert)" = "[duplo clique] adicionar (geradores: um novo canal; efeitos: no insert selecionado)"

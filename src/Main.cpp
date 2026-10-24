@@ -3486,6 +3486,9 @@ private:
             ui.getBrowserForSnapshot().showProjectForSnapshot();
             offline.dispatchPendingMessages();
             saveSnapshot (ui, prefix + "-browser-project.png");
+            ui.getBrowserForSnapshot().showPluginDatabaseForSnapshot(); // round 142: the Plugin database's FL engines
+            offline.dispatchPendingMessages();
+            saveSnapshot (ui, prefix + "-browser-plugins.png");
             ui.getBrowserForSnapshot().setTab (lynx::BrowserComponent::allTab);
 
             // the undo history after a few edits

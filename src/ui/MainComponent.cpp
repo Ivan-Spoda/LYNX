@@ -118,6 +118,18 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
         mixer.selectTrack (track);
     };
     browser.onOpenAutomation = [this] (int automation) { openAutomationEditor (engine, automation); };
+    // the Browser's Plugin database (round 142): the same targets as the quick-add palette
+    browser.onAddInstrument = [this] (ChannelDef c) {
+        rack.addChannel (std::move (c), true);
+        showPanel (Panel::channelRack);
+    };
+    browser.onAddEffect = [this] (EffectSlot slot) {
+        if (! mixer.addEffectToSelected (std::move (slot)))
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, tr ("Plugin database"),
+                                                    tr ("The selected insert has no free effect slot."));
+        else
+            showPanel (Panel::mixer);
+    };
     browser.onPreviewVolumeChanged = [this] { saveUiSettings(); };
     browser.onSendToPlaylist = [this] (const juce::File& file) {
         playlist.addAudioClipAtPlayhead (file);

@@ -1216,6 +1216,8 @@ int ChannelRackComponent::addChannel (ChannelDef c, bool openEditor)
         openPluginWindow (index);
         openEditorRow = index;
     }
+    else if (openEditor && natives::instrumentEngine (c.instrument) != nullptr) // an FL engine: its editor (round 142)
+        openChannelSettings (engine, index);
 
     return index;
 }
@@ -1232,7 +1234,7 @@ bool ChannelRackComponent::loadSampleIntoSelected (const juce::File& file)
 
     // only channels that play a sample (or the built-in drums, which become samplers) take a file
     if (kind != InstrumentKind::sampler && kind != InstrumentKind::kick && kind != InstrumentKind::snare && kind != InstrumentKind::hat
-        && kind != InstrumentKind::clap)
+        && kind != InstrumentKind::clap && kind != InstrumentKind::granulizer)
         return false;
 
     assignSample (row, file);
@@ -2161,8 +2163,10 @@ void ChannelRackComponent::assignSample (int channel, const juce::File& file)
 
         if (isNew)
             c.mixerTrack = freeInsert;
-        c.instrument = InstrumentKind::sampler;
         c.samplePath = path;
+        if (! isNew && c.instrument == InstrumentKind::granulizer) // FL's Granulizer keeps its engine and plays the file (round 142)
+            return;
+        c.instrument = InstrumentKind::sampler;
         c.name = name;
     });
 
