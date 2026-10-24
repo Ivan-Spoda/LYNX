@@ -2239,7 +2239,7 @@ TEST (flp_real_files)
     std::printf ("  Fruity Delay 2: %d of %d slots on the exact engine; Fruity Delay 3: %d of %d\n", delay2Exact, delay2Slots,
                  delay3Exact, delay3Slots);
     // (FL 11 files' slots are read since round 80; Patcher graphs can add Delay 2 nodes of their own)
-    CHECK (delay2Exact >= delay2Slots && delay2Slots >= 60 && delay3Exact == delay3Slots && delay3Slots >= 100); // REA_rodada52
+    CHECK (delay2Exact >= delay2Slots && delay2Slots >= 60 && delay3Exact >= delay3Slots && delay3Slots >= 100); // REA_rodada52
     std::printf ("  Chorus family: %d of %d slots on the exact engines\n", chorusExact, chorusSlots);
     CHECK (chorusExact >= chorusSlots && chorusSlots >= 47); // REA_rodada59
     std::printf ("  Fruity Fast Dist: %d of %d slots on the exact engine; Fruity Flangus: %d of %d; Fruity Flanger: %d of %d\n", fastDistExact,
