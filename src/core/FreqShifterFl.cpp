@@ -576,6 +576,15 @@ public:
                 engine->setControl (k, controlValue (k, raw[(std::size_t) k]));
             current = raw;
             ready = true;
+            // FL's mixer runs the plug-in on silence before a render starts — 1536 samples with the transport stopped,
+            // measured against FL's renders on the reference PC — so the controls' glides (the frequency glide starts
+            // from −20 kHz) are part-way when the song begins; the song's start then restarts the oscillator
+            ScopedFlushDenormals ftz;
+            for (int i = 0; i < 1536; ++i)
+            {
+                float zl = 0.0f, zr = 0.0f;
+                engine->process (zl, zr, bpm);
+            }
         }
         else
             for (int k = 0; k < numParams; ++k)

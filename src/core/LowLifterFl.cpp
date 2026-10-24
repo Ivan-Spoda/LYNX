@@ -1,6 +1,7 @@
 #include "core/LowLifterFl.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -453,6 +454,9 @@ public:
         ready = false;
     }
     void reset() noexcept override {}
+    // what the plug-in reports to FL's PDC: the look-ahead, rint(rate · 0.01)
+    explicit LowLifterEffect (bool la) : lookahead (la) {}
+    int latencySamples() const noexcept override { return lookahead.load() ? (int) std::nearbyint ((double) rate * 0.01) : 0; }
     void process (float* left, float* right, int n, const EffectParams& params, double) noexcept override
     {
         std::array<int, numParams> raw {};
@@ -466,6 +470,7 @@ public:
             for (int k = 0; k < numParams; ++k)
                 engine->setControl (k, engineValue (k, raw[(std::size_t) k]));
             current = raw;
+            lookahead = raw[4] != 0;
             silent = 0;
             tail = rate;
             ready = true;
@@ -477,6 +482,7 @@ public:
                     engine->setControl (k, engineValue (k, raw[(std::size_t) k]));
                     current[(std::size_t) k] = raw[(std::size_t) k];
                 }
+        lookahead = raw[4] != 0;
         for (int done = 0; done < n;)
         {
             const int m = std::min (512, n - done);
@@ -506,8 +512,9 @@ private:
     std::array<int, numParams> current {};
     int rate = 44100, silent = 0, tail = 44100;
     bool ready = false;
+    std::atomic<bool> lookahead { true };
 };
 } // namespace
 
-std::unique_ptr<Effect> make() { return std::make_unique<LowLifterEffect>(); }
+std::unique_ptr<Effect> make (bool lookahead) { return std::make_unique<LowLifterEffect> (lookahead); }
 } // namespace lynx::lowlifter

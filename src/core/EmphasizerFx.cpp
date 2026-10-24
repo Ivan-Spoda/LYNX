@@ -327,6 +327,7 @@ public:
         ready = false;
     }
     void reset() noexcept override {} // FL's flush only resets the plug-in's meters
+    int latencySamples() const noexcept override { return (int) std::lround (rate * 0.002f); } // reported to FL's PDC
     void process (float* left, float* right, int n, const EffectParams& params, double) noexcept override
     {
         std::array<int, numParams> raw {};
@@ -340,6 +341,16 @@ public:
                 engine.setParam (k, engineValue (k, raw[(std::size_t) k]));
             current = raw;
             ready = true;
+            // FL's mixer runs the plug-in on silence before a render starts (measured against FL's renders on the
+            // reference PC: 1536 samples, plus 768 for a plug-in that reports latency, as this one does), so its gain
+            // ramps and bypass cross-fade have nearly settled when the song begins
+            std::array<float, 512> zl {}, zr {};
+            for (int done = 0; done < warmUpSamples; done += 512)
+            {
+                zl.fill (0.0f);
+                zr.fill (0.0f);
+                engine.process (zl.data(), zr.data(), zl.data(), zr.data(), std::min (512, warmUpSamples - done));
+            }
         }
         else
             for (int k = 0; k < numParams; ++k)
@@ -357,6 +368,7 @@ public:
     }
 
 private:
+    static constexpr int warmUpSamples = 1536 + 768;
     Engine engine;
     std::array<int, numParams> current {};
     float rate = 44100.0f;

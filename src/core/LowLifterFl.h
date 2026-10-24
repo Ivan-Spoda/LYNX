@@ -41,7 +41,7 @@ struct State
 std::optional<State> parse (const std::vector<std::uint8_t>& state);
 void toParams (const State& s, float* params) noexcept;
 std::string paramText (int param, float v01);
-std::unique_ptr<Effect> make();
+std::unique_ptr<Effect> make (bool lookahead = true);
 
 // the engine value the front end sends for control k at raw value v (dB / Hz / amounts, the switches as their raw)
 float engineValue (int k, int raw) noexcept;

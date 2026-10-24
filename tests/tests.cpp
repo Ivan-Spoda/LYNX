@@ -15829,7 +15829,8 @@ TEST (plugin_layout_options_match_the_engine_values)
 TEST (emphasizer_matches_fl_engine)
 {
     // REA_rodada154: FL's Emphasizer through the import (state → slot → effect) against goldens of the installation's
-    // Emphasizer_x64.dll (rate set before the state, 512-frame calls, 44.1 kHz): FNV-1a of the output's float bits
+    // Emphasizer_x64.dll (rate set before the state, 2304 samples of silence as FL's mixer runs it before a render,
+    // 512-frame calls, 44.1 kHz): FNV-1a of the output's float bits
     auto signal = [] {
         std::vector<float> l (24000), r (24000);
         std::uint32_t s = 12345;
@@ -15845,8 +15846,8 @@ TEST (emphasizer_matches_fl_engine)
         return std::pair { l, r };
     };
     struct Case { std::array<int, 6> raw; std::uint64_t hash; };
-    const Case cases[] { { { 0, 5013, 0, 0, 0, 10000 }, 0x79682f3abfdac488ull }, { { 6000, 9000, 1, 0, 0, 8000 }, 0x4138a8ff577a39d6ull },
-                         { { 8000, 2000, 0, 1, 0, 10000 }, 0x1a2ac8bf371715daull }, { { 3000, 5013, 1, 0, 1, 10000 }, 0x57a8fa4d8b890ac0ull } };
+    const Case cases[] { { { 0, 5013, 0, 0, 0, 10000 }, 0xa009608f060eb32eull }, { { 6000, 9000, 1, 0, 0, 8000 }, 0x6fc7ec82cc9d9c01ull },
+                         { { 8000, 2000, 0, 1, 0, 10000 }, 0xb10a1f3bd998198cull }, { { 3000, 5013, 1, 0, 1, 10000 }, 0x57a8fa4d8b890ac0ull } };
     for (const auto& c : cases)
     {
         std::vector<std::uint8_t> state (4 + 24 + 1, 0);
@@ -15885,12 +15886,13 @@ TEST (emphasizer_matches_fl_engine)
 TEST (fl_frequency_shifter_matches_fl_engine)
 {
     // REA_rodada154 §4: FL's Frequency Shifter (import → slot → effect) against goldens of the installation's
-    // Engine_x64.dll driven by its front end (rate before the state, transport stopped, 120 BPM): FNV-1a of the output
+    // Engine_x64.dll driven by its front end (rate before the state, 1536 samples of silence first, transport stopped, 120 BPM): FNV-1a
+    // of the output
     struct Case { std::array<int, 10> raw; double rate; std::uint64_t hash; };
-    const Case cases[] { { { 10000, 0, -60480, 0, 10000, 10000, 5000, 10000, 1, 5000 }, 44100.0, 0x326aa161d74aa77cull },
-                         { { 7000, 2, 40000, 3000, 10000, 10000, 8000, 6000, 0, 2000 }, 44100.0, 0xc3feb760dd2a4311ull },
-                         { { 6000, 1, -30000, 6000, 3000, 7000, 3000, 4000, 0, 5000 }, 48000.0, 0x3ab8edef44a90586ull },
-                         { { 10000, 0, 51542, 2000, 8000, 10000, 5000, 10000, 0, 5000 }, 48000.0, 0x960c788c5d50fd0bull } };
+    const Case cases[] { { { 10000, 0, -60480, 0, 10000, 10000, 5000, 10000, 1, 5000 }, 44100.0, 0x462af5f13683c90eull },
+                         { { 7000, 2, 40000, 3000, 10000, 10000, 8000, 6000, 0, 2000 }, 44100.0, 0xcd597b95bf1bbb1aull },
+                         { { 6000, 1, -30000, 6000, 3000, 7000, 3000, 4000, 0, 5000 }, 48000.0, 0x5592232115cb3acull },
+                         { { 10000, 0, 51542, 2000, 8000, 10000, 5000, 10000, 0, 5000 }, 48000.0, 0x63d3051ba14bd00full } };
     for (const auto& c : cases)
     {
         std::vector<std::uint8_t> state (4 + 40 + 8, 0);

@@ -101,7 +101,17 @@ rate-first order used by every earlier port; FL's own order is checked with FL r
 
 `py/mkemz.py` turns `Data/System/Render tests/Emphasis.flp` into seven projects with Emphasizer in place of Emphasis
 (her state; Emphasis 0 / 100 %; soft clip; +12 dB; level matching; output 70 %), rendered with `FL64 /R /Ewav` into
-`C:\Users\kauan\lynx-test\fldsp154\ref`. (Results in "Where I stopped".)
+`C:\Users\kauan\lynx-test\fldsp154\ref` and compared with LYNX's `renderwav` (3x Osc source, exact in LYNX):
+
+| LYNX start | Result against FL (after the 88-sample latency) |
+|---|---|
+| a fresh engine | ESR −29 dB: LYNX's output ramp and dry→wet cross-fade start from 0 during the first 0.1 s, FL's do not |
+| the engine run on silence first | her state: ESR −85 dB, **99.97 % of the 16-bit samples identical, max 1 LSB** (warm-up of 2304 samples, the best fit; settled ramps give 99.1 %, max 10 LSB); the other six states 98.1–99.3 % identical, ESR −76…−82 dB |
+
+So FL loads the state *after* the sample-rate call (otherwise the controls would be wiped, §2.3) and its mixer runs the
+plug-in on silence for a short while before the render starts (it has no silence gate). The length of that warm-up is
+not constant between FL runs (§4.4); LYNX uses 2304 samples, the best fit here. FL compensates the plug-in's reported
+latency (`roundf(fs·0.002)`); LYNX reports the same to its PDC (the app's export trims it; `renderwav` does not).
 
 ### 2.5 In LYNX
 
@@ -173,6 +183,21 @@ changes.
 | design coefficients with the C library's `sin`/`cos` instead of the engine's vector double sincos | 4 of 2 000 000 float coefficients differ (1 ulp) |
 | unit test `fl_frequency_shifter_matches_fl_engine` (4 states, 24000 frames) | FNV-1a of the DLL's output |
 
+### 4.4 FL renders **[FL]**
+
+Five variants of the Emphasis render-test project with Frequency Shifter states (HQ +561 Hz, HQ −71 Hz in the 200 Hz
+range, plain shifter, ring modulator, Tempo range) rendered by FL and compared with the plug-in in our harness on the
+same source: FL's output is reproduced only with (a) a warm-up on silence with the transport stopped, then (b) the
+transport starting at the render (`dispatch 12`), which restarts the oscillator at the left phase offset. The warm-up
+that fits differs between FL runs: 1536 samples for the ring-modulator render (ESR −68.5 dB against the 16-bit file),
+2048 for the HQ +561 Hz render (−66.1 dB), none of the multiples of 512 up to 5120 for the plain shifter. The
+frequency glide (time constant 43 ms, from −20 kHz) is still moving at that point, so the oscillator's phase — and
+with it the shifted signal's phase — depends on how long FL ran the plug-in before the song: FL's own renders of a
+Frequency Shifter are not reproducible from run to run in their phase. LYNX warms up 1536 samples and restarts the
+oscillator when playback starts; spectra and levels match FL (`spec_db` 0), sample-exact only when FL happened to run
+the same warm-up. (The Frequency Shifter render test itself uses the Tempo range and its 3x Osc source differs from
+LYNX's in phase, so it is not used.)
+
 LYNX: `src/core/FreqShifterFl.{h,cpp}`, `EffectKind::flFrequencyShifter` (project id `flFrequencyShifter`), the FL
 import uses it for every readable state (the old approximation `freqShift` stays for unreadable ones), addable from the
 Mixer. While the song plays LYNX passes the song position in beats.
@@ -215,7 +240,12 @@ The library's `tanf` (double evaluation, FMA on FMA machines) and `powf` / `expf
 were compiled with different groupings of a few products, which the port keeps (Ghidra prints chained products
 without their grouping — the disassembly decides).
 
-### 5.3 Verification **[EXEC]**
+### 5.3 Verification **[EXEC + FL]**
+
+FL's own render of `Data/System/Render tests/Low Lifter.flp` against LYNX's (after the 441-sample look-ahead latency,
+which LYNX now reports to its PDC): **99.98 % of the 16-bit samples identical, max 1 LSB** over the whole file — the
+silence gate means FL does not run the engine before the song, so the fades start from zero in both.
+
 
 `cpp/llcmp.cpp` (LYNX effect) against the plug-in in our harness (`py/llbatch.py 1 12`): the 11 installation states
 (3 demo slots, 7 presets + Default) and 12 random states at 44.1 / 48 / 96 kHz — **23/23 bit-identical**, both
@@ -223,4 +253,19 @@ channels; a 1.6 s gap of silence (gate) at 44.1 and 48 kHz bit-identical. Unit t
 
 ## Where I stopped
 
-(updated at the end of the round)
+- **Landed:** Emphasizer, Frequency Shifter and Low Lifter as exact engines (`EffectKind::emphasizer`,
+  `flFrequencyShifter`, `flLowLifter`), imported from FL projects and presets, addable from the Mixer, with unit
+  tests against the DLLs' outputs, FL's render warm-up and latency reports.
+- **Emphasis** (§3) is surveyed only; its engine is about five times the Low Lifter's (oversampling, true peak, four
+  envelope orders, the Steady loudness analyser, a 28-way set-parameter with deferred updates). The next round can use
+  `out/emp_set2.c` (set-parameter with the switch overrides, `gh/scripts/DecSwitch.java`), `out/emp_proc.c` and the
+  harness (`run/fx.c`, options `early`, `warm=N`, `dispafter=a,b`).
+- FL's warm-up before a render varies between runs (§4.4): the first ~0.5 s of a Frequency Shifter render cannot be
+  sample-exact in general; LYNX uses the most common value measured (1536 samples, 2304 for latency-reporting
+  Emphasizer).
+- The Tempo range of the Frequency Shifter gets the song position in beats while playing (FL's unit, confirmed from the
+  front end's `TTimeSigInfo` arithmetic, §4.1); its 48/96 kHz states differ from the DLL at −46…−85 dB (double `pow`
+  of the C run-time).
+- Tools of this round: `tmp/fldsp154/` — `run/fx.c` (harness), `cpp/emzcmp.cpp`, `cpp/fscmp.cpp`, `cpp/llcmp.cpp`
+  (drivers), `py/batch.py`, `py/fsbatch.py`, `py/llbatch.py`, `py/*gold.py`, `py/mkemz.py`, `probe/probe2.c` (bulk
+  calls of a DLL's math helpers), Ghidra scripts `DecTree`, `DecSwitch`, `Dump`, `Dis`.
