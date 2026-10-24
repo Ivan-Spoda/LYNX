@@ -112,6 +112,7 @@ add_library(lynx_core STATIC
     src/core/NewtoneFx.cpp
     src/core/MixSuite.cpp
     src/core/EmberClassic.cpp
+    src/core/VoxStrip.cpp
     src/core/RhythmPan.cpp
     src/core/VoiceMatch.cpp
     src/core/EchoSuite.cpp
@@ -147,6 +148,8 @@ target_sources(lynx_core PRIVATE
     src/core/KeyMap.cpp
     src/core/Workspace.cpp
     src/core/RackOps.cpp
+    src/core/ChannelMiscFx.cpp
+    src/core/MidiImport.cpp
     src/core/StartupSound.cpp)
 
 # workflow P2 (note tools, mixer operations, history labels, browser search)

@@ -3464,8 +3464,15 @@ void MainComponent::importMidiFile()
         const auto file = fc.getResult();
         if (safe == nullptr || file == juce::File())
             return;
+        juce::String error;
+        const auto midi = MidiFileIo::parseFile (file, error);
+        if (! midi)
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not import"), error);
+            return;
+        }
         static MidiFileIo::ImportOptions remembered; // FL keeps the window's choices
-        showMidiImportDialog (file.getFileName(), remembered, [safe, file] (const MidiFileIo::ImportOptions& o) {
+        showMidiImportDialog (file.getFileName(), *midi, remembered, false, [safe, file] (const MidiFileIo::ImportOptions& o) {
             remembered = o;
             if (safe != nullptr)
                 safe->importMidiFile (file, o);

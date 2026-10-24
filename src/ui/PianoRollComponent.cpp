@@ -5,6 +5,7 @@
 #include "core/NoteEdit.h"
 #include "core/NoteTools.h"
 #include "engine/MidiFileIo.h"
+#include "ui/Dialogs.h"
 #include "engine/Text.h"
 #include "ui/AutomationUi.h"
 #include "ui/EventEditor.h"
@@ -3041,19 +3042,36 @@ juce::PopupMenu PianoRollComponent::midiMenu()
                 return;
 
             juce::String error;
-            auto notes = MidiFileIo::loadNotes (fc.getResult(), engine.getSelectedChannel(), error);
+            const auto file = fc.getResult();
+            const auto midi = MidiFileIo::parseFile (file, error);
 
-            if (! notes)
+            if (! midi)
             {
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "MIDI", error);
                 return;
             }
 
-            std::vector<int> added;
-            editNotes ([&] (Pattern& p) { added = noteedit::paste (p, *notes, 0); });
-            setSelection (added);
-            sortNotes();
-            scrollToNotes();
+            // FL's "Import MIDI data" window with Blend (REA round 146b): which tracks / channels / controller
+            static midiimport::Options remembered;
+            juce::Component::SafePointer<PianoRollComponent> safe (this);
+            showMidiImportDialog (file.getFileName(), *midi, remembered, true, [safe, midi = *midi] (const midiimport::Options& o) {
+                remembered = o;
+                if (safe == nullptr)
+                    return;
+                std::vector<int> added;
+                std::string err;
+                const auto channel = safe->engine.getSelectedChannel();
+                safe->engine.editSong ([&] (Song& s) { added = midiimport::importIntoChannel (s, channel, midi, o, err); });
+                if (added.empty())
+                {
+                    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "MIDI", juce::String::fromUTF8 (err.c_str()));
+                    return;
+                }
+                safe->knownNoteCount = currentPattern (safe->engine.getSong()).notes.size();
+                safe->setSelection (added);
+                safe->scrollToNotes();
+                safe->repaint();
+            });
         });
     });
     menu.addItem (tr ("Export pattern as .mid..."), [this] {
