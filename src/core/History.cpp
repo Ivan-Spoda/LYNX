@@ -10,7 +10,7 @@ bool sameNote (const Note& a, const Note& b) noexcept
 {
     return a.start == b.start && a.length == b.length && a.channel == b.channel && a.key == b.key && a.velocity == b.velocity
            && a.pan == b.pan && a.finePitch == b.finePitch && a.muted == b.muted && a.slide == b.slide && a.porta == b.porta
-           && a.release == b.release && a.modX == b.modX && a.modY == b.modY && a.colour == b.colour;
+           && a.release == b.release && a.modX == b.modX && a.modY == b.modY && a.colour == b.colour && a.group == b.group;
 }
 
 bool sameNotes (const std::vector<Note>& a, const std::vector<Note>& b) noexcept
@@ -60,7 +60,7 @@ bool sameClip (const Clip& a, const Clip& b) noexcept
 {
     return a.pattern == b.pattern && a.track == b.track && a.start == b.start && a.length == b.length && a.offset == b.offset
            && a.kind == b.kind && a.channel == b.channel && a.automation == b.automation && a.fadeIn == b.fadeIn && a.fadeOut == b.fadeOut
-           && a.gain == b.gain && a.muted == b.muted && a.offsetFraction == b.offsetFraction;
+           && a.gain == b.gain && a.pan == b.pan && a.muted == b.muted && a.offsetFraction == b.offsetFraction;
 }
 
 bool sameClips (const std::vector<Clip>& a, const std::vector<Clip>& b) noexcept

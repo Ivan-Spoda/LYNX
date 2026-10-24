@@ -128,6 +128,8 @@ std::vector<Action> makeActions()
         { "pianoRoll.colourSelected", TR_NOOP ("Colour the selected notes with the note colour"), Context::pianoRoll, { chord ('C', alt) } },
         { "pianoRoll.selectByColour", TR_NOOP ("Select the notes of the same colour"), Context::pianoRoll, { chord ('C', shift) } },
         { "pianoRoll.invertSelection", TR_NOOP ("Invert the note selection"), Context::pianoRoll, { chord ('I', shift) } },
+        { "pianoRoll.groupNotes", TR_NOOP ("Group the selected notes"), Context::pianoRoll, { chord ('G', shift) } },
+        { "pianoRoll.ungroupNotes", TR_NOOP ("Ungroup the selected notes"), Context::pianoRoll, { chord ('G', alt) } },
         { "pianoRoll.zoomIn", TR_NOOP ("Zoom in"), Context::pianoRoll, { chord (pageUp) } },
         { "pianoRoll.zoomOut", TR_NOOP ("Zoom out"), Context::pianoRoll, { chord (pageDown) } },
         { "pianoRoll.zoom1", TR_NOOP ("Zoom: one bar"), Context::pianoRoll, { chord ('1', shift) }, true },

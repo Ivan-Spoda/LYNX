@@ -62,6 +62,9 @@ public:
         ui::setQuickTip (closeButton, tr ("Close"));
         setWantsKeyboardFocus (false);
         setMouseClickGrabsKeyboardFocus (false);
+        // paints every pixel: the panels it covers (a maximised Mixer over the Playlist, a floating Piano roll)
+        // are not painted under it (round 151: the hidden Playlist cost 13-19 ms a frame behind the Mixer)
+        setOpaque (true);
         refreshButtons();
     }
 

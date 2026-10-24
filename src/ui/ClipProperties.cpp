@@ -140,6 +140,10 @@ public:
         label (gainLabel, tr ("Gain"));
         slider (gain, -24.0, 12.0, 0.1, " dB");
         gain.setDoubleClickReturnValue (true, 0.0);
+        label (panLabel, tr ("Pan"));
+        slider (pan, -100.0, 100.0, 1.0, "%");
+        pan.setDoubleClickReturnValue (true, 0.0);
+        pan.setTooltip (tr ("The clip's pan (left -100% ... right 100%), on top of the channel's"));
         label (pitchLabel, tr ("Pitch"));
         slider (pitch, -24.0, 24.0, 1.0, " st");
         pitch.setDoubleClickReturnValue (true, 0.0);
@@ -238,6 +242,7 @@ public:
         {
             title (levelsTitle);
             row (gainLabel, gain);
+            row (panLabel, pan);
             row (pitchLabel, pitch);
             row (fadeInLabel, fadeIn);
             row (fadeOutLabel, fadeOut);
@@ -267,7 +272,7 @@ private:
         // margins + buttons, then 30 per section title and 32 per row
         auto h = 24 + 30 + 14 + 2 * 30 + 6 * 32;
         if (isAudio())
-            h += 30 + 5 * 32 + 28;
+            h += 30 + 6 * 32 + 28;
         if (selection.size() > 1)
             h += 30 + 2 * 32;
         return h;
@@ -317,13 +322,14 @@ private:
         offset.setText (clipprops::formatLength (props.offset, song.beatsPerBar), false);
         muted.setToggleState (props.muted, n);
         gain.setValue (juce::Decibels::gainToDecibels (props.gain, -24.0f), n);
+        pan.setValue (props.pan * 100.0, n);
         pitch.setValue (props.pitch, n);
         fadeIn.setValue ((double) props.fadeIn / ppq, n);
         fadeOut.setValue ((double) props.fadeOut / ppq, n);
         stretch.setValue (props.stretchBeats, n);
         keepPitch.setToggleState (props.keepPitch, n);
         keepPitch.setEnabled (props.stretchBeats > 0.0f);
-        for (auto* c : std::initializer_list<juce::Component*> { &levelsTitle, &gainLabel, &gain, &pitchLabel, &pitch, &fadeInLabel, &fadeIn,
+        for (auto* c : std::initializer_list<juce::Component*> { &levelsTitle, &gainLabel, &gain, &panLabel, &pan, &pitchLabel, &pitch, &fadeInLabel, &fadeIn,
                                                                   &fadeOutLabel, &fadeOut, &stretchLabel, &stretch, &keepPitch })
             c->setVisible (isAudio());
         for (auto* c : std::initializer_list<juce::Component*> { &groupTitle, &groupMuteLabel, &groupMute, &groupGainLabel, &groupGainMode, &groupGain, &groupApply })
@@ -354,6 +360,7 @@ private:
             p.offset = t;
         p.muted = muted.getToggleState();
         p.gain = gain.getValue() <= -24.0 ? 0.0f : juce::Decibels::decibelsToGain ((float) gain.getValue());
+        p.pan = (float) (pan.getValue() / 100.0);
         p.pitch = (float) pitch.getValue();
         p.fadeIn = (std::int64_t) std::llround (fadeIn.getValue() * ppq);
         p.fadeOut = (std::int64_t) std::llround (fadeOut.getValue() * ppq);
@@ -426,11 +433,11 @@ private:
 
     SectionTitle sourceTitle, timeTitle, levelsTitle, groupTitle;
     juce::Label nameLabel, colourLabel, sourceLabel, trackLabel, startLabel, lengthLabel, offsetLabel;
-    juce::Label gainLabel, pitchLabel, fadeInLabel, fadeOutLabel, stretchLabel, groupMuteLabel, groupGainLabel;
+    juce::Label gainLabel, panLabel, pitchLabel, fadeInLabel, fadeOutLabel, stretchLabel, groupMuteLabel, groupGainLabel;
     juce::TextEditor name, start, length, offset;
     ColourRow colours;
     juce::ComboBox source, groupMute, groupGainMode;
-    juce::Slider track, gain, pitch, fadeIn, fadeOut, stretch, groupGain;
+    juce::Slider track, gain, pan, pitch, fadeIn, fadeOut, stretch, groupGain;
     juce::ToggleButton muted, keepPitch;
     juce::TextButton groupApply { tr ("Apply") }, reset { tr ("Reset") }, close { tr ("Close") };
 };

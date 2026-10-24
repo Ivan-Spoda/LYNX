@@ -653,6 +653,63 @@ std::vector<int> selectStacked (const Pattern& pattern, const std::vector<int>& 
     return out;
 }
 
+namespace
+{
+int nextGroup (const Pattern& pattern)
+{
+    auto top = 0;
+    for (const auto& n : pattern.notes)
+        top = std::max (top, n.group);
+    return top + 1;
+}
+} // namespace
+
+void groupNotes (Pattern& pattern, const std::vector<int>& indices)
+{
+    const auto list = validSorted (pattern, indices);
+    if (list.size() < 2)
+        return;
+    const auto id = nextGroup (pattern);
+    for (auto i : list)
+        pattern.notes[(std::size_t) i].group = id;
+}
+
+void ungroupNotes (Pattern& pattern, const std::vector<int>& indices)
+{
+    for (auto i : validSorted (pattern, indices))
+        pattern.notes[(std::size_t) i].group = 0;
+}
+
+std::vector<int> groupOf (const Pattern& pattern, int index)
+{
+    if (! valid (pattern, index))
+        return {};
+    const auto& n = pattern.notes[(std::size_t) index];
+    if (n.group == 0)
+        return { index };
+    std::vector<int> out;
+    for (int i = 0; i < (int) pattern.notes.size(); ++i)
+        if (pattern.notes[(std::size_t) i].group == n.group && pattern.notes[(std::size_t) i].channel == n.channel)
+            out.push_back (i);
+    return out;
+}
+
+void regroup (Pattern& pattern, const std::vector<int>& indices)
+{
+    std::map<int, int> renamed;
+    auto next = nextGroup (pattern);
+    for (auto i : validSorted (pattern, indices))
+    {
+        auto& g = pattern.notes[(std::size_t) i].group;
+        if (g == 0)
+            continue;
+        const auto old = g;
+        if (renamed.find (old) == renamed.end())
+            renamed[old] = next++;
+        g = renamed[old];
+    }
+}
+
 const char* generalMidiDrumName (int key) noexcept
 {
     // the General MIDI 1 percussion key map (a public standard)

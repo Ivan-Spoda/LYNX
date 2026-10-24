@@ -331,6 +331,9 @@ public:
                                   PreparedFlp& out);
     // one hosted plugin of the queue (message thread); false when the queue is done
     bool preloadNextPlugin (PreparedFlp& prepared);
+    // Before importing the open project again: leaves out of `prepared`'s plugin queue those the song already runs
+    // with the same settings (the rack keeps them).
+    void keepRunningPlugins (PreparedFlp& prepared);
     bool finishFlpImport (PreparedFlp&& prepared, bool asEdit);
 
     // Renders without an audio device. Writes to `output` if not nullptr.

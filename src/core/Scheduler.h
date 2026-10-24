@@ -32,6 +32,8 @@ struct NoteEvent
     bool porta = false;        // the note inverts the channel's porta
     // audio clips: fades (in samples) and the position within the clip when the note starts
     float clipElapsed = 0.0f, clipRemaining = 0.0f, fadeIn = 0.0f, fadeOut = 0.0f;
+    // the note's Mod X / Y (0..1, 0.5 = none) and, on its "off", its release velocity (0..1) — REA round 151
+    float modX = 0.5f, modY = 0.5f, release = 0.5f;
 };
 
 // Fixed-capacity buffer. Events beyond capacity are dropped

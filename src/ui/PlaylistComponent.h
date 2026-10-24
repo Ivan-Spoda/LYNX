@@ -192,6 +192,9 @@ private:
     void duplicateSelection();
     void seekTo (int x);
     void paintAudioClip (juce::Graphics& g, const Clip& clip, juce::Rectangle<float> bounds);
+    // Clips a few pixels wide (zoomed far out), gathered and filled per colour at the end (round 151)
+    struct SmallClips;
+    void addSmallClip (SmallClips& batch, float physicalScale, const Clip& clip, juce::Rectangle<float> bounds, bool current);
     void paintAutomationClip (juce::Graphics& g, const Clip& clip, juce::Rectangle<float> bounds);
 
     void refreshArrangementBox();

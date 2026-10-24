@@ -21,6 +21,7 @@ enum : std::uint32_t
     evChannelTracking = 0xE4,   // i32 mid, pan, mod X, mod Y: velocity tracking, then key tracking
     evChannelCutGroups = 0x84,
     evSampleRootNote = 0x87,
+    evChannelFineTune = 0x8E, // REA round 151 [DATA: FL 2026's Misc › Fine tune +15 / +78 cents saved as 15 / 78]
     evFileFlags = 0xA9,
     evChannelParams = 0xD7,
     evChannelEnvelope = 0xDA,
@@ -529,6 +530,11 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                     channel().rootNote = (int) e.value;
                 break;
 
+            case evChannelFineTune:
+                if (section == Section::channel)
+                    channel().fineTune = (int) (std::int32_t) e.value;
+                break;
+
             case evChannelPolyphony:
                 if (section == Section::channel && e.data.size() >= 4)
                 {
@@ -672,6 +678,7 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                     n.channel = readLE<std::uint16_t> (e.data, o + 6);
                     n.length = readLE<std::uint32_t> (e.data, o + 8);
                     n.key = readLE<std::uint16_t> (e.data, o + 12);
+                    n.group = readLE<std::uint16_t> (e.data, o + 14);
                     n.finePitch = e.data[o + 16];
                     n.repeats = e.data[o + 17];
                     n.extra = e.data[o + 19];

@@ -85,6 +85,11 @@ struct WaveStyle
 void paintWaveform (juce::Graphics& g, juce::Rectangle<float> body, const wave::Summary& summary, double startFrame,
                     double framesPerPixel, const WaveStyle& style);
 
+// The clean style's shape added to `out` instead of painted (round 151: many small clips of one colour are
+// filled as one path). `scale` = the physical pixel scale. Returns false for the spectral style (paint it instead).
+bool appendWaveformPath (juce::Path& out, float scale, juce::Rectangle<float> body, juce::Rectangle<float> clip, const wave::Summary& summary,
+                         double startFrame, double framesPerPixel, const WaveStyle& style);
+
 // Style from the current settings.
 WaveStyle currentWaveStyle (juce::Colour classic, float gain = 1.0f);
 

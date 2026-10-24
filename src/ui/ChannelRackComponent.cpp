@@ -1,4 +1,6 @@
 #include "ui/PatcherEditor.h"
+#include "ui/UiTrace.h"
+#include "ui/TextCache.h"
 #include "ui/ChannelRackComponent.h"
 
 #include "ui/AutomationUi.h"
@@ -401,6 +403,7 @@ bool ChannelRackComponent::cellHasNote (int channel, int step) const
 
 void ChannelRackComponent::paint (juce::Graphics& g)
 {
+    const uitrace::Scope trace ("ChannelRackComponent paint", true, g.getClipBounds());
     using namespace theme::colour;
     g.fillAll (bg2);
 
@@ -436,7 +439,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
         {
             g.setColour (textDisabled);
             g.setFont (theme::font (theme::type::small));
-            g.drawText (tr ("audio clip — plays from the Playlist"), gridLeft() + 4, y, 400, rowHeight, juce::Justification::centredLeft);
+            textcache::drawText (g, tr ("audio clip — plays from the Playlist"), gridLeft() + 4, y, 400, rowHeight, juce::Justification::centredLeft);
             g.setFont (theme::font (theme::type::body));
             continue;
         }
@@ -474,7 +477,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
     const auto addY = rowY ((int) song.channels.size());
     g.setColour (textDisabled);
     g.setFont (theme::font (theme::type::small));
-    g.drawText (tr ("or drop an audio file here"), gridLeft() + 4, addY, 400, rowHeight, juce::Justification::centredLeft);
+    textcache::drawText (g, tr ("or drop an audio file here"), gridLeft() + 4, addY, 400, rowHeight, juce::Justification::centredLeft);
 
     if (playheadStep >= 0 && playheadStep < steps)
     {
@@ -540,7 +543,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
 
             g.setColour (channel.mixerTrack > 0 ? textPrimary : textDisabled);
             g.setFont (theme::font (theme::type::caption, true));
-            g.drawText (channel.mixerTrack > 0 ? juce::String (channel.mixerTrack) : juce::String ("-"), routeArea.toNearestInt(),
+            textcache::drawText (g, channel.mixerTrack > 0 ? juce::String (channel.mixerTrack) : juce::String ("-"), routeArea.toNearestInt(),
                         juce::Justification::centred);
             g.setFont (theme::font (theme::type::body));
 
@@ -564,7 +567,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
             g.fillRoundedRectangle (nameArea.withWidth (4.0f).reduced (0.0f, 3.0f).translated (3.0f, 0.0f), 1.5f);
 
             g.setColour (channel.muted ? textDisabled : textPrimary);
-            g.drawText (juce::String::fromUTF8 (channel.name.c_str()), nameArea.withTrimmedLeft (14).withTrimmedRight (6).toNearestInt(),
+            textcache::drawText (g, juce::String::fromUTF8 (channel.name.c_str()), nameArea.withTrimmedLeft (14).withTrimmedRight (6).toNearestInt(),
                         juce::Justification::centredLeft, true);
 
             // selector: a slim pill, lit when the row is selected
@@ -585,7 +588,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
             g.fillPath (dashed);
             g.setColour (addHovered ? textPrimary : textSecondary);
             g.setFont (theme::font (theme::type::small));
-            g.drawText (tr ("+ add channel"), addArea.toNearestInt(), juce::Justification::centred);
+            textcache::drawText (g, tr ("+ add channel"), addArea.toNearestInt(), juce::Justification::centred);
         }
 
         if (stickyX > 0) // steps pass under the column: a hairline marks its edge
@@ -1034,12 +1037,12 @@ void ChannelRackComponent::paintLane (juce::Graphics& g)
         g.fillRoundedRectangle (r, theme::radius::sm);
         g.setColour (l == graphLevel ? onAccent : textSecondary);
         g.setFont (theme::font (theme::type::caption, l == graphLevel));
-        g.drawFittedText (tr (notetools::levelName ((notetools::Level) l)), r.toNearestInt(), juce::Justification::centred, 1, 0.8f);
+        textcache::drawFittedText (g, tr (notetools::levelName ((notetools::Level) l)), r.toNearestInt(), juce::Justification::centred, 1, 0.8f);
     }
 
     g.setColour (textDisabled);
     g.setFont (theme::font (theme::type::caption));
-    g.drawFittedText (tr ("Drag: set  ·  Right-drag: ramp  ·  Alt+click: reset"),
+    textcache::drawFittedText (g, tr ("Drag: set  ·  Right-drag: ramp  ·  Alt+click: reset"),
                       juce::Rectangle<int> (12, lane.getBottom() - 20, gridLeft() - 24, 16), juce::Justification::centredLeft, 1, 0.8f);
 
     const auto top = (float) lane.getY() + 6.0f, bottom = (float) lane.getBottom() - 6.0f;
@@ -1820,7 +1823,7 @@ void ChannelRackComponent::showChannelMenu (int channel)
             c.name = ref.name;
         });
         openPluginWindow (channel);
-    });
+    }, this);
     instruments.addSubMenu (tr ("Plugin (VST/VST3/CLAP)"), plugins);
 
     // FL's layout (REA round 104): two columns, the channel on the left (editors, name and colour, sample,
@@ -2136,7 +2139,7 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
         const auto added = add (c);
         openPluginWindow (added); // the plugin opens when added
         openEditorRow = added;
-    });
+    }, this);
     menu.addSubMenu (tr ("Plugin (VST/VST3/CLAP)"), plugins);
 }
 

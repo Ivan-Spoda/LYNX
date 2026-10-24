@@ -265,6 +265,21 @@ juce::var pluginToVar (const PluginRef& p)
         o->setProperty ("notifyRender", false);
     if (p.latencyOverrideMs >= 0.0f)
         o->setProperty ("latencyMs", p.latencyOverrideMs);
+    // the round-151 wrapper options, when not FL's defaults
+    if (! p.releaseVelocity)
+        o->setProperty ("releaseVelocity", false);
+    if (p.sendBendRange)
+        o->setProperty ("sendBendRange", true);
+    if (p.bendRange != 12)
+        o->setProperty ("bendRange", p.bendRange);
+    if (p.modXAftertouch)
+        o->setProperty ("modXAftertouch", true);
+    if (! p.allNotesOffOnStop)
+        o->setProperty ("allNotesOffOnStop", false);
+    if (! p.resetOnFlush)
+        o->setProperty ("resetOnFlush", false);
+    if (! p.sendLoopPosition)
+        o->setProperty ("sendLoopPosition", false);
     return juce::var (o.release());
 }
 
@@ -286,6 +301,13 @@ PluginRef pluginFromVar (const juce::var& v)
     p.midiOutPort = juce::jlimit (-1, 255, (int) v.getProperty ("midiOutPort", -1));
     p.notifyRender = (bool) v.getProperty ("notifyRender", true);
     p.latencyOverrideMs = v.hasProperty ("latencyMs") ? juce::jlimit (0.0f, 2000.0f, (float) (double) v["latencyMs"]) : -1.0f;
+    p.releaseVelocity = (bool) v.getProperty ("releaseVelocity", true);
+    p.sendBendRange = (bool) v.getProperty ("sendBendRange", false);
+    p.bendRange = juce::jlimit (1, 48, (int) v.getProperty ("bendRange", 12));
+    p.modXAftertouch = (bool) v.getProperty ("modXAftertouch", false);
+    p.allNotesOffOnStop = (bool) v.getProperty ("allNotesOffOnStop", true);
+    p.resetOnFlush = (bool) v.getProperty ("resetOnFlush", true);
+    p.sendLoopPosition = (bool) v.getProperty ("sendLoopPosition", true);
     return p;
 }
 
@@ -360,6 +382,14 @@ juce::var patcherToVar (const PatcherDoc& doc)
             tracks.add (t);
         o->setProperty ("outputTracks", tracks);
     }
+    if (! doc.surface.empty()) // the Surface tab (round 151): [kind, name, value, value Y, x, y]
+    {
+        juce::Array<juce::var> controls;
+        for (const auto& c : doc.surface)
+            controls.add (juce::Array<juce::var> { (int) c.kind, juce::String::fromUTF8 (c.name.c_str()), c.value, c.valueY, c.x, c.y });
+        o->setProperty ("surface", controls);
+        o->setProperty ("surfaceAt", juce::Array<juce::var> { doc.surfaceX, doc.surfaceY });
+    }
     return juce::var (o.release());
 }
 
@@ -401,7 +431,7 @@ PatcherDoc patcherFromVar (const juce::var& v, const Song& song)
             {
                 PatchWire wire;
                 wire.kind = (PatchWire::Kind) juce::jlimit (0, 2, (int) w[0]);
-                wire.from = juce::jlimit (patchToHost, count - 1, (int) w[1]);
+                wire.from = juce::jlimit (patchSurface, count - 1, (int) w[1]); // (the Surface node, round 151)
                 wire.fromPort = juce::jmax (0, (int) w[2]);
                 wire.to = juce::jlimit (patchToHost, count - 1, (int) w[3]);
                 wire.toPort = juce::jmax (0, (int) w[4]);
@@ -409,7 +439,7 @@ PatcherDoc patcherFromVar (const juce::var& v, const Song& song)
                 wire.enabled = (bool) w[6];
                 for (int k = 7; k < w.size(); ++k)
                     wire.curve.push_back (juce::jlimit (0.0f, 1.0f, (float) (double) w[k]));
-                if (wire.from != patchToHost && wire.to != patchFromHost)
+                if (wire.from != patchToHost && wire.to != patchFromHost && (wire.from != patchSurface || wire.kind == PatchWire::Kind::control))
                     doc.wires.push_back (std::move (wire));
             }
     if (const auto& io = v["io"]; io.isArray() && io.size() == 4)
@@ -434,6 +464,26 @@ PatcherDoc patcherFromVar (const juce::var& v, const Song& song)
     if (auto* tracks = v["outputTracks"].getArray())
         for (const auto& t : *tracks)
             doc.outputTracks.push_back (juce::jlimit (-1, maxMixerTracks - 1, (int) t));
+    if (auto* controls = v["surface"].getArray())
+        for (const auto& c : *controls)
+            if (c.isArray() && c.size() >= 6)
+            {
+                SurfaceControl s;
+                s.kind = (SurfaceControl::Kind) juce::jlimit (0, 4, (int) c[0]);
+                s.name = c[1].toString().toStdString();
+                s.value = juce::jlimit (0.0f, 1.0f, (float) (double) c[2]);
+                s.valueY = juce::jlimit (0.0f, 1.0f, (float) (double) c[3]);
+                s.x = (float) (double) c[4];
+                s.y = (float) (double) c[5];
+                doc.surface.push_back (std::move (s));
+            }
+    if (const auto& at = v["surfaceAt"]; at.isArray() && at.size() == 2)
+    {
+        doc.surfaceX = (float) (double) at[0];
+        doc.surfaceY = (float) (double) at[1];
+    }
+    // a Surface cable whose control is gone
+    std::erase_if (doc.wires, [&doc] (const PatchWire& w) { return w.from == patchSurface && w.fromPort >= doc.surfaceOutputs(); });
     return doc;
 }
 
@@ -653,15 +703,18 @@ juce::var clipsToVar (const std::vector<Clip>& list)
 
         // [.., fade-in, fade-out, gain, muted, sub-tick offset] only when not default
         const auto fraction = juce::roundToInt (c.offsetFraction * 10000.0f) / 10000.0;
-        if (c.fadeIn > 0 || c.fadeOut > 0 || c.gain != 1.0f || c.muted || fraction != 0.0)
+        const auto pan = juce::roundToInt (c.pan * 1000.0f) / 1000.0;
+        if (c.fadeIn > 0 || c.fadeOut > 0 || c.gain != 1.0f || c.muted || fraction != 0.0 || pan != 0.0)
         {
             clip.add ((juce::int64) c.fadeIn);
             clip.add ((juce::int64) c.fadeOut);
             clip.add (juce::roundToInt (c.gain * 1000.0f) / 1000.0);
-            if (c.muted || fraction != 0.0)
+            if (c.muted || fraction != 0.0 || pan != 0.0)
                 clip.add (c.muted);
-            if (fraction != 0.0)
+            if (fraction != 0.0 || pan != 0.0)
                 clip.add (fraction);
+            if (pan != 0.0)
+                clip.add (pan); // [.., sub-tick offset, pan]
         }
 
         clips.add (clip);
@@ -695,6 +748,7 @@ std::vector<Clip> clipsFromVar (const juce::var& v, const Song& song)
                 clip.gain = juce::jlimit (0.0f, 4.0f, (float) (double) c[9]);
                 clip.muted = c.size() >= 11 && (bool) c[10];
                 clip.offsetFraction = c.size() >= 12 ? juce::jlimit (-0.5f, 0.5f, (float) (double) c[11]) : 0.0f;
+                clip.pan = c.size() >= 13 ? juce::jlimit (-1.0f, 1.0f, (float) (double) c[12]) : 0.0f;
             }
 
             if (c.size() >= 7 && (int) c[5] == 2)
@@ -800,6 +854,8 @@ juce::var channelToVar (const ChannelDef& c)
         misc->setProperty ("mainPitch", m.mainPitch);
         misc->setProperty ("rootNote", m.rootNote);
         misc->setProperty ("addToKey", m.addToKey);
+        if (m.fineTune != 0.0f)
+            misc->setProperty ("fineTune", m.fineTune);
         o->setProperty ("misc", juce::var (misc.release()));
     }
     if (c.cutGroup != 0 || c.cutBy != 0)
@@ -1048,6 +1104,7 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
         m.mainPitch = (bool) misc.getProperty ("mainPitch", true);
         m.rootNote = juce::jlimit (0, 127, (int) misc.getProperty ("rootNote", 60));
         m.addToKey = (bool) misc.getProperty ("addToKey", false);
+        m.fineTune = juce::jlimit (-100.0f, 100.0f, (float) (double) misc.getProperty ("fineTune", 0.0));
     }
 
     if (const auto& cut = c["cut"]; cut.isArray() && cut.size() == 2)
@@ -1355,7 +1412,7 @@ juce::String toJson (const Song& song)
 
             // [.., pan, fine pitch, muted] only when not default
             // [.., release, mod X, mod Y (, colour)]
-            const auto extra = n.release != 0.5f || n.modX != 0.5f || n.modY != 0.5f || n.colour != 0;
+            const auto extra = n.release != 0.5f || n.modX != 0.5f || n.modY != 0.5f || n.colour != 0 || n.group != 0;
             if (n.pan != 0.0f || n.finePitch != 0.0f || n.muted || n.slide || n.porta || extra)
             {
                 note.add (juce::roundToInt (n.pan * 1000.0f) / 1000.0);
@@ -1367,8 +1424,10 @@ juce::String toJson (const Song& song)
                 if (extra)
                     for (auto v : { n.release, n.modX, n.modY })
                         note.add (juce::roundToInt (v * 1000.0f) / 1000.0);
-                if (n.colour != 0)
+                if (n.colour != 0 || n.group != 0)
                     note.add (n.colour);
+                if (n.group != 0)
+                    note.add (n.group); // [.., colour, group]
             }
 
             notes.add (note);
@@ -1637,6 +1696,8 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
                         }
                         if (n.size() >= 14)
                             note.colour = juce::jlimit (0, noteColourCount - 1, (int) n[13]);
+                        if (n.size() >= 15)
+                            note.group = juce::jmax (0, (int) n[14]);
                     }
 
                     if (note.channel >= 0 && note.channel < (int) song.channels.size())

@@ -213,15 +213,15 @@ TEST (rea146a_wrapper_settings_page_options)
     // FL's wrapper settings (round 149: in its form's order): Processing options, then Compatibility; the buffer
     // sub-options need fixed buffers
     const auto& o = lynx::wrapperOptions();
-    CHECK (o.size() == 7);
-    if (o.size() == 7)
+    CHECK (o.size() == 13); // round 151 added the MIDI ones and two Compatibility ones (indices 4-9)
+    if (o.size() == 13)
     {
         CHECK (std::string (o[0].label) == "Notify about rendering mode" && o[0].member == &lynx::PluginRef::notifyRender && ! o[0].recreates);
-        CHECK (std::string (o[4].label) == "Use fixed size buffers" && o[4].member == &lynx::PluginRef::fixedBuffers && o[4].recreates);
-        CHECK (o[5].needsFixed && o[6].needsFixed && ! o[4].needsFixed && ! o[1].needsFixed);
+        CHECK (std::string (o[10].label) == "Use fixed size buffers" && o[10].member == &lynx::PluginRef::fixedBuffers && o[10].recreates);
+        CHECK (o[11].needsFixed && o[12].needsFixed && ! o[10].needsFixed && ! o[1].needsFixed);
         CHECK (! o[1].recreates && ! o[3].recreates && o[2].recreates && std::string (o[2].section) == "Processing"
-               && std::string (o[4].section) == "Compatibility");
+               && std::string (o[10].section) == "Compatibility" && std::string (o[4].section) == "MIDI");
         lynx::PluginRef ref;
-        CHECK (ref.*(o[0].member) && ref.*(o[1].member) && ref.*(o[3].member) && ! (ref.*(o[4].member))); // FL's defaults
+        CHECK (ref.*(o[0].member) && ref.*(o[1].member) && ref.*(o[3].member) && ! (ref.*(o[10].member))); // FL's defaults
     }
 }
