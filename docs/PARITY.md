@@ -342,17 +342,19 @@ sources, 50 modulation slots).
 | 28 styles in 6 families | ⚠️ | 4 families (tube, tape, transistor, fuzz) |
 | Per-band tone: Bass / Mid / Treble / Presence | ✅ | round 128: ±18 dB (Saturn ±24) on the band's saturated signal — LYNX's own curves (shelf 120 Hz, bell 800 Hz, shelf 3.5 kHz, bell 6 kHz); the global tilt / cuts stay as LYNX extras in the bottom bar |
 | Per-band power, solo, mute | ✅ | round 128 (panel buttons, tags on the display) |
-| Drive pan (L / R), band pan | ❌ | |
+| Drive pan (L / R), band pan | ✅ | round 147b: per band DRIVE PAN (beside the drive) and PAN (under the level) [EXEC trial: the far channel's drive × (1 − \|pan\|) on the 0–100 % scale; the band pan's far side 1 − \|pan\|]; translated from Saturn 2 states |
 | Feedback amount / frequency | ✅ | round 128: a band-passed loop around the shaper (10 Hz – 1 kHz, loop gain up to 0.9) |
 | Dynamics (compress / expand the band) | ✅ | round 128: −1 … +1, the band's level follows its input level |
 | Modulation (+ Add Modulation: XLFO, EG, EF, MIDI, XY, slots) | ❌ | |
 | Crossover slope (bottom bar) | ✅ | global (original per band) |
 | Linear phase / minimum phase | ❌ | |
 | High Quality mode (oversampling) | ✅ | "Oversampling 2x / 4x / 8x" |
-| Channel mode M/S | ❌ | |
+| Channel mode M/S | ✅ | round 147b: "Channel L/R \| M/S" in the bottom bar [EXEC trial: M = (L + R) / 2, S = (R − L) / 2 through the bands' two channels; drive pan and band pan then balance mid / side]; translated (state slot 695) |
 | In / Out gain + mix | ✅ | round 128: In (±24 dB) in the bottom bar; Out; Dry / wet |
 | Auto gain | — | LYNX extra (Saturn has none; Decapitator has Auto) |
 | Decapitator: Drive, 5 styles (A, E, N, T, P), Low Cut, Tone, High Cut, Thump, Steep, Mix, Output, Auto, Punish | ⚠️ | trial not installed; Ember covers drive / tone / cuts / mix / auto gain, no Thump / Steep / Punish |
+
+**Round 147b:** configuration 6 → 7 (channel mode M/S, drive pan, band pan, measured on the trial and translated), design 7 → 7. Remaining: 6 bands, 28 styles, modulation, linear phase.
 
 ## Aether ← Fresh Air
 
@@ -1021,12 +1023,12 @@ positions against wtune.png once it exists.
 | Reference pitch | ±100 c (415.3–466.16 Hz), 440 | "A4" knob 430–450 Hz | ⚠️ | range ±40 c only |
 | Root | 17 names (sharps and flats) | KEY menu, 12 names (sharps) | ✅ | |
 | Scale type | 44 (User, Chromatic, Major, Natural/Harmonic/Melodic minors, Justonic, modes, Blues, Whole tone, Diminished, Bebop, pentatonics, Pythagorean, Maqamat, Indian thaats …) | SCALE menu, 13 + Custom | ⚠️ | her states use Major / Natural Minor only (covered) |
-| Range | keyboard span with draggable boundary handles + presets Bass / Baritone / Tenor / Alto / Mezzo / Soprano / Generic; notes outside → **bypassed** | "Input type" menu (Soprano / Alto-Tenor / Low male / Instrument) = detector range | ⚠️ | 4 presets vs 7, no handles, outside notes not bypassed |
-| Keyboard | multi-octave piano at the bottom, per-note status area | one octave of on/off key toggles at the bottom ("TARGET NOTES") | ⚠️ | same place, less content |
-| Note status per key | Legal / Illegal / Illegal-Pitch-Up / Illegal-Pitch-Down / Bypass (click cycles) | on / off | ⚠️ | Up/Down/Bypass missing |
-| Group Octaves | switch (per-note edits apply to all octaves) | always grouped | ⚠️ | |
-| Reset Scale / Send Scale to All / Receive (key) | buttons | — (key comes from translation / project key) | ❌ | |
-| Keyboard view / navigation buttons | yes | — | ❌ | one octave only |
+| Range | keyboard span with draggable boundary handles + presets Bass / Baritone / Tenor / Alto / Mezzo / Soprano / Generic; notes outside → **bypassed** | "Input type" menu (Soprano / Alto-Tenor / Low male / Instrument) = detector range | ✅ | round 147b: the range bar over the keys (drag a boundary), seven presets in the keyboard strip (LYNX's spans [model]: classical voice ranges ± a third; they also pick the detector's input type), notes sung outside pass uncorrected |
+| Keyboard | multi-octave piano at the bottom, per-note status area | one octave of on/off key toggles at the bottom ("TARGET NOTES") | ✅ | round 128: four octaves; round 147b: 2–7 octaves shown, scrollable (see navigation) |
+| Note status per key | Legal / Illegal / Illegal-Pitch-Up / Illegal-Pitch-Down / Bypass (click cycles) | on / off | ✅ | round 128: Bypass mode; round 147b: REMOVE mode cycles legal → illegal → illegal up → illegal down (arrows on the key; an illegal note's direction picks the next legal note up / down) |
+| Group Octaves | switch (per-note edits apply to all octaves) | always grouped | ⚠️ | per-octave statuses would need 128 per-key values; LYNX keeps the grouped behaviour (the reference's default) |
+| Reset Scale / Send Scale to All / Receive (key) | buttons | — (key comes from translation / project key) | ⚠️ | round 147b: RESET SCALE in the keyboard strip; Send / Receive (instance-to-instance transmission) not done |
+| Keyboard view / navigation buttons | yes | — | ✅ | round 147b: − / + (more / fewer octaves, 2–7) and ◀ / ▶ (scroll by an octave) in the keyboard strip |
 | Central display | target note name + correction amount in cents | `pitchring`: note name, ±100 c ring, sung offset + octave | ✅ | |
 | Scrolling pitch graph | not in WTRT (guide lists none) | `pitchtrace` (input vs corrected, 8 s) | ➕ | Auto-Tune-style; useful |
 | Input / output meters | −28 … 0 dBFS | — | ✅ | round 135w: IN / OUT meters on the "Real-time" page |
@@ -1040,6 +1042,8 @@ positions against wtune.png once it exists.
 | Undo / Redo, presets (factory/user/favourites, search), A/B, Setup A/B, Save | toolbar | see header note | ✅ | round 129's preset bar (no search / favourites) |
 | MIDI learn, gestures | right-click; Alt-click etc. | yes | ✅ | |
 | Window | fixed | resizable 800×548 | ✅ | |
+
+**Round 147b:** configuration 8 → 9, design 6 → 7 (the keyboard: note statuses with directions, the range bar and presets, Reset scale, the view's navigation). Remaining: Group Octaves off, Send / Receive, MIDI reference tone.
 
 **Scores** — configuration: 4/10 (for a Waves Tune RT user: key/scale/formant/time are there, but Speed, Tolerance,
 Vibrato, Correction %, note statuses and range bypass are not), design: 5/10 (note display centre + keyboard at the

@@ -562,7 +562,11 @@ TEST (lynx_tune_editor_layout_round95)
         // lists the extra scales (More scales)
         if (item.type == lynx::plugui::Item::display && item.display != nullptr && std::string (item.display) == "tunekeys")
             for (int k = 0; k < 12; ++k)
+            {
                 placed[(std::size_t) (lynx::lynxtune::noteC + k)] = placed[(std::size_t) (lynx::lynxtune::bypassC + k)] = true;
+                placed[(std::size_t) (lynx::lynxtune::noteDirC + k)] = true; // round 147b: the note directions
+                placed[(std::size_t) lynx::lynxtune::rangeLow] = placed[(std::size_t) lynx::lynxtune::rangeHigh] = true; // and the range bar
+            }
         if (item.type == lynx::plugui::Item::menu && item.param != nullptr && std::string (item.param) == "Scale")
             placed[(std::size_t) lynx::lynxtune::moreScales] = true;
     }

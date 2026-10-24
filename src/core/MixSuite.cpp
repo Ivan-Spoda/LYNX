@@ -1328,6 +1328,13 @@ double toneDb (float v) noexcept { return lin (v, -18.0, 18.0); }
 double feedbackAmount (float v) noexcept { return lin (v, 0.0, 1.0); }
 double feedbackHz (float v) noexcept { return logMap (v, 10.0, 1000.0); }
 double dynamicsAmount (float v) noexcept { return lin (v, -1.0, 1.0); }
+double panOf (float v) noexcept { return std::clamp ((double) v * 2.0 - 1.0, -1.0, 1.0); }
+std::pair<float, float> panScales (double pan) noexcept
+{
+    pan = std::clamp (pan, -1.0, 1.0);
+    return { (float) (pan > 0.0 ? 1.0 - pan : 1.0), (float) (pan < 0.0 ? 1.0 + pan : 1.0) };
+}
+bool midSide (const EffectParams& p) noexcept { return on (p[channelMode]); }
 int bandParam (int band, int field) noexcept
 {
     if (band <= 0)
@@ -1509,8 +1516,25 @@ public:
 
     void process (float* l, float* r, int n, const EffectParams& p, double) noexcept override
     {
+        // round 147: mid / side — M = (L + R) / 2 on channel 0, S = (R − L) / 2 on channel 1 (the trial's sign: a
+        // left-only tone's even harmonics land on the right), decoded L = M − S, R = M + S
+        const bool ms = midSide (p);
+        if (ms)
+            for (int i = 0; i < n; ++i)
+            {
+                const auto m = 0.5f * (l[i] + r[i]), sd = 0.5f * (r[i] - l[i]);
+                l[i] = m;
+                r[i] = sd;
+            }
         for (int off = 0; off < n; off += maxBlock)
             chunk (l + off, r + off, std::min (maxBlock, n - off), p);
+        if (ms)
+            for (int i = 0; i < n; ++i)
+            {
+                const auto m = l[i], sd = r[i];
+                l[i] = m - sd;
+                r[i] = m + sd;
+            }
     }
 
 private:
@@ -1540,6 +1564,12 @@ private:
         const auto vk = voiceIndex (p[voice]);
         const auto s = vk > 0 ? voiceStyle (vk) : styleOf (p[style]);
         const auto drv = (float) dbToGain (driveDb (p[drive]) + (on (p[punish]) ? punishDb : 0.0));
+        // round 147: the drive pan — the far channel's drive × (1 − |pan|) (in dB, the trial's 0 … 100 % scale)
+        const auto [dsA, dsB] = panScales (panOf (p[bandDrivePanParam (0)]));
+        const bool drivePanned = dsA != 1.0f || dsB != 1.0f;
+        const auto drvA = drivePanned ? (float) dbToGain (driveDb (p[drive]) * dsA + (on (p[punish]) ? punishDb : 0.0)) : drv;
+        const auto drvB = drivePanned ? (float) dbToGain (driveDb (p[drive]) * dsB + (on (p[punish]) ? punishDb : 0.0)) : drv;
+        const auto [panA, panB] = panScales (panOf (p[bandPanParam (0)]));
         const bool tape = s == Style::tape && vk == 0;
         const auto [lc, hc] = configureCuts (p);
         configureVoice (vk);
@@ -1558,6 +1588,8 @@ private:
             lastStyle = s;
         }
         const auto comp = on (p[autoGain]) ? makeup : 1.0f;
+        const auto compA = drivePanned && on (p[autoGain]) ? autoMakeup (s, drvA) : comp;
+        const auto compB = drivePanned && on (p[autoGain]) ? autoMakeup (s, drvB) : comp;
 
         for (int i = 0; i < n; ++i)
         {
@@ -1577,8 +1609,8 @@ private:
                 a = emphasis.process (a, 0);
                 b = emphasis.process (b, 1);
             }
-            wl[(std::size_t) i] = a * drv;
-            wr[(std::size_t) i] = b * drv;
+            wl[(std::size_t) i] = a * drvA;
+            wr[(std::size_t) i] = b * drvB;
         }
 
         // round 128: band 1's power, mute, feedback, dynamics and tone (single-band mode)
@@ -1603,7 +1635,7 @@ private:
 
         for (int i = 0; i < n; ++i)
         {
-            auto a = dc.process (wl[(std::size_t) i], 0) * comp, b = dc.process (wr[(std::size_t) i], 1) * comp;
+            auto a = dc.process (wl[(std::size_t) i], 0) * compA, b = dc.process (wr[(std::size_t) i], 1) * compB;
             if (tape)
             {
                 a = deemphasis.process (a, 0);
@@ -1626,6 +1658,8 @@ private:
             dry.process (da, db);
             if (! powered) { a = da; b = db; }  // switched off: the band passes clean
             if (muted) { a = 0.0f; b = 0.0f; }
+            a *= panA; // round 147: the band's pan
+            b *= panB;
             l[i] = (da + (a - da) * mx) * out;
             r[i] = (db + (b - db) * mx) * out;
         }
@@ -1673,6 +1707,7 @@ private:
 
         std::array<Style, maxBands> st {};
         std::array<float, maxBands> drv {}, bmix {}, lvl {}, comp {};
+        std::array<float, maxBands> drvB {}, compB {}, panA {}, panB {}; // round 147: channel 1's drive, the band pan
         bool anySolo = false;
         for (int b = 0; b < nb; ++b) anySolo = anySolo || bandState (p[(std::size_t) bandExtra (b, 1)]) == BandState::solo;
         for (int b = 0; b < nb; ++b)
@@ -1682,6 +1717,21 @@ private:
             bmix[(std::size_t) b] = std::clamp (p[(std::size_t) bandParam (b, 2)], 0.0f, 1.0f);
             lvl[(std::size_t) b] = (float) dbToGain (bandLevelDb (p[(std::size_t) bandParam (b, 3)]));
             comp[(std::size_t) b] = autoOn ? autoMakeup (st[(std::size_t) b], drv[(std::size_t) b]) : 1.0f;
+            // round 147: drive pan (channel 0's drive stays in drv) and band pan
+            const auto [dsA, dsB] = panScales (panOf (p[(std::size_t) bandDrivePanParam (b)]));
+            const auto dDb = driveDb (p[(std::size_t) bandParam (b, 1)]);
+            drvB[(std::size_t) b] = drv[(std::size_t) b];
+            compB[(std::size_t) b] = comp[(std::size_t) b];
+            if (dsA != 1.0f || dsB != 1.0f)
+            {
+                drv[(std::size_t) b] = (float) dbToGain (dDb * dsA) * punishGain;
+                drvB[(std::size_t) b] = (float) dbToGain (dDb * dsB) * punishGain;
+                comp[(std::size_t) b] = autoOn ? autoMakeup (st[(std::size_t) b], drv[(std::size_t) b]) : 1.0f;
+                compB[(std::size_t) b] = autoOn ? autoMakeup (st[(std::size_t) b], drvB[(std::size_t) b]) : 1.0f;
+            }
+            const auto [pa, pb] = panScales (panOf (p[(std::size_t) bandPanParam (b)]));
+            panA[(std::size_t) b] = pa;
+            panB[(std::size_t) b] = pb;
             bandOs[(std::size_t) b][0].setFactor (factor);
             bandOs[(std::size_t) b][1].setFactor (factor);
         }
@@ -1731,7 +1781,7 @@ private:
                 dryBand[0][(std::size_t) i] = da;
                 dryBand[1][(std::size_t) i] = db;
                 bl[i] *= drv[(std::size_t) b];
-                br[i] *= drv[(std::size_t) b];
+                br[i] *= drvB[(std::size_t) b];
             }
             const auto s = st[(std::size_t) b];
             // round 128: the band's feedback, dynamics, tone, power and solo / mute
@@ -1750,17 +1800,18 @@ private:
                 bandOs[(std::size_t) b][0].process (bl, n, curve);
                 bandOs[(std::size_t) b][1].process (br, n, curve);
             }
-            const auto m = bmix[(std::size_t) b], g = lvl[(std::size_t) b], k = comp[(std::size_t) b];
+            const auto m = bmix[(std::size_t) b], g = lvl[(std::size_t) b], k = comp[(std::size_t) b], kB = compB[(std::size_t) b];
+            const auto gA = g * panA[(std::size_t) b], gB = g * panB[(std::size_t) b];
             const bool post = ex.toneOn || ex.dyn != 0.0;
             const bool powered = on (p[(std::size_t) bandExtra (b, 0)]);
             const auto state = bandState (p[(std::size_t) bandExtra (b, 1)]);
             const bool silent = state == BandState::mute || (anySolo && state != BandState::solo);
             for (int i = 0; i < n; ++i)
             {
-                auto wa = bandDc[(std::size_t) b].process (bl[i], 0) * k, wb = bandDc[(std::size_t) b].process (br[i], 1) * k;
+                auto wa = bandDc[(std::size_t) b].process (bl[i], 0) * k, wb = bandDc[(std::size_t) b].process (br[i], 1) * kB;
                 if (post) ex.post (wa, wb, dryBand[0][(std::size_t) i], dryBand[1][(std::size_t) i]);
-                auto ya = (dryBand[0][(std::size_t) i] + (wa - dryBand[0][(std::size_t) i]) * m) * g;
-                auto yb = (dryBand[1][(std::size_t) i] + (wb - dryBand[1][(std::size_t) i]) * m) * g;
+                auto ya = (dryBand[0][(std::size_t) i] + (wa - dryBand[0][(std::size_t) i]) * m) * gA;
+                auto yb = (dryBand[1][(std::size_t) i] + (wb - dryBand[1][(std::size_t) i]) * m) * gB;
                 if (! powered) { ya = dryBand[0][(std::size_t) i]; yb = dryBand[1][(std::size_t) i]; }
                 if (silent) { ya = 0.0f; yb = 0.0f; }
                 if (b == 0)
@@ -1997,7 +2048,11 @@ const EffectInfo& emberInfo()
                                      // round 136: the Classic voicing (EmberClassic.h)
                                      { "Voicing", 0.0f }, { "Classic style", 0.0f }, { "Classic drive", 0.0f }, { "Classic punish", 0.0f },
                                      { "Classic low cut", 0.0f }, { "Classic thump", 0.0f }, { "Classic tone", 0.5f }, { "Classic high cut", 1.0f },
-                                     { "Classic steep", 0.0f }, { "Classic mix", 1.0f }, { "Classic output", 1.0f } } };
+                                     { "Classic steep", 0.0f }, { "Classic mix", 1.0f }, { "Classic output", 1.0f },
+                                     // round 147 (Saturn 2's channel mode, drive pan and band pan)
+                                     { "Channel mode", 0.0f },
+                                     { "B1 drive pan", 0.5f }, { "B2 drive pan", 0.5f }, { "B3 drive pan", 0.5f }, { "B4 drive pan", 0.5f },
+                                     { "B1 pan", 0.5f }, { "B2 pan", 0.5f }, { "B3 pan", 0.5f }, { "B4 pan", 0.5f } } };
     return info;
 }
 
@@ -2220,6 +2275,19 @@ std::string paramText (EffectKind kind, int param, float v)
             case classicHighCut: return hzText (emberclassic::highCutHz (v));
             case classicMix: return fmt ("%.0f%%", v * 100.0);
             case classicOutput: return fmt ("%+.1f dB", emberclassic::outputDb (v));
+            // round 147
+            case channelMode: return on (v) ? "Mid/Side" : "Left/Right";
+            case band1DrivePan: case band2DrivePan: case band3DrivePan: case band4DrivePan:
+            {
+                const auto pan = panOf (v);
+                return std::abs (pan) < 0.005 ? std::string ("centre") : fmt ("%.0f%% ", std::abs (pan) * 100.0) + (pan < 0.0 ? "L/M" : "R/S");
+            }
+            case band1Pan: case band2Pan: case band3Pan: case band4Pan:
+            {
+                const auto [a, b] = panScales (panOf (v));
+                const auto db = [] (float g) { return g <= 0.0f ? std::string ("-inf") : fmt ("%.1f", gainToDb (g)); };
+                return std::abs (panOf (v)) < 0.005 ? std::string ("centre") : db (a) + " / " + db (b) + " dB";
+            }
             default:
                 if (param >= band1On && param < band1On + maxBands * extraFields)
                     switch ((param - band1On) % extraFields)

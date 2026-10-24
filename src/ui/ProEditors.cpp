@@ -2062,17 +2062,21 @@ private:
         out.push_back (button ({ a.getX() + 70.0f, a.getY() + 12.0f, 32.0f, 22.0f }, idPower, tr ("On"), powered (b), tr ("Band on / off: a band switched off passes clean")));
         out.push_back (button ({ a.getX() + 106.0f, a.getY() + 12.0f, 22.0f, 22.0f }, idSolo, "S", state (b) == BandState::solo, tr ("Solo the band")));
         out.push_back (button ({ a.getX() + 130.0f, a.getY() + 12.0f, 22.0f, 22.0f }, idMute, "M", state (b) == BandState::mute, tr ("Mute the band")));
-        add (menu ({ a.getX() + 160.0f, a.getY() + 10.0f, 150.0f, 26.0f }, fp (b, 0), {}, "Tube|Tape|Transistor|Fuzz"));
+        add (menu ({ a.getX() + 160.0f, a.getY() + 10.0f, 120.0f, 26.0f }, fp (b, 0), {}, "Tube|Tape|Transistor|Fuzz"));
         add (knob ({ a.getX() + 10.0f, a.getY() + 60.0f, 66.0f, 92.0f }, fp (b, 2), tr ("Mix")));
         add (knob ({ a.getX() + 78.0f, a.getY() + 60.0f, 66.0f, 92.0f }, xp (b, 6), tr ("Feedback")));
         add (knob ({ a.getX() + 146.0f, a.getY() + 60.0f, 66.0f, 92.0f }, xp (b, 7), tr ("Freq")));
         add (knob ({ a.getX() + 214.0f, a.getY() + 60.0f, 70.0f, 92.0f }, xp (b, 8), tr ("Dynamics"), 1, true));
-        add (knob ({ a.getX() + 290.0f, a.getY() + 24.0f, 132.0f, 144.0f }, fp (b, 1), tr ("Drive"), 2));
+        add (knob ({ a.getX() + 290.0f, a.getY() + 40.0f, 124.0f, 128.0f }, fp (b, 1), tr ("Drive"), 2));
+        // round 147 (Saturn 2): the drive pan beside the drive (the far channel's drive shrinks), the band's pan under
+        // its level; both act on left / right or on mid / side (the bottom bar's Channel)
+        add (knob ({ a.getX() + 352.0f, a.getY() + 2.0f, 74.0f, 52.0f }, bandDrivePanParam (b), tr ("Drive pan"), 0, true));
         add (fader ({ a.getX() + 432.0f, a.getY() + 14.0f, 42.0f, 148.0f }, xp (b, 2), tr ("Bass"), true));
         add (fader ({ a.getX() + 476.0f, a.getY() + 14.0f, 42.0f, 148.0f }, xp (b, 3), tr ("Mid"), true));
         add (fader ({ a.getX() + 520.0f, a.getY() + 14.0f, 42.0f, 148.0f }, xp (b, 4), tr ("Treble"), true));
         add (fader ({ a.getX() + 564.0f, a.getY() + 14.0f, 42.0f, 148.0f }, xp (b, 5), tr ("Presence"), true));
-        add (knob ({ a.getX() + 612.0f, a.getY() + 60.0f, 70.0f, 92.0f }, fp (b, 3), tr ("Level"), 1, true));
+        add (knob ({ a.getX() + 612.0f, a.getY() + 8.0f, 70.0f, 78.0f }, fp (b, 3), tr ("Level"), 1, true));
+        add (knob ({ a.getX() + 612.0f, a.getY() + 88.0f, 70.0f, 78.0f }, bandPanParam (b), tr ("Pan"), 1, true));
         if (count() > 1)
         {
             out.push_back (button ({ a.getRight() - 72.0f, a.getY() + 10.0f, 20.0f, 20.0f }, idPrev, "<", false, tr ("Previous / next band")));
@@ -2092,19 +2096,26 @@ private:
         out.push_back (toggle ({ s.getX() + 690.0f, s.getY(), 110.0f, s.getHeight() }, wideCuts, tr ("Wide cuts")));
         const auto bar = barArea();
         const auto cy = bar.getCentreY();
-        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 160.0f, 22.0f }, xoverSlope, tr ("Crossover"), "12 dB/oct|24 dB/oct|48 dB/oct", { 0.0f, 0.5f, 1.0f }));
-        out.push_back (barMenu ({ 176.0f, cy - 11.0f, 140.0f, 22.0f }, quality, tr ("Oversampling"), "2x|4x|8x", { 0.0f, 0.5f, 1.0f }));
-        out.push_back (barMenu ({ 322.0f, cy - 11.0f, 100.0f, 22.0f }, bands, tr ("Bands"), "1|2|3|4"));
-        out.push_back (barValue ({ 428.0f, cy - 11.0f, 100.0f, 22.0f }, inputGain, tr ("In")));
-        out.push_back (barValue ({ 534.0f, cy - 11.0f, 90.0f, 22.0f }, tone, tr ("Tilt")));
-        out.push_back (barValue ({ 630.0f, cy - 11.0f, 120.0f, 22.0f }, wide() ? lowCutWide : lowCut, tr ("Low cut")));
-        out.push_back (barValue ({ 756.0f, cy - 11.0f, 130.0f, 22.0f }, wide() ? highCutWide : highCut, tr ("High cut")));
+        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 150.0f, 22.0f }, xoverSlope, tr ("Crossover"), "12 dB/oct|24 dB/oct|48 dB/oct", { 0.0f, 0.5f, 1.0f }));
+        out.push_back (barMenu ({ 166.0f, cy - 11.0f, 130.0f, 22.0f }, quality, tr ("Oversampling"), "2x|4x|8x", { 0.0f, 0.5f, 1.0f }));
+        out.push_back (barMenu ({ 302.0f, cy - 11.0f, 90.0f, 22.0f }, bands, tr ("Bands"), "1|2|3|4"));
+        out.push_back (barValue ({ 398.0f, cy - 11.0f, 90.0f, 22.0f }, inputGain, tr ("In")));
+        out.push_back (barValue ({ 494.0f, cy - 11.0f, 80.0f, 22.0f }, tone, tr ("Tilt")));
+        out.push_back (barValue ({ 580.0f, cy - 11.0f, 110.0f, 22.0f }, wide() ? lowCutWide : lowCut, tr ("Low cut")));
+        out.push_back (barValue ({ 696.0f, cy - 11.0f, 120.0f, 22.0f }, wide() ? highCutWide : highCut, tr ("High cut")));
+        // round 147 (Saturn 2's channel mode): the bands work on left / right or on mid / side
+        out.push_back (barMenu ({ 822.0f, cy - 11.0f, 128.0f, 22.0f }, channelMode, tr ("Channel"), "L/R|M/S", { 0.0f, 1.0f }));
     }
 
     // band settings as a block (style, drive, mix, level + round 128's power, state, tone, feedback, dynamics) to move
     // bands around when splitting / removing
-    static constexpr int blockSize = 4 + mixsuite::ember::extraFields;
-    int blockParam (int b, int k) const { return k < 4 ? fp (b, k) : xp (b, k - 4); }
+    static constexpr int blockSize = 4 + mixsuite::ember::extraFields + 2; // round 147: + drive pan, pan
+    int blockParam (int b, int k) const
+    {
+        if (k == blockSize - 2) return mixsuite::ember::bandDrivePanParam (b);
+        if (k == blockSize - 1) return mixsuite::ember::bandPanParam (b);
+        return k < 4 ? fp (b, k) : xp (b, k - 4);
+    }
     std::array<float, blockSize> bandValues (int b) const
     {
         std::array<float, blockSize> out {};

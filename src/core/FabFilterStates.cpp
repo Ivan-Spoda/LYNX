@@ -418,7 +418,8 @@ int fromProG (const State& s, EffectSlot& slot)
 // ---------------------------------------------------------------- Saturn 2 -> Ember Saturator
 // layout (FFBS v1, 951 values): 0 input gain dB, 2 output gain dB, 5 mix %, 6 band count, band b at 7 + 17b:
 // 2 dynamics, 3 style, 4 drive (norm), 6 … 9 bass / mid / treble / presence dB, 10 mix %, 11 level, 13 enabled,
-// 15 crossover (log2 Hz, the band's upper edge), 16 crossover slope (6, 12, 24, 36, 48)
+// 15 crossover (log2 Hz, the band's upper edge), 16 crossover slope (6, 12, 24, 36, 48); round 147: 5 drive pan,
+// 12 band pan (−1 … +1), 695 the channel mode (0 left / right, 1 mid / side)
 int fromSaturn2 (const State& s, EffectSlot& slot)
 {
     if (slot.kind != EffectKind::ember || s.named || s.count != 951 || ! finiteAll (s, 7 + 17 * 6))
@@ -466,6 +467,9 @@ int fromSaturn2 (const State& s, EffectSlot& slot)
             const auto st = roundIndex (s.at (base + 14));
             set (bandExtra (b, 1), st == 1 ? 0.5f : (st == 2 || st == 3) ? 1.0f : 0.0f);
         }
+        // round 147 (measured on the trial, REA_rodada147b): drive pan at 5 and band pan at 12, both −1 … +1
+        set (bandDrivePanParam (b), (float) (0.5 + 0.5 * std::clamp ((double) s.at (base + 5), -1.0, 1.0)));
+        set (bandPanParam (b), (float) (0.5 + 0.5 * std::clamp ((double) s.at (base + 12), -1.0, 1.0)));
         if (b == 0)
         {
             static constexpr int slopes[5] { 12, 12, 24, 24, 48 };
@@ -477,6 +481,7 @@ int fromSaturn2 (const State& s, EffectSlot& slot)
     set (inputGain, linValue (std::clamp ((double) s.at (0), -24.0, 24.0), -24.0, 24.0)); // round 128
     set (output, linValue (s.at (2), -18.0, 18.0));
     set (autoGain, 1.0f); // Saturn compensates its level as the drive rises (§4)
+    set (channelMode, s.at (695) >= 0.5f ? 1.0f : 0.0f); // round 147: the channel mode (0 left / right, 1 mid / side)
     return n;
 }
 
