@@ -696,6 +696,7 @@ double gainDb (float v) noexcept { return lin (v, 0.0, 30.0); }
 double sidechainDb (float v) noexcept { return lin (v, -20.0, 40.0); }
 bool classic (const EffectParams& p) noexcept { return on (p[voicing]); }
 double trimDb (float v) noexcept { return lin (v, -18.0, 18.0); }
+int analogHz (float v) noexcept { return v < 0.25f ? 0 : v < 0.75f ? 50 : 60; }
 
 namespace
 {
@@ -737,7 +738,10 @@ public:
             c.gain = 100.0 * std::clamp ((double) p[gain], 0.0, 1.0);
             c.hiFreq = 100.0 * std::clamp ((double) p[emphasis], 0.0, 1.0);
             c.limit = on (p[mode]);
+            c.measured = on (p[optoLaw]);
+            c.autoMakeup = on (p[autoMakeup]);
             const auto mx = std::clamp (p[mix], 0.0f, 1.0f);
+            const int hz = analogHz (p[analog]);
             const auto trimGain = (float) dbToGain (trimDb (p[trim]));
             for (int off = 0; off < n; off += maxBlock)
             {
@@ -745,6 +749,8 @@ public:
                 std::copy (l + off, l + off + m, dryL.begin());
                 std::copy (r + off, r + off + m, dryR.begin());
                 classicEngine.process (l + off, r + off, m, c);
+                if (hz > 0)
+                    addAnalog (l + off, r + off, m, hz);
                 for (int i = 0; i < m; ++i)
                 {
                     l[off + i] = (l[off + i] * mx + dryL[(std::size_t) i] * (1.0f - mx)) * trimGain;
@@ -761,6 +767,7 @@ public:
         const auto mx = std::clamp (p[mix], 0.0f, 1.0f);
         const auto trimGain = (float) dbToGain (trimDb (p[trim]));
         const auto autoUp = on (p[autoMakeup]);
+        const int hz = analogHz (p[analog]);
         double maxGr = 0.0;
 
         for (int i = 0; i < n; ++i)
@@ -793,14 +800,69 @@ public:
                 autoGr = autoCoef * autoGr + (1.0 - autoCoef) * grDb;
                 wet *= (float) dbToGain (0.66 * autoGr);
             }
-            l[i] = ((lastL * wet) * mx + l[i] * (1.0f - mx)) * trimGain;
-            r[i] = ((lastR * wet) * mx + r[i] * (1.0f - mx)) * trimGain;
+            auto wl = lastL * wet, wr = lastR * wet;
+            if (hz > 0)
+                addAnalog (&wl, &wr, 1, hz);
+            l[i] = (wl * mx + l[i] * (1.0f - mx)) * trimGain;
+            r[i] = (wr * mx + r[i] * (1.0f - mx)) * trimGain;
             maxGr = std::max (maxGr, -gainToDb (g));
         }
         meters.set ((float) maxGr, 0.0f, inPeak, Meters::peak (l, r, n));
     }
 
 private:
+    // round 152: ANALOG [EXEC] (REA_rodada152a §2) — the reference adds, in its wet path after the make-up (Trim moves it,
+    // Mix 0 % removes it, Gain and Peak reduction do not), pink-like noise of −89.5 dBFS RMS per channel (the two
+    // uncorrelated, flat per third octave within 3 dB) and mains hum on both channels alike: harmonics of 50 or 60 Hz,
+    // the 2nd strongest (−98.7 dBFS peak), as measured on silence. Pink: Paul Kellet's economy filter over Gaussian
+    // (Irwin–Hall) noise from a small xorshift per channel.
+    void addAnalog (float* l, float* r, int n, int hz) noexcept
+    {
+        static constexpr double hum50[12] { -117.2, -98.7, -118.2, -105.2, -122.5, -120.6, -126.6, -126.4, -127.7, -123.8, -125.5, -125.5 };
+        static constexpr double hum60[12] { -117.8, -98.5, -118.7, -104.9, -121.8, -120.1, -121.8, -123.1, -128.7, -121.4, -127.7, -132.1 };
+        constexpr float sigma = 1.1322e-5f; // 10^(−89.5 / 20) / the filter's RMS gain (2.9586)
+        if (humHz != hz)
+        {
+            humHz = hz;
+            for (int k = 0; k < 12; ++k)
+                humAmp[k] = dbToGain ((hz == 50 ? hum50 : hum60)[k]);
+        }
+        const auto gauss = [] (std::uint32_t& st) noexcept {
+            float sum = 0.0f;
+            for (int k = 0; k < 4; ++k)
+            {
+                st ^= st << 13; st ^= st >> 17; st ^= st << 5;
+                sum += (float) (st >> 8) * (1.0f / 16777216.0f);
+            }
+            return (sum - 2.0f) * 1.7320508f;
+        };
+        const double dphi = (double) hz / sr;
+        for (int i = 0; i < n; ++i)
+        {
+            float* ch[2] { &l[i], &r[i] };
+            for (int c = 0; c < 2; ++c)
+            {
+                const auto w = gauss (seed[c]);
+                auto* b = pink[c];
+                b[0] = 0.99765f * b[0] + w * 0.0990460f;
+                b[1] = 0.96300f * b[1] + w * 0.2965164f;
+                b[2] = 0.57000f * b[2] + w * 1.0526913f;
+                *ch[c] += sigma * (b[0] + b[1] + b[2] + w * 0.1848f);
+            }
+            double hum = 0.0;
+            for (int k = 0; k < 12; ++k)
+                hum += humAmp[k] * std::sin (2.0 * pi * (double) (k + 1) * humPhase);
+            humPhase += dphi;
+            if (humPhase >= 1.0) humPhase -= 1.0;
+            l[i] += (float) hum;
+            r[i] += (float) hum;
+        }
+    }
+    std::uint32_t seed[2] { 0x9e3779b9u, 0x85ebca6bu };
+    float pink[2][3] {};
+    double humPhase = 0.0, humAmp[12] {};
+    int humHz = 0;
+
     static constexpr int maxBlock = 1024;
     double sr = 44100.0;
     vmatch::opto::Leveler classicEngine;
@@ -2370,8 +2432,11 @@ const EffectInfo& ridgeInfo()
 const EffectInfo& glowInfo()
 {
     static const EffectInfo info { "Glow Leveler",
-                                   { { "Peak reduction", 0.0f }, { "Gain", 0.0f }, { "Limit", 0.0f }, { "Emphasis", 0.0f }, { "Mix", 1.0f },
-                                     { "Trim", 0.5f }, { "Auto makeup", 0.0f }, { "Voicing", 0.0f } } };
+                                   // round 152: a new instance starts as the reference does (the measured Opto classic
+                                   // voicing, Gain 40, Peak reduction 46, Hi Freq 50)
+                                   { { "Peak reduction", 0.46f }, { "Gain", 0.40f }, { "Limit", 0.0f }, { "Emphasis", 0.5f }, { "Mix", 1.0f },
+                                     { "Trim", 0.5f }, { "Auto makeup", 0.0f }, { "Voicing", 1.0f },
+                                     { "Opto law", 1.0f }, { "Analog", 0.0f } } };
     return info;
 }
 
@@ -2624,6 +2689,8 @@ std::string paramText (EffectKind kind, int param, float v)
             case emphasis: case mix: return fmt ("%.0f%%", v * 100.0);
             case trim: return fmt ("%+.1f dB", trimDb (v));
             case autoMakeup: return on (v) ? "on" : "off";
+            case optoLaw: return on (v) ? "measured" : "round 123";
+            case analog: return analogHz (v) == 0 ? "off" : analogHz (v) == 50 ? "50 Hz" : "60 Hz";
             default: return fmt ("%.2f", v);
         }
     }

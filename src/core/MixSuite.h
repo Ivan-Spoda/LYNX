@@ -174,7 +174,10 @@ namespace glow
 // projects load their defaults (0 dB, off) and sound the same
 // round 123: voicing (appended): 0 = Glow's own engine, 1 = the measured classic opto leveler (core/VoiceMatch.h), where
 // peak reduction / gain / emphasis read 0 .. 100 like the original's dials (emphasis = its Hi Freq)
-enum Param { peakReduction, gain, mode, emphasis, mix, trim, autoMakeup, voicing, count };
+// round 152 (REA_rodada152a §2): appended — the opto law (the Opto classic voicing's measured Limit and AUTO MAKEUP; a
+// project saved before keeps the round-123 law) and ANALOG (Off / 50 Hz / 60 Hz: the reference's measured hum and noise)
+enum Param { peakReduction, gain, mode, emphasis, mix, trim, autoMakeup, voicing, optoLaw, analog, count };
+int analogHz (float v) noexcept; // 0 (off), 50 or 60
 bool classic (const EffectParams& p) noexcept;
 std::string classicParamText (int param, float v);
 double trimDb (float v) noexcept;   // −18 .. +18 dB

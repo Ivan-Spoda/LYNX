@@ -190,6 +190,7 @@ TEST (mixsuite96_glow_leveler)
     // static curve: compress is gentle (about 2:1 to 3:1 at the top), limit is much firmer
     auto slope = [] (float limit) {
         auto p = defaults (EffectKind::glowLeveler);
+        p[voicing] = 0.0f; p[gain] = 0.0f; p[emphasis] = 0.0f; // Glow's own (Modern) engine; round 152's defaults are the classic voicing
         p[peakReduction] = 0.6f;
         p[mode] = limit;
         const auto a = db (amplitude (run (EffectKind::glowLeveler, p, sine (1000.0, std::pow (10.0, -12.0 / 20.0), 88200)), 1000.0, 70000, 8192));
@@ -204,6 +205,7 @@ TEST (mixsuite96_glow_leveler)
     // two-stage, program-dependent release: read the gain-reduction meter after a burst
     auto releaseAfter = [] (double burstSeconds) {
         auto p = defaults (EffectKind::glowLeveler);
+        p[voicing] = 0.0f; p[gain] = 0.0f; p[emphasis] = 0.0f; // the Modern engine (see above)
         p[peakReduction] = 0.7f;
         auto fx = lynx::makeEffect (EffectKind::glowLeveler);
         fx->prepare (44100.0);
@@ -477,7 +479,8 @@ TEST (mixsuite_panels_place_every_parameter)
             }
             if (item.type == plugui::Item::tabs || item.type == plugui::Item::radio)
                 CHECK (item.values.empty() || item.values.size() == plugui::optionLabels (item).size());
-            if (item.type == plugui::Item::display && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0))
+            if (item.type == plugui::Item::display && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0
+                                                       || std::strcmp (item.display, "gcmeter") == 0)) // round 152: the Compressor's bipolar meter
                 ++meters; // round 114: the optical leveler shows its reduction on a VU needle
             if (item.type != plugui::Item::section && item.type != plugui::Item::label)
                 controls.push_back (&item);

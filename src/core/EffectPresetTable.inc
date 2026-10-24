@@ -11,12 +11,18 @@ namespace
 {
 const char* const builtInTable = R"PRESETS(
 [Glow Leveler]
-Gentle vocal leveling   | Peak reduction = 35; Gain = 3 dB
-Vocal, steady           | Peak reduction = 55; Gain = 6 dB
-Bass, even              | Peak reduction = 50; Gain = 5 dB; Emphasis = 0 %
-Bright source, de-harsh | Peak reduction = 45; Gain = 4 dB; Emphasis = 60 %
-Limit, peaks only       | Peak reduction = 40; Gain = 3 dB; Limit = limit
-Parallel squash         | Peak reduction = 85; Gain = 12 dB; Mix = 40 %
+Gentle vocal leveling   | Peak reduction = 35; Gain = 3 dB; Emphasis = 0 %; Voicing = 0.00
+Vocal, steady           | Peak reduction = 55; Gain = 6 dB; Emphasis = 0 %; Voicing = 0.00
+Bass, even              | Peak reduction = 50; Gain = 5 dB; Emphasis = 0 %; Voicing = 0.00
+Bright source, de-harsh | Peak reduction = 45; Gain = 4 dB; Emphasis = 60 %; Voicing = 0.00
+Limit, peaks only       | Peak reduction = 40; Gain = 3 dB; Limit = limit; Emphasis = 0 %; Voicing = 0.00
+Parallel squash         | Peak reduction = 85; Gain = 12 dB; Mix = 40 %; Emphasis = 0 %; Voicing = 0.00
+
+[Compressor]
+RComp-style start      | Voicing = vintage program; Ranges = RComp; Threshold = 0 dB; RC ratio = 1.00:1; RC gain = 0 dB; RC attack = 16 ms; RC release = 160 ms; Limiter = on
+Vocal, program         | Voicing = vintage program; Ranges = RComp; Threshold = -18 dB; RC ratio = 3.00:1; RC attack = 3 ms; RC release = 160 ms; Limiter = on
+Bus, glue              | Voicing = vintage program; Ranges = RComp; Threshold = -12 dB; RC ratio = 2.00:1; RC attack = 30 ms; RC release = 150 ms; Release curve = opto
+Upward lift            | Voicing = vintage program; Ranges = RComp; Threshold = -30 dB; RC ratio = 0.79:1; Limiter = on
 
 [Ridge Strip]
 folder Vocals

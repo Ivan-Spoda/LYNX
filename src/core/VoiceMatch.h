@@ -170,7 +170,12 @@ struct Settings
 {
     double gain = 40.0, peakReduction = 46.0, hiFreq = 50.0; // the dials, 0 .. 100
     bool limit = false;
+    // round 152 (REA_rodada152a §2) [EXEC]: the measured Limit law (a steeper cell, a little of the input in the side
+    // chain, the cell's deepest reduction) and AUTO MAKEUP (a make-up that follows the peak reduction dial); off = the
+    // round-123 Limit [model] and no auto make-up
+    bool measured = false, autoMakeup = false;
 };
+double autoMakeupDb (double peakReduction) noexcept; // round 152: AUTO MAKEUP's gain (dB) at a peak reduction dial
 double makeupDb (double gainKnob) noexcept;              // the gain dial's level (dB) below the threshold
 double sensitivityDb (double peakReduction, double hiFreq) noexcept; // side-chain level shift vs her state (dB)
 
@@ -184,7 +189,7 @@ public:
 
 private:
     double sr = 48000.0;
-    double cf = 0.0, cs = 0.0, el = 0.0, mem = 0.0, yc[2] {}, fx1[2] {}, fy1[2] {}, tx[2][4] {}, ty[2][4] {};
+    double cf = 0.0, cs = 0.0, el = 0.0, mem = 0.0, yc[2] {}, fx1[2] {}, fy1[2] {}, tx[2][4] {}, ty[2][4] {}, xp[2] {};
     Biquad sc;
     double scDesignedRate = 0.0;
     float last = 0.0f;
@@ -202,6 +207,9 @@ struct Settings
     // time (no program-dependent slow path), Opto = the slow path's release curve inverted (slower near 0 dB of
     // reduction), Smooth = without Warm's extra reduction (ratio as shown) [model: laws not measured yet]
     bool manual = false, opto = false, smooth = false;
+    // round 152 (REA_rodada152a §1) [EXEC]: the static curve measured on the trial at every ratio 1.5 … 50 (a table of
+    // corrections on top of the fit above; Smooth has Warm's static curve there). Off = the round-123 / 150 curve.
+    bool measuredStatic = false;
 };
 constexpr int lookahead = 64; // samples at 48 kHz (the original's measured delay, scaled with the rate)
 
@@ -213,13 +221,17 @@ public:
     void process (float* l, float* r, int n, const Settings& s) noexcept;
     int latency() const noexcept { return delayLen; }
     float reductionDb() const noexcept { return last; }
+    // round 152: the block's largest gain change, signed (negative = reduction, positive = the expansion's boost)
+    float changeDb() const noexcept { return change; }
 
 private:
     double sr = 48000.0;
     int delayLen = lookahead, pos = 0;
     std::array<float, 1024> dl {}, dr {};
     double env = 0.0, grf = 0.0, grs = 0.0;
-    float last = 0.0f;
+    float last = 0.0f, change = 0.0f;
 };
+// round 152: the measured static correction (dB of gain added) at a ratio ≥ 1 and a level `over` dB above the threshold
+double measuredStaticDelta (double ratio, double over) noexcept;
 } // namespace progcomp
 } // namespace lynx::vmatch

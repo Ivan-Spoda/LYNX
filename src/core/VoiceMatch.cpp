@@ -965,7 +965,7 @@ void Leveler::reset() noexcept
     cf = cs = el = mem = 0.0;
     for (int c = 0; c < 2; ++c)
     {
-        yc[c] = fx1[c] = fy1[c] = 0.0;
+        yc[c] = fx1[c] = fy1[c] = xp[c] = 0.0;
         for (int k = 0; k < 4; ++k)
             tx[c][k] = ty[c][k] = 0.0;
     }
@@ -981,9 +981,11 @@ void Leveler::process (float* l, float* r, int n, const Settings& s) noexcept
         const double A = std::pow (10.0, scDb / 40.0), w = 2.0 * pi * std::min (scHz, 0.45 * sr) / sr, al = std::sin (w) / (2.0 * scQ), cw = std::cos (w);
         sc.set (1 + al * A, -2 * cw, 1 - al * A, 1 + al / A, -2 * cw, 1 - al / A);
     }
-    const double shift = sensitivityDb (s.peakReduction, s.hiFreq) + (s.limit ? limitShiftDb : 0.0);
-    const double Y0 = dbToGain (y0Db + shift), Yt = dbToGain (ytDb + shift), gam = s.limit ? limitGamma : gamma;
-    const double mk = dbToGain (makeupDb (s.gain) + idleMakeupDb);
+    const bool ml = s.limit && s.measured; // round 152: the measured Limit law
+    const double shift = sensitivityDb (s.peakReduction, s.hiFreq) + (s.limit ? (ml ? limitShiftDb152 : limitShiftDb) : 0.0);
+    const double Y0 = dbToGain (y0Db + shift), Yt = dbToGain (ytDb + shift), gam = s.limit ? (ml ? limitGamma152 : limitGamma) : gamma;
+    const double ff = ml ? limitFeedForward : 0.0, gFloor = ml ? dbToGain (-limitFloorDb) : 0.0;
+    const double mk = dbToGain (makeupDb (s.gain) + idleMakeupDb + (s.measured && s.autoMakeup ? autoMakeupDb (s.peakReduction) : 0.0));
     const double cA = 1.0 - std::exp (-dt * 1000.0 / attackSlowMs), mUp = 1.0 - std::exp (-dt * 1000.0 / memUpMs), mDn = 1.0 - std::exp (-dt * 1000.0 / memDownMs);
     const double K = 2.0 * sr;
     // the idle response measured at 48 kHz; other rates take its bilinear analog prototype (approximate)
@@ -992,7 +994,7 @@ void Leveler::process (float* l, float* r, int n, const Settings& s) noexcept
     double maxGr = 0.0;
     for (int i = 0; i < n; ++i)
     {
-        const double e0 = sc.process ((float) yc[0], 0), e1 = sc.process ((float) yc[1], 1);
+        const double e0 = sc.process ((float) (yc[0] + ff * xp[0]), 0), e1 = sc.process ((float) (yc[1] + ff * xp[1]), 1);
         el = std::max (std::abs (e0), std::abs (e1)); // the light follows the drive within the sample (fitted)
         const double ct = (el > Yt ? std::pow ((el - Yt) / Y0, gam) : 0.0) * (1.0 + memGain * mem);
         const double ctf = (1.0 - slowShare) * ct, cts = slowShare * ct;
@@ -1008,7 +1010,7 @@ void Leveler::process (float* l, float* r, int n, const Settings& s) noexcept
             cs += (cts - cs) * cA;
         else
             cs = std::max (cts, cs - dt * releaseA2 * std::pow (cs, releaseN2));
-        const double g = 1.0 / (1.0 + cf + cs);
+        const double g = std::max (gFloor, 1.0 / (1.0 + cf + cs));
         mem += ((1.0 - g) > mem ? mUp : mDn) * ((1.0 - g) - mem);
         const double gp = g + (1.0 - g) * (tiltC0 - tiltC1 * g);
         const double wz = 2.0 * pi * tiltHz * (1.0 + g);
@@ -1017,6 +1019,7 @@ void Leveler::process (float* l, float* r, int n, const Settings& s) noexcept
         for (int c = 0; c < 2; ++c)
         {
             const double x = *ch[c];
+            xp[c] = x;
             const double y = b0 * x + b1 * fx1[c] - a1 * fy1[c];
             fx1[c] = x;
             fy1[c] = y;
@@ -1048,9 +1051,32 @@ namespace progcomp
 {
 namespace
 {
+#include "core/RCompStatic.inc"
 constexpr double thrOffset = -2.8056, kneeDb = 21.7431, ratioScale = 1.3191, attackScale = 2.1395, fastReleaseMs = 24.5151;
 constexpr double slowChargeMs = 222.5718, slowRate = 3.8413, slowShape = -1.1528, detectorReleaseMs = 9.2761;
 } // namespace
+
+double measuredStaticDelta (double ratio, double over) noexcept
+{
+    // bilinear in (ln ratio, level over the threshold); 1 : 1 = no correction, past the last column the last value
+    constexpr int nr = (int) std::size (rcStaticRatios), nc = (int) std::size (rcStaticDelta[0]);
+    if (ratio <= 1.0 || over <= rcStaticOver0)
+        return 0.0;
+    const double c = std::min ((over - rcStaticOver0) / rcStaticStep, (double) (nc - 1));
+    const int c0 = std::min ((int) c, nc - 2);
+    const double cf = c - c0;
+    const auto at = [&] (int k) { return rcStaticDelta[k][c0] + (rcStaticDelta[k][c0 + 1] - rcStaticDelta[k][c0]) * cf; };
+    const double lr = std::log (ratio);
+    if (lr <= std::log (rcStaticRatios[0]))
+        return at (0) * lr / std::log (rcStaticRatios[0]);
+    for (int k = 0; k + 1 < nr; ++k)
+        if (lr <= std::log (rcStaticRatios[k + 1]))
+        {
+            const double f = (lr - std::log (rcStaticRatios[k])) / (std::log (rcStaticRatios[k + 1]) - std::log (rcStaticRatios[k]));
+            return at (k) + (at (k + 1) - at (k)) * f;
+        }
+    return at (nr - 1);
+}
 
 void Compressor::prepare (double sampleRate) noexcept
 {
@@ -1069,7 +1095,7 @@ void Compressor::reset() noexcept
 
 void Compressor::process (float* l, float* r, int n, const Settings& s) noexcept
 {
-    const double T = s.thresholdDb + thrOffset, R = 1.0 + (std::max (1.0, s.ratio) - 1.0) * (s.smooth ? 1.0 : ratioScale), W = kneeDb;
+    const double T = s.thresholdDb + thrOffset, R = 1.0 + (std::max (1.0, s.ratio) - 1.0) * (s.smooth && ! s.measuredStatic ? 1.0 : ratioScale), W = kneeDb;
     const double aA = coefMs (std::max (0.01, s.attackMs) * attackScale, sr), sC = coefMs (slowChargeMs, sr);
     const double fR = coefMs (s.manual ? std::max (1.0, s.releaseMs) : fastReleaseMs, sr);
     const double shape = s.opto ? -slowShape : slowShape;
@@ -1089,7 +1115,8 @@ void Compressor::process (float* l, float* r, int n, const Settings& s) noexcept
     }
     const double Te = s.thresholdDb - 2.28, We = 4.55;
     const int N = (int) dl.size();
-    double maxGr = 0.0;
+    const bool corrected = s.measuredStatic && ! expand && s.ratio > 1.0;
+    double maxGr = 0.0, extreme = 0.0;
     for (int i = 0; i < n; ++i)
     {
         const double a = std::max (std::abs ((double) l[i]), std::abs ((double) r[i]));
@@ -1110,7 +1137,8 @@ void Compressor::process (float* l, float* r, int n, const Settings& s) noexcept
         if (2.0 * o < -W) y = x;
         else if (2.0 * std::abs (o) <= W) y = x + (1.0 / R - 1.0) * (o + W / 2.0) * (o + W / 2.0) / (2.0 * W);
         else y = T + o / R;
-        const double target = std::max (0.0, x - y);
+        // round 152: the measured static curve (a correction over the threshold as the trial measured it)
+        const double target = std::max (0.0, x - y - (corrected ? measuredStaticDelta (s.ratio, x - s.thresholdDb) : 0.0));
         grf += (target > grf ? aA : fR) * (target - grf);
         if (s.manual)
             grs = 0.0;
@@ -1126,6 +1154,7 @@ void Compressor::process (float* l, float* r, int n, const Settings& s) noexcept
         }
         const double gr = expand ? grf : std::max (grf, grs);
         maxGr = std::max (maxGr, gr);
+        if (std::abs (gr) > std::abs (extreme)) extreme = gr;
         const double g = (dbToGain (makeup - gr) * s.mix + (1.0 - s.mix)) * trim;
         dl[(std::size_t) pos] = l[i];
         dr[(std::size_t) pos] = r[i];
@@ -1136,6 +1165,7 @@ void Compressor::process (float* l, float* r, int n, const Settings& s) noexcept
         if (++pos == N) pos = 0;
     }
     last = (float) maxGr;
+    change = (float) -extreme;
 }
 } // namespace progcomp
 } // namespace lynx::vmatch

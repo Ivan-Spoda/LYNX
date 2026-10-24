@@ -569,27 +569,29 @@ Trial on this PC: yes (the new parity129 capture is missing; the w119 capture wa
 | Header: Save | bar | none | ✅ | round 129: Save preset… (.lynxpreset) |
 | Header: ≡ menu (help, resize) | bar, right | options menu (Presets, Reset, Bypass); window resizable | ⚠️ | |
 | Bypass | VST param | slot LED / options menu | ✅ | |
-| GAIN knob | 0–100 scale, default **40** (≈ +8 dB below threshold), left of the VU; nonlinear law (20 → −18.5 dB, 40 → +8, 80 → +31.8) | "Gain" 0…+30 dB linear, default **+0.0 dB**, big knob on the left | ⚠️ | right place; different unit (dB, not 0–100), different range (no attenuation below unity), different default (CLA 40 ≈ +8 dB vs 0 dB) |
-| PEAK REDUCTION knob | 0–100, default **46**, right of the VU, nonlinear | "Peak reduction" 0–100 (side chain −20…+40 dB linear), default **0** = off, big knob on the right | ⚠️ | right place and right scale; the default does no levelling, and the taper differs (the translator uses 0.40 + 0.021·(knob − 40)) |
+| GAIN knob | 0–100 scale, default **40** (≈ +8 dB below threshold), left of the VU; nonlinear law (20 → −18.5 dB, 40 → +8, 80 → +31.8) | "Gain" 0…+30 dB linear, default **+0.0 dB**, big knob on the left | ✅ | round 123: the Opto classic voicing reads 0–100 with the measured law; round 152: a new Glow starts there at **40** (the trial's fresh instance: +8.45 dB at −40 dBFS) |
+| PEAK REDUCTION knob | 0–100, default **46**, right of the VU, nonlinear | "Peak reduction" 0–100 (side chain −20…+40 dB linear), default **0** = off, big knob on the right | ✅ | round 123: the classic voicing's measured taper (one to one); round 152: default **46** |
 | COMPRESS / LIMIT switch | toggle, left side under the logo; default Compress | "Compress | Limit" tabs under the VU | ✅ | different place (centre, not left) but easy to find; Limit γ = 9 (~10:1) vs about 100:1 on the hardware |
 | VU meter | analog VU in the centre; −20…+3 scale, red above 0 | analog VU in the centre, same −20…+3 scale | ✅ | good match |
 | VU DISPLAY selector | rotary knob INPUT / **GR** (default) / OUTPUT, top right | hidden: clicking the meter switches GR ↔ Output; no Input | ✅ | no visible selector, and Input is missing; add a 3-position switch beside the VU; round 129: INPUT / GR / OUTPUT selector beside the VU |
 | VU readout text | none (needle only) | "Gain reduction −x.x dB" or "Output x VU" inside the face | ➕ | |
 | VU calibration | 0 VU = −18 dBFS (spec, unverified) | output mode 0 VU = −18 dBFS | ✅ | |
-| HI FREQ (side-chain HF emphasis) | knob 0–100, default **50** (≈ +5–6 dB detector sensitivity at 6 kHz), with a "FLAT" mark; bottom strip | "Emphasis" 0–100 % (+0…+10 dB shelf at 2.5 kHz in the detector), default **0 %**, small knob under the switch | ⚠️ | the function exists; different default (CLA's default is not flat), name and law; not translated (fixed to 0) |
-| ANALOG | 3 buttons 50Hz / 60Hz / OFF, bottom left; default 60 Hz per a 3rd-party summary, Off in her state | none | ❌ | needs DSP (hum + noise); low priority, Off is the common choice |
-| MIX | knob 0–100 %, default 100, bottom strip | "Mix" 0–100 %, default 100 %, small knob | ✅ | |
+| HI FREQ (side-chain HF emphasis) | knob 0–100, default **50** (≈ +5–6 dB detector sensitivity at 6 kHz), with a "FLAT" mark; bottom strip | "Emphasis" 0–100 % (+0…+10 dB shelf at 2.5 kHz in the detector), default **0 %**, small knob under the switch | ✅ | round 123: the classic voicing's measured side-chain emphasis and Hi Freq law, translated (RW 153); round 152: default **50** |
+| ANALOG | 3 buttons 50Hz / 60Hz / OFF, bottom left; default **Off** (the trial's fresh instance) | none | ✅ | round 152 [EXEC]: **Analog Off \| 50 Hz \| 60 Hz** bottom left — the measured hum (mains harmonics, the 2nd strongest at −98.7 dBFS, both channels alike) and noise (−89.5 dBFS RMS, flat per third octave, L / R uncorrelated) in the wet path after the gain (Trim moves it, Mix 0 % removes it); translated (RW 140) |
+| MIX | knob 0–100 %, default 100, bottom strip | "Mix" 0–100 %, default 100 %, small knob | ✅ | round 152: translated (RW 204) |
 | TRIM | knob −18…+18 dB, default 0, bottom right (after the mix) | none (Gain is pre-mix and 0…+30 only) | ✅ | new parameter (output trim ±18 dB); round 129: Trim ±18 dB after the mix |
-| AUTO MAKEUP | toggle under the VU-display knob, right; default Off | none | ✅ | new parameter: makeup tied to peak reduction; round 129: Auto makeup toggle |
+| AUTO MAKEUP | toggle under the VU-display knob, right; default Off | none | ✅ | new parameter: makeup tied to peak reduction; round 129: Auto makeup toggle; round 152 [EXEC]: the classic voicing's measured law (a make-up that follows the Peak reduction dial: −1.5 dB at 0, 0 at 46, +6.8 at 62.6, +11.4 at 80, +16.7 at 100 — not a level follower), translated (RW 207) |
 | Mono / stereo components | separate Mono and Stereo plugins | stereo-linked engine | ⚠️ | no mono variant needed in a DAW slot |
-| Attack / release | fixed (opto cell, program dependent: about 66 ms near the knee to 4 ms deep; two-stage release 60 ms then 0.5–15 s) | fixed: fast cell 10 ms / 50 ms + slow cell 400 ms / 0.4–5 s with memory | ⚠️ | no control in either (correct), but the behaviour differs (spec §6: slow 400 ms attack and a fixed 10 ms) |
-| Static curve | γ ≈ 4.54 (≈ 4.2:1 local, 5.5:1 asymptotic) | γ = 2 (≈ 3:1) | ⚠️ | engine (spec §7) |
-| HF tilt under GR / 2nd harmonic | yes (+1…+6 dB above 6 kHz under GR; ≈ −52 dBc H2) | none | ❌ | engine |
+| Attack / release | fixed (opto cell, program dependent: about 66 ms near the knee to 4 ms deep; two-stage release 60 ms then 0.5–15 s) | fixed: fast cell 10 ms / 50 ms + slow cell 400 ms / 0.4–5 s with memory | ✅ | round 123: the classic voicing's measured log-domain attack (faster as the reduction grows), hyperbolic two-stage release and memory; round 152 check: the recovery after a loud passage is ≈ 1 dB slower than the trial's on 0.5 s stairs |
+| Static curve | γ ≈ 4.54 (≈ 4.2:1 local, 5.5:1 asymptotic) | γ = 2 (≈ 3:1) | ✅ | round 123: the Opto classic voicing's cell law fitted on the trial (γ 2.15 on the side-chain level above its threshold, feedback detection); round 152 [EXEC]: **Limit** measured (a steeper cell, 1.5 % of the input in the side chain — the trial over-compresses at 62.6 — and the cell's deepest reduction, 30.4 dB): 0.34 / 0.52 / 0.50 dB rms at peak reduction 46 / 62.6 / 80 (round 123's Limit 0.37 / 1.00 / 1.32); older projects keep the old Limit (Opto law Old \| Measured) |
+| HF tilt under GR / 2nd harmonic | yes (+1…+6 dB above 6 kHz under GR; ≈ −52 dBc H2) | none | ✅ | round 123: the classic voicing's measured tilt (up to +7 dB at 20 kHz under reduction) and 2nd / 3rd harmonics |
 | Section layout | Gain left, VU centre, Peak Reduction right; Comp/Limit left; VU selector + Auto Makeup right; bottom strip Analog · Hi Freq · Mix · Trim | Gain left, VU centre, Peak reduction right; Comp/Limit under the VU; Emphasis + Mix small at the bottom | ⚠️ | the main row matches; the bottom strip has 2 of its 4 items, and the right column (selector, auto makeup) is missing |
 | Proportions | 659×296 window, big knobs, VU in the middle third | 540×270, same composition | ✅ | |
 | Knob scales | 0–100 printed around Gain and Peak Reduction | arc only; the value appears under the knob | ⚠️ | a CLA user reads Gain as 0–100; LYNX shows dB |
 | Value entry / fine / reset | Waves value handling | right-click entry, Ctrl fine, double-click reset | ✅ | |
-| Saved-state translation | — | Gain (via the measured table), Peak Reduction, Comp/Limit translated; Hi Freq, Analog, Mix, Trim, Auto Makeup and VU ignored | ⚠️ | PLUGIN_FALLBACK row 140 / round 113 §3c |
+| Saved-state translation | — | Gain (via the measured table), Peak Reduction, Comp/Limit translated; Hi Freq, Analog, Mix, Trim, Auto Makeup and VU ignored | ✅ | PLUGIN_FALLBACK row 140 / round 113 §3c; round 123: Hi Freq, Trim; round 152: Mix (RW 204), Auto Makeup (207), Analog (140); the VU selector is the editor's view only |
+
+**After round 152** (REA_rodada152a §2): configuration 7 → **9**/10, design 7 → **8**/10 — the reference's fresh instance (Opto classic, 40 / 46 / 50), ANALOG 50 / 60 Hz (measured hum and noise), the measured Limit and AUTO MAKEUP, Mix / Auto Makeup / Analog translated. Left: the release tail ≈ 1 dB slower than the trial's after loud passages, Auto Makeup's reference point (LYNX: the dial's default 46; the trial: the dial where it was switched on).
 
 **Scores:** configuration 5/10, design 6/10. The main row is correct. A CLA-2A user misses Trim, Auto Makeup,
 Analog, the 3-way VU selector, the 0–100 Gain scale and CLA's defaults (Gain 40 / PR 46 / Hi Freq 50).
@@ -721,7 +723,7 @@ What the trial shows (rcomp.png):
 |---|---|---|---|---|
 | Header: Skins menu | Light / Dark / Legacy | — | ➕/n.a. | not needed |
 | Header: Undo/Redo, A/B, A→B, Load/Save, preset name | WaveSystem bar ("A: Default Preset") | generic header, "(no preset)" | ✅ | round 129's preset bar |
-| Threshold | −60…0 dBFS, default **0**, vertical slider integrated in the input meter | knob −60…0 dB, default **−18** | ⚠️ | range ✅; default and form differ |
+| Threshold | −60…0 dBFS, default **0**, vertical slider integrated in the input meter | knob −60…0 dB, default **−18** | ✅ | range ✅; round 152: the trial's fresh instance read back (threshold 0.0 dB, ratio 1.00, attack 16 ms, release 160 ms, gain 0) is the factory preset **RComp-style start** (vintage voicing, RComp ranges, limiter on); a new Compressor keeps LYNX's −18 dB so it compresses at once (it is also FL's generic compressor) |
 | Ratio | 0.50…50 (below 1 = expansion), default **1.0**, value box inside the GR meter | knob 1…20, default **4:1** | ✅ | round 150: **Ranges = RComp** (LYNX \| RComp tabs): the reference's own ratio control 50 … 1.00 … 0.50 : 1 (its value law, read from the trial), below 1 : 1 the measured upward expansion above the threshold (0.50 / 0.79 / 0.90 : 1 within 0.4 dB); translated states use it |
 | Gain (output) | −30…+30 dB, default 0, vertical fader on the output meter | "Makeup" 0…+24 dB | ✅ | round 150: with the RComp ranges the Gain fader runs −30 … +30 dB |
 | Attack | 0.5…500 ms, default 16 ms, horizontal slider | 0.1…100 ms, default 10.2 ms | ✅ | round 150: RComp ranges 0.5 … 500 ms (default 16 ms) |
@@ -733,8 +735,9 @@ What the trial shows (rcomp.png):
 | Trim | −18…+18 dB, post-limiter, knob | none | ✅ | round 129: Trim ±18 dB |
 | Built-in 0 dBFS output limiter + activity indicator | always on; pill under Gain | none | ✅ | round 135w: Limiter switch (on for translated RComp states) + the activity pill under it |
 | Knee | soft, starts ≈ 6 dB below the threshold (fixed) | hard knee | ✅ | engine; round 123: the vintage voicing (substitutes start there) has the fitted soft knee; Classic stays hard |
+| Static curve per ratio | 1.05 … 50 : 1 (20 and 50 alike), knee from ≈ 12 dB under the threshold, the same at every threshold; Warm = Smooth, ARC = Manual, Electro = Opto statically | round 123's fit at her 2.95 : 1 (0.6 … 1.8 dB rms off elsewhere, up to 3.5 dB at 1.5 : 1, 30 dB over) | ✅ | round 152 [EXEC]: **Vintage curve = Measured** (new instances and translated states; older projects keep the round-150 curve, the Old \| Measured tabs above the meter): the trial's stairs at 11 ratios as a correction table — every ratio within 0.07 dB (holdouts 1.2 / 3.3 / 8 / 14 : 1 within 0.06); her state unchanged (≤ 0.01 dB up to −3 dBFS) |
 | Input meter (stereo) + peak readouts | left | none | ✅ | round 129: input / output meters with peak read-outs |
-| Gain-change meter (bipolar, +6…−12) + readout | centre, the main display | none (no live output) | ⚠️ | round 129: the reduction meter with its read-out (0…−30, not bipolar) |
+| Gain-change meter (bipolar, +6…−12) + readout | centre, the main display | none (no live output) | ✅ | round 129: the reduction meter with its read-out (0…−30, not bipolar); round 152: the **bipolar gain-change meter** — +6 … 0 … −12 dB on the reference's scale (deeper reductions compressed to −24), reduction downwards and the expansion's boost upwards from the 0 dB line, the held largest change under it (click = reset); both voicings |
 | Output meter (stereo) + peak readouts | right | none | ✅ | round 129 |
 | Latency / look-ahead | 64 samples @ 48 kHz | 0 | ✅ | round 123: the vintage voicing has the measured 64-sample delay |
 | Auto gain (power-matched) | — | "Auto gain" toggle | ➕ | |
@@ -744,6 +747,8 @@ What the trial shows (rcomp.png):
 | CLA-76 (same stand-in) | Input/Output −∞…0, Attack/Release 1–7, Ratio 4/8/12/20/All, Meter In/GR/Out, Analog, Bluey/Blacky, Mix | Compressor at a fixed preset, no translation | ✅ | round 127: CLA-76 → Crest Compressor (Bus style) fitted on her state, RealWorld list translated (input / output, attack / release 1–7, ratio buttons, mix) |
 
 **Scores:** configuration 2/10, design 1/10. A plain row of 6 knobs with no meters cannot be read as RComp.
+
+**After round 152** (REA_rodada152a §1): configuration 9 → **10**/10, design 7 → **8**/10 — the bipolar gain-change meter, the measured static curve at every ratio, the reference's fresh instance as a factory start. Left: Warm / Smooth's and Opto's transient differences (statically identical on the trial), the meter's ratio box (the ratio is a knob under it).
 
 **After round 150** (REA_rodada150 §6): configuration 8 → **9**/10, design 7/10 — the reference's own control ranges (ratio 0.5 … 50 with expansion, gain ±30, attack 0.5 … 500, release 5 … 5000 ms), translated. Left: threshold default 0 dB, the bipolar gain-change meter, the vintage voicing's compression away from her 2.95 : 1 (1.2 – 1.7 dB deeper at 10.46 : 1).
 
