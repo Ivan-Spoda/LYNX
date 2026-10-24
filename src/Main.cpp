@@ -2614,6 +2614,9 @@ private:
                 fx.params[ef::rhythmTap1 + 2] = 0.45f;
                 fx.params[ef::feedback] = 0.25f;
                 fx.params[ef::era] = 0.5f;
+                for (const auto& [param, value] : ef::rhythmPresetEdits (0)) // round 144: a pattern in the rhythm editor (Grid)
+                    fx.params[(std::size_t) param] = value;
+                fx.params[ef::rhythmShape] = 0.5f; // swell
                 lynx::Song song;
                 song.mixer.resize (2);
                 song.mixer[0].name = "Master";
@@ -3153,6 +3156,9 @@ private:
             saveIconSheet (prefix + "-icons-150.png", 1.5f);
             saveWindow (lynx::MainComponent::makeHelpContent(), "-help.png");
             saveWindow (std::make_unique<lynx::toolbar::CustomizePanel> (lynx::toolbarlayout::Layout::makeDefault()), "-customize-toolbar.png");
+            // two moved controls: Tools › Last tweaked and Add › Automation for last tweaked parameter show them (REA round 143)
+            offline.noteTweaked ({ lynx::AutomationTargetKind::channelVolume, 0 });
+            offline.noteTweaked ({ lynx::AutomationTargetKind::mixerVolume, 0 });
             saveMenus (ui, prefix + "-menus.png");
             {
                 // the windows' own menus (title bars) and the toolbar's recording menu
@@ -3171,6 +3177,27 @@ private:
                 menus.push_back (ui.getToolbarMenuForSnapshot());
                 saveMenus (names, menus, prefix + "-panel-menus.png");
             }
+            {
+                // REA round 143: the piano roll Tools menu, a Playlist track menu and a mixer insert menu (FL's layouts)
+                std::vector<juce::PopupMenu> menus { ui.getPianoRollForSnapshot().getToolsMenuForSnapshot(),
+                                                     ui.getPlaylistForSnapshot().getTrackMenuForSnapshot (0),
+                                                     ui.getMixerForSnapshot().getStripsForSnapshot().buildMenu (1) };
+                saveMenus (juce::StringArray { "Piano roll tools", "Playlist track", "Mixer track" }, menus, prefix + "-menus143.png");
+                // and the clip menus of the first pattern, audio and automation clips of the project
+                juce::StringArray clipNames;
+                std::vector<juce::PopupMenu> clipMenus;
+                for (auto [kind, name] : { std::pair { lynx::ClipKind::pattern, "Pattern clip" }, { lynx::ClipKind::audio, "Audio clip" },
+                                           { lynx::ClipKind::automation, "Automation clip" } })
+                    for (int c = 0; c < (int) offline.getSong().playlist.size(); ++c)
+                        if (offline.getSong().playlist[(std::size_t) c].kind == kind)
+                        {
+                            clipNames.add (name);
+                            clipMenus.push_back (ui.getPlaylistForSnapshot().getClipMenuForSnapshot (c));
+                            break;
+                        }
+                if (! clipMenus.empty())
+                    saveMenus (clipNames, clipMenus, prefix + "-menus143-clips.png");
+            }
 
             auto saveAlert = [&] (std::unique_ptr<juce::AlertWindow> alert, const juce::String& name) {
                 alert->setOpaque (true);
@@ -3180,6 +3207,7 @@ private:
             saveAlert (lynx::MainComponent::makeAboutWindow(), "-about.png");
             saveAlert (lynx::makeNameAndColourDialog (lynx::tr ("Rename pattern"), "Pattern 2", lynx::lynxPalette()[6]), "-rename.png");
             saveAlert (lynx::makeRecordChoiceDialog(), "-record-dialog.png");
+            saveAlert (lynx::makeMidiImportDialog(), "-midi-import-dialog.png"); // File › Import › MIDI file (REA round 143)
             saveWindow (lynx::makeSetupWizardContent (offline, {}, {}), "-setup.png");
             saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 0, 1), "-missing-files.png");
             saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 1), "-missing-plugins.png");
@@ -3292,6 +3320,9 @@ private:
             }
 
             saveWindow (lynx::makeChannelSettingsPanel (offline, 0), "-sampler.png");
+            // the channel window frame (REA round 143b): header strip + tabs; the Misc tab of the first channel and of a synth
+            saveWindow (lynx::makeChannelFrame (offline, 0), "-channel-frame.png");
+            saveWindow (lynx::makeChannelFrame (offline, 0, -1), "-channel-misc.png");
 
             for (int c = 0; c < (int) offline.getSong().channels.size(); ++c)
                 if (offline.getSong().channels[(std::size_t) c].instrument == lynx::InstrumentKind::synth)

@@ -372,7 +372,8 @@ map = xml:DrivePrePost -> Drive post
 map = xml:Speed -> Half speed
 # round 137: InputPan (0-8, the same value law; its routes measured black-box, REA_rodada137 §4)
 map = xml:InputPan -> Input pan
-# not translated (meaning not confirmed): DelaySync (0-17: which note each step is)
+# round 144: DelaySync (floor (17 v): free, straight, dotted, triplet groups — measured, REA_rodada144a §1), the same value law
+map = xml:DelaySync -> Delay sync
 
 [fabfilter-timeless]
 product = FabFilter Timeless

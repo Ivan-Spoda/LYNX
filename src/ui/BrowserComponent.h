@@ -126,8 +126,10 @@ private:
     juce::StringArray starred;
     void openFile (const juce::File& file); // what a double-click does
     void fileSelected (const juce::File& file, bool preview);
-    void showFolderMenu (const juce::File& folder);
+    void showFolderMenu (const juce::File& folder, std::function<void()> expandAll = {});
     void showFileMenu (const juce::File& file);
+    void addSystemItems (juce::PopupMenu& menu, const juce::File& file);
+    void confirmDeleteFile (const juce::File& file);
     FileTree& activeList() const;
     juce::Array<juce::File> searchRoots() const;
     juce::File previewedFile; // the sample last sent to the preview player

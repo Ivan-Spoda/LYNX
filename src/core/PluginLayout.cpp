@@ -2000,7 +2000,7 @@ Layout prismMultiband()
 {
     Layout l;
     l.width = 900;
-    l.height = 560;
+    l.height = 594; // round 144: + the processing / oversampling / pan-mode row (was 560)
     l.pages = { TR_NOOP ("Band 1"), TR_NOOP ("Band 2"), TR_NOOP ("Band 3"), TR_NOOP ("Band 4"), TR_NOOP ("Band 5"), TR_NOOP ("Band 6") };
     auto& v = l.items;
     // the bands are the display: click one to edit it, drag a crossover line to move it
@@ -2049,6 +2049,13 @@ Layout prismMultiband()
     v.push_back (dial (660, 504, 24, "Mix", TR_NOOP ("Mix")));
     v.push_back (dial (740, 504, 24, "Input", TR_NOOP ("Input"), bipolar));
     v.push_back (dial (820, 504, 24, "Output", TR_NOOP ("Output"), bipolar));
+    // round 144 (Pro-MB's bottom bar): processing mode, oversampling, what the bands' pan balances
+    v.push_back (label (8, 566, 50, 20, TR_NOOP ("Phase")));
+    v.push_back (tabs (56, 566, 240, 20, "Processing", TR_NOOP ("Linear|Dynamic|Minimum"), { 0.0f, 0.5f, 1.0f }));
+    v.push_back (label (310, 566, 90, 20, TR_NOOP ("Oversampling")));
+    v.push_back (tabs (402, 566, 150, 20, "Oversampling", "Off|2x|4x", { 0.0f, 0.5f, 1.0f }));
+    v.push_back (label (570, 566, 40, 20, TR_NOOP ("Pan")));
+    v.push_back (tabs (612, 566, 110, 20, "Pan mode", "L/R|M/S"));
     return l;
 }
 
@@ -2637,7 +2644,8 @@ Layout echoformLayout()
 {
     Layout l;
     l.width = 950;  // round 135w: + the TWEAK section and the output meter (was 780)
-    l.height = 352; // round 135w: + a second row of switches (was 300); round 137: + the Rhythm row (was 330)
+    l.height = 446; // round 135w: + a second row of switches (was 300); round 137: + the Rhythm row (was 330);
+                    // round 144: + the rhythm editor (was 352)
     auto& v = l.items;
     const auto top = 4.0f, h = 232.0f, k1 = 66.0f, k2 = 160.0f, d = 34.0f;
     // mix + style
@@ -2659,9 +2667,8 @@ Layout echoformLayout()
     const std::vector<float> syncValues { 0.25f, 0.5f, 0.75f, 1.0f };
     v.push_back (menuOf (100, 150, 76, 20, "Sync L", TR_NOOP ("Sync"), TR_NOOP ("ms|Note|Dotted|Triplet"), syncValues));
     v.push_back (when (menuOf (190, 150, 76, 20, "Sync R", TR_NOOP ("Sync"), TR_NOOP ("ms|Note|Dotted|Triplet"), syncValues), "Style", 0.6f, 1.0f));
-    v.push_back (when (display (96, 180, 172, 50, "echotrain"), "Rhythm", 0.0f, 0.49f));
-    // round 137: in Rhythm mode the picture is the pattern itself: one bar per heard tap, drag to set its level
-    v.push_back (when (display (96, 180, 172, 50, "rhythmbars"), "Rhythm", 0.5f, 1.0f));
+    // the echo train (round 137: in Rhythm mode, three passes of the pattern; round 144: edited in the rhythm editor below)
+    v.push_back (display (96, 180, 172, 50, "echotrain"));
     // feedback + width
     v.push_back (section (280, top, 80, h, TR_NOOP ("Feedback")));
     v.push_back (dial (320, k1, d, "Feedback", TR_NOOP ("Feedback")));
@@ -2752,6 +2759,29 @@ Layout echoformLayout()
     v.push_back (when (stepper (666, 320, 96, 20, "Length", TR_NOOP ("Length"), 7), "Rhythm", 0.5f, 1.0f));
     // round 137: ValhallaDelay's Era (the loop's bandwidth per mode), bottom right
     v.push_back (tabs (770, 320, 176, 20, "Era", TR_NOOP ("Past|Present|Future"), { 0.0f, 0.5f, 1.0f }));
+    // ---- round 144: the rhythm editor (EchoBoy's role: pattern presets, taps at their own times or on a grid): the
+    // taps on the pattern's time axis — drag a tap up / down for its level, sideways for its time (Free / Grid)
+    v.push_back (when (section (4, 346, 942, 96, TR_NOOP ("Rhythm editor")), "Rhythm", 0.5f, 1.0f));
+    v.push_back (when (tabs (10, 366, 156, 20, "Rhythm edit", TR_NOOP ("Even|Free|Grid"), { 0.0f, 0.5f, 1.0f }), "Rhythm", 0.5f, 1.0f));
+    v.push_back (when (when (stepper (10, 390, 156, 20, "Rhythm grid", TR_NOOP ("Grid"), 5), "Rhythm edit", 0.67f, 1.0f), "Rhythm", 0.5f, 1.0f));
+    v.push_back (when (menuOf (10, 414, 76, 20, "Rhythm shape", TR_NOOP ("Shape"), TR_NOOP ("Decay|Reverse|Swell|Fade|Nonlin"), stepCentres (5)), "Rhythm", 0.5f, 1.0f));
+    v.push_back (when (display (90, 414, 76, 20, "rhythmpatterns"), "Rhythm", 0.5f, 1.0f));
+    v.push_back (when (display (172, 364, 768, 72, "rhythmedit"), "Rhythm", 0.5f, 1.0f));
+    // ---- round 144: with Rhythm off the same row holds the Style Edit role (EchoBoy's): the echo path's input level, the
+    // EQ inside the loop, the feedback balance, the diffusion's place and the LFO's wave / sync
+    const auto off = [] (LayoutItem i) { return when (std::move (i), "Rhythm", 0.0f, 0.49f); };
+    v.push_back (off (section (4, 346, 942, 96, TR_NOOP ("Style edit"))));
+    v.push_back (off (dial (52, 396, 24, "Input level", TR_NOOP ("Input"), bipolar)));
+    v.push_back (off (dial (132, 396, 24, "Loop bass", TR_NOOP ("Bass"), bipolar)));
+    v.push_back (off (dial (202, 396, 24, "Loop mid", TR_NOOP ("Mid"), bipolar)));
+    v.push_back (off (dial (272, 396, 24, "Loop treble", TR_NOOP ("Treble"), bipolar)));
+    v.push_back (off (dial (352, 396, 24, "FB balance", TR_NOOP ("FB bal."), bipolar)));
+    v.push_back (off (label (420, 372, 70, 20, TR_NOOP ("Diffusion"))));
+    v.push_back (off (tabs (492, 372, 130, 20, "Diffusion post", TR_NOOP ("Loop|Post"), { 0.0f, 1.0f })));
+    v.push_back (off (label (420, 404, 70, 20, TR_NOOP ("Wobble"))));
+    v.push_back (off (menuOf (492, 402, 130, 20, "Mod shape", TR_NOOP ("Shape"), TR_NOOP ("Sine|Triangle|Square|Saw|Random"), stepCentres (5))));
+    v.push_back (off (label (640, 404, 40, 20, TR_NOOP ("Sync"))));
+    v.push_back (off (menuOf (682, 402, 110, 20, "Mod sync", TR_NOOP ("Sync"), TR_NOOP ("Free|1/16|1/8|1/4|1/2|1 bar|2 bars"), stepCentres (7))));
     return l;
 }
 
@@ -2831,8 +2861,17 @@ Layout latticeLayout()
     for (int k = 0; k <= 17; ++k)
         syncValues.push_back ((float) k / 17.0f);
     v.push_back (label (178, 268, 36, 18, TR_NOOP ("Sync")));
-    v.push_back (menuOf (214, 266, 88, 22, "Sync", TR_NOOP ("Sync"),
-                         "Free|1/64|1/32T|1/64.|1/32|1/16T|1/32.|1/16|1/8T|1/16.|1/8|1/4T|1/8.|1/4|1/2T|1/4.|1/2|1/1", syncValues));
+    // round 144: the reference's DelaySync list (straight, dotted, triplet groups — measured); the older by-length list
+    // stays in its place for projects that use it, until it is set back to Free
+    std::vector<float> refSync { 0.0f };
+    for (int k = 2; k <= 17; ++k)
+        refSync.push_back (((float) k + 0.5f) / 17.0f);
+    v.push_back (when (menuOf (214, 266, 88, 22, "Delay sync", TR_NOOP ("Sync"),
+                               "Free|1/16|1/8|1/4|1/2|1/1|2/1|1/16.|1/8.|1/4.|1/2.|1/1.|1/16T|1/8T|1/4T|1/2T|1/1T", refSync),
+                       "Sync", 0.0f, 0.5f / 17.0f));
+    v.push_back (when (menuOf (214, 266, 88, 22, "Sync", TR_NOOP ("Sync"),
+                               "Free|1/64|1/32T|1/64.|1/32|1/16T|1/32.|1/16|1/8T|1/16.|1/8|1/4T|1/8.|1/4|1/2T|1/4.|1/2|1/1", syncValues),
+                       "Sync", 0.5f / 17.0f, 1.0f));
     // the pages: modulation, taps, diffusion, EQ, drive, warp
     l.pages = { TR_NOOP ("Mod"), TR_NOOP ("Taps"), TR_NOOP ("Diff"), TR_NOOP ("EQ"), TR_NOOP ("Drive"), TR_NOOP ("Warp") };
     v.push_back (pageTabs (312, 8, 354, 22, TR_NOOP ("Mod|Taps|Diff|EQ|Drive|Warp")));

@@ -78,6 +78,7 @@ public:
     std::unique_ptr<juce::Component> makeNoteInspectorForSnapshot (bool singleNote = false);
     std::vector<int> noteIndicesForSnapshot() const { return selectionOrAll(); }
     std::int64_t gridForSnapshot() const { return gridTicks(); }
+    juce::PopupMenu getToolsMenuForSnapshot() { return toolsMenu(); }
     // zooms in (taller rows, wider steps) and hovers the right edge of the first note; returns its hint
     ui::Hint hoverForSnapshot();
 

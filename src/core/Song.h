@@ -481,7 +481,7 @@ enum class EffectKind : std::uint8_t
 // the last EffectKind (loops over every kind; update when one is appended)
 constexpr EffectKind lastEffectKind = EffectKind::voiceShift;
 
-constexpr int maxEffectParams = 96; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches); Facet EQ 88 (round 128)
+constexpr int maxEffectParams = 128; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches); Facet EQ 88 (round 128); Echoform 102 (round 144)
 constexpr int maxEffectSlots = 10; // as in FL
 using EffectParams = std::array<float, maxEffectParams>;
 

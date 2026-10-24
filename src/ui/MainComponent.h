@@ -8,6 +8,7 @@
 #include "core/ToolbarLayout.h"
 #include "core/ValueMath.h"
 #include "engine/AudioEngine.h"
+#include "engine/MidiFileIo.h"
 #include "ui/BrowserComponent.h"
 #include "ui/Icons.h"
 #include "ui/ChannelRackComponent.h"
@@ -180,6 +181,13 @@ private:
     void menuItemSelected (int, int) override {}
     void rememberRecent (const juce::File& file);
     juce::PopupMenu makePatternMenu();
+    // Tools › Last tweaked / Next to last tweaked (REA round 143): the parameter menu of a recently moved control
+    juce::PopupMenu makeLastTweakedMenu (int which);
+    // File › Import › MIDI file... (REA round 143)
+    void importMidiFile();
+    void importMidiFile (const juce::File& file, const MidiFileIo::ImportOptions& options);
+    static float& lastTweakedClipboard();
+    void setTweakedValue (const AutomationTarget& target, float value);
     juce::MenuBarComponent menuBar { this };
     juce::RecentlyOpenedFilesList recent;
     // The main toolbar is two rows high, laid out the way FL Studio arranges its panels (docs/WORKFLOW_FL.md,

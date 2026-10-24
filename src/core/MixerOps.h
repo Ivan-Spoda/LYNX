@@ -46,6 +46,21 @@ int sidechainTo (Song& song, int from, int to);
 // Moves effect slot `from` to position `to` of the same insert (the others shift); automations follow.
 bool moveEffectSlot (Song& song, int track, int from, int to);
 
+// --- FL's mixer track menu (REA round 143) ---------------------------------------------------------------
+// "Reset selected track(s) to default": level, pan, stereo separation, phase, swap and EQ back to the defaults,
+// mute and solo off (name, colour, effects and routing stay).
+void resetToDefault (Song& song, const std::vector<int>& tracks);
+// "Reset selected track(s) routing": each insert sends only to the Master again, at full level.
+void resetRouting (Song& song, const std::vector<int>& tracks);
+// "Unroute tracks routed to the selected track(s)": the sends into them are removed (an insert left with no
+// output goes to the Master). Returns how many sends were removed.
+int unrouteInto (Song& song, const std::vector<int>& tracks);
+// "Select › Tracks this one is routed to" / "Tracks routed to this one" (0 = Master counts as a destination).
+std::vector<int> destinationsOf (const Song& song, int track);
+std::vector<int> sourcesOf (const Song& song, int track);
+// "Insert multiple...": `count` blank inserts at `at`; returns how many were inserted (the mixer may fill up).
+int insertTracks (Song& song, int at, int count);
+
 // All effects of the insert on or off (the "effects" switch).
 void setAllEffectsEnabled (Song& song, int track, bool enabled);
 bool anyEffectEnabled (const Song& song, int track) noexcept;

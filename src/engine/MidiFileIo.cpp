@@ -1,8 +1,10 @@
 #include "engine/MidiFileIo.h"
 
+#include <limits>
 #include <map>
 
 #include "core/ExportOptions.h"
+#include "core/MidiControls.h"
 #include "engine/Text.h"
 
 namespace lynx::MidiFileIo
@@ -13,7 +15,9 @@ struct Parsed
 {
     std::vector<std::vector<Note>> tracks; // notes per track (channel = track index)
     std::vector<std::string> names;
+    std::vector<std::vector<int>> midiChannels; // per track, per note: its MIDI channel 0..15
     double bpm = 120.0;
+    int numerator = 0, denominator = 4; // the first time signature (0 = none)
 };
 
 std::optional<Parsed> parse (const juce::File& file, juce::String& error)
@@ -46,6 +50,7 @@ std::optional<Parsed> parse (const juce::File& file, juce::String& error)
         auto track = *midi.getTrack (t);
         track.updateMatchedPairs();
         std::vector<Note> notes;
+        std::vector<int> channels;
         std::string name;
 
         for (int i = 0; i < track.getNumEvents(); ++i)
@@ -55,6 +60,16 @@ std::optional<Parsed> parse (const juce::File& file, juce::String& error)
 
             if (m.isTempoMetaEvent() && out.bpm == 120.0 && m.getTempoSecondsPerQuarterNote() > 0.0)
                 out.bpm = juce::jlimit (20.0, 999.0, 60.0 / m.getTempoSecondsPerQuarterNote());
+            else if (m.isTimeSignatureMetaEvent() && out.numerator == 0)
+            {
+                int num = 0, den = 0;
+                m.getTimeSignatureInfo (num, den);
+                if (num > 0 && den > 0)
+                {
+                    out.numerator = num;
+                    out.denominator = den;
+                }
+            }
             else if (m.isTrackNameEvent() && name.empty())
                 name = m.getTextFromTextMetaEvent().toStdString();
             else if (m.isNoteOn())
@@ -66,6 +81,7 @@ std::optional<Parsed> parse (const juce::File& file, juce::String& error)
                 n.key = m.getNoteNumber();
                 n.velocity = m.getFloatVelocity();
                 notes.push_back (n);
+                channels.push_back (juce::jlimit (0, 15, m.getChannel() - 1));
             }
         }
 
@@ -73,6 +89,7 @@ std::optional<Parsed> parse (const juce::File& file, juce::String& error)
         {
             out.tracks.push_back (std::move (notes));
             out.names.push_back (name);
+            out.midiChannels.push_back (std::move (channels));
         }
     }
 
@@ -117,6 +134,96 @@ std::optional<Song> loadSong (const juce::File& file, juce::String& error)
 
     pattern.sortNotes();
     return song;
+}
+
+bool importInto (Song& song, const juce::File& file, const ImportOptions& o, juce::String& error)
+{
+    auto parsed = parse (file, error);
+    if (! parsed)
+        return false;
+
+    if (o.newProject)
+    {
+        song = Song();
+        song.bpm = parsed->bpm;
+        song.mixer = Song::defaultMixer();
+        song.patterns.clear();
+        if (o.timeSignatures && parsed->numerator > 0 && parsed->denominator == 4)
+            song.beatsPerBar = juce::jlimit (1, 16, parsed->numerator);
+    }
+
+    // the groups that become channels: the file's tracks, or its MIDI channels (tracks merged)
+    struct Group
+    {
+        std::string name;
+        int midiChannel = 0;
+        std::vector<Note> notes;
+    };
+    std::vector<Group> groups;
+    if (o.perTrack)
+        for (std::size_t t = 0; t < parsed->tracks.size(); ++t)
+            groups.push_back ({ parsed->names[t].empty() ? "MIDI " + std::to_string (t + 1) : parsed->names[t],
+                                parsed->midiChannels[t].empty() ? 0 : parsed->midiChannels[t].front(), parsed->tracks[t] });
+    else
+    {
+        std::map<int, Group> byChannel;
+        for (std::size_t t = 0; t < parsed->tracks.size(); ++t)
+            for (std::size_t i = 0; i < parsed->tracks[t].size(); ++i)
+            {
+                const auto ch = parsed->midiChannels[t][i];
+                auto& g = byChannel[ch];
+                g.name = "MIDI channel " + std::to_string (ch + 1);
+                g.midiChannel = ch;
+                g.notes.push_back (parsed->tracks[t][i]);
+            }
+        for (auto& [ch, g] : byChannel)
+            groups.push_back (std::move (g));
+    }
+
+    // "Realign events": the silence before the first note goes
+    std::int64_t shift = 0;
+    if (o.realign)
+    {
+        shift = std::numeric_limits<std::int64_t>::max();
+        for (const auto& g : groups)
+            for (const auto& n : g.notes)
+                shift = std::min (shift, n.start);
+        if (shift == std::numeric_limits<std::int64_t>::max())
+            shift = 0;
+    }
+
+    Pattern pattern;
+    pattern.name = file.getFileNameWithoutExtension().toStdString();
+    for (const auto& g : groups)
+    {
+        ChannelDef c;
+        c.name = g.name;
+        if (o.midiOut)
+        {
+            c.instrument = InstrumentKind::midiOut;
+            midictl::MidiOutSettings settings;
+            settings.channel = g.midiChannel;
+            midictl::writeMidiOut (c.pluginState, settings);
+        }
+        else
+        {
+            c.instrument = InstrumentKind::synth;
+            c.volume = 0.6f;
+        }
+        c.mixerTrack = o.mixerTracks ? song.nextFreeInsert() : 0;
+        song.channels.push_back (c);
+        const auto channel = (int) song.channels.size() - 1;
+        for (auto n : g.notes)
+        {
+            n.channel = channel;
+            n.start = std::max<std::int64_t> (0, n.start - shift);
+            pattern.notes.push_back (n);
+        }
+    }
+    pattern.sortNotes();
+    song.patterns.push_back (std::move (pattern));
+    song.currentPattern = (int) song.patterns.size() - 1;
+    return true;
 }
 
 std::optional<std::vector<Note>> loadNotes (const juce::File& file, int channel, juce::String& error)

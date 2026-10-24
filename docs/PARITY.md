@@ -30,6 +30,18 @@ LYNX's style; the transfer-curve and GR-history displays are bars). Her Vocalstr
 model (−60 … −67 dB null on her takes). The other Complete Access plugins (Slate, SSL, LiquidSonics, sonible,
 Harrison) map to LYNX effects by role only.
 
+## Round 144: what changed (config / design, after 137 → after 144)
+
+Round 144 (`docs/analise/REA_rodada144.md`, sub-rounds `REA_rodada144a.md` / `REA_rodada144b.md`).
+
+| LYNX engine | Original | Config 137 → 144 | Design 137 → 144 | Round-144 changes |
+|---|---|---|---|---|
+| Echoform | EchoBoy / PrimalTap | 8 → 9 | 7 → 8 | rhythm editor (Even / Free / Grid taps, Shape, 12 LYNX patterns), Style edit row (input, loop EQ, FB balance, diffusion loop / post, wobble shape / sync) |
+| Lattice Mod | ValhallaUberMod | 8 → 9 | 9 → 9 | DelaySync measured (18 steps, 2750 ms cap) and translated |
+| Facet EQ | Pro-Q 4 | 9 → 9 | 8 → 8 | linear-phase resolution Low … Maximum (the trial's latencies), translated |
+| Hush De-esser | DeEsser | 9 → 9 | 6 → 7 | the GR meter's held peak (click to reset) |
+| Prism Multiband | Pro-MB | 7 → 9 | 7 → 8 | Processing (Dynamic / Linear / Minimum phase, measured latencies), oversampling 2x / 4x, mid / side band pan, analyser resolution / tilt, translated; Dynamic phase still the old engine |
+
 ## Round 137: what changed (config / design, after 135 → after 137)
 
 Round 137 (`docs/analise/REA_rodada137.md`) took the biggest remaining ❌ / ⚠️ rows and re-measured rows marked "not
@@ -159,7 +171,7 @@ range.
 | Hover tooltip next to a node (freq, gain, Q, power, solo) | ✅ | read-out box at the node with power (round 128), solo and remove |
 | Right-click a node: shape, slope, dynamic range, solo, reset, remove | ✅ | |
 | Processing: Zero Latency / Natural Phase / Linear Phase | ✅ | |
-| Linear-phase resolution | ❌ | fixed (LYNX: 4608 samples at 48 kHz). Round 137 [EXEC] the trial's latencies at 48 kHz: natural phase 320 (LYNX 320 ✅); linear phase Low 3072 / Medium 5120 (default) / High 9216 / Very High 17408 / Maximum 66560 = 1024 + 2^11 … 2^16 (no 2^15) — an FIR of 2× that half-length; needs per-instance buffers sized by the resolution |
+| Linear-phase resolution | ✅ | round 144: Low / Medium (default) / High / Very High / Maximum in the Processing menu (with each latency) and in the bottom bar; the FIR is 2 × 2048 … 65536 taps in blocks of 1024, so the latencies are the trial's exactly; the buffers are sized per instance (choosing another resolution builds a new instance); translated from Pro-Q 4 states (value 553, and the character at 554). Was: fixed (LYNX: 4608 samples at 48 kHz). Round 137 [EXEC] the trial's latencies at 48 kHz: natural phase 320 (LYNX 320 ✅); linear phase Low 3072 / Medium 5120 (default) / High 9216 / Very High 17408 / Maximum 66560 = 1024 + 2^11 … 2^16 (no 2^15) — an FIR of 2× that half-length; needs per-instance buffers sized by the resolution |
 | Character (Clean / Subtle / Warm) | ✅ | round 135: in the Processing menu (shown after the mode in the bottom bar); LYNX's own soft-knee curves on the output, unity below about −20 dBFS (the reference's law is not measured) |
 | Gain scale | ✅ | |
 | Output level | ✅ | |
@@ -172,6 +184,8 @@ range.
 | Piano display (note names on the frequency axis) | ✅ | piano strip toggle at the bottom left; note name of the mouse position |
 | Output meter with peak hold | ✅ | |
 | Window size | ✅ | resizable |
+
+**After round 144**: configuration 9/10, design 8/10 (the linear-phase resolution row closed; left: 24 bands, spectral dynamics, EQ match, per-band attack / release).
 
 ## Apex Limiter ← Pro-L 2
 
@@ -260,15 +274,17 @@ lookahead on, expert mode, display range, analyser options.
 | Floating band panel: power, THRESHOLD, RANGE, ATTACK, RELEASE, OUTPUT, mode, RATIO, KNEE | ✅ | |
 | LOOKAHEAD per band | ✅ | round 128: LOOKAHEAD in the band panel (0–20 ms, capped by the global look-ahead, which sets the latency); translated from Pro-MB |
 | EXPERT (»): side-chain filtering, external side chain, stereo link per band | ⚠️ | round 135: external side chain (bottom bar Int / Ext: the detectors hear the side chain split by the same crossovers); no side-chain filtering or per-band stereo link |
-| Band output pan (mid / side) | ⚠️ | round 135: PAN in the band panel (left / right balance of the band); no mid / side |
-| Crossover slope per band 6–48 dB/oct | ⚠️ | one global slope 12 / 24 / 48 |
-| Processing mode Linear / Dynamic / Minimum phase | ❌ | |
-| Oversampling | ❌ | |
+| Band output pan (mid / side) | ✅ | round 135: PAN in the band panel (left / right balance of the band); round 144: L/R \| M/S switch in the band panel (mid / side = the reference's law, measured: the far side's gain 1 − \|pan\|), translated from Pro-MB states |
+| Crossover slope per band 6–48 dB/oct | ⚠️ | one global slope 12 / 24 / 48 (round 144: in the band panel, where the reference has it) |
+| Processing mode Linear / Dynamic / Minimum phase | ✅ | round 144: Phase menu in the bottom bar; linear = FIR crossovers with the same magnitudes, 3072 samples at 48 kHz (measured); minimum = all-pass compensated sum; dynamic = the old engine (its crossover shape when a band works still differs: REA_rodada144b); translated |
+| Oversampling | ✅ | round 144: Off / 2x / 4x in the bottom bar: the gains applied at the high rate; latency + the oversampler's; translated |
 | Display range 3 / 6 / 12 / 30 dB | ✅ | round 128: 3 dB added |
 | Analyser off / pre / post / pre+post | ✅ | |
-| Analyser resolution / speed / tilt / freeze | ⚠️ | round 128: the analyser button opens a menu (off / pre / post / pre+post, speed, freeze); no resolution / tilt choice |
+| Analyser resolution / speed / tilt / freeze | ✅ | round 128: the analyser button opens a menu (off / pre / post / pre+post, speed, freeze); round 144: Resolution (Low … Maximum) and Tilt (0 … 6 dB/oct) |
 | Mix, In, Out (bottom bar) | ✅ | |
 | Output meter | ✅ | |
+
+**After round 144** (REA_rodada144b): configuration 7 → **9**/10, design 7 → **8**/10 — processing modes, oversampling, mid / side band pan, analyser resolution / tilt, the reference's bottom-bar order. Left: per-band slopes, side-chain filtering, per-band stereo link, the dynamic mode's crossover shape, free band placement.
 
 ## Sentry Gate ← Pro-G
 
@@ -763,7 +779,7 @@ Trial on this PC: yes (no screenshot this round).
 | Audio Split / Wideband | button, default **Split** | "Processing: Wide band \| Split band" tabs, default Split | ✅ | Hush's split is 2nd order at the frequency; Waves' is 1st order at ≈ Freq/π (engine) |
 | Monitor Output / SideChain (+ yellow light) | button | "Audition" toggle under the frequency slider (plays the detection band) | ✅ | same function, different name |
 | Energy Detector meter (side-chain energy, dB below 0 dBFS, blue) aligned with the threshold | main meter | "IN" meter = **input** peak, with a threshold arrow | ⚠️ | threshold is compared with an unfiltered level; switch IN to side-chain energy (as Waves) or add it |
-| Attn meter (red, instantaneous GR) + **infinite peak hold, click to reset** | meter | "GR" bar (0–30 dB scale, shared with the IN scale) | ⚠️ | no peak hold / reset |
+| Attn meter (red, instantaneous GR) + **infinite peak hold, click to reset** | meter | "GR" bar with a held-peak line and number, click to reset | ✅ | round 144 |
 | Output meter −30…0 dBFS + peak readout (click to reset) | meter | none (bottom bar shows the Output **setting**) | ✅ | UI; round 135w: OUT meter −30…0 beside IN / GR, clip lamp and highest-peak read-out, click to reset |
 | Frequency-response display | **none in the classic DeEsser** (the manual lists no graph; Renaissance DeEsser has one) | small detector-band graph only in the generic `hushDeEsser()` layout; the display-first editor shows the scrolling waveform with the reduction in red | ➕ | nothing to add for parity |
 | Range | none (the floor is the split's leakage) | "Range" 0–24 dB, default 12 | ➕ | translator fixes it at 12 dB |
@@ -774,7 +790,7 @@ Trial on this PC: yes (no screenshot this round).
 | Gestures | slider drag, value-window typing | drag, Ctrl fine, wheel, reset, right-click entry, line/arrow drags | ✅ | |
 | Saved-state translation | — | frequency (×0.81), threshold (+5 dB), Split/Wide, HP/BP, Monitor translated; range fixed at 12 dB | ✅ | round 113 §3c |
 
-**Scores:** configuration 7/10 (every Waves control exists, plus extras), design 5/10. The scrolling-waveform
+**Scores:** configuration 7/10 (every Waves control exists, plus extras), design 5/10. **After round 144**: configuration 9/10, design 7/10 (round 135w: 9 / 6; round 144: the GR meter's held peak). The scrolling-waveform
 editor is Pro-DS-like. A DeEsser user finds Threshold, Freq, HP/BP, Split/Wide and Monitor (as "Audition")
 quickly. What they miss: the side-chain energy meter beside the threshold, the Attn peak hold, the output meter,
 presets, and the Waves defaults.
@@ -1451,7 +1467,7 @@ Sources: [VintageVerb](https://valhalladsp.com/shop/reverb/valhalla-vintage-verb
 |---|---|---|---|---|
 | Faders Mix / Depth / Width / Delay / Feedback, values under them | 50 % / 50 % / 100 % (0–200) / 10 ms (0–1000) / 0 % | Same faders, values and defaults | ✅ | |
 | **MODE** menu (under the faders) | Named algorithms: 2TapChorus (default), 4TapEnsemble, SuperSix, 6TapRandom, DualEnsemble, 8Tap, 16Phase, 16Tap, 32Tap; each has its own LFO design (antiphase triangle, 3-phase, randomised triangle, 16-phase) | round 135: a "Mode" menu with the nine algorithms under LYNX's own names (2-tap chorus … 32-tap) on the reference's type index, default 2-tap chorus (round 129), ◀ ▶ | ⚠️ | The three 6-tap modes and the two 16-tap modes still play alike (one random-detune plus one vibrato LFO for every mode — vox136 / engine) |
-| Sync | Free plus 17 note values, next to the mode | 18-entry list (Free, 1/64 … 1/1), next to Taps | ⚠️ | List order is a guess; the substitute doesn't translate `DelaySync`. Round 137 [EXEC]: the demo's value has more states than its 18 index texts (impulses at 120 BPM, sampled at k / 24: free, 1/16, 1/8, 1/4, 1/2, 1/1, then dotted and triplet groups, long values capped at 2750 ms) — the full map is still to read |
+| Sync | Free plus 17 note values, next to the mode | round 144: the reference's list on its own value law (Free, 1/16 … 2/1, 1/16. … 1/1., 1/16T … 1/1T), next to the mode; translated | ✅ | round 144 [EXEC] (REA_rodada144a §1): index = floor (17 v) (boundaries at k / 17, checked ± 0.002); 0 and 1 both free; 2–7 straight 1/16 … 2/1, 8–12 dotted 1/16. … 1/1., 13–17 triplet 1/16T … 1/1T; the synced delay is capped at 2750 ms (2/1 and 1/1. at 120 BPM; uncapped at 240 BPM). The older by-length list stays for LYNX projects that use it (shown only while it is set) |
 | Page tabs | MOD / TAPS / DIFF / EQ / DRIVE / WARP, top right | Same 6 tabs, same order | ✅ | |
 | MOD page | SlowRate 0.50 Hz, SlowDepth 50 %, VibRate 6.00 Hz, VibDepth 0 %, OverMod 1.0× | Same 5 knobs and defaults | ✅ | |
 | TAPS page | Spread 50 %, Slope 0, Skew 0, Random 0, TapGain 0 dB | Same | ✅ | Smoothing of tap-time changes (Warp Smoothing) should be checked |
@@ -1466,9 +1482,9 @@ Sources: [VintageVerb](https://valhalladsp.com/shop/reverb/valhalla-vintage-verb
 | Tap display | — | Tap graph under the pages | ➕ | |
 | Resizable | Fixed size | Resizable | ➕ | |
 | Gestures / text entry | Not confirmed | Full LYNX set | ✅ | |
-| Saved-state translation | — | Everything except DelaySync (round 137: InputPan translated) | ⚠️ | `PluginSubstitutes.cpp [valhalla-ubermod]` |
+| Saved-state translation | — | Everything (round 137: InputPan; round 144: DelaySync) | ✅ | `PluginSubstitutes.cpp [valhalla-ubermod]` |
 
-**Scores:** configuration 6/10, design 7/10. **After round 135**: configuration 7/10, design 9/10 (left: per-mode LFO designs, InputPan, Sync translation).
+**Scores:** configuration 6/10, design 7/10. **After round 135**: configuration 7/10, design 9/10 (left: per-mode LFO designs, InputPan, Sync translation). **After round 144**: configuration 9/10, design 9/10 (left: per-mode LFO designs, 16-tap polarity).
 
 **Top gaps** (1 and 5 done in round 135, except the per-mode sound):
 1. **Named Mode menu with the correct default**: replace "Taps" with 9 LYNX-named algorithms using the measured `type` index (2TapChorus = index 1), and set the default to index 1 (1.5/24) instead of 6.5/24. Changes `latticeLayout()`, `latticeInfo()` and `tapCount()`. UI plus default, S.
@@ -1530,7 +1546,7 @@ Sources: docs/specs/echoboy.md (Pro Tools-era guide pp. 22–54, store page); `[
 | Echo Mode: Single | per-channel echo | Delay model Mono/Stereo | Style "Single" (+ Spread) | ✅ (Echoform) | |
 | Echo Mode: Dual | two independent times, FB mix / balance | Offset only | Style "Dual" (Time L/R, sync L/R) | ⚠️ | no FB cross-mix or FB balance |
 | Echo Mode: Ping-Pong | mono in, L then R | Ping pong | Style "Ping-pong" (+ Pairs) | ✅ | |
-| Echo Mode: Rhythm (≤16 taps, 1–8 beats, grid ½…1/64, Shape) | Rhythm editor | — | round 137: RHYTHM switch (third row): evenly spaced taps (ms / note / dotted / triplet), Repeats 1–16, Decay 0–40 dB, Length 1–8 beats; the echo train shows the pattern | ⚠️ (Echoform) | [EXEC] measured on the trial (impulses at 60 / 120 BPM; its host parameters RhythmMode / Note / Time / Repeats / Decay): Repeats = slots incl. the input, so repeats − 1 taps are heard, each 1 / √slots (equal power, with the decay spread from the first slot to the last); the pattern spans 2 beats (taps past it are dropped) and the feedback replays it every 2 beats — LYNX's Length defaults to 2 beats. Left: the Pattern presets and the Custom (drawn) taps of the rhythm editor (not host parameters, not measured) |
+| Echo Mode: Rhythm (≤16 taps, 1–8 beats, grid ½…1/64, Shape) | Rhythm editor | — | round 137: RHYTHM switch (third row): evenly spaced taps (ms / note / dotted / triplet), Repeats 1–16, Decay 0–40 dB, Length 1–8 beats; the echo train shows the pattern | ✅ (Echoform) | [EXEC] measured on the trial (impulses at 60 / 120 BPM; its host parameters RhythmMode / Note / Time / Repeats / Decay): Repeats = slots incl. the input, so repeats − 1 taps are heard, each 1 / √slots (equal power, with the decay spread from the first slot to the last); the pattern spans 2 beats (taps past it are dropped) and the feedback replays it every 2 beats — LYNX's Length defaults to 2 beats. Left: the Pattern presets and the Custom (drawn) taps of the rhythm editor (not host parameters, not measured); **round 144**: the rhythm editor (a row under the panel): the taps on the pattern's time axis, drag = level / time, double-click = add / remove a tap; Even / Free / Grid edits (Grid ½ … 1/64 — EchoBoy's Custom Time / Custom Beats roles), Shape (Decay, Reverse, Swell, Fade, Nonlin — LYNX's own laws, [model]), and a Patterns menu of 12 LYNX-authored patterns (gallop, tresillo, clave, stutter, triplet roll …; none copied). [EXEC] round 144: on the trial the Pattern / Custom Time / Custom Beats modes give no echo when only its host parameters are set (their taps live in its editor), so those are not measured |
 | Echo Style menu (~30 voicings) | main panel menu | — | Mode menu: 12 (Tape, Lo-Fi, Hi-Fi tape, Bucket brigade, Analog, Digital, Clean, Phaser, Shifter, Pitch, Reverse, Detune) | ⚠️ | covers families: tape/BBD/digital/lo-fi; no radio/telephone, chorus/vibrato, "Diffused/Verbed" variants |
 | Echo Time ms | ms, pitch-bends when moved | Time + Keep pitch | Time L/R 0–20 s, default 300 ms | ✅ | |
 | Note / Dotted / Triplet | Note/Dot/Trip buttons | Tempo sync | Sync menu ms/Note/Dotted/Triplet, 1/64…8/1 | ✅ | |
@@ -1542,16 +1558,16 @@ Sources: docs/specs/echoboy.md (Pro Tools-era guide pp. 22–54, store page); `[
 | Prime Numbers | detunes repeat times | — | — | ✅ | trivial: snap times to primes in samples; round 135w (Echoform): "Primes" — the delay times snap to a prime number of samples |
 | Groove (shuffle…swing) | alternate repeats | — | — | ✅ | round 135w (Echoform): Groove ±25 % = odd repeats late / early by that share of the echo time ([EXEC] EchoBoy trial: +0.25 → +113…125 ms at 500 ms) |
 | Feel (rushin'…draggin') | global pre-delay ± | Offset (partial) | Spread ±20 ms (partial) | ✅ | round 135w (Echoform): Feel ±25 % moves the whole train by that share of the echo time ([EXEC]: +0.125 → +56…62 ms at 500 ms) |
-| Input level (echo path only) | −24…+24 dB | Input Wet | — | ⚠️ | |
+| Input level (echo path only) | −24…+24 dB | Input Wet | — | ✅ | **round 144**: Echoform "Input level" −24 … +24 dB on the echo path only (Style edit row) |
 | Output level (echo only) | −24…+24 dB | Wet | Level ±18 dB | ✅ | |
 | Tweak: Accent | bipolar | — | — | ✅ | round 135w (Echoform): Accent ±100 % (odd vs even repeats) [MANUAL: not a host parameter on the trial, law not measured] |
 | Tweak: Width | min…max, past 3 o'clock out-of-phase | Stereo | Width ±100 % | ✅ | |
 | Tweak: L/R Offset | 0–25 ms, default 8 | Offset | Spread ±20 ms | ✅ | |
-| Tweak Dual: FB Mix / Balance / FB Balance | knobs | — | — | ⚠️ | round 135w (Echoform): X-feed (each side's feedback from the other) and Balance; no FB Balance |
-| Style Edit: 3-band EQ gain + per-repeat Decay, Mid Res | ±18 dB etc. | FB filter only | Low/High cut only | ❌ | the "EQ in the loop vs first repeat" idea is missing |
+| Tweak Dual: FB Mix / Balance / FB Balance | knobs | — | — | ✅ | round 135w (Echoform): X-feed (each side's feedback from the other) and Balance; no FB Balance; **round 144**: FB balance (±100 %, each side's feedback) |
+| Style Edit: 3-band EQ gain + per-repeat Decay, Mid Res | ±18 dB etc. | FB filter only | Low/High cut only | ⚠️ | the "EQ in the loop vs first repeat" idea is missing; **round 144**: loop EQ (bass 120 Hz shelf, mid 1.2 kHz bell, treble 5 kHz shelf, ±18 dB) inside the loop — every repeat is shaped again; no per-repeat decay / Mid Res |
 | Style Edit: saturation type (Clean, Tape, Warm, Pump, Dirt, Limit×4) | menu | Limit/Sat + knee/symmetry | via Mode only | ⚠️ | |
-| Style Edit: Diffusion + Size, Loop/Post | knobs + switch | Diffusion level/spread | Diffusion amount/size | ⚠️ | no Loop/Post choice |
-| Style Edit: Wobble, Rate, Shape (5), Sync | knobs/menu | Mod rate/time | Wow, Flutter (Tape) / Rate, Depth | ⚠️ | no shape menu, no LFO sync |
+| Style Edit: Diffusion + Size, Loop/Post | knobs + switch | Diffusion level/spread | Diffusion amount/size | ✅ | no Loop/Post choice; **round 144**: Diffusion Loop / Post |
+| Style Edit: Wobble, Rate, Shape (5), Sync | knobs/menu | Mod rate/time | Wow, Flutter (Tape) / Rate, Depth | ✅ | no shape menu, no LFO sync; **round 144**: Wobble shape (sine, triangle, square, saw, random) and LFO sync (free, 1/16 … 2 bars) for the LFO modes |
 | Ducking | — (not in EchoBoy) | — | Ducking | ➕ | |
 | Pitch / shifter / reverse modes | — | — | yes | ➕ | |
 | Echo display | Tweak "visualiser" of delay tails | — | "echotrain" display of repeats | ✅ (Echoform) | |
@@ -1562,7 +1578,7 @@ Sources: docs/specs/echoboy.md (Pro Tools-era guide pp. 22–54, store page); `[
 | Gestures, value entry, automation | standard | generic editor: full set | full set | ✅ | |
 | Translation of the saved state | encoded | none, FL defaults (ms delay, FB, etc. unrelated) | none | ❌ | state unreadable; default only |
 
-**Scores**: Fruity Delay 3 as the stand-in: configuration 2/10, design 2/10. Echoform: configuration 5/10, design 5/10.
+**Scores**: Fruity Delay 3 as the stand-in: configuration 2/10, design 2/10. Echoform: configuration 5/10, design 5/10. **After round 144** (Echoform): configuration 9/10, design 8/10 (round 137: 8 / 7) — the rhythm editor (patterns, free / grid taps, shapes) and the Style Edit role (input, loop EQ, FB balance, diffusion place, wobble shape / sync); left: the saturation types, the ~30 style voicings, PrimalTap's Multiply.
 
 **Verdict:** **Echoform is clearly the better EchoBoy (and PrimalTap) substitute.** It has the four-mode-like Style switch (Single/Dual/Ping-pong + Ratio/Quad), a character Mode menu standing in for EchoBoy's Style, Drive ≈ Saturation, Wow/Flutter ≈ Wobble, Diffusion, note/dotted/triplet sync and an echo display. Fruity Delay 3 is a clean FL delay with none of the "style" concept, played at FL defaults. The spec's own recommendation (§7.1) agrees. H-Delay already moved to Echoform in round 119.
 

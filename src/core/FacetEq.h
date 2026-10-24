@@ -21,7 +21,8 @@
 // spectrum tilted at a constant slope: the gain is the level 5 octaves above the band frequency, the opposite 5 below)
 // and All Pass (a 2nd-order phase rotation at the band frequency, width by Q) — stored at shape values between the old
 // ones (1/16 and 3/16), so every saved shape keeps its meaning; [88] character (Clean = the old sound, Subtle, Warm:
-// a gentle analog-style saturation of the output, harmonics only on hot signals).
+// a gentle analog-style saturation of the output, harmonics only on hot signals). Round 144: [89] linear-phase
+// resolution (see resolution()).
 //
 // Dynamic EQ (docs/analise/REA_rodada103.md §2, measured on the reference): each band with a gain (bell, shelves,
 // tilt) whose range is not 0 listens to its own region of the detector signal (band pass at the band frequency and
@@ -62,7 +63,8 @@ constexpr int specSpeedParam = 85;  // editor only
 constexpr int specTiltParam = 86;   // editor only
 constexpr int displayRangeParam = 87; // editor only
 constexpr int characterParam = 88; // round 135
-constexpr int paramCount = 89;
+constexpr int resolutionParam = 89; // round 144: the linear-phase resolution (Low … Maximum, Pro-Q 4's list)
+constexpr int paramCount = 90;
 constexpr int maxSections = 8; // 96 dB/oct = 16th order
 
 enum class Shape { off, bell, lowShelf, highShelf, lowCut, highCut, notch, bandPass, tiltShelf, flatTilt, allPass };
@@ -131,8 +133,17 @@ double autoGainDb (const EffectParams& params, double sampleRate) noexcept;
 // The dynamic gain (dB) a band applies for a detector level (dB, sine peak): 0 below the knee, then 1 dB per dB over the
 // threshold (10 dB soft knee), clamped at the range; the sign follows the range.
 double dynamicGainDb (double levelDb, double thresholdDb, double rangeDb) noexcept;
-// Latency (samples) of a phase mode at a sample rate
-int latencyFor (Phase p, double sampleRate) noexcept;
+// Round 144: the linear-phase resolution, measured black-box on the Pro-Q 4 trial (REA_rodada144a §2): Low, Medium
+// (the default — older projects load it: the same 8192-tap FIR as before), High, Very High, Maximum. The FIR has 2 h
+// taps (h = 2048, 4096, 8192, 16384, 65536 at 48 kHz, ×2 / ×4 at 96 / 192 kHz) and runs in blocks of 1024 (× the rate
+// factor): latency = 1024 + h = the trial's 3072 / 5120 / 9216 / 17408 / 66560 samples at 48 kHz.
+constexpr int resolutionCount = 5;
+int resolution (float v) noexcept;     // 0 … 4 (round (4 v), the trial's normalised values)
+float resolutionValue (int r) noexcept;
+const char* resolutionName (int r) noexcept;
+int linearHalfTaps (int resolution, double sampleRate) noexcept; // h
+// Latency (samples) of a phase mode at a sample rate (linear phase: at the given resolution; Medium by default)
+int latencyFor (Phase p, double sampleRate, int resolution = 1) noexcept;
 
 const EffectInfo& info();
 std::string paramText (int param, float v);

@@ -186,8 +186,17 @@ void ValueDrag::begin (const juce::MouseEvent& e, double value)
     active = true;
 }
 
+std::function<void (const AutomationTarget&)> onTweak;
+
+void reportTweak (const ValueSpec& spec)
+{
+    if (spec.target && onTweak)
+        onTweak (*spec.target);
+}
+
 double ValueDrag::update (const juce::MouseEvent& e, const ValueSpec& spec)
 {
+    reportTweak (spec);
     const auto nowFine = e.mods.isCtrlDown();
 
     if (nowFine != fine) // switching mid-drag: continue from where the value is now
@@ -214,6 +223,7 @@ std::optional<double> wheelValue (double value, const juce::MouseEvent& e, const
         return std::nullopt;
 
     const auto notches = (wheel.isReversed ? -1.0 : 1.0) * (delta > 0.0f ? 1.0 : -1.0) * juce::jmax (1.0, std::abs (delta) / 0.12);
+    reportTweak (spec);
     return controls::wheelValue (value, notches, spec.minimum, spec.maximum, e.mods.isCtrlDown(), spec.interval);
 }
 
