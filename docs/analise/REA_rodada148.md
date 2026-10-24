@@ -203,6 +203,37 @@ With the kernels exact at low level, the input curve was refitted together with 
 −33.3 / −28.7 → −27.2 / −33.4 / −29.4 dB); what is left is in the loudest passages. Test
 `echoform_ping_pong_kernels_round148` (tap times, the tap's 0.389, the diffusion energy around it).
 
+## 5. Waves, measured in full (the 7-day trial the user activated on 2026-10-24, ~10-31) [EXEC]
+
+Until now every Waves comparison had to dodge the demo mode's mutes. With the trial active the renders are whole and
+clean (checked: no muted runs). Her most-used states (`tmp/vm124/st`, the top 1–3 per plug-in by slot count) on her
+three whole takes, the trial (WaveShell 17.1, `fxmeasure`, `loadcomponent`) against LYNX through the real substitute
+lookup and translation (`tmp/vox148/wv/wvcmp.py`; renders `D:\lynx-work\vox148\wv\out\<plug-in>\`): null (L / R),
+level, 1/3-octave RMS error.
+
+| plug-in (slots) → LYNX | her states | null on go / kwe / lu | level | 1/3-oct |
+|---|---|---|---|---|
+| SSL E-Channel (2172) → Ridge E voicing | 0 / 1 / 2 | −46.9 / −48.0 / −44.4 dB | ±0.02 | 0.02 |
+| DeEsser (2172) → Hush classic | 0 / 1 | −37.8 / −50.3 / −43.6 | ±0.02 | 0.05 |
+| S1 Imager (12) → Stereo Shaper | 0 / 1 | −89 / −92 | 0 | 0 |
+| CLA-2A (2178) → Glow Leveler classic | 0 / 1 / 2 | −27.0 / −28.7 / −27.0 | +0.1 … +0.3 | 0.14–0.29 |
+| RComp (2172) → Compressor vintage | 0 / 1 | −26.7 / −24.7 / −27.2 | −0.03 … −0.18 | 0.16–0.52 |
+| NS1 (2240) → Quell matched | 0 / 1 / 2 | −22.3 … −24.2 | +0.02 … +0.07 | 0.26–0.62 |
+| H-Delay (2072) → Echoform hybrid | 0 / 1 / 2 | −17.9 … −29.5 (vs a second trial render: −20 … −26) | −0.07 | 0.10–0.17 |
+| Doubler2 (2050) → Gemini | 0 / 1 | (detuned voices: no waveform null; the right voice of state 0 −134 dB) | −0.1 … −0.3 | 0.35–0.67 |
+| Tune Real-Time (80) → LYNX Tune | 0 / 1 / 2 | pitch: median 3.4–6.2 c from the trial (dry 10–28 c) | ±0.1 | 0.3–1.1 |
+| **CLA-76 (6) → Crest** | 0 | **−13.0 / −7.9 / −10.2 → −25.5 / −19.2 / −21.7** | +0.3 … +2.2 → ±0.1 | **3.3–3.9 → 0.5–1.0** |
+
+- H-Delay is not repeatable on the trial itself: the same state rendered twice nulls at −0.2 dB on one take (its
+  modulation runs free), so its "null" is bounded by the trial's own run-to-run difference.
+- For NS1, CLA-2A and RComp a refit of the translated controls on the same renders gains ≤ 1.6 dB (`pfit.py`: NS1
+  −23.96 → −23.99, CLA-2A −27.4 → −29.0, RComp −26.3 → −26.8): the translations are right, the residue is in the models
+  (left as they are).
+- **CLA-76**: round 127 fitted Crest on mute-masked renders; refitted now on the whole takes (Nelder–Mead on the null,
+  `c76fit.py`): threshold −55.4 dB, 2.8:1, knee 24.8 dB, range 31.5 dB, attack 1.56 ms, release 2.5 s (Crest's
+  longest — the reference's all-buttons release is slow), output +31.5 dB.
+- `docs/inspired-by.json`: descriptions for Stereo Shaper, Quell Denoiser and Gemini Doubler (gen-inspired's warnings).
+
 ## Where I stopped
 - Done: §1 Auto-Tune (renders recorded before the trial ends; LYNX Tune's marks; the highs' make-up), §2 SSL 4K E
   measured and Ridge's 4K voicing + translator, §3 Pro-DS translated (Hush's Vocal voicing), Pro-Q 4 re-checked,
@@ -218,5 +249,7 @@ With the kernels exact at low level, the input curve was refitted together with 
   - the Vocal strip's broadband de-esser / de-ploser (not in her states);
   - LYNX Tune: the period-doubling residue at half the fundamental (+1 … +2.6 dB at 125–200 Hz on her takes, 35–44 dB
     under the take's loudest band), the upper / lower tie.
-- Trials left: Complete Access Hub 2026-11-03 (iLok 11-13), FabFilter ~11-16, Soundtoys 11-22; Auto-Tune ends
+- Waves (7-day trial, ~2026-10-31): the NS1 / CLA-2A / RComp models' residue (−22 … −29 dB), H-Delay's free-running
+  modulation.
+- Trials left: Waves ~10-31, Complete Access Hub 2026-11-03 (iLok 11-13), FabFilter ~11-16, Soundtoys 11-22; Auto-Tune ends
   2026-10-25 21:00 (every render of rounds 138 / 145 / 148 is on D:).
