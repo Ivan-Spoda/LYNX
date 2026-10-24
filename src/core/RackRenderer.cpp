@@ -503,12 +503,23 @@ std::vector<int> RackState::currentLatencies() const
 {
     std::vector<int> out;
 
-    for (const auto& i : instruments)
-        out.push_back (i->latencySamples());
+    // a hosted plugin's latency set by hand in its wrapper settings (round 149) replaces what it reports
+    auto manual = [this] (const PluginRef& ref, int reported) {
+        return ref.latencyOverrideMs >= 0.0f ? (int) std::lround (ref.latencyOverrideMs * 0.001 * sampleRate) : reported;
+    };
+    for (std::size_t c = 0; c < instruments.size(); ++c)
+    {
+        const auto reported = instruments[c]->latencySamples();
+        out.push_back (c < song.channels.size() && song.channels[c].instrument == InstrumentKind::plugin ? manual (song.channels[c].plugin, reported) : reported);
+    }
 
-    for (const auto& track : effects)
-        for (const auto& e : track)
-            out.push_back (e->latencySamples());
+    for (std::size_t t = 0; t < effects.size(); ++t)
+        for (std::size_t s = 0; s < effects[t].size(); ++s)
+        {
+            const auto reported = effects[t][s]->latencySamples();
+            const auto* slot = t < song.mixer.size() && s < song.mixer[t].effects.size() ? &song.mixer[t].effects[s] : nullptr;
+            out.push_back (slot != nullptr && slot->kind == EffectKind::plugin ? manual (slot->plugin, reported) : reported);
+        }
 
     return out;
 }
@@ -567,6 +578,17 @@ void RackState::buildMidiRoutes()
     midiSources.assign (count, {});
     midiOutChannel.assign (count, -1);
     hasMidiRoutes = false;
+    midiOutTargets.assign (count, {});
+    hasMidiOutputs = false;
+    for (std::size_t c = 0; c < count; ++c)
+        if (song.channels[c].instrument == InstrumentKind::plugin && song.channels[c].plugin.midiOutPort >= 0)
+            for (std::size_t t = 0; t < count; ++t)
+                if (t != c && song.channels[t].instrument == InstrumentKind::plugin
+                    && song.channels[t].plugin.midiInPort == song.channels[c].plugin.midiOutPort)
+                {
+                    midiOutTargets[c].push_back ((int) t);
+                    hasMidiOutputs = true;
+                }
     for (std::size_t c = 0; c < count; ++c)
     {
         // a generator Patcher's "MIDI port N" outputs (REA_rodada141): its notes reach the plugins on those ports, as a
@@ -1244,10 +1266,15 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         gains = echo.outputGains.data();
     }
     const auto tracking = c.misc.key.pan != 0.0f || c.misc.velocity.pan != 0.0f;
+    // FL's Add to key (round 149): the root note moves the notes of instruments that are not samplers
+    const auto keyShift = c.misc.addToKey && c.instrument != InstrumentKind::sampler ? 60 - c.misc.rootNote : 0;
 
     for (int index = 0; index < listCount; ++index)
     {
-        const auto& e = list[index];
+        auto shifted = list[index];
+        if (keyShift != 0 && shifted.channel == i)
+            shifted.key = std::clamp (shifted.key + keyShift, 0, 127);
+        const auto& e = shifted;
 
         if (e.channel != i)
         {
@@ -1628,6 +1655,18 @@ void RackRenderer::process (const RackState* state,
     // their "off" events will no longer happen.
     const auto jumped = playing && wasPlaying && std::abs (startTick - expectedTick) > 1.0;
 
+    if ((wasPlaying && ! playing) || (playing && ! wasPlaying))
+    {
+        // the arpeggiators / echoes ran on the live clock while stopped (round 149): they restart on the song's
+        liveRoutedCount = 0;
+        for (auto& arp : state->arpeggiators)
+            if (arp != nullptr)
+                arp->reset();
+        for (auto& echo : state->echoes)
+            if (echo != nullptr)
+                echo->reset();
+    }
+
     if ((wasPlaying && ! playing) || jumped)
     {
         for (auto& instrument : state->instruments)
@@ -1730,6 +1769,16 @@ void RackRenderer::process (const RackState* state,
                         else if (e.type == NoteEvent::Type::off)
                             target.noteOffMidi (e.key, midiChannel);
                     }
+            // the channel's arpeggiator / echo delay / tracking play it (in processChunk's first chunk)
+            if ((e.type == NoteEvent::Type::on || e.type == NoteEvent::Type::off) && routesLiveNotes (*state, e.channel))
+            {
+                if (liveRoutedCount < (int) liveRouted.size())
+                {
+                    e.sampleOffset = 0;
+                    liveRouted[(std::size_t) liveRoutedCount++] = e;
+                }
+                continue;
+            }
             auto& order = voiceOrders[(std::size_t) std::min (e.channel, maxChannels - 1)];
             if (e.type == NoteEvent::Type::on)
             {
@@ -1833,6 +1882,17 @@ double RackRenderer::ticksToNextEvent (const RackState& state, double tick) noex
     return best;
 }
 
+bool RackRenderer::routesLiveNotes (const RackState& state, int channel) const noexcept
+{
+    const auto c = (std::size_t) channel;
+    if (channel < 0 || c >= state.song.channels.size())
+        return false;
+    const auto& misc = state.song.channels[c].misc;
+    return (c < state.arpeggiators.size() && state.arpeggiators[c] != nullptr) || (c < state.echoes.size() && state.echoes[c] != nullptr)
+           || misc.key.pan != 0.0f || misc.velocity.pan != 0.0f
+           || (misc.addToKey && misc.rootNote != 60 && state.song.channels[c].instrument != InstrumentKind::sampler);
+}
+
 void RackRenderer::processChunk (const RackState& state, bool playing, double startTick, int numSamples,
                                  float* left, float* right, MeterBank* meters) noexcept
 {
@@ -1844,8 +1904,10 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
     if (state.hasAutomation) // (a hair later: a chunk that starts on a pattern event's sample takes its value)
         updateAutomation (state, startTick + 1.0e-6);
 
-    chunkStartTick = startTick;
     chunkTps = ticksPerSample (bpm, sampleRate);
+    chunkStartTick = playing ? startTick : liveTick; // stopped: live notes' arpeggios run on their own clock
+    if (! playing)
+        liveTick += numSamples * chunkTps;
 
     // hosted plugins read the transport from here (PluginHost's play head)
     {
@@ -1875,6 +1937,40 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         const auto& pattern = song.patterns[(std::size_t) patternIndex];
         schedulePatternLoop (pattern, pattern.effectiveLength (song.beatsPerBar), startTick, numSamples,
                              ticksPerSample (bpm, sampleRate), events, song.swing, &song.channels);
+    }
+
+    // FL's wrapper "Output port" (round 149): the notes a plugin sent out in the previous chunk play the plugins on
+    // that port, at this chunk's start
+    if (state.hasMidiOutputs)
+    {
+        std::array<Instrument::MidiOutNote, 128> notes;
+        for (std::size_t c = 0; c < state.midiOutTargets.size() && c < state.instruments.size(); ++c)
+        {
+            if (state.midiOutTargets[c].empty())
+                continue;
+            const auto count = state.instruments[c]->takeMidiOutput (notes.data(), (int) notes.size());
+            for (int k = 0; k < count; ++k)
+                for (const auto t : state.midiOutTargets[c])
+                {
+                    NoteEvent e;
+                    e.type = notes[(std::size_t) k].velocity > 0.0f ? NoteEvent::Type::on : NoteEvent::Type::off;
+                    e.channel = t;
+                    e.key = notes[(std::size_t) k].key;
+                    e.velocity = notes[(std::size_t) k].velocity;
+                    e.sampleOffset = 0;
+                    events.add (e);
+                }
+        }
+        events.sortByOffset();
+    }
+
+    // live-played notes routed through their channel's note path (round 149)
+    if (liveRoutedCount > 0)
+    {
+        for (int k = 0; k < liveRoutedCount; ++k)
+            events.add (liveRouted[(std::size_t) k]);
+        liveRoutedCount = 0;
+        events.sortByOffset();
     }
 
     // cut groups: each note of a channel "cuts" the channels linked to it, at the same sample

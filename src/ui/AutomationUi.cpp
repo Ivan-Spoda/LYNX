@@ -804,8 +804,10 @@ void addControllerLinkItems (juce::PopupMenu& menu, AudioEngine& engine, const A
 
 std::function<void (const AutomationTarget&)> onEditEventsInPianoRoll;
 
-void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const AutomationTarget& target)
+void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const AutomationTarget& target, bool headers)
 {
+    if (headers)
+        menu.addSectionHeader (tr ("Automation"));
     if (target.kind != AutomationTargetKind::tempo)
     {
         menu.addItem (tr ("Edit events in the pattern"), [&engine, target] { openEventEditor (engine, target); });
@@ -826,6 +828,17 @@ void addAutomationItem (juce::PopupMenu& menu, AudioEngine& engine, const Automa
         engine.editSong ([target] (Song& s) { s.removeInitialValue (target); });
     });
     menu.addItem (tr ("Create automation clip"), [&engine, target] { createAutomationClip (engine, target); });
+    {
+        // FL's "Edit automation clip..." (the clip that automates this control)
+        const auto& automations = engine.getSong().automations;
+        int clip = -1;
+        for (int a = 0; a < (int) automations.size(); ++a)
+            if (automations[(std::size_t) a].target == target && ! automations[(std::size_t) a].isLive())
+                clip = a;
+        menu.addItem (tr ("Edit automation clip..."), clip >= 0, false, [&engine, clip] { openAutomationEditor (engine, clip); });
+    }
+    if (headers)
+        menu.addSectionHeader (tr ("Remote control"));
     menu.addItem (tr ("Link to MIDI controller (move a knob on the controller)"), [&engine, target] {
         engine.learnMidiController (target);
     });

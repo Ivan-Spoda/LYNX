@@ -1730,6 +1730,13 @@ bool AudioEngine::importFlpFile (const juce::File& file, juce::String& error, co
 
 void AudioEngine::publishSong()
 {
+    // diagnostics (round 149): with LYNX_TRACE_EDITS set, each publish's time goes to %APPDATA%\LYNX\edits.log
+    static const bool traceEdits = std::getenv ("LYNX_TRACE_EDITS") != nullptr;
+    const auto publishStart = juce::Time::getMillisecondCounterHiRes();
+    const juce::ScopeGuard traceEnd { [&] {
+        if (traceEdits)
+            platform::settingsFile ("edits.log").appendText (juce::String (juce::Time::getMillisecondCounterHiRes() - publishStart, 1) + " ms publish\n");
+    } };
     song.currentPattern = juce::jlimit (0, juce::jmax (0, (int) song.patterns.size() - 1), song.currentPattern);
     selectedChannel = juce::jlimit (0, juce::jmax (0, (int) song.channels.size() - 1), selectedChannel);
     {
@@ -1781,11 +1788,23 @@ void AudioEngine::publishSong()
     factories.pluginInstruments = [this] (const PluginRef& ref, double sr) { return plugins.makeInstrument (ref, sr); };
     factories.pluginEffects = [this] (const PluginRef& ref, double sr) { return plugins.makeEffect (ref, sr); };
 
+    const auto buildStart = juce::Time::getMillisecondCounterHiRes();
+    const auto tracePhases = traceEdits && ! loadtrace::active(); // the build's phases (an open traces its own)
+    if (tracePhases)
+        loadtrace::begin ("edit");
     auto state = RackState::build (song, &lastPublishedShape, transport.sampleRate.load(), factories);
+    if (traceEdits)
+        platform::settingsFile ("edits.log").appendText (juce::String (juce::Time::getMillisecondCounterHiRes() - buildStart, 1) + " ms rack build\n"
+                                                         + (tracePhases ? juce::String (loadtrace::reportLines()) : juce::String()));
+    if (tracePhases)
+        loadtrace::end();
 
     // what the next build needs to reuse instruments and effects
     lastPublishedShape.song.channels = song.channels;
     lastPublishedShape.song.mixer = song.mixer;
+    // the tempo too (round 149): a channel that plays a time-stretched copy is kept when its stretch and the tempo
+    // did not change; without it every edit rebuilt them (sample reloaded and stretch looked up, ~0.5 s on Thief)
+    lastPublishedShape.song.bpm = song.bpm;
     lastPublishedShape.instruments = state->instruments;
     lastPublishedShape.effects = state->effects;
     lastPublishedShape.sampleRate = state->sampleRate;
@@ -1794,10 +1813,17 @@ void AudioEngine::publishSong()
     lastPublishedShape.channelDelays = state->channelDelays;
     lastPublishedShape.sendDelays = state->sendDelays;
 
+    const auto mark = [&] (const char* what) {
+        if (traceEdits)
+            platform::settingsFile ("edits.log").appendText (juce::String (juce::Time::getMillisecondCounterHiRes() - publishStart, 1) + " ms " + what + "\n");
+    };
+    mark ("built");
     rackExchange.publish (std::move (state));
+    mark ("exchanged");
 
     if (prefetcher != nullptr)
         prefetcher->update (song, samples);
+    mark ("prefetch updated");
 
     sendChangeMessage();
 }
@@ -2311,14 +2337,17 @@ std::shared_ptr<Effect> AudioEngine::getEffect (int track, int slot) const
 
 void AudioEngine::setPluginsRenderMode (bool offline)
 {
+    // FL's "Notify about rendering mode" off: that plugin is not told (round 149)
     for (std::size_t i = 0; i < song.channels.size(); ++i)
         if (auto* p = dynamic_cast<PluginInstrument*> (getChannelInstrument ((int) i).get()))
-            p->setRenderMode (offline);
+            if (song.channels[i].plugin.notifyRender)
+                p->setRenderMode (offline);
 
     for (std::size_t t = 0; t < song.mixer.size(); ++t)
         for (std::size_t s = 0; s < song.mixer[t].effects.size(); ++s)
             if (auto* p = dynamic_cast<PluginEffect*> (getEffect ((int) t, (int) s).get()))
-                p->setRenderMode (offline);
+                if (song.mixer[t].effects[s].plugin.notifyRender)
+                    p->setRenderMode (offline);
 
     // the plugins inside Patchers (REA_rodada141)
     std::function<void (patcher::Graph*)> graphMode = [&] (patcher::Graph* graph) {

@@ -884,6 +884,10 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 }
             m.pitchRange = std::clamp (c.pitchRange, 0, 48);
             m.mainPitch = c.mainPitch;
+            // the root note keyboard and Add to key (round 149); a sampler's root is folded into its pitch above
+            if (c.rootNote >= 0 && c.rootNote <= 127)
+                m.rootNote = c.rootNote;
+            m.addToKey = c.addToKey;
 
             // arpeggiator: FL's directions 1 up, 2 down, 3 up-down bounce, 4 up-down sticky, 5 random
             static constexpr int directions[] = { 0, 1, 2, 3, 5, 4 };
@@ -895,7 +899,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 a.stepBeats = (float) std::clamp (channelmisc::flTimeKnobBeats (c.arpTime), 1.0 / 192.0, 4.0);
                 a.gate = std::clamp (c.arpGate / 48.0f, 0.05f, 128.0f / 48.0f);
                 a.slide = c.arpSlide;
-                a.octaveRepeat = std::clamp (c.arpRepeat, 1, 16);
+                a.octaveRepeat = std::clamp (c.arpRepeat, 0, 16); // 0: FL's chord at once (round 149)
                 a.chordSustain = c.arpChord != -2;
                 if (c.arpChord == 0)
                     a.chord = { 0 }; // "None": the root, stepping by octaves
@@ -1211,6 +1215,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             def.plugin.name = def.plugin.foreign.name;
             applyFlWrapperOptions (def.plugin.foreign, def.plugin);
             def.plugin.midiInPort = def.plugin.foreign.midiInPort; // the MIDI Out channels on that port play it
+            def.plugin.midiOutPort = def.plugin.foreign.midiOutPort; // its notes play the plugins on that port
         }
 
         // MIDI Out (REA_rodada16 §1): a silent channel whose notes the renderer sends to the plugins on its port

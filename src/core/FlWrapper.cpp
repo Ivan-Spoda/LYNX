@@ -143,6 +143,7 @@ void applyFlWrapperOptions (const ForeignPlugin& w, PluginRef& ref)
     if (! w.hasWrapperOptions || (w.wrapperFlags & 0x400000u) != 0)
         return;
     ref.fixedBuffers = (w.wrapperFlags & 0x2u) != 0;
+    ref.notifyRender = (w.wrapperFlags & 0x4u) != 0; // "Notify about rendering mode" (REA round 134)
     ref.maxSizeBuffers = ref.fixedBuffers && (w.fixedOptions & 0x1u) != 0;
     if (w.wrapperVersion >= 7)
         ref.threaded = (w.wrapperFlags & 0x1000u) != 0;
@@ -332,13 +333,16 @@ std::vector<std::uint8_t> writeFlVst2State (const FlVst2State& s)
 
 const std::vector<WrapperOption>& wrapperOptions()
 {
+    // in FL's order (Fruity Wrapper's settings form, REA round 149): Processing › Options, then Troubleshooting ›
+    // Compatibility
     static const std::vector<WrapperOption> options = {
-        { "Processing", "Use fixed size buffers", "Constant 2 ms blocks, for plugins that need equal buffers (adds latency)", &PluginRef::fixedBuffers, true, false },
-        { "Processing", "Process maximum size buffers", "With fixed size buffers: the whole device buffer instead of 2 ms blocks", &PluginRef::maxSizeBuffers, true, true },
-        { "Processing", "Use maximum buffer size from host", "With fixed size buffers: prepare the plugin for the host's largest block", &PluginRef::hostMaxBuffer, true, true },
+        { "Processing", "Notify about rendering mode", "Let the plugin know when rendering to an audio file", &PluginRef::notifyRender, false, false },
         { "Processing", "Allow threaded processing", "Allow the plugin to be multi-threaded (off: always on the audio thread)", &PluginRef::threaded, false, false },
+        { "Processing", "Make bridged", "Load the plugin in a separate process (bridged)", &PluginRef::separateProcess, true, false },
         { "Processing", "Allow smart disable", "Allow smart disable for the plugin (off: it is always processed)", &PluginRef::allowSmartDisable, false, false },
-        { "Bridging", "Make bridged", "Load the plugin in a separate process (bridged)", &PluginRef::separateProcess, true, false },
+        { "Compatibility", "Use fixed size buffers", "Constant 2 ms blocks, for plugins that need equal buffers (adds latency)", &PluginRef::fixedBuffers, true, false },
+        { "Compatibility", "Process maximum size buffers", "With fixed size buffers: the whole device buffer instead of 2 ms blocks", &PluginRef::maxSizeBuffers, true, true },
+        { "Compatibility", "Use maximum buffer size from host", "With fixed size buffers: prepare the plugin for the host's largest block", &PluginRef::hostMaxBuffer, true, true },
     };
     return options;
 }

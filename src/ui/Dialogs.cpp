@@ -187,14 +187,20 @@ class MidiChannelFilter final : public juce::Component,
 public:
     std::uint16_t mask = 0xFFFF;
 
-    MidiChannelFilter() { setSize (360, 24); setTooltip (tr ("Deselect MIDI channels to filter out")); }
+    MidiChannelFilter() { setSize (240, 44); setTooltip (tr ("Deselect MIDI channels to filter out (right-click: only this one)")); }
+
+    // FL's grid: two rows of eight (REA round 149 [EXEC])
+    juce::Rectangle<float> cell (int c) const
+    {
+        const auto w = getWidth() / 8.0f, h = getHeight() / 2.0f;
+        return { (float) (c % 8) * w, (float) (c / 8) * h, w, h };
+    }
 
     void paint (juce::Graphics& g) override
     {
-        const auto w = getWidth() / 16.0f;
         for (int c = 0; c < 16; ++c)
         {
-            const auto r = juce::Rectangle<float> (c * w, 0.0f, w, (float) getHeight()).reduced (1.5f);
+            const auto r = cell (c).reduced (1.5f);
             const auto on = (mask >> c & 1) != 0;
             g.setColour (on ? theme::colour::accent : theme::colour::bg3);
             g.fillRoundedRectangle (r, 3.0f);
@@ -206,7 +212,7 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        const auto c = juce::jlimit (0, 15, (int) (e.x / (getWidth() / 16.0f)));
+        const auto c = juce::jlimit (0, 15, juce::jlimit (0, 7, (int) (e.x / (getWidth() / 8.0f))) + (e.y >= getHeight() / 2 ? 8 : 0));
         if (e.mods.isPopupMenu() || e.mods.isCtrlDown())
             mask = mask == (std::uint16_t) (1u << c) ? (std::uint16_t) 0xFFFF : (std::uint16_t) (1u << c); // solo / all
         else
@@ -227,25 +233,26 @@ public:
             b.setButtonText (text);
             b.setTooltip (hint);
             b.setToggleState (on, juce::dontSendNotification);
-            b.setSize (360, 24);
-            addCustomComponent (&b);
+            content.addAndMakeVisible (b);
+            optionBoxes.push_back (&b);
         };
+        // FL's two columns of options (REA round 149 [EXEC]): new project / realign / time signatures, then one channel
+        // per track / mixer tracks / zero velocity notes
         if (pianoRoll)
+        {
             add (blend, tr ("Blend with existing data"), tr ("Don't delete the channel's notes before importing"), o.blend);
+            add (realign, tr ("Realign events"), tr ("Removes any silent part at the beginning"), o.realign);
+            add (zeroVelocity, tr ("Import zero velocity notes"), tr ("Don't treat note on messages with zero velocity as note off"), o.zeroVelocityNotes);
+        }
         else
         {
             add (newProject, tr ("Start new project"), tr ("Start a blank project, or add to the open one"), o.newProject);
-            add (perTrack, tr ("Create one channel per track"), tr ("One channel per track, or per MIDI channel"), o.perTrack);
-        }
-        add (realign, tr ("Realign events"), tr ("Removes any silent part at the beginning"), o.realign);
-        if (! pianoRoll)
-        {
+            add (realign, tr ("Realign events"), tr ("Removes any silent part at the beginning"), o.realign);
             add (timeSignatures, tr ("Import time signatures"), tr ("The file's time signature becomes the new project's"), o.timeSignatures);
+            add (perTrack, tr ("Create one channel per track"), tr ("One channel per track, or per MIDI channel"), o.perTrack);
             add (mixerTracks, tr ("Set mixer tracks for new channels"), tr ("Route new channels to consecutive mixer tracks"), o.mixerTracks);
-            add (midiOut, tr ("Channel type: MIDI Out (else LYNX's synth)"), tr ("MIDI Out channels play the plugins on their MIDI port, on the note's MIDI channel"),
-                 o.midiOut);
+            add (zeroVelocity, tr ("Import zero velocity notes"), tr ("Don't treat note on messages with zero velocity as note off"), o.zeroVelocityNotes);
         }
-        add (zeroVelocity, tr ("Import zero velocity notes"), tr ("Don't treat note on messages with zero velocity as note off"), o.zeroVelocityNotes);
 
         // Which tracks to import?
         tracks.addItem (tr ("All tracks"), 1);
@@ -261,14 +268,15 @@ public:
         for (std::size_t i = 0; i < trackIds.size(); ++i)
             if (trackIds[i] == o.track)
                 tracks.setSelectedId ((int) i + 1, juce::dontSendNotification);
-        tracks.setSize (360, 24);
-        addComboLabel (tr ("Which tracks to import?"));
-        addCustomComponent (&tracks);
 
         // Which channels to import?
         channels.mask = o.channels;
-        addComboLabel (tr ("Which channels to import? (click: on / off, right-click: only this one)"));
-        addCustomComponent (&channels);
+
+        // Channel type (FL: FLEX / MIDI Out…; LYNX: its synth or a MIDI Out on the note's MIDI channel)
+        channelType.addItem (tr ("LYNX synth"), 1);
+        channelType.addItem (tr ("MIDI Out"), 2);
+        channelType.setSelectedId (o.midiOut ? 2 : 1, juce::dontSendNotification);
+        channelType.setTooltip (tr ("MIDI Out channels play the plugins on their MIDI port, on the note's MIDI channel"));
 
         // Which controller to import? (the ones LYNX applies: 7 / 11 volume, 10 pan, when the file has them)
         controller.addItem (tr ("None"), 1);
@@ -288,9 +296,32 @@ public:
         for (std::size_t i = 0; i < controllerIds.size(); ++i)
             if (controllerIds[i] == o.controller)
                 controller.setSelectedId ((int) i + 1, juce::dontSendNotification);
-        controller.setSize (360, 24);
-        addComboLabel (tr ("Which controller to import? (into the pattern's events)"));
-        addCustomComponent (&controller);
+        controller.setTooltip (tr ("Which controller to import? (into the pattern's events)"));
+
+        // FL's order: the selections on top (label on the left, the control on the right), the options below
+        auto label = [this] (const juce::String& text) {
+            auto l = std::make_unique<juce::Label> (juce::String(), text);
+            l->setFont (theme::font (theme::type::body));
+            l->setJustificationType (juce::Justification::centredRight);
+            content.addAndMakeVisible (*l);
+            labels.push_back (std::move (l));
+        };
+        label (tr ("Which tracks to import?"));
+        content.addAndMakeVisible (tracks);
+        label (tr ("Which channels to import?"));
+        content.addAndMakeVisible (channels);
+        if (! pianoRoll)
+        {
+            label (tr ("Channel type"));
+            content.addAndMakeVisible (channelType);
+        }
+        label (tr ("Which controller?"));
+        content.addAndMakeVisible (controller);
+
+        content.onLayout = [this] { layout(); };
+        const auto rows = pianoRoll ? 3 : 4;
+        content.setSize (440, rows * 30 + 22 + ((int) optionBoxes.size() + 1) / 2 * 26 + 12);
+        addCustomComponent (&content);
 
         addButton (tr ("Accept"), 1, juce::KeyPress (juce::KeyPress::returnKey));
         addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
@@ -307,7 +338,7 @@ public:
             o.perTrack = perTrack.getToggleState();
             o.timeSignatures = timeSignatures.getToggleState();
             o.mixerTracks = mixerTracks.getToggleState();
-            o.midiOut = midiOut.getToggleState();
+            o.midiOut = channelType.getSelectedId() == 2;
         }
         o.realign = realign.getToggleState();
         o.zeroVelocityNotes = zeroVelocity.getToggleState();
@@ -320,19 +351,46 @@ public:
     }
 
 private:
-    void addComboLabel (const juce::String& text)
+    struct Content final : public juce::Component
     {
-        auto label = std::make_unique<juce::Label> (juce::String(), text);
-        label->setSize (360, 20);
-        label->setFont (theme::font (theme::type::caption, true));
-        addCustomComponent (label.get());
-        labels.push_back (std::move (label));
+        std::function<void()> onLayout;
+        void resized() override
+        {
+            if (onLayout)
+                onLayout();
+        }
+    };
+
+    void layout()
+    {
+        auto area = content.getLocalBounds();
+        std::size_t l = 0;
+        auto row = [&] (juce::Component& c, int height) {
+            auto r = area.removeFromTop (height);
+            area.removeFromTop (6);
+            if (l < labels.size())
+                labels[l++]->setBounds (r.removeFromLeft (190));
+            r.removeFromLeft (8);
+            c.setBounds (r);
+        };
+        row (tracks, 24);
+        row (channels, 44);
+        if (! roll)
+            row (channelType, 24);
+        row (controller, 24);
+        area.removeFromTop (6);
+        const auto half = (int) (optionBoxes.size() + 1) / 2;
+        auto left = area.removeFromLeft (area.getWidth() / 2);
+        for (std::size_t i = 0; i < optionBoxes.size(); ++i)
+            optionBoxes[i]->setBounds (((int) i < half ? left : area).removeFromTop (26));
     }
 
     bool roll = false;
     midiimport::Options kept;
-    juce::ToggleButton newProject, perTrack, realign, timeSignatures, mixerTracks, midiOut, zeroVelocity, blend;
-    juce::ComboBox tracks, controller;
+    Content content;
+    juce::ToggleButton newProject, perTrack, realign, timeSignatures, mixerTracks, zeroVelocity, blend;
+    std::vector<juce::ToggleButton*> optionBoxes;
+    juce::ComboBox tracks, controller, channelType;
     std::vector<int> trackIds, controllerIds;
     MidiChannelFilter channels;
     std::vector<std::unique_ptr<juce::Label>> labels;

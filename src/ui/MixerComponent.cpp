@@ -147,20 +147,24 @@ void MixerStrips::layoutStrips()
     bool any = false, afterMaster = false;
     for (auto dock : { MixerDock::left, MixerDock::middle, MixerDock::right })
     {
+        const auto d = (int) dock;
+        blockStart[d] = x;
         bool first = true;
         for (int t = 0; t < tracks; ++t)
         {
             const auto& track = song.mixer[(std::size_t) t];
             if (track.dock != dock)
                 continue;
-            if (any && first)
+            if (any && first && dock == MixerDock::right)
             {
-                dockGaps.push_back (x + dockGap / 2 - 2);
+                // the gap between two blocks belongs to the pinned block: the right block's is before its strips,
+                // the left block's after them (below)
+                dockGaps.push_back ({ x + dockGap / 2 - 2, dock });
                 x += dockGap;
             }
             else if (! first && track.separator && t > 0)
             {
-                separatorLines.push_back (x + separatorGap / 2 - 3);
+                separatorLines.push_back ({ x + separatorGap / 2 - 3, dock });
                 x += separatorGap;
             }
             else if (afterMaster)
@@ -180,14 +184,40 @@ void MixerStrips::layoutStrips()
             afterMaster = false;
             any = true;
         }
+        blockEnd[d] = x;
+        if (dock == MixerDock::left && ! first) // the left block carries its gap to the middle
+        {
+            dockGaps.push_back ({ x + dockGap / 2 - 2, dock });
+            x += dockGap;
+            blockEnd[d] = x;
+            afterMaster = false;
+        }
     }
     contentWidth = x + 8;
+}
+
+MixerDock MixerStrips::dockOf (int track) const noexcept
+{
+    const auto& mixer = engine.getSong().mixer;
+    return track >= 0 && track < (int) mixer.size() ? mixer[(std::size_t) track].dock : MixerDock::middle;
+}
+
+int MixerStrips::pinOffset (MixerDock dock) const noexcept
+{
+    auto* parent = getParentComponent();
+    if (parent == nullptr || dock == MixerDock::middle)
+        return 0;
+    const auto scroll = juce::jmax (0, -getX());
+    const auto visible = parent->getWidth();
+    if (dock == MixerDock::left)
+        return blockEnd[0] > blockStart[0] ? juce::jmin (scroll, juce::jmax (0, contentWidth - blockEnd[0])) : 0;
+    return blockEnd[2] > blockStart[2] ? juce::jmin (0, scroll + visible - contentWidth) : 0;
 }
 
 int MixerStrips::stripX (int track) const noexcept
 {
     if (track >= 0 && track < (int) stripXs.size())
-        return stripXs[(std::size_t) track];
+        return stripXs[(std::size_t) track] + pinOffset (dockOf (track));
     return track == 0 ? 4 : 4 + masterWidth + 8 + (track - 1) * stripWidth;
 }
 
@@ -195,9 +225,11 @@ int MixerStrips::trackAt (int x) const noexcept
 {
     const auto tracks = (int) engine.getSong().mixer.size();
 
-    for (int t = 0; t <= tracks; ++t) // t == tracks = "+" button
-        if (x >= stripX (t) && x < stripX (t) + stripWidthOf (t))
-            return t;
+    // the pinned blocks lie over the scrolled middle: they are hit first
+    for (auto dock : { MixerDock::left, MixerDock::right, MixerDock::middle })
+        for (int t = 0; t <= tracks; ++t) // t == tracks = "+" button
+            if (dockOf (t) == dock && x >= stripX (t) && x < stripX (t) + stripWidthOf (t))
+                return t;
 
     return -1;
 }
@@ -385,8 +417,50 @@ void MixerStrips::paint (juce::Graphics& g)
     g.setColour (colour::bg0.withAlpha (0.55f));
     g.fillRect (0, laneTop() + switchHeight + sendKnobHeight + 2, getWidth(), wiresHeight + 2);
 
+    // FL's separators (a line on the left of the track) and the gaps between the dock blocks (round 146a), drawn
+    // per block so the pinned left / right blocks cover the scrolled middle (round 149)
+    auto paintDividers = [&] (MixerDock dock) {
+        const auto shift = pinOffset (dock);
+        g.setColour (colour::borderStrong);
+        for (auto [lx, d] : separatorLines)
+            if (d == dock)
+                g.fillRoundedRectangle ((float) (lx + shift), 8.0f, 2.0f, (float) laneTop() - 14.0f, 1.0f);
+        g.setColour (colour::bg0);
+        for (auto [gx, d] : dockGaps)
+            if (d == dock)
+                g.fillRect (gx + shift - 3, 0, 6, getHeight());
+    };
+
+    for (auto pass : { MixerDock::middle, MixerDock::left, MixerDock::right })
+    {
+    if (pass == MixerDock::middle)
+    {
+        // "+" button
+        if (tracks < maxMixerTracks)
+        {
+            const auto add = juce::Rectangle<int> (stripX (tracks), 2, stripWidth - 4, 60).toFloat();
+            const auto addHovered = hoverPart == Part::add;
+            g.setColour (addHovered ? colour::bg4 : colour::bg2);
+            g.fillRoundedRectangle (add, radius::md);
+            g.setColour (addHovered ? colour::borderStrong : colour::border);
+            g.drawRoundedRectangle (add.reduced (0.5f), radius::md, 1.0f);
+            icons::draw (g, Icon::plus, add.withSizeKeepingCentre (22.0f, 22.0f), addHovered ? colour::textPrimary : colour::textSecondary);
+        }
+    }
+    else if (const auto shift = pinOffset (pass); shift != 0) // a pinned block hides what scrolls under it
+    {
+        const auto d = (int) pass;
+        g.setColour (colour::bg1);
+        g.fillRect (blockStart[d] + shift, 0, blockEnd[d] - blockStart[d], laneTop());
+        g.setColour (colour::bg0.withAlpha (0.55f));
+        g.fillRect (blockStart[d] + shift, laneTop(), blockEnd[d] - blockStart[d], getHeight() - laneTop());
+    }
+
     for (int t = 0; t < tracks; ++t)
     {
+        if (song.mixer[(std::size_t) t].dock != pass)
+            continue;
+
         const auto x = stripX (t);
         const auto w = stripWidthOf (t);
 
@@ -621,28 +695,10 @@ void MixerStrips::paint (juce::Graphics& g)
             }
         }
     }
-
-    // FL's separators (a line on the left of the track) and the gaps between the dock blocks (round 146a)
-    g.setColour (colour::borderStrong);
-    for (auto lx : separatorLines)
-        g.fillRoundedRectangle ((float) lx, 8.0f, 2.0f, (float) laneTop() - 14.0f, 1.0f);
-    g.setColour (colour::bg0);
-    for (auto gx : dockGaps)
-        g.fillRect (gx - 3, 0, 6, getHeight());
+    paintDividers (pass);
+    }
 
     paintRouting (g);
-
-    // "+" button
-    if (tracks < maxMixerTracks)
-    {
-        const auto add = juce::Rectangle<int> (stripX (tracks), 2, stripWidth - 4, 60).toFloat();
-        const auto addHovered = hoverPart == Part::add;
-        g.setColour (addHovered ? colour::bg4 : colour::bg2);
-        g.fillRoundedRectangle (add, radius::md);
-        g.setColour (addHovered ? colour::borderStrong : colour::border);
-        g.drawRoundedRectangle (add.reduced (0.5f), radius::md, 1.0f);
-        icons::draw (g, Icon::plus, add.withSizeKeepingCentre (22.0f, 22.0f), addHovered ? colour::textPrimary : colour::textSecondary);
-    }
 }
 
 // Wires in the lane under the strips: from the selected insert to where it sends (accent), and from the
