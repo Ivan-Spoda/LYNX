@@ -347,7 +347,7 @@ TEST (parity135f_crest_wet_dry_pan)
     using namespace dyn108;
     namespace c = lynx::dyn::crest;
     auto p = defaults (EffectKind::crestCompressor);
-    CHECK (p[c::wetPan] == 0.5f && p[c::dryPan] == 0.5f && c::count == c::dryPan + 1);
+    CHECK (p[c::wetPan] == 0.5f && p[c::dryPan] == 0.5f && c::trigger == c::dryPan + 1);
     CHECK (lynx::dyn::paramText (EffectKind::crestCompressor, c::wetPan, 1.0f) == "100% R");
     // all wet, the wet path panned hard right: the left channel is silent, the right one is the compressed signal
     auto run2 = [] (const EffectParams& q, std::vector<float>& l, std::vector<float>& r) {

@@ -51,8 +51,21 @@ enum Param
     dryGain, autoThreshold, linkMode, meterScale, inputMeter,
     // round 135 (Pro-C 3 parity): the wet (compressed) and dry paths' stereo balance
     wetPan, dryPan,
+    // round 137 (Pro-C 3 parity, appended; off by default): the side-chain trigger — the detector hears a 0 dBFS
+    // pulse (× the side-chain level) instead of the audio: Host sync = a pulse every note × rate, Length of that
+    // period long, on the song position; MIDI = while a note is held on the chosen Channel Rack channel.
+    // [EXEC] measured on the trial (REA_rodada137 §6)
+    trigger, triggerSync, triggerRate, triggerLength, triggerChannel,
     count
 };
+enum class Trigger { off, hostSync, midi };
+Trigger triggerOf (float v) noexcept;
+double triggerBeats (float v) noexcept;     // whole, 1/2, 1/4, 1/8, 1/16 note (quarter notes: 4 … 0.25)
+double triggerRateOf (float v) noexcept;    // 0.5 … 2 (the trial's "offset" 50 … 200 %, log)
+double triggerLengthOf (float v) noexcept;  // 0 … 1 of the period
+int triggerChannelOf (float v) noexcept;    // −1 = off, else 0 … 127
+// the host-sync pulse at a song position (quarter notes): 1 inside the pulse, else 0
+float hostTrigger (const EffectParams& p, double beats) noexcept;
 constexpr int scBands = 3;
 // stereo-link modes: L/R (the classic linked or split stereo detection), mid only, side only, mid triggers the side,
 // side triggers the mid (the last four process in mid / side)
