@@ -1,10 +1,13 @@
 #include "ui/PianoRollComponent.h"
 
 #include "core/EditorPolish.h"
+#include "core/EventEdit.h"
 #include "core/NoteEdit.h"
 #include "core/NoteTools.h"
 #include "engine/MidiFileIo.h"
+#include "ui/Dialogs.h"
 #include "engine/Text.h"
+#include "ui/AutomationUi.h"
 #include "ui/EventEditor.h"
 #include "ui/HintBar.h"
 #include "ui/I18n.h"
@@ -835,7 +838,38 @@ void PianoRollComponent::paint (juce::Graphics& g)
             g.drawHorizontalLine ((int) base, (float) lane.getX(), (float) lane.getRight());
         }
 
-        for (int i = 0; i < (int) pattern.notes.size(); ++i)
+        if (const auto target = eventLaneTarget()) // pattern events: held values, a dot on each event
+        {
+            const auto* events = eventedit::findLane (pattern, *target);
+            if (events != nullptr && ! events->events.empty())
+            {
+                juce::Path held;
+                const auto yOf = [&] (float v) { return (float) lane.getBottom() - 2.0f - usable * v; };
+                auto x = (float) tickToX (0.0);
+                auto y = yOf (events->events.front().value);
+                held.startNewSubPath (x, y);
+                for (const auto& ev : events->events)
+                {
+                    const auto ex = (float) tickToX ((double) ev.tick);
+                    held.lineTo (ex, y);
+                    y = yOf (ev.value);
+                    held.lineTo (ex, y);
+                }
+                held.lineTo ((float) lane.getRight(), y);
+                g.setColour (accent.withAlpha (0.85f));
+                g.strokePath (held, juce::PathStrokeType (1.5f));
+                for (const auto& ev : events->events)
+                    g.fillEllipse ((float) tickToX ((double) ev.tick) - 2.5f, yOf (ev.value) - 2.5f, 5.0f, 5.0f);
+            }
+            else
+            {
+                g.setColour (textDisabled);
+                g.setFont (theme::font (theme::type::small));
+                g.drawText (tr ("No events yet: draw them here"), lane.reduced (8, 4), juce::Justification::centredLeft, true);
+            }
+        }
+
+        for (int i = 0; i < (int) pattern.notes.size() && ! eventLaneTarget(); ++i)
         {
             const auto& n = pattern.notes[(std::size_t) i];
 
@@ -1220,6 +1254,15 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
+    if (velocityArea().contains (e.getPosition()) && eventLaneTarget())
+    {
+        // pattern events: drag draws one event per grid step, right-drag erases
+        lastVelocityX = e.x;
+        drag = e.mods.isRightButtonDown() ? Drag::eventErase : Drag::eventDraw;
+        drawEvents (e.x, e.x, e.y, drag == Drag::eventErase);
+        return;
+    }
+
     if (velocityArea().contains (e.getPosition()))
     {
         const auto lane = velocityArea();
@@ -1576,6 +1619,12 @@ void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
             lastVelocityX = e.x;
             return;
 
+        case Drag::eventDraw:
+        case Drag::eventErase:
+            drawEvents (lastVelocityX, e.x, e.y, drag == Drag::eventErase);
+            lastVelocityX = e.x;
+            return;
+
         case Drag::velocitySet:
             applyLaneValue (e.x, laneSetValue, lastVelocityX);
             lastVelocityX = e.x;
@@ -1840,6 +1889,15 @@ void PianoRollComponent::postDragHint (const juce::MouseEvent& e)
             hint.text = tr ("Resizing {0} note(s)  [Alt] no snap", { count });
             hint.value = juce::String ((double) notes[(std::size_t) dragNote].length / ticksPerStep, 2) + " " + tr ("steps");
             break;
+        case Drag::eventDraw:
+        case Drag::eventErase:
+        {
+            const auto lane = velocityArea();
+            const auto value = juce::jlimit (0.0f, 1.0f, (float) (lane.getBottom() - 2 - e.y) / (float) (lane.getHeight() - 8));
+            hint.text = drag == Drag::eventErase ? tr ("Deleting events") : tr ("Drawing events: {0}", { laneBox.getText() });
+            hint.value = juce::String (juce::roundToInt (value * 100.0f)) + "%";
+            break;
+        }
         case Drag::velocity:
         case Drag::velocitySet:
         case Drag::velocityLine:
@@ -2984,19 +3042,36 @@ juce::PopupMenu PianoRollComponent::midiMenu()
                 return;
 
             juce::String error;
-            auto notes = MidiFileIo::loadNotes (fc.getResult(), engine.getSelectedChannel(), error);
+            const auto file = fc.getResult();
+            const auto midi = MidiFileIo::parseFile (file, error);
 
-            if (! notes)
+            if (! midi)
             {
                 juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "MIDI", error);
                 return;
             }
 
-            std::vector<int> added;
-            editNotes ([&] (Pattern& p) { added = noteedit::paste (p, *notes, 0); });
-            setSelection (added);
-            sortNotes();
-            scrollToNotes();
+            // FL's "Import MIDI data" window with Blend (REA round 146b): which tracks / channels / controller
+            static midiimport::Options remembered;
+            juce::Component::SafePointer<PianoRollComponent> safe (this);
+            showMidiImportDialog (file.getFileName(), *midi, remembered, true, [safe, midi = *midi] (const midiimport::Options& o) {
+                remembered = o;
+                if (safe == nullptr)
+                    return;
+                std::vector<int> added;
+                std::string err;
+                const auto channel = safe->engine.getSelectedChannel();
+                safe->engine.editSong ([&] (Song& s) { added = midiimport::importIntoChannel (s, channel, midi, o, err); });
+                if (added.empty())
+                {
+                    juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "MIDI", juce::String::fromUTF8 (err.c_str()));
+                    return;
+                }
+                safe->knownNoteCount = currentPattern (safe->engine.getSong()).notes.size();
+                safe->setSelection (added);
+                safe->scrollToNotes();
+                safe->repaint();
+            });
         });
     });
     menu.addItem (tr ("Export pattern as .mid..."), [this] {
@@ -3054,8 +3129,80 @@ void PianoRollComponent::changeListenerCallback (juce::ChangeBroadcaster*)
     }
 
     refreshChannelBox();
+    rebuildLaneBox();
     updateScrollBars();
     repaint();
+}
+
+std::optional<AutomationTarget> PianoRollComponent::eventLaneTarget() const
+{
+    const auto k = laneBox.getSelectedId() - eventLaneIdBase;
+    if (k >= 0 && k < (int) eventTargets.size())
+        return eventTargets[(std::size_t) k];
+    return std::nullopt;
+}
+
+void PianoRollComponent::rebuildLaneBox (std::optional<AutomationTarget> shown, bool force)
+{
+    // the pattern's event lanes, plus the one shown (it may have no events yet)
+    if (! shown)
+        shown = eventLaneTarget();
+    std::vector<AutomationTarget> targets;
+    for (const auto& lane : currentPattern (engine.getSong()).events)
+        if (lane.target.kind != AutomationTargetKind::none && ! lane.events.empty())
+            targets.push_back (lane.target);
+    if (shown && std::find (targets.begin(), targets.end(), *shown) == targets.end())
+        targets.push_back (*shown);
+    if (targets == eventTargets && ! force)
+        return;
+
+    eventTargets = targets;
+    const auto previous = laneBox.getSelectedId();
+    laneBox.clear (juce::dontSendNotification);
+    laneBox.addItem (tr ("Velocity"), 1);
+    laneBox.addItem (tr ("Pan"), 2);
+    laneBox.addItem (tr ("Fine pitch"), 3);
+    if (! eventTargets.empty())
+        laneBox.addSectionHeading (tr ("Pattern events"));
+    for (int k = 0; k < (int) eventTargets.size(); ++k)
+        laneBox.addItem (describeAutomationTarget (engine, eventTargets[(std::size_t) k]), eventLaneIdBase + k);
+    auto id = previous >= 1 && previous <= 3 ? previous : 1;
+    if (shown)
+        id = eventLaneIdBase + (int) (std::find (eventTargets.begin(), eventTargets.end(), *shown) - eventTargets.begin());
+    laneBox.setSelectedId (id, juce::dontSendNotification);
+}
+
+void PianoRollComponent::showEventLane (const AutomationTarget& target)
+{
+    rebuildLaneBox (target, true);
+    repaint();
+}
+
+void PianoRollComponent::drawEvents (int fromX, int toX, int y, bool erase)
+{
+    const auto target = eventLaneTarget();
+    if (! target)
+        return;
+    const auto lane = velocityArea();
+    const auto value = juce::jlimit (0.0f, 1.0f, (float) (lane.getBottom() - 2 - y) / (float) (lane.getHeight() - 8));
+    const auto step = std::max<std::int64_t> (1, gridTicks());
+    const auto t0 = std::max<std::int64_t> (0, (std::int64_t) std::floor (xToTick (juce::jmin (fromX, toX)) / (double) step) * step);
+    const auto t1 = std::max (t0 + step, (std::int64_t) std::floor (xToTick (juce::jmax (fromX, toX)) / (double) step) * step + step);
+    const auto pattern = engine.getSong().currentPattern;
+    engine.editSong ([&] (Song& s) {
+        if (pattern < 0 || pattern >= (int) s.patterns.size())
+            return;
+        auto& p = s.patterns[(std::size_t) pattern];
+        if (erase)
+        {
+            if (auto* l = eventedit::findLane (p, *target))
+                eventedit::erase (*l, t0, t1);
+            eventedit::removeEmptyLanes (p);
+        }
+        else
+            eventedit::fill (eventedit::laneFor (p, *target), t0, t1, value, step);
+    });
+    repaint (velocityArea());
 }
 
 void PianoRollComponent::timerCallback()

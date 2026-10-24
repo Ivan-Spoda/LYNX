@@ -1,5 +1,7 @@
 #include "ui/Dialogs.h"
 
+#include <set>
+
 #include "core/RackOps.h"
 #include "engine/MidiFileIo.h"
 #include "ui/I18n.h"
@@ -178,12 +180,48 @@ std::unique_ptr<juce::AlertWindow> makeRecordChoiceDialog()
 
 namespace
 {
-// FL's "Import MIDI data" window (REA round 143, TMIDIImportForm): its options as LYNX can apply them
+// FL's "Import MIDI data" window (REA rounds 143 / 146b, TMIDIImportForm): its options as LYNX can apply them
+class MidiChannelFilter final : public juce::Component,
+                                public juce::SettableTooltipClient
+{
+public:
+    std::uint16_t mask = 0xFFFF;
+
+    MidiChannelFilter() { setSize (360, 24); setTooltip (tr ("Deselect MIDI channels to filter out")); }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto w = getWidth() / 16.0f;
+        for (int c = 0; c < 16; ++c)
+        {
+            const auto r = juce::Rectangle<float> (c * w, 0.0f, w, (float) getHeight()).reduced (1.5f);
+            const auto on = (mask >> c & 1) != 0;
+            g.setColour (on ? theme::colour::accent : theme::colour::bg3);
+            g.fillRoundedRectangle (r, 3.0f);
+            g.setColour (on ? theme::colour::textPrimary : theme::colour::textSecondary);
+            g.setFont (theme::font (theme::type::caption));
+            g.drawText (juce::String (c + 1), r, juce::Justification::centred);
+        }
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        const auto c = juce::jlimit (0, 15, (int) (e.x / (getWidth() / 16.0f)));
+        if (e.mods.isPopupMenu() || e.mods.isCtrlDown())
+            mask = mask == (std::uint16_t) (1u << c) ? (std::uint16_t) 0xFFFF : (std::uint16_t) (1u << c); // solo / all
+        else
+            mask ^= (std::uint16_t) (1u << c);
+        repaint();
+    }
+};
+
 class MidiImportWindow final : public juce::AlertWindow
 {
 public:
-    MidiImportWindow (const juce::String& fileName, const MidiFileIo::ImportOptions& o)
-        : juce::AlertWindow (tr ("Import MIDI data"), fileName, juce::MessageBoxIconType::NoIcon)
+    MidiImportWindow (const juce::String& fileName, const midiimport::ParsedMidi& midi, const midiimport::Options& o, bool pianoRoll)
+        : juce::AlertWindow (tr ("Import MIDI data"), fileName, juce::MessageBoxIconType::NoIcon),
+          roll (pianoRoll),
+          kept (o)
     {
         auto add = [this] (juce::ToggleButton& b, const juce::String& text, const juce::String& hint, bool on) {
             b.setButtonText (text);
@@ -192,38 +230,119 @@ public:
             b.setSize (360, 24);
             addCustomComponent (&b);
         };
-        add (newProject, tr ("Start new project"), tr ("Start a blank project, or add to the open one"), o.newProject);
-        add (perTrack, tr ("Create one channel per track"), tr ("One channel per track, or per MIDI channel"), o.perTrack);
+        if (pianoRoll)
+            add (blend, tr ("Blend with existing data"), tr ("Don't delete the channel's notes before importing"), o.blend);
+        else
+        {
+            add (newProject, tr ("Start new project"), tr ("Start a blank project, or add to the open one"), o.newProject);
+            add (perTrack, tr ("Create one channel per track"), tr ("One channel per track, or per MIDI channel"), o.perTrack);
+        }
         add (realign, tr ("Realign events"), tr ("Removes any silent part at the beginning"), o.realign);
-        add (timeSignatures, tr ("Import time signatures"), tr ("The file's time signature becomes the new project's"), o.timeSignatures);
-        add (mixerTracks, tr ("Set mixer tracks for new channels"), tr ("Route new channels to consecutive mixer tracks"), o.mixerTracks);
-        add (midiOut, tr ("Channel type: MIDI Out (else LYNX's synth)"), tr ("MIDI Out channels play the plugins on their MIDI port, on the note's MIDI channel"),
-             o.midiOut);
+        if (! pianoRoll)
+        {
+            add (timeSignatures, tr ("Import time signatures"), tr ("The file's time signature becomes the new project's"), o.timeSignatures);
+            add (mixerTracks, tr ("Set mixer tracks for new channels"), tr ("Route new channels to consecutive mixer tracks"), o.mixerTracks);
+            add (midiOut, tr ("Channel type: MIDI Out (else LYNX's synth)"), tr ("MIDI Out channels play the plugins on their MIDI port, on the note's MIDI channel"),
+                 o.midiOut);
+        }
+        add (zeroVelocity, tr ("Import zero velocity notes"), tr ("Don't treat note on messages with zero velocity as note off"), o.zeroVelocityNotes);
+
+        // Which tracks to import?
+        tracks.addItem (tr ("All tracks"), 1);
+        trackIds.push_back (-1);
+        for (const auto t : midiimport::tracksWithContent (midi))
+        {
+            const auto& name = t < (int) midi.trackNames.size() ? midi.trackNames[(std::size_t) t] : std::string();
+            tracks.addItem (juce::String (t + 1) + ". " + (name.empty() ? tr ("Track {0}", { juce::String (t + 1) }) : juce::String::fromUTF8 (name.c_str())),
+                            (int) trackIds.size() + 1);
+            trackIds.push_back (t);
+        }
+        tracks.setSelectedId (1, juce::dontSendNotification);
+        for (std::size_t i = 0; i < trackIds.size(); ++i)
+            if (trackIds[i] == o.track)
+                tracks.setSelectedId ((int) i + 1, juce::dontSendNotification);
+        tracks.setSize (360, 24);
+        addComboLabel (tr ("Which tracks to import?"));
+        addCustomComponent (&tracks);
+
+        // Which channels to import?
+        channels.mask = o.channels;
+        addComboLabel (tr ("Which channels to import? (click: on / off, right-click: only this one)"));
+        addCustomComponent (&channels);
+
+        // Which controller to import? (the ones LYNX applies: 7 / 11 volume, 10 pan, when the file has them)
+        controller.addItem (tr ("None"), 1);
+        controllerIds.push_back (-1);
+        std::set<int> present;
+        for (const auto& e : midi.events)
+            if ((e.status & 0xF0) == 0xB0)
+                present.insert (e.data1);
+        for (const auto& [cc, label] : { std::pair<int, const char*> { 7, TR_NOOP ("CC 7 (volume) → channel volume") },
+                                         { 11, TR_NOOP ("CC 11 (expression) → channel volume") }, { 10, TR_NOOP ("CC 10 (pan) → channel pan") } })
+            if (present.count (cc) > 0 || cc == o.controller)
+            {
+                controller.addItem (tr (label), (int) controllerIds.size() + 1);
+                controllerIds.push_back (cc);
+            }
+        controller.setSelectedId (1, juce::dontSendNotification);
+        for (std::size_t i = 0; i < controllerIds.size(); ++i)
+            if (controllerIds[i] == o.controller)
+                controller.setSelectedId ((int) i + 1, juce::dontSendNotification);
+        controller.setSize (360, 24);
+        addComboLabel (tr ("Which controller to import? (into the pattern's events)"));
+        addCustomComponent (&controller);
+
         addButton (tr ("Accept"), 1, juce::KeyPress (juce::KeyPress::returnKey));
         addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
     }
 
-    MidiFileIo::ImportOptions options() const
+    midiimport::Options options() const
     {
-        MidiFileIo::ImportOptions o;
-        o.newProject = newProject.getToggleState();
-        o.perTrack = perTrack.getToggleState();
+        auto o = kept;
+        if (roll)
+            o.blend = blend.getToggleState();
+        else
+        {
+            o.newProject = newProject.getToggleState();
+            o.perTrack = perTrack.getToggleState();
+            o.timeSignatures = timeSignatures.getToggleState();
+            o.mixerTracks = mixerTracks.getToggleState();
+            o.midiOut = midiOut.getToggleState();
+        }
         o.realign = realign.getToggleState();
-        o.timeSignatures = timeSignatures.getToggleState();
-        o.mixerTracks = mixerTracks.getToggleState();
-        o.midiOut = midiOut.getToggleState();
+        o.zeroVelocityNotes = zeroVelocity.getToggleState();
+        const auto t = tracks.getSelectedId() - 1;
+        o.track = t >= 0 && t < (int) trackIds.size() ? trackIds[(std::size_t) t] : -1;
+        o.channels = channels.mask;
+        const auto c = controller.getSelectedId() - 1;
+        o.controller = c >= 0 && c < (int) controllerIds.size() ? controllerIds[(std::size_t) c] : -1;
         return o;
     }
 
 private:
-    juce::ToggleButton newProject, perTrack, realign, timeSignatures, mixerTracks, midiOut;
+    void addComboLabel (const juce::String& text)
+    {
+        auto label = std::make_unique<juce::Label> (juce::String(), text);
+        label->setSize (360, 20);
+        label->setFont (theme::font (theme::type::caption, true));
+        addCustomComponent (label.get());
+        labels.push_back (std::move (label));
+    }
+
+    bool roll = false;
+    midiimport::Options kept;
+    juce::ToggleButton newProject, perTrack, realign, timeSignatures, mixerTracks, midiOut, zeroVelocity, blend;
+    juce::ComboBox tracks, controller;
+    std::vector<int> trackIds, controllerIds;
+    MidiChannelFilter channels;
+    std::vector<std::unique_ptr<juce::Label>> labels;
 };
 } // namespace
 
-void showMidiImportDialog (const juce::String& fileName, const MidiFileIo::ImportOptions& current,
-                           std::function<void (const MidiFileIo::ImportOptions&)> onAccept)
+void showMidiImportDialog (const juce::String& fileName, const midiimport::ParsedMidi& midi, const midiimport::Options& current, bool pianoRoll,
+                           std::function<void (const midiimport::Options&)> onAccept)
 {
-    auto* window = new MidiImportWindow (fileName, current);
+    auto* window = new MidiImportWindow (fileName, midi, current, pianoRoll);
     window->enterModalState (true, juce::ModalCallbackFunction::create ([window, onAccept] (int result) {
                                  if (result == 1)
                                      onAccept (window->options());
@@ -234,7 +353,10 @@ void showMidiImportDialog (const juce::String& fileName, const MidiFileIo::Impor
 
 std::unique_ptr<juce::AlertWindow> makeMidiImportDialog()
 {
-    return std::make_unique<MidiImportWindow> ("song.mid", MidiFileIo::ImportOptions {});
+    midiimport::ParsedMidi midi;
+    midi.trackNames = { "", "Piano", "Strings" };
+    midi.events = { { 1, 0, 0x90, 60, 100 }, { 1, 0, 0xB0, 7, 100 }, { 2, 0, 0x91, 64, 90 } };
+    return std::make_unique<MidiImportWindow> ("song.mid", midi, midiimport::Options {}, false);
 }
 
 void showRecordChoiceDialog (std::function<void (int, bool)> onChoice)

@@ -726,7 +726,7 @@ public:
         };
         styleNote (pickupNote, tr ("A controller moves a parameter only after reaching its current value, so nothing jumps."));
 
-        styleLabel (linksLabel, tr ("Links in this project"));
+        styleLabel (linksLabel, tr ("Links (this project, then global)"));
         linksLabel.setJustificationType (juce::Justification::topLeft);
         links.setModel (this);
         links.setRowHeight (24);
@@ -735,8 +735,11 @@ public:
         links.setOutlineThickness (1);
         removeLink.onClick = [this] {
             const auto row = links.getSelectedRow();
-            if (juce::isPositiveAndBelow (row, (int) engine.getSong().midiLinks.size()))
+            const auto projectLinks = (int) engine.getSong().midiLinks.size();
+            if (juce::isPositiveAndBelow (row, projectLinks))
                 engine.editSong ([row] (Song& s) { s.midiLinks.erase (s.midiLinks.begin() + row); });
+            else if (const auto global = engine.getGlobalLinks(); juce::isPositiveAndBelow (row - projectLinks, (int) global.size()))
+                engine.removeGlobalLink (global[(std::size_t) (row - projectLinks)].target);
         };
         removeAll.onClick = [this] { engine.editSong ([] (Song& s) { s.midiLinks.clear(); }); };
 
@@ -820,6 +823,9 @@ private:
         removeAll.setEnabled (! engine.getSong().midiLinks.empty());
     }
 
+    // the project's links, then the global ones (settings; FL's "Override global link...", REA round 146)
+    int linkRows() const { return (int) (engine.getSong().midiLinks.size() + engine.getGlobalLinks().size()); }
+
     void rebuildInputs()
     {
         rows.clear();
@@ -850,12 +856,15 @@ private:
     }
 
     // links list
-    int getNumRows() override { return juce::jmax (1, (int) engine.getSong().midiLinks.size()); }
+    int getNumRows() override { return juce::jmax (1, linkRows()); }
 
     void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected) override
     {
-        const auto& list = engine.getSong().midiLinks;
-        if (list.empty())
+        auto list = engine.getSong().midiLinks;
+        const auto projectLinks = (int) list.size();
+        for (const auto& l : engine.getGlobalLinks())
+            list.push_back (l);
+        if (list.empty() || row >= (int) list.size())
         {
             g.setFont (theme::font (theme::type::small));
             g.setColour (theme::colour::textDisabled);
@@ -873,10 +882,11 @@ private:
         const auto source = "CC " + juce::String (link.cc) + (link.channel >= 0 ? juce::String::fromUTF8 (" \xc2\xb7 ") + tr ("ch. {0}", { juce::String (link.channel + 1) }) : juce::String());
         g.drawText (source, 10, 0, 110, height, juce::Justification::centredLeft);
         g.setColour (theme::colour::textPrimary);
-        g.drawText (describeAutomationTarget (engine, link.target), 124, 0, width - 134, height, juce::Justification::centredLeft, true);
+        g.drawText (describeAutomationTarget (engine, link.target) + (row >= projectLinks ? "  (" + tr ("global") + ")" : juce::String()), 124, 0,
+                    width - 134, height, juce::Justification::centredLeft, true);
     }
 
-    void selectedRowsChanged (int) override { removeLink.setEnabled (links.getSelectedRow() >= 0 && ! engine.getSong().midiLinks.empty()); }
+    void selectedRowsChanged (int) override { removeLink.setEnabled (links.getSelectedRow() >= 0 && linkRows() > 0); }
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override
     {

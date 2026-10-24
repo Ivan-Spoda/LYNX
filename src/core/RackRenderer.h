@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "core/Arpeggiator.h"
+#include "core/ChannelMiscFx.h"
 #include "core/VoiceLimit.h"
 #include "core/Biquad.h"
 #include "core/Effects.h"
@@ -77,6 +78,8 @@ struct RackState
 
     // Arpeggiators of channels with arpeggio on (nullptr for the others); reused across snapshots.
     std::vector<std::shared_ptr<Arpeggiator>> arpeggiators;
+    // Echo delays of channels with FL's Misc › Echo delay on (nullptr for the others; REA round 146b).
+    std::vector<std::shared_ptr<channelmisc::NoteEcho>> echoes;
 
     // Cut groups: channels each channel cuts when it plays (cutBy == its cutGroup).
     std::vector<std::vector<int>> cutTargets;
@@ -114,6 +117,9 @@ struct RackState
     void buildMixerGraph();
 
     void buildAutomationTables();
+    // The automation slots that drive `target` in a snapshot of `song` (its automations, then its pattern event
+    // lanes, numbered as buildAutomationTables numbers them). REA round 146: a touched control overrides them.
+    static void slotsOfTarget (const Song& song, const AutomationTarget& target, std::vector<int>& out);
 
     // MIDI Out channels (REA_rodada133 §4): which channels each one's notes and controls reach (the plugin channels
     // whose MIDI input port is its port), and the MIDI channel it sends on. Indexed by channel; empty / −1 otherwise.
@@ -243,6 +249,16 @@ public:
     static std::uint64_t nonFiniteEffectBlocks() noexcept;
     void resetUnitTimes() noexcept;
 
+    // FL's touched control wins over its playing automation while recording (REA round 146): the slots set here
+    // (RackState::slotsOfTarget) are not driven by automation clips / pattern events; the control's own value
+    // plays. UI thread writes, audio thread reads (relaxed: a block late at worst).
+    void setOverriddenSlots (const std::vector<int>& slots) noexcept;
+    bool isSlotOverridden (int slot) const noexcept
+    {
+        return slot >= 0 && slot < RackState::maxAutomations
+            && (overridden[(std::size_t) slot / 32].load (std::memory_order_relaxed) & (1u << ((unsigned) slot % 32))) != 0;
+    }
+
     // Tempo used in the last block (changes with tempo automation). The transport advances with it.
     double currentBpm() const noexcept { return bpm; }
 
@@ -276,6 +292,9 @@ private:
     EventBuffer events;
     std::vector<float> mixBuffers; // maxMixerTracks * 2 * blockCapacity
     std::array<float, RackState::maxAutomations> automationValues {}; // NaN = not evaluated yet
+    std::array<std::atomic<std::uint32_t>, RackState::maxAutomations / 32> overridden {}; // touched while recording
+    std::atomic<bool> anyOverridden { false };
+    void clearOverriddenValues() noexcept;
     std::array<float, maxMixerTracks * 2> lastTrackGain {}; // L/R gain of the previous block, for the ramp
     std::array<char, maxMixerTracks> trackActive {};        // the track output has sound in this block
     std::vector<float> tapBuffers;                          // RackState::maxSendTaps * 2 * chunkCapacity

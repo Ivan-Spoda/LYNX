@@ -378,6 +378,13 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                                          ? previous->arpeggiators[c]
                                          : std::make_shared<Arpeggiator>();
 
+    state->echoes.assign (channels.size(), nullptr);
+    for (std::size_t c = 0; c < channels.size(); ++c)
+        if (channels[c].misc.echo.enabled())
+            state->echoes[c] = previous != nullptr && c < previous->echoes.size() && previous->echoes[c] != nullptr
+                                   ? previous->echoes[c]
+                                   : std::make_shared<channelmisc::NoteEcho>();
+
     for (std::size_t c = 0; c < channels.size(); ++c)
         if (channels[c].cutGroup > 0)
             for (std::size_t d = 0; d < channels.size(); ++d)
@@ -733,6 +740,28 @@ void RackState::buildAutomationTables()
         }
 }
 
+void RackState::slotsOfTarget (const Song& song, const AutomationTarget& target, std::vector<int>& out)
+{
+    out.clear();
+    if (target.kind == AutomationTargetKind::none)
+        return;
+    const auto count = std::min<int> ((int) song.automations.size(), maxAutomations);
+    for (int a = 0; a < count; ++a)
+        if (song.automations[(std::size_t) a].target == target)
+            out.push_back (a);
+
+    auto slot = count;
+    for (const auto& pattern : song.patterns)
+        for (const auto& lane : pattern.events)
+        {
+            if (lane.events.empty() || lane.target.kind == AutomationTargetKind::tempo || slot >= maxAutomations)
+                continue;
+            if (lane.target == target)
+                out.push_back (slot);
+            ++slot;
+        }
+}
+
 namespace
 {
 // Constant-power pan: at center both sides are 1 (0 dB).
@@ -987,6 +1016,28 @@ float automationValueAt (const Song& song, const Automation& automation, const s
 }
 } // namespace
 
+void RackRenderer::setOverriddenSlots (const std::vector<int>& slots) noexcept
+{
+    std::array<std::uint32_t, RackState::maxAutomations / 32> bits {};
+    for (const auto s : slots)
+        if (s >= 0 && s < RackState::maxAutomations)
+            bits[(std::size_t) s / 32] |= 1u << ((unsigned) s % 32);
+    for (std::size_t i = 0; i < bits.size(); ++i)
+        overridden[i].store (bits[i], std::memory_order_relaxed);
+    anyOverridden.store (! slots.empty(), std::memory_order_release);
+}
+
+void RackRenderer::clearOverriddenValues() noexcept
+{
+    if (! anyOverridden.load (std::memory_order_acquire))
+        return;
+    for (std::size_t w = 0; w < overridden.size(); ++w)
+        if (auto bits = overridden[w].load (std::memory_order_relaxed); bits != 0)
+            for (unsigned b = 0; b < 32; ++b)
+                if ((bits & (1u << b)) != 0)
+                    automationValues[w * 32 + b] = std::numeric_limits<float>::quiet_NaN(); // the control's own value
+}
+
 void RackRenderer::updateAutomation (const RackState& state, double startTick) noexcept
 {
     const auto& song = state.song;
@@ -1056,6 +1107,7 @@ void RackRenderer::updateAutomation (const RackState& state, double startTick) n
     // in pattern mode the Playlist does not play: values stay as they were
     if (song.mode != PlayMode::song)
     {
+        clearOverriddenValues();
         if (! state.eventLanes.empty()) // only the plugin parameters driven by pattern events
             applyPluginParams (state, std::min<int> ((int) song.automations.size(), RackState::maxAutomations));
         return;
@@ -1068,6 +1120,7 @@ void RackRenderer::updateAutomation (const RackState& state, double startTick) n
         if (! state.automationClips[a].empty())
             automationValues[a] = automationValueAt (song, song.automations[a], state.automationClips[a], tick);
 
+    clearOverriddenValues();
     applyPluginParams (state, 0);
 }
 
@@ -1130,7 +1183,8 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
 
     // idle channel, no notes in this chunk and no PDC: nothing to do (neither clear nor sum into the mixer)
     const auto hasDelay = (std::size_t) i < state.channelDelays.size() && state.channelDelays[(std::size_t) i] != nullptr;
-    const auto hasArp = (std::size_t) i < state.arpeggiators.size() && state.arpeggiators[(std::size_t) i] != nullptr;
+    const auto hasArp = ((std::size_t) i < state.arpeggiators.size() && state.arpeggiators[(std::size_t) i] != nullptr)
+                        || ((std::size_t) i < state.echoes.size() && state.echoes[(std::size_t) i] != nullptr);
     const auto* sources = state.hasMidiRoutes && (std::size_t) i < state.midiSources.size() && ! state.midiSources[(std::size_t) i].empty()
                               ? &state.midiSources[(std::size_t) i] : nullptr;
     const auto routed = [sources] (int channel) {
@@ -1163,9 +1217,33 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
 
         int outCount = 0;
         arp.process (i, arp.input.data(), inCount, chunkStartTick, chunkTps, n, c.arp, arp.output.data(), outCount);
+        // FL cuts an arpeggio note at its gate even on a sample that plays out (REA round 146b [EXEC: FL's renders of
+        // its Sampler render test]): the arpeggio is one voice, so its "off" stops the channel's sound (not with the
+        // echo delay, whose echoes keep ringing)
+        if (! c.misc.echo.enabled())
+            for (int k = 0; k < outCount; ++k)
+                if (arp.output[(std::size_t) k].type == NoteEvent::Type::off)
+                    arp.output[(std::size_t) k].type = NoteEvent::Type::choke;
         list = arp.output.data();
         listCount = outCount;
     }
+
+    // FL's echo delay (Misc tab): the channel's notes (after the arpeggio) and their echoes
+    const float* gains = nullptr;
+    if ((std::size_t) i < state.echoes.size() && state.echoes[(std::size_t) i] != nullptr)
+    {
+        auto& echo = *state.echoes[(std::size_t) i];
+        int inCount = 0;
+        for (int k = 0; k < listCount; ++k)
+            if (list[k].channel == i && inCount < channelmisc::NoteEcho::maxEvents)
+                echo.input[(std::size_t) inCount++] = list[k];
+        int outCount = 0;
+        echo.process (i, echo.input.data(), inCount, chunkStartTick, chunkTps, n, c.misc.echo, echo.output.data(), echo.outputGains.data(), outCount);
+        list = echo.output.data();
+        listCount = outCount;
+        gains = echo.outputGains.data();
+    }
+    const auto tracking = c.misc.key.pan != 0.0f || c.misc.velocity.pan != 0.0f;
 
     for (int index = 0; index < listCount; ++index)
     {
@@ -1210,17 +1288,22 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
                 if (const auto limit = voiceLimitFor (c.maxPolyphony, c.synth.mono); limit > 0)
                     if (const auto victim = voiceOrders[(std::size_t) i].noteOn (e.key, limit); victim >= 0)
                         instrument.noteOff (victim);
-                instrument.setNextNoteExpression (e.pan, e.cents + state.song.masterPitch, e.porta);
+                const auto pan = tracking ? channelmisc::trackedPan (c.misc, e.key, e.velocity, e.pan) : e.pan;
+                instrument.setNextNoteExpression (pan, e.cents + (c.misc.mainPitch ? state.song.masterPitch : 0.0f), e.porta);
 
                 if (e.fadeIn > 0.0f || e.fadeOut > 0.0f)
                     instrument.setNextClipFades (e.clipElapsed, e.clipRemaining, e.fadeIn, e.fadeOut);
 
-                instrument.noteOnAt (e.key, e.velocity, e.startSeconds);
+                // an echo's volume: the instrument scales the voice, else (engines without it) the velocity
+                auto velocity = e.velocity;
+                if (gains != nullptr && gains[index] != 1.0f && ! instrument.setNextNoteGain (gains[index]))
+                    velocity *= gains[index];
+                instrument.noteOnAt (e.key, velocity, e.startSeconds);
             }
         }
         else if (e.type == NoteEvent::Type::slide)
         {
-            instrument.slideTo (e.key, e.cents + state.song.masterPitch, e.slideSamples);
+            instrument.slideTo (e.key, e.cents + (c.misc.mainPitch ? state.song.masterPitch : 0.0f), e.slideSamples);
         }
         else if (e.type == NoteEvent::Type::choke)
         {
@@ -1554,6 +1637,9 @@ void RackRenderer::process (const RackState* state,
         for (auto& arp : state->arpeggiators)
             if (arp != nullptr)
                 arp->reset();
+        for (auto& echo : state->echoes)
+            if (echo != nullptr)
+                echo->reset();
     }
 
     // FL's MIDI Out sends its bank and program when playback starts (REA_rodada16 §1.3)
@@ -1591,7 +1677,7 @@ void RackRenderer::process (const RackState* state,
     // tempo automation: the tempo holds for the whole block (evaluated at its start)
     bpm = state->song.bpm;
 
-    if (state->tempoAutomation >= 0 && state->song.mode == PlayMode::song)
+    if (state->tempoAutomation >= 0 && state->song.mode == PlayMode::song && ! isSlotOverridden (state->tempoAutomation))
     {
         const auto length = (double) std::max<std::int64_t> (1, state->schedule.songLength);
         const auto& clips = state->automationClips[(std::size_t) state->tempoAutomation];

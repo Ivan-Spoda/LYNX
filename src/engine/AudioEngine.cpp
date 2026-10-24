@@ -211,6 +211,7 @@ AudioEngine::AudioEngine (bool openAudioDevice)
             rackProcessor->getRenderer().setProfiling (true); // per-unit CPU for the CPU meter and the glitch log
         deviceStateSaver = std::make_unique<DeviceStateSaver> (*this);
         midiPrefs = midiPrefsShared = prefs::MidiPrefs::fromText (midiSettingsFile().loadFileAsString().toStdString());
+        saveGlobalLinks = true;
 
         prefetcher = std::make_unique<StreamPrefetcher> (transport);
         prefetcher->update (song, samples);
@@ -376,7 +377,46 @@ ProcessTimes* AudioEngine::getProcessTimes() noexcept
     return rackProcessor != nullptr ? &rackProcessor->processTimes() : nullptr;
 }
 
-void AudioEngine::play() noexcept { transport.playing.store (true); }
+void AudioEngine::play() noexcept
+{
+    if (! transport.playing.load())
+        resetToInitialValues();
+    transport.playing.store (true);
+}
+
+// FL resets its "initialized controls" whenever the song position is set in song mode (playing starts, a jump):
+// FUN_011e7470 plays the song's init list (PTR_DAT_015dfc48) before the pattern events (REA round 146).
+void AudioEngine::resetToInitialValues() noexcept
+{
+    if (song.initialValues.empty() || song.mode != PlayMode::song)
+        return;
+    try
+    {
+        auto differs = false;
+        for (const auto& v : song.initialValues)
+        {
+            const auto now = currentTargetValue (v.target);
+            differs = differs || (now >= 0.0f && std::abs (now - v.value) > 1.0e-6f);
+        }
+        if (! differs)
+            return;
+        std::vector<Song::InitialValue> plugins;
+        editSong ([&plugins] (Song& s) { s.applyInitialValues ([&plugins] (const AutomationTarget& t, float v) { plugins.push_back ({ t, v }); }); },
+                  false);
+        for (const auto& v : plugins)
+        {
+            if (v.target.kind == AutomationTargetKind::channelParam)
+                if (auto* p = dynamic_cast<PluginInstrument*> (getChannelInstrument (v.target.index).get()))
+                    p->setParameterFromUi (v.target.param, v.value);
+            if (v.target.kind == AutomationTargetKind::effectParam)
+                if (auto* p = dynamic_cast<PluginEffect*> (getEffect (v.target.index, v.target.slot).get()))
+                    p->setParameterFromUi (v.target.param, v.value);
+        }
+    }
+    catch (...)
+    {
+    }
+}
 
 void AudioEngine::stop() noexcept
 {
@@ -453,7 +493,12 @@ bool AudioEngine::isInsertArmed (int track) const noexcept
     return std::find (armedInserts.begin(), armedInserts.end(), track) != armedInserts.end();
 }
 void AudioEngine::rewind() noexcept { transport.rewindRequested.store (true); }
-void AudioEngine::seek (double ticks) noexcept { transport.seekRequest.store (juce::jmax (0.0, ticks)); }
+void AudioEngine::seek (double ticks) noexcept
+{
+    if (transport.playing.load())
+        resetToInitialValues(); // a jump while the song plays (FL sets the position the same way)
+    transport.seekRequest.store (juce::jmax (0.0, ticks));
+}
 
 void AudioEngine::copyScope (float* destination, int count) const noexcept
 {
@@ -1757,9 +1802,45 @@ void AudioEngine::publishSong()
     sendChangeMessage();
 }
 
+std::vector<MidiLink> AudioEngine::getGlobalLinks() const
+{
+    std::vector<MidiLink> out;
+    for (const auto& l : midiPrefs.globalLinks)
+        out.push_back ({ l.cc, l.channel, { (AutomationTargetKind) l.kind, l.index, l.slot, l.param } });
+    return out;
+}
+
+std::optional<MidiLink> AudioEngine::globalLinkOf (const AutomationTarget& target) const
+{
+    for (const auto& l : getGlobalLinks())
+        if (l.target == target)
+            return l;
+    return std::nullopt;
+}
+
+void AudioEngine::learnGlobalLink (const AutomationTarget& target)
+{
+    learning = target;
+    learningGlobal = true;
+    sendChangeMessage();
+}
+
+void AudioEngine::removeGlobalLink (const AutomationTarget& target)
+{
+    auto p = midiPrefs;
+    p.globalLinks.erase (std::remove_if (p.globalLinks.begin(), p.globalLinks.end(),
+                                         [&] (const prefs::GlobalLink& l) {
+                                             return l.kind == (int) target.kind && l.index == target.index && l.slot == target.slot
+                                                 && l.param == target.param;
+                                         }),
+                         p.globalLinks.end());
+    setMidiPrefs (p, saveGlobalLinks);
+}
+
 void AudioEngine::learnMidiController (const AutomationTarget& target)
 {
     learning = target;
+    learningGlobal = false;
     sendChangeMessage();
 }
 
@@ -1887,10 +1968,28 @@ void AudioEngine::updateAutomationRecording (bool active)
             writeFor (target).lastLocal = -1; // the next gesture on it starts a new stretch
     };
 
+    // FL: while recording, the moved control wins over its playing automation at once (REA round 146); the
+    // automation of a touched target does not drive it until the gesture ends and its points are written.
+    auto overrideTouched = [this] {
+        if (rackProcessor == nullptr)
+            return;
+        std::vector<int> slots, one;
+        for (const auto& t : touches)
+        {
+            RackState::slotsOfTarget (song, t.target, one);
+            slots.insert (slots.end(), one.begin(), one.end());
+        }
+        if (slots.empty() && ! automationOverrideActive)
+            return;
+        rackProcessor->getRenderer().setOverriddenSlots (slots);
+        automationOverrideActive = ! slots.empty();
+    };
+
     if (! recording)
     {
         commit ({});
         touches.clear();
+        overrideTouched();
         if (! active)
         {
             takeWrites.clear();
@@ -1934,6 +2033,7 @@ void AudioEngine::updateAutomationRecording (bool active)
     touches.erase (std::remove_if (touches.begin(), touches.end(),
                                    [&] (const Touch& t) { return std::find (ended.begin(), ended.end(), t.target) != ended.end(); }),
                    touches.end());
+    overrideTouched();
 }
 
 void AudioEngine::applyControllers()
@@ -1943,7 +2043,22 @@ void AudioEngine::applyControllers()
 
     while (controllerQueue.pop (e))
     {
-        if (learning.kind != AutomationTargetKind::none)
+        if (learning.kind != AutomationTargetKind::none && learningGlobal)
+        {
+            // "Override global link...": the link goes to the settings, for every project (REA round 146)
+            auto p = midiPrefs;
+            const prefs::GlobalLink g { e.cc, e.channel, (int) learning.kind, learning.index, learning.slot, learning.param };
+            p.globalLinks.erase (std::remove_if (p.globalLinks.begin(), p.globalLinks.end(),
+                                                 [&] (const prefs::GlobalLink& l) {
+                                                     return l.kind == g.kind && l.index == g.index && l.slot == g.slot && l.param == g.param;
+                                                 }),
+                                 p.globalLinks.end());
+            p.globalLinks.push_back (g);
+            learning = {};
+            learningGlobal = false;
+            setMidiPrefs (p, saveGlobalLinks);
+        }
+        else if (learning.kind != AutomationTargetKind::none)
         {
             // MIDI learn: replace the old link for the same target with the new one
             editSong ([t = learning, e] (Song& s) {
@@ -1957,14 +2072,15 @@ void AudioEngine::applyControllers()
         latest[{ e.cc, e.channel }] = e.value;
     }
 
-    if (latest.empty() || song.midiLinks.empty())
+    const auto links = linksWithGlobal (song.midiLinks, getGlobalLinks());
+    if (latest.empty() || links.empty())
         return;
 
     // one snapshot per frame, outside the undo history (like turning the knob)
     std::vector<std::pair<AutomationTarget, float>> changes;
 
     for (const auto& [key, value] : latest)
-        for (const auto& link : song.midiLinks)
+        for (const auto& link : links)
             if (link.cc == key.first && (link.channel < 0 || link.channel == key.second))
             {
                 const auto v = value / 127.0f;

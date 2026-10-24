@@ -29,7 +29,9 @@ public:
 private:
     void hold (int key, float velocity) noexcept;
     void release (int key) noexcept;
-    int nextIndex (const ArpSettings& settings) noexcept; // within the sequence of heldCount * octaves
+    int sequenceLength (const ArpSettings& settings) const noexcept;
+    int keyAt (const ArpSettings& settings, int index) const noexcept; // a position of the sequence → its key
+    int nextIndex (const ArpSettings& settings) noexcept; // within the sequence
 
     std::array<int, maxHeld> heldKeys {};
     std::array<float, maxHeld> heldVelocity {};
@@ -38,6 +40,8 @@ private:
     int repeatCount = 0;
     int sounding = -1;     // key currently sounding (-1 = none)
     double offTick = -1.0; // when the sounding key is released (gate)
+    double nextStep = -1.0; // FL: the steps count from the first held note (−1 = start at the next note)
+    bool sliding = false;   // a slide-mode note is sounding (the next steps glide it)
     std::uint32_t random = 0x2545F491u;
 };
 } // namespace lynx

@@ -431,6 +431,15 @@ MainComponent::MainComponent (AudioEngine& e, bool restoreUserSettings)
     ui::installSliderContract();
     // FL's Last tweaked and automation recording (REA round 143): every automatable control reports its moves
     ui::onTweak = [this] (const AutomationTarget& t) { engine.noteTweaked (t); };
+    // FL's "Edit events in piano roll" (REA round 146): the channel's own parameter selects its channel
+    onEditEventsInPianoRoll = [this] (const AutomationTarget& t) {
+        const auto onChannel = t.kind == AutomationTargetKind::channelVolume || t.kind == AutomationTargetKind::channelPan
+                               || t.kind == AutomationTargetKind::channelParam;
+        if (onChannel && t.index >= 0 && t.index < (int) engine.getSong().channels.size())
+            engine.setSelectedChannel (t.index);
+        openPianoRoll();
+        pianoRoll.showEventLane (t);
+    };
     PluginWindows::onGesture = [this] (const juce::AudioPluginInstance& plugin, int param, bool starting) {
         if (const auto t = engine.targetOfPlugin (plugin, param))
         {
@@ -477,6 +486,7 @@ MainComponent::~MainComponent()
     workspace.saveState();
     ui::uninstallSliderContract();
     ui::onTweak = nullptr;
+    onEditEventsInPianoRoll = nullptr;
     PluginWindows::onGesture = nullptr;
     engine.nameAutomation = nullptr;
     PluginWindows::closeAll(); // plugin UIs before the engine
@@ -3454,8 +3464,15 @@ void MainComponent::importMidiFile()
         const auto file = fc.getResult();
         if (safe == nullptr || file == juce::File())
             return;
+        juce::String error;
+        const auto midi = MidiFileIo::parseFile (file, error);
+        if (! midi)
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Could not import"), error);
+            return;
+        }
         static MidiFileIo::ImportOptions remembered; // FL keeps the window's choices
-        showMidiImportDialog (file.getFileName(), remembered, [safe, file] (const MidiFileIo::ImportOptions& o) {
+        showMidiImportDialog (file.getFileName(), *midi, remembered, false, [safe, file] (const MidiFileIo::ImportOptions& o) {
             remembered = o;
             if (safe != nullptr)
                 safe->importMidiFile (file, o);

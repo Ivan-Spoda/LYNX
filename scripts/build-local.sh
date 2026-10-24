@@ -17,7 +17,7 @@ CORE="src/flp/Flp.cpp src/core/Song.cpp src/core/NoteEdit.cpp src/core/Recorder.
 
 mkdir -p build-local build-local/wavpack
 # workflow shell (key map, workspace layout, rack operations)
-CORE="$CORE src/core/KeyMap.cpp src/core/Workspace.cpp src/core/RackOps.cpp"
+CORE="$CORE src/core/KeyMap.cpp src/core/Workspace.cpp src/core/RackOps.cpp src/core/ChannelMiscFx.cpp src/core/MidiImport.cpp"
 # workflow P2 (note tools, mixer operations, history labels, browser search)
 CORE="$CORE src/core/NoteTools.cpp src/core/PianoRollTools.cpp src/core/EventEdit.cpp src/core/AudioEdit.cpp src/core/MixerOps.cpp src/core/History.cpp src/core/SearchQuery.cpp src/core/SearchIndex.cpp src/core/EffectPresets.cpp src/core/ParamHelp.cpp"
 # start-up sound (procedural)

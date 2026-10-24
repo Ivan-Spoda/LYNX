@@ -286,6 +286,10 @@ std::string MidiPrefs::toText() const
     // input=<enabled>|<midi channel>|<target>|<device name>
     for (const auto& i : inputs)
         out += "input=" + std::string (i.enabled ? "1" : "0") + "|" + std::to_string (i.midiChannel) + "|" + std::to_string (i.target) + "|" + i.name + "\n";
+    // link=<cc>|<channel>|<target kind>|<index>|<slot>|<param>
+    for (const auto& l : globalLinks)
+        out += "link=" + std::to_string (l.cc) + "|" + std::to_string (l.channel) + "|" + std::to_string (l.kind) + "|" + std::to_string (l.index)
+               + "|" + std::to_string (l.slot) + "|" + std::to_string (l.param) + "\n";
     return out;
 }
 
@@ -323,6 +327,21 @@ MidiPrefs MidiPrefs::fromText (const std::string& text)
             i.target = std::max (-1, toInt (trim (parts[2]), -1));
             i.name = parts[3];
             p.setInput (i);
+        }
+        else if (key == "link")
+        {
+            const auto parts = split (value, '|', 6);
+            if (parts.size() != 6)
+                continue;
+            GlobalLink l;
+            l.cc = std::clamp (toInt (trim (parts[0]), 0), 0, 127);
+            l.channel = std::clamp (toInt (trim (parts[1]), -1), -1, 15);
+            l.kind = std::max (0, toInt (trim (parts[2]), 0));
+            l.index = toInt (trim (parts[3]), 0);
+            l.slot = toInt (trim (parts[4]), 0);
+            l.param = toInt (trim (parts[5]), 0);
+            if (l.kind > 0 && l.kind <= 8) // AutomationTargetKind::channelVolume ... effectMix
+                p.globalLinks.push_back (l);
         }
     }
 
