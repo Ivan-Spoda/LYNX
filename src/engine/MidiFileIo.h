@@ -4,6 +4,7 @@
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
+#include "core/MidiImport.h"
 #include "core/Song.h"
 
 namespace lynx
@@ -20,15 +21,12 @@ std::optional<Song> loadSong (const juce::File& file, juce::String& error);
 // (off: removes the silence at the start), Import time signatures (on; LYNX: the project's time signature, new
 // project only), Set mixer tracks for new channels (on), Channel type (LYNX: its synth, or MIDI Out on the note's
 // MIDI channel).
-struct ImportOptions
-{
-    bool newProject = false;
-    bool perTrack = true;
-    bool realign = false;
-    bool timeSignatures = true;
-    bool mixerTracks = true;
-    bool midiOut = false;
-};
+// (REA round 146b: also the tracks / MIDI channels / controller to import and zero-velocity notes; core/MidiImport.h)
+using ImportOptions = midiimport::Options;
+
+// The file's raw events (notes, controllers; ticks at LYNX's PPQ), track names, first tempo and time signature.
+std::optional<midiimport::ParsedMidi> parseFile (const juce::File& file, juce::String& error);
+
 bool importInto (Song& song, const juce::File& file, const ImportOptions& options, juce::String& error);
 
 // All notes in the file (tracks merged) into `channel`, starting at tick 0.

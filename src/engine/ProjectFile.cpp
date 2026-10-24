@@ -752,7 +752,35 @@ juce::var channelToVar (const ChannelDef& c)
     if (c.swingMix != 1.0f)
         o->setProperty ("swingMix", c.swingMix);
     if (c.arp.enabled())
+    {
         o->setProperty ("arp", juce::Array<juce::var> { c.arp.direction, c.arp.range, c.arp.stepBeats, c.arp.gate, c.arp.repeat });
+        // FL's chord / slide / repeat (REA round 146b)
+        juce::Array<juce::var> chord;
+        for (auto i : c.arp.chord)
+            chord.add (i);
+        auto fl = std::make_unique<juce::DynamicObject>();
+        fl->setProperty ("chord", chord);
+        fl->setProperty ("chordSustain", c.arp.chordSustain);
+        fl->setProperty ("slide", c.arp.slide);
+        fl->setProperty ("octaveRepeat", c.arp.octaveRepeat);
+        o->setProperty ("arpFl", juce::var (fl.release()));
+    }
+    // FL's Misc tab (REA round 146b): only what differs from the defaults
+    if (! (c.misc == ChannelMisc {}))
+    {
+        const auto& m = c.misc;
+        auto misc = std::make_unique<juce::DynamicObject>();
+        misc->setProperty ("shift", m.shiftBeats);
+        misc->setProperty ("gate", m.gateBeats);
+        misc->setProperty ("fullPorta", m.fullPorta);
+        misc->setProperty ("echo", juce::Array<juce::var> { m.echo.feedback, m.echo.pan, m.echo.pitch, m.echo.modX, m.echo.modY, m.echo.echoes,
+                                                            m.echo.timeBeats, m.echo.pingPong, m.echo.fat });
+        misc->setProperty ("velocityTracking", juce::Array<juce::var> { m.velocity.mid, m.velocity.pan, m.velocity.modX, m.velocity.modY });
+        misc->setProperty ("keyTracking", juce::Array<juce::var> { m.key.mid, m.key.pan, m.key.modX, m.key.modY });
+        misc->setProperty ("pitchRange", m.pitchRange);
+        misc->setProperty ("mainPitch", m.mainPitch);
+        o->setProperty ("misc", juce::var (misc.release()));
+    }
     if (c.cutGroup != 0 || c.cutBy != 0)
         o->setProperty ("cut", juce::Array<juce::var> { c.cutGroup, c.cutBy });
 
@@ -943,9 +971,53 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
     def.swingMix = juce::jlimit (0.0f, 1.0f, (float) (double) c.getProperty ("swingMix", 1.0));
 
     if (const auto& arp = c["arp"]; arp.isArray() && arp.size() == 5)
-        def.arp = { juce::jlimit (0, 4, (int) arp[0]), juce::jlimit (1, 4, (int) arp[1]),
-                    juce::jlimit (1.0f / 32.0f, 4.0f, (float) (double) arp[2]), juce::jlimit (0.05f, 1.0f, (float) (double) arp[3]),
-                    juce::jlimit (1, 16, (int) arp[4]) };
+    {
+        def.arp.direction = juce::jlimit (0, 5, (int) arp[0]);
+        def.arp.range = juce::jlimit (1, 4, (int) arp[1]);
+        def.arp.stepBeats = juce::jlimit (1.0f / 192.0f, 4.0f, (float) (double) arp[2]);
+        def.arp.gate = juce::jlimit (0.05f, 128.0f / 48.0f, (float) (double) arp[3]);
+        def.arp.repeat = juce::jlimit (1, 16, (int) arp[4]);
+        if (const auto& fl = c["arpFl"]; fl.isObject())
+        {
+            if (const auto* chord = fl["chord"].getArray())
+                for (const auto& i : *chord)
+                    def.arp.chord.push_back (juce::jlimit (-48, 48, (int) i));
+            def.arp.chordSustain = (bool) fl.getProperty ("chordSustain", true);
+            def.arp.slide = (bool) fl.getProperty ("slide", false);
+            def.arp.octaveRepeat = juce::jlimit (1, 16, (int) fl.getProperty ("octaveRepeat", 1));
+        }
+    }
+    if (const auto& misc = c["misc"]; misc.isObject())
+    {
+        auto& m = def.misc;
+        m.shiftBeats = juce::jlimit (0.0f, 1.0f, (float) (double) misc.getProperty ("shift", 0.0));
+        m.gateBeats = juce::jlimit (0.0f, 4.0f, (float) (double) misc.getProperty ("gate", 0.0));
+        m.fullPorta = (bool) misc.getProperty ("fullPorta", true);
+        if (const auto& e = misc["echo"]; e.isArray() && e.size() >= 9)
+        {
+            m.echo.feedback = juce::jlimit (0.0f, 2.0f, (float) (double) e[0]);
+            m.echo.pan = juce::jlimit (-1.0f, 1.0f, (float) (double) e[1]);
+            m.echo.pitch = juce::jlimit (-4800.0f, 4800.0f, (float) (double) e[2]);
+            m.echo.modX = juce::jlimit (-1.0f, 1.0f, (float) (double) e[3]);
+            m.echo.modY = juce::jlimit (-1.0f, 1.0f, (float) (double) e[4]);
+            m.echo.echoes = juce::jlimit (0, 16, (int) e[5]);
+            m.echo.timeBeats = juce::jlimit (1.0f / 192.0f, 16.0f, (float) (double) e[6]);
+            m.echo.pingPong = (bool) e[7];
+            m.echo.fat = (bool) e[8];
+        }
+        auto tracking = [] (const juce::var& t, NoteTracking& to) {
+            if (! t.isArray() || t.size() < 4)
+                return;
+            to.mid = juce::jlimit (0, 131, (int) t[0]);
+            to.pan = juce::jlimit (-1.0f, 1.0f, (float) (double) t[1]);
+            to.modX = juce::jlimit (-1.0f, 1.0f, (float) (double) t[2]);
+            to.modY = juce::jlimit (-1.0f, 1.0f, (float) (double) t[3]);
+        };
+        tracking (misc["velocityTracking"], m.velocity);
+        tracking (misc["keyTracking"], m.key);
+        m.pitchRange = juce::jlimit (0, 48, (int) misc.getProperty ("pitchRange", 2));
+        m.mainPitch = (bool) misc.getProperty ("mainPitch", true);
+    }
 
     if (const auto& cut = c["cut"]; cut.isArray() && cut.size() == 2)
     {
@@ -1086,6 +1158,10 @@ juce::var mixerTrackToVar (const MixerTrack& t)
     o->setProperty ("solo", t.solo);
     if (! t.threaded)
         o->setProperty ("threaded", false);
+    if (t.separator)
+        o->setProperty ("separator", true);
+    if (t.dock != MixerDock::middle)
+        o->setProperty ("dock", t.dock == MixerDock::left ? "left" : "right");
 
     if (! t.toMaster)
         o->setProperty ("toMaster", false);
@@ -1141,6 +1217,8 @@ MixerTrack mixerTrackFromVar (const juce::var& t)
     track.muted = (bool) t.getProperty ("muted", false);
     track.solo = (bool) t.getProperty ("solo", false);
     track.threaded = (bool) t.getProperty ("threaded", true);
+    track.separator = (bool) t.getProperty ("separator", false);
+    track.dock = t["dock"].toString() == "left" ? MixerDock::left : t["dock"].toString() == "right" ? MixerDock::right : MixerDock::middle;
     track.toMaster = (bool) t.getProperty ("toMaster", true);
     track.masterLevel = juce::jlimit (0.0f, maxFaderGain, (float) (double) t.getProperty ("masterLevel", 1.0));
     track.stereo = juce::jlimit (-1.0f, 1.0f, (float) (double) t.getProperty ("stereo", 0.0));
@@ -1372,6 +1450,15 @@ juce::String toJson (const Song& song)
 
         if (! groups.isEmpty())
             root->setProperty ("playlistTrackGroups", groups);
+
+        // track modes (round 146a): [index, "audio" | "instrument", mixer track, channel]
+        juce::Array<juce::var> modes;
+        for (std::size_t i = 0; i < song.playlistTracks.size(); ++i)
+            if (const auto& t = song.playlistTracks[i]; t.mode != PlaylistTrackMode::unassigned)
+                modes.add (juce::Array<juce::var> { (int) i, t.mode == PlaylistTrackMode::audio ? "audio" : "instrument", t.mixerTrack, t.channel });
+
+        if (! modes.isEmpty())
+            root->setProperty ("playlistTrackModes", modes);
     }
 
     const auto anyMarkers = std::any_of (song.arrangements.begin(), song.arrangements.end(), [] (const Arrangement& a) { return ! a.markers.empty(); });
@@ -1630,6 +1717,25 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
                 song.playlistTracks[index].grouped = index > 0 && (int) t[1] != 0;
                 song.playlistTracks[index].collapsed = (int) t[2] != 0;
+            }
+
+    if (auto* modes = root["playlistTrackModes"].getArray())
+        for (const auto& t : *modes)
+            if (t.isArray() && t.size() == 4 && (int) t[0] >= 0 && (int) t[0] < 500)
+            {
+                const auto index = (std::size_t) (int) t[0];
+                const auto mixer = (int) t[2], channel = (int) t[3];
+                const auto audio = t[1].toString() == "audio";
+                if (audio ? (mixer <= 0 || mixer >= (int) song.mixer.size()) : (channel < 0 || channel >= (int) song.channels.size()))
+                    continue;
+
+                if (song.playlistTracks.size() <= index)
+                    song.playlistTracks.resize (index + 1);
+
+                auto& track = song.playlistTracks[index];
+                track.mode = audio ? PlaylistTrackMode::audio : PlaylistTrackMode::instrument;
+                track.mixerTrack = mixer > 0 && mixer < (int) song.mixer.size() ? mixer : -1;
+                track.channel = audio ? -1 : channel;
             }
 
     if (auto* arrangements = root["arrangements"].getArray(); arrangements != nullptr && ! arrangements->isEmpty())

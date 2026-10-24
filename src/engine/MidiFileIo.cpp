@@ -136,93 +136,67 @@ std::optional<Song> loadSong (const juce::File& file, juce::String& error)
     return song;
 }
 
+std::optional<midiimport::ParsedMidi> parseFile (const juce::File& file, juce::String& error)
+{
+    juce::FileInputStream in (file);
+    juce::MidiFile midi;
+    if (! in.openedOk() || ! midi.readFrom (in))
+    {
+        error = utf8 ("not a valid MIDI file");
+        return std::nullopt;
+    }
+    const auto format = midi.getTimeFormat();
+    if (format <= 0)
+        midi.convertTimestampTicksToSeconds();
+    midiimport::ParsedMidi out;
+    const auto filePpq = format > 0 ? (double) format : 0.0;
+    auto toTicks = [&] (double t) {
+        return filePpq > 0.0 ? (std::int64_t) std::llround (t * ppq / filePpq) : (std::int64_t) std::llround (t * out.bpm / 60.0 * ppq);
+    };
+    for (int t = 0; t < midi.getNumTracks(); ++t)
+    {
+        const auto& track = *midi.getTrack (t);
+        std::string name;
+        for (int i = 0; i < track.getNumEvents(); ++i)
+        {
+            const auto& m = track.getEventPointer (i)->message;
+            if (m.isTempoMetaEvent() && out.bpm == 120.0 && m.getTempoSecondsPerQuarterNote() > 0.0)
+                out.bpm = juce::jlimit (20.0, 999.0, 60.0 / m.getTempoSecondsPerQuarterNote());
+            else if (m.isTimeSignatureMetaEvent() && out.numerator == 0)
+            {
+                int num = 0, den = 0;
+                m.getTimeSignatureInfo (num, den);
+                if (num > 0 && den > 0)
+                {
+                    out.numerator = num;
+                    out.denominator = den;
+                }
+            }
+            else if (m.isTrackNameEvent() && name.empty())
+                name = m.getTextFromTextMetaEvent().toStdString();
+            else if (m.isNoteOnOrOff() || m.isController())
+            {
+                const auto* raw = m.getRawData();
+                // a running-status note off may come as a note on with velocity 0: kept as it is (the import decides)
+                out.events.push_back ({ t, toTicks (m.getTimeStamp()), raw[0], raw[1], m.getRawDataSize() > 2 ? raw[2] : (std::uint8_t) 0 });
+            }
+        }
+        out.trackNames.push_back (name);
+    }
+    return out;
+}
+
 bool importInto (Song& song, const juce::File& file, const ImportOptions& o, juce::String& error)
 {
-    auto parsed = parse (file, error);
+    auto parsed = parseFile (file, error);
     if (! parsed)
         return false;
-
-    if (o.newProject)
+    std::string err;
+    if (! midiimport::importInto (song, *parsed, o, file.getFileNameWithoutExtension().toStdString(), err))
     {
-        song = Song();
-        song.bpm = parsed->bpm;
-        song.mixer = Song::defaultMixer();
-        song.patterns.clear();
-        if (o.timeSignatures && parsed->numerator > 0 && parsed->denominator == 4)
-            song.beatsPerBar = juce::jlimit (1, 16, parsed->numerator);
+        error = utf8 (err.c_str());
+        return false;
     }
-
-    // the groups that become channels: the file's tracks, or its MIDI channels (tracks merged)
-    struct Group
-    {
-        std::string name;
-        int midiChannel = 0;
-        std::vector<Note> notes;
-    };
-    std::vector<Group> groups;
-    if (o.perTrack)
-        for (std::size_t t = 0; t < parsed->tracks.size(); ++t)
-            groups.push_back ({ parsed->names[t].empty() ? "MIDI " + std::to_string (t + 1) : parsed->names[t],
-                                parsed->midiChannels[t].empty() ? 0 : parsed->midiChannels[t].front(), parsed->tracks[t] });
-    else
-    {
-        std::map<int, Group> byChannel;
-        for (std::size_t t = 0; t < parsed->tracks.size(); ++t)
-            for (std::size_t i = 0; i < parsed->tracks[t].size(); ++i)
-            {
-                const auto ch = parsed->midiChannels[t][i];
-                auto& g = byChannel[ch];
-                g.name = "MIDI channel " + std::to_string (ch + 1);
-                g.midiChannel = ch;
-                g.notes.push_back (parsed->tracks[t][i]);
-            }
-        for (auto& [ch, g] : byChannel)
-            groups.push_back (std::move (g));
-    }
-
-    // "Realign events": the silence before the first note goes
-    std::int64_t shift = 0;
-    if (o.realign)
-    {
-        shift = std::numeric_limits<std::int64_t>::max();
-        for (const auto& g : groups)
-            for (const auto& n : g.notes)
-                shift = std::min (shift, n.start);
-        if (shift == std::numeric_limits<std::int64_t>::max())
-            shift = 0;
-    }
-
-    Pattern pattern;
-    pattern.name = file.getFileNameWithoutExtension().toStdString();
-    for (const auto& g : groups)
-    {
-        ChannelDef c;
-        c.name = g.name;
-        if (o.midiOut)
-        {
-            c.instrument = InstrumentKind::midiOut;
-            midictl::MidiOutSettings settings;
-            settings.channel = g.midiChannel;
-            midictl::writeMidiOut (c.pluginState, settings);
-        }
-        else
-        {
-            c.instrument = InstrumentKind::synth;
-            c.volume = 0.6f;
-        }
-        c.mixerTrack = o.mixerTracks ? song.nextFreeInsert() : 0;
-        song.channels.push_back (c);
-        const auto channel = (int) song.channels.size() - 1;
-        for (auto n : g.notes)
-        {
-            n.channel = channel;
-            n.start = std::max<std::int64_t> (0, n.start - shift);
-            pattern.notes.push_back (n);
-        }
-    }
-    pattern.sortNotes();
-    song.patterns.push_back (std::move (pattern));
-    song.currentPattern = (int) song.patterns.size() - 1;
     return true;
 }
 

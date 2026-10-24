@@ -130,12 +130,64 @@ void MixerStrips::setVisibleHeight (int height)
 void MixerStrips::updateSize()
 {
     const auto tracks = (int) engine.getSong().mixer.size();
-    setSize (stripX (tracks) + stripWidth + 8, visibleHeight);
+    layoutStrips();
+    setSize (contentWidth, visibleHeight);
     levels.resize ((std::size_t) juce::jmax (1, tracks) * 2);
+}
+
+void MixerStrips::layoutStrips()
+{
+    const auto& song = engine.getSong();
+    const auto tracks = (int) song.mixer.size();
+    stripXs.assign ((std::size_t) tracks + 1, 0);
+    dockGaps.clear();
+    separatorLines.clear();
+
+    int x = 4;
+    bool any = false, afterMaster = false;
+    for (auto dock : { MixerDock::left, MixerDock::middle, MixerDock::right })
+    {
+        bool first = true;
+        for (int t = 0; t < tracks; ++t)
+        {
+            const auto& track = song.mixer[(std::size_t) t];
+            if (track.dock != dock)
+                continue;
+            if (any && first)
+            {
+                dockGaps.push_back (x + dockGap / 2 - 2);
+                x += dockGap;
+            }
+            else if (! first && track.separator && t > 0)
+            {
+                separatorLines.push_back (x + separatorGap / 2 - 3);
+                x += separatorGap;
+            }
+            else if (afterMaster)
+                x += 8;
+            stripXs[(std::size_t) t] = x;
+            x += stripWidthOf (t);
+            any = true;
+            first = false;
+            afterMaster = t == 0;
+        }
+        if (dock == MixerDock::middle) // the "+" button ends the middle block
+        {
+            if (afterMaster)
+                x += 8;
+            stripXs[(std::size_t) tracks] = x;
+            x += stripWidth;
+            afterMaster = false;
+            any = true;
+        }
+    }
+    contentWidth = x + 8;
 }
 
 int MixerStrips::stripX (int track) const noexcept
 {
+    if (track >= 0 && track < (int) stripXs.size())
+        return stripXs[(std::size_t) track];
     return track == 0 ? 4 : 4 + masterWidth + 8 + (track - 1) * stripWidth;
 }
 
@@ -570,6 +622,14 @@ void MixerStrips::paint (juce::Graphics& g)
         }
     }
 
+    // FL's separators (a line on the left of the track) and the gaps between the dock blocks (round 146a)
+    g.setColour (colour::borderStrong);
+    for (auto lx : separatorLines)
+        g.fillRoundedRectangle ((float) lx, 8.0f, 2.0f, (float) laneTop() - 14.0f, 1.0f);
+    g.setColour (colour::bg0);
+    for (auto gx : dockGaps)
+        g.fillRect (gx - 3, 0, 6, getHeight());
+
     paintRouting (g);
 
     // "+" button
@@ -860,7 +920,9 @@ void MixerStrips::mouseDrag (const juce::MouseEvent& e)
         headerDragged = true;
         setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
         const auto count = (int) engine.getSong().mixer.size();
-        const auto target = juce::jlimit (1, juce::jmax (1, count - 1), trackAt (juce::jlimit (stripX (1), stripX (count) - 1, e.x)));
+        const auto target = trackAt (e.x);
+        if (target < 1 || target >= count)
+            return;
 
         for (int guard = 0; guard < count && selected != target; ++guard)
             if (! moveSelected (target < selected ? -1 : 1))
@@ -1452,6 +1514,11 @@ juce::PopupMenu MixerStrips::buildMenu (int t)
         select.addItem (tr ("Tracks this one is routed to"), ! destinations.empty(), false, [this, t, destinations] { setSelection (destinations, t); });
         select.addItem (tr ("Tracks routed to this one"), ! sources.empty(), false, [this, t, sources] { setSelection (sources, t); });
         select.addSeparator();
+        select.addItem (tr ("Group"), t > 0, false, [this, t] {
+            auto group = mixerops::groupOf (engine.getSong(), t);
+            std::sort (group.begin(), group.end());
+            setSelection (group, t);
+        });
         select.addItem (tr ("All"), [this, t] {
             std::vector<int> all ((std::size_t) engine.getSong().mixer.size());
             std::iota (all.begin(), all.end(), 0);
@@ -1538,10 +1605,34 @@ juce::PopupMenu MixerStrips::buildMenu (int t)
             menu.addItem (tr ("Render to audio (freeze)..."), [this, t] { bounceInsertToAudio (engine, t); });
     }
 
-    // --- FL's "Layout" section --------------------------------------------------------------------------
+    // --- FL's "Group" section (REA round 146a) -----------------------------------------------------------
     if (t > 0)
     {
+        menu.addSectionHeader (tr ("Group"));
+        const auto on = song.mixer[(std::size_t) t].separator;
+        menu.addItem (tr ("Separator"), true, on, [this, targets, on] {
+            engine.editSong ([targets, on] (Song& s) { mixerops::setSeparator (s, targets, ! on); });
+        });
+        menu.addItem (tr ("Create group"), [this, targets, t] { engine.editSong ([targets, t] (Song& s) { mixerops::createGroup (s, targets, t); }); });
+        menu.addItem (tr ("Auto color group"), song.mixer[(std::size_t) t].colour != 0, false,
+                      [this, t] { engine.editSong ([t] (Song& s) { mixerops::autoColorGroup (s, t); }); });
+    }
+
+    // --- FL's "Layout" section --------------------------------------------------------------------------
+    {
         menu.addSectionHeader (tr ("Layout"));
+        juce::PopupMenu dockMenu;
+        const auto dock = song.mixer[(std::size_t) t].dock;
+        const std::pair<const char*, MixerDock> docks[] = { { TR_NOOP ("Left"), MixerDock::left }, { TR_NOOP ("Middle"), MixerDock::middle },
+                                                            { TR_NOOP ("Right"), MixerDock::right } };
+        for (const auto& [label, d] : docks)
+            dockMenu.addItem (tr (label), true, dock == d, [this, targets, d = d] {
+                engine.editSong ([targets, d] (Song& s) { mixerops::dockTracks (s, targets, d); });
+            });
+        menu.addSubMenu (tr ("Dock to"), dockMenu);
+    }
+    if (t > 0)
+    {
         menu.addItem (tr ("Move left") + "\tAlt+Left", t > 1, false, [this, t] {
             setSelection ({ t }, t);
             moveSelected (-1);
@@ -3443,7 +3534,12 @@ void EffectsPanel::openPluginWindow (int slot)
             return;
         }
         const auto& s = engine.getSong().mixer[(std::size_t) track].effects[(std::size_t) slot];
-        PluginWindows::open (effect, plugin->getInstance(), juce::String::fromUTF8 (s.plugin.name.c_str()));
+        PluginWindows::open (effect, plugin->getInstance(), juce::String::fromUTF8 (s.plugin.name.c_str()),
+                             { &engine, [t = track, slot] (Song& song) -> PluginRef* {
+                                  if (t >= (int) song.mixer.size() || slot >= (int) song.mixer[(std::size_t) t].effects.size())
+                                      return nullptr;
+                                  return &song.mixer[(std::size_t) t].effects[(std::size_t) slot].plugin;
+                              } });
         return;
     }
 
@@ -3924,7 +4020,7 @@ void MixerComponent::selectTrack (int track)
 
     // scroll the strip into view
     const auto t = strips.getSelectedTrack();
-    const auto x = t == 0 ? 0 : 4 + MixerStrips::masterWidth + 8 + (t - 1) * MixerStrips::stripWidth;
+    const auto x = strips.stripLeft (t);
     const auto w = t == 0 ? MixerStrips::masterWidth : MixerStrips::stripWidth;
     const auto view = viewport.getViewArea();
 

@@ -15,6 +15,10 @@ enum : std::uint32_t
     evPanLaw = 0x17,
     evTimeSignatureNumerator = 0x11,
     evChannelSwingMix = 0x61,
+    evChannelTimeShift = 0x59,  // u16: Misc › Time › Shift, FL's time-knob value (REA round 146b)
+    evChannelEcho = 0xD1,       // i32 feedback, pan, pitch, echoes, time (REA round 146b)
+    evChannelEchoModXY = 0x8A,  // u16 mod X, u16 mod Y of the echoes (128 = none)
+    evChannelTracking = 0xE4,   // i32 mid, pan, mod X, mod Y: velocity tracking, then key tracking
     evChannelCutGroups = 0x84,
     evSampleRootNote = 0x87,
     evFileFlags = 0xA9,
@@ -471,6 +475,47 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                     channel().swingMix = (int) e.value;
                 break;
 
+            case evChannelTimeShift:
+                if (section == Section::channel)
+                    channel().timeShift = (int) e.value;
+                break;
+
+            case evChannelEchoModXY:
+                if (section == Section::channel)
+                {
+                    channel().echoModX = (int) (e.value & 0xFFFF);
+                    channel().echoModY = (int) ((e.value >> 16) & 0xFFFF);
+                }
+                break;
+
+            case evChannelEcho:
+                if (section == Section::channel && e.data.size() >= 20)
+                {
+                    auto& c = channel();
+                    c.echoFeedback = readLE<std::int32_t> (e.data, 0);
+                    c.echoPan = readLE<std::int32_t> (e.data, 4);
+                    c.echoPitch = readLE<std::int32_t> (e.data, 8);
+                    c.echoes = readLE<std::int32_t> (e.data, 12);
+                    c.echoTime = readLE<std::int32_t> (e.data, 16);
+                }
+                break;
+
+            case evChannelTracking:
+                if (section == Section::channel && e.data.size() >= 16)
+                {
+                    auto& c = channel();
+                    if (c.trackingCount < 2)
+                    {
+                        auto& t = c.tracking[(std::size_t) c.trackingCount++];
+                        t.present = true;
+                        t.mid = readLE<std::int32_t> (e.data, 0);
+                        t.pan = readLE<std::int32_t> (e.data, 4);
+                        t.modX = readLE<std::int32_t> (e.data, 8);
+                        t.modY = readLE<std::int32_t> (e.data, 12);
+                    }
+                }
+                break;
+
             case evChannelCutGroups:
                 if (section == Section::channel)
                 {
@@ -540,6 +585,24 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                 if (section == Section::channel && e.data.size() >= 0x70)
                 {
                     auto& c = channel();
+                    // Misc tab (REA round 146b [EXEC: FL 2026 saves with one control changed, and renders]): delay
+                    // flags (byte 10: 2 ping pong, 4 fat mode), main pitch (11), arpeggiator (40 direction, 44 range,
+                    // 48 chord, 52 time, 56 gate, 60 slide, 92 repeat), full porta (62), add to key (63), time gate
+                    // (u16 at 64), pitch range (112)
+                    c.delayFlags = e.data[10];
+                    c.mainPitch = e.data[11] != 0;
+                    c.arpDirection = readLE<std::int32_t> (e.data, 40);
+                    c.arpRange = readLE<std::int32_t> (e.data, 44);
+                    c.arpChord = readLE<std::int32_t> (e.data, 48);
+                    c.arpTime = readLE<std::int32_t> (e.data, 52);
+                    c.arpGate = readLE<std::int32_t> (e.data, 56);
+                    c.arpSlide = e.data[60] != 0;
+                    c.fullPorta = e.data[62] != 0;
+                    c.addToKey = e.data[63] != 0;
+                    c.timeGate = readLE<std::uint16_t> (e.data, 64);
+                    c.arpRepeat = readLE<std::int32_t> (e.data, 92);
+                    if (e.data.size() >= 116)
+                        c.pitchRange = readLE<std::int32_t> (e.data, 112);
                     c.stretchTimeRaw = readLE<std::uint32_t> (e.data, 0x60);
                     c.stretchMul = readLE<std::int32_t> (e.data, 0x68);
                     c.stretchMode = readLE<std::int32_t> (e.data, 0x6C);
@@ -861,6 +924,9 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                     {
                         t.grouped = e.data[46] != 0;
                         t.expanded = e.data[61] != 0;
+                        t.mode = (int) readLE<std::uint32_t> (e.data, 49);
+                        t.mixerTrack = readLE<std::int32_t> (e.data, 53);
+                        t.channel = readLE<std::int32_t> (e.data, 57);
                     }
                     arrangement().tracks.push_back (t);
                 }

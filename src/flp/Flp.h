@@ -129,6 +129,24 @@ struct Channel
     std::array<Envelope, 5> envelopes {};
     int envelopeCount = 0;
 
+    // Misc tab (REA round 146b): 0x59 time shift (FL's time-knob value), 0xD1 echo delay, 0x8A echo mod X / Y,
+    // 0xE4 velocity / key tracking, and the 0xD7 fields below
+    int timeShift = 0;
+    int echoFeedback = 0, echoPan = 6400, echoPitch = 0, echoes = 4, echoTime = 144; // time in 1/192 beat
+    int echoModX = 128, echoModY = 128;
+    struct Tracking
+    {
+        bool present = false;
+        int mid = 0, pan = 0, modX = 0, modY = 0;
+    };
+    std::array<Tracking, 2> tracking {}; // [0] velocity (mid 100), [1] key (mid 60)
+    int trackingCount = 0;
+    int delayFlags = 0;            // 2 ping pong, 4 fat mode
+    bool mainPitch = true, addToKey = false, arpSlide = false, fullPorta = true;
+    int arpDirection = 0, arpRange = 1, arpChord = -1, arpTime = 1024, arpGate = 48, arpRepeat = 1;
+    int timeGate = 1447;           // time-knob value; 1446 and above = off
+    int pitchRange = 2;
+
     // 0xD7: time-stretch
     std::uint32_t stretchTimeRaw = 0; // in 1/192 of a beat: int or float, depending on Project::flagsA9
     int stretchMul = 0;               // factor = 2^(v/10000)
@@ -262,6 +280,9 @@ struct PlaylistTrackInfo
     float heightScale = 1.0f; // the track's size (FL's Size menu: 0.33 .. 2.0; 1 = 100 %)
     bool grouped = false;     // "Group with above track"
     bool expanded = true;     // a group header's members are shown (false = "Collapse grouped tracks")
+    // track mode (REA round 146a): u32 at 49 (0 none, 1 audio track, 3 instrument track), i32 mixer track at 53, i32
+    // FL channel index at 57 (-1 = none)
+    int mode = 0, mixerTrack = -1, channel = -1;
 };
 
 // Playlist time marker: 0x94 (u32: type << 24 | position in ticks), followed by

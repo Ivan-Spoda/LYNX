@@ -2267,6 +2267,72 @@ Layout withRhythmVoicing (Layout l)
     return l;
 }
 
+// round 145: Ridge Strip's Vocal strip voicing (core/VoxStrip.h; the role: a vocal channel strip with de-esser,
+// de-ploser, three-band EQ and compander, measured on the official trial) gets its own panel in the reference's
+// reading order: the level block on top, the COMPANDER, then DE-ESSER and DE-PLOSER side by side, the EQUALISER, the
+// process order. Ridge's panel shows while it is off; the switch at the bottom flips between them.
+LayoutItem choiceMenu (float x, float y, float w, float h, const char* param, const char* caption, const char* options);
+
+Layout withVocalVoicing (Layout l)
+{
+    for (auto& it : l.items)
+    {
+        if (it.whenParam != nullptr)
+        {
+            it.when2Param = it.whenParam;
+            it.when2Min = it.whenMin;
+            it.when2Max = it.whenMax;
+            it.whenParam = nullptr;
+        }
+        it = when (it, "Vocal strip", 0.0f, 0.5f);
+    }
+    l.height = std::max (l.height, 744);
+    auto add = [&l] (LayoutItem it) { l.items.push_back (when (it, "Vocal strip", 0.5f, 1.0f)); };
+    add (section (4, 4, 552, 128, TR_NOOP ("Level")));
+    add (dial (50, 64, 40, "Vocal input", TR_NOOP ("Input"), bipolar));
+    add (display (100, 26, 250, 96, "iometer"));
+    add (dial (396, 64, 40, "Vocal output", TR_NOOP ("Output"), bipolar));
+    add (choiceMenu (440, 40, 108, 24, "Process order", TR_NOOP ("Order"), "DS>DP>EQ>COMP|DS>DP>COMP>EQ|DS>EQ>DP>COMP|DS>EQ>COMP>DP|DS>COMP>DP>EQ|DS>COMP>EQ>DP|DP>DS>EQ>COMP|DP>DS>COMP>EQ|DP>EQ>DS>COMP|DP>EQ>COMP>DS|DP>COMP>DS>EQ|DP>COMP>EQ>DS|EQ>DS>DP>COMP|EQ>DS>COMP>DP|EQ>DP>DS>COMP|EQ>DP>COMP>DS|EQ>COMP>DS>DP|EQ>COMP>DP>DS|COMP>DS>DP>EQ|COMP>DS>EQ>DP|COMP>DP>DS>EQ|COMP>DP>EQ>DS|COMP>EQ>DS>DP|COMP>EQ>DP>DS"));
+    add (section (4, 136, 552, 232, TR_NOOP ("Compander")));
+    add (toggle (14, 158, 64, 20, "Compander", TR_NOOP ("On")));
+    add (dial (60, 220, 34, "Compander attack", TR_NOOP ("Attack")));
+    add (dial (60, 310, 34, "Compander release", TR_NOOP ("Release")));
+    add (dial (160, 240, 36, "Compander ratio", TR_NOOP ("Ratio")));
+    add (dial (264, 230, 48, "Compander threshold", TR_NOOP ("Threshold"), big));
+    add (dial (370, 220, 34, "Expander threshold", TR_NOOP ("Expander")));
+    add (dial (370, 310, 34, "Make-up", TR_NOOP ("Make-up")));
+    add (toggle (128, 330, 72, 22, "Soft knee", TR_NOOP ("Soft knee")));
+    add (toggle (226, 330, 72, 22, "Drive", TR_NOOP ("Drive")));
+    add (meter (426, 170, 120, 12, 0, TR_NOOP ("GR")));
+    add (section (4, 372, 274, 170, TR_NOOP ("De-esser")));
+    add (toggle (14, 394, 64, 20, "De-esser", TR_NOOP ("On")));
+    add (dial (70, 456, 34, "De-ess threshold", TR_NOOP ("Threshold")));
+    add (dial (170, 456, 34, "De-ess freq.", TR_NOOP ("Frequency")));
+    add (tabs (90, 394, 180, 20, "De-ess split", TR_NOOP ("Broadband|Split")));
+    add (toggle (226, 440, 46, 20, "De-ess lookahead", TR_NOOP ("Look")));
+    add (toggle (226, 470, 46, 20, "De-ess listen", TR_NOOP ("Listen")));
+    add (meter (14, 520, 254, 12, 1, TR_NOOP ("GR")));
+    add (section (282, 372, 274, 170, TR_NOOP ("De-ploser")));
+    add (toggle (292, 394, 64, 20, "De-ploser", TR_NOOP ("On")));
+    add (dial (348, 456, 34, "De-plos threshold", TR_NOOP ("Threshold")));
+    add (dial (448, 456, 34, "De-plos freq.", TR_NOOP ("Frequency")));
+    add (tabs (368, 394, 180, 20, "De-plos split", TR_NOOP ("Broadband|Split")));
+    add (toggle (504, 440, 46, 20, "De-plos lookahead", TR_NOOP ("Look")));
+    add (toggle (504, 470, 46, 20, "De-plos listen", TR_NOOP ("Listen")));
+    add (section (4, 546, 552, 168, TR_NOOP ("Equaliser")));
+    add (toggle (14, 568, 64, 20, "Vocal EQ", TR_NOOP ("On")));
+    add (toggle (60, 600, 90, 20, "Vocal HPF", TR_NOOP ("High-pass")));
+    add (dial (104, 660, 34, "Vocal HPF freq.", TR_NOOP ("Freq")));
+    add (toggle (210, 600, 90, 20, "Notch", TR_NOOP ("Notch")));
+    add (dial (220, 660, 34, "Notch gain", TR_NOOP ("Gain"), bipolar));
+    add (dial (300, 660, 34, "Notch freq.", TR_NOOP ("Freq")));
+    add (toggle (390, 600, 90, 20, "High band", TR_NOOP ("High band")));
+    add (dial (400, 660, 34, "High gain", TR_NOOP ("Gain"), bipolar));
+    add (dial (480, 660, 34, "High freq.", TR_NOOP ("Freq")));
+    l.items.push_back (toggle (8, 720, 300, 20, "Vocal strip", TR_NOOP ("Vocal strip voicing")));
+    return l;
+}
+
 Layout voiceShiftLayout()
 {
     // round 135: the voice manipulators' one-screen panel (the role: a small Soundtoys voice shifter, screenshot of the
@@ -2969,7 +3035,7 @@ const Layout& layoutFor (EffectKind kind)
         case EffectKind::effector: l = effectorLayout(); break;
         case EffectKind::hardcore: l = hardcoreLayout(); break;
         case EffectKind::vocodex: l = vocodexLayout(); break;
-        case EffectKind::ridgeStrip: l = ridgeStrip(); break;
+        case EffectKind::ridgeStrip: l = withVocalVoicing (ridgeStrip()); break;
         case EffectKind::glowLeveler: l = glowLeveler(); break;
         case EffectKind::compressor: l = compressorLayout(); break;
         case EffectKind::hushDeEsser: l = hushDeEsser(); break;

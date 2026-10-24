@@ -40,6 +40,9 @@ void swapTracks (Song& song, int a, int b)
 
     for (auto& c : song.channels)
         c.mixerTrack = map (c.mixerTrack);
+    for (auto& pt : song.playlistTracks) // audio / instrument tracks (round 146a)
+        if (pt.mixerTrack > 0)
+            pt.mixerTrack = map (pt.mixerTrack);
 
     for (auto& track : song.mixer)
     {
@@ -131,6 +134,13 @@ bool deleteTrack (Song& song, int t)
     for (auto& c : song.channels)
         if (c.mixerTrack == t)
             c.mixerTrack = 0;
+    for (auto& pt : song.playlistTracks) // an audio track loses its link (round 146a)
+        if (pt.mixerTrack == t)
+        {
+            pt.mixerTrack = -1;
+            if (pt.mode == PlaylistTrackMode::audio)
+                pt.mode = PlaylistTrackMode::unassigned;
+        }
 
     for (auto& track : song.mixer)
     {
@@ -361,5 +371,85 @@ int insertTracks (Song& song, int at, int count)
     for (int i = 0; i < count && insertTrack (song, at + i); ++i)
         ++done;
     return done;
+}
+
+std::vector<int> displayOrder (const Song& song)
+{
+    std::vector<int> order;
+    for (auto dock : { MixerDock::left, MixerDock::middle, MixerDock::right })
+        for (int t = 0; t < (int) song.mixer.size(); ++t)
+            if (song.mixer[(std::size_t) t].dock == dock)
+                order.push_back (t);
+    return order;
+}
+
+std::vector<int> groupOf (const Song& song, int track)
+{
+    std::vector<int> out;
+    if (track <= 0 || track >= (int) song.mixer.size())
+        return out;
+    const auto order = displayOrder (song);
+    const auto at = (int) (std::find (order.begin(), order.end(), track) - order.begin());
+    const auto dock = song.mixer[(std::size_t) track].dock;
+    const auto inBlock = [&] (int i) { return i >= 0 && i < (int) order.size() && order[(std::size_t) i] > 0
+                                              && song.mixer[(std::size_t) order[(std::size_t) i]].dock == dock; };
+    auto first = at;
+    while (! song.mixer[(std::size_t) order[(std::size_t) first]].separator && inBlock (first - 1))
+        --first;
+    auto last = at;
+    while (inBlock (last + 1) && ! song.mixer[(std::size_t) order[(std::size_t) last + 1]].separator)
+        ++last;
+    for (auto i = first; i <= last; ++i)
+        out.push_back (order[(std::size_t) i]);
+    return out;
+}
+
+void createGroup (Song& song, const std::vector<int>& tracks, int current)
+{
+    const auto order = displayOrder (song);
+    const auto picked = [&] (int t) { return std::find (tracks.begin(), tracks.end(), t) != tracks.end(); };
+    for (std::size_t i = 0; i < order.size(); ++i)
+    {
+        const auto t = order[i];
+        if (t <= 0 || ! picked (t))
+            continue;
+        if (i == 0 || ! picked (order[i - 1]))
+            song.mixer[(std::size_t) t].separator = true;
+        if (i + 1 < order.size() && order[i + 1] > 0 && ! picked (order[i + 1]))
+            song.mixer[(std::size_t) order[i + 1]].separator = true;
+    }
+    if (current >= 0 && current < (int) song.mixer.size() && song.mixer[(std::size_t) current].colour != 0)
+        for (auto t : tracks)
+            if (t > 0 && t < (int) song.mixer.size() && song.mixer[(std::size_t) t].colour == 0)
+                song.mixer[(std::size_t) t].colour = song.mixer[(std::size_t) current].colour;
+}
+
+int autoColorGroup (Song& song, int track)
+{
+    int changed = 0;
+    if (track <= 0 || track >= (int) song.mixer.size())
+        return 0;
+    const auto colour = song.mixer[(std::size_t) track].colour;
+    for (auto t : groupOf (song, track))
+        if (song.mixer[(std::size_t) t].colour != colour)
+        {
+            song.mixer[(std::size_t) t].colour = colour;
+            ++changed;
+        }
+    return changed;
+}
+
+void setSeparator (Song& song, const std::vector<int>& tracks, bool on)
+{
+    for (auto t : tracks)
+        if (t > 0 && t < (int) song.mixer.size())
+            song.mixer[(std::size_t) t].separator = on;
+}
+
+void dockTracks (Song& song, const std::vector<int>& tracks, MixerDock dock)
+{
+    for (auto t : tracks)
+        if (t >= 0 && t < (int) song.mixer.size())
+            song.mixer[(std::size_t) t].dock = dock;
 }
 } // namespace lynx::mixerops

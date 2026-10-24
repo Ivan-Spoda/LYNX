@@ -103,3 +103,36 @@ void rename (Song& song, int index, const std::string& name);
 // Duplicates arrangement `index` after itself (not selected); returns the new index.
 int duplicate (Song& song, int index);
 } // namespace lynx::arrangeops
+
+// FL's Playlist track modes and "Consolidate track(s)" (REA round 146a).
+namespace lynx::trackmodes
+{
+// A mixer track nothing uses yet (no channel routed to it, no track linked to it, no effects, nothing sent into it),
+// from insert 1 on; a new insert is added when there is none and the mixer has room. -1 when the mixer is full
+// (FL: "Can't create new audio or instrument track: no available mixer tracks").
+int freeMixerTrack (Song& song);
+// "Track mode › Audio track": links the track to a free mixer track (named and coloured after the track). False when
+// no mixer track is free.
+bool makeAudioTrack (Song& song, int track);
+// "Track mode › Instrument track": the track belongs to `channel` (an instrument, not an audio clip or automation
+// channel) and to its mixer track (a free one when the channel plays on the Master or on a track already linked).
+bool makeInstrumentTrack (Song& song, int track, int channel);
+// "Track mode › Unassigned".
+void unassign (Song& song, int track);
+// The text FL's hint bar adds for a track header: "(Audio track, linked to mixer track N)" / "(Instrument track)";
+// empty for an unassigned track.
+std::string describe (const Song& song, int track);
+// Audio clips on an audio track play through its mixer track: each one's channel is routed there; a channel that
+// also plays clips elsewhere gets a copy of its own first (FL: "make this instance unique and then route it to this
+// audio track"). Returns how many clips were changed.
+int followAudioTracks (Song& song);
+
+// The copy of the song rendered by "Consolidate track(s)": only the (unmuted) clips of `track` play, moved so the render
+// starts at `start` (the track's first clip, or 0 with `fromSongStart`); the Master without effects, at unity.
+// `musicLength` receives the length of the music from `start` (ticks). False when the track has no clips.
+bool makeConsolidateSong (const Song& song, int track, bool fromSongStart, Song& out, std::int64_t& start, std::int64_t& musicLength);
+// After the render: a new audio clip channel with `samplePath` (named "<track> (consolidated)", on the track's mixer
+// track for an audio track, else the Master) and one clip of `length` ticks at `start` on the track, in place of the
+// track's clips. Returns the new channel.
+int applyConsolidate (Song& song, int track, const std::string& samplePath, std::int64_t start, std::int64_t length);
+} // namespace lynx::trackmodes
