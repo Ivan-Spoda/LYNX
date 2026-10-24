@@ -969,6 +969,35 @@ const FoilType foilTypes[foil::typeCount] = {
 };
 double foilDecaySec (float v) { return knotLaw (v, foilDecayKnots, foilDecayCount); }
 
+// round 150 (parity150a) [EXEC]: the measured plate voicing (the Little Plate role, official trial, impulses at Decay 0.5 …
+// 20 s and ∞, REA_rodada150a §7): the plate speaks after 0.7 ms (no plate delay), and its decay per band against the
+// Decay label — the bass rings longer than the label at long settings (20 s: 35 s at 125 Hz), the highs shorter
+// (20 s: 5.5 s at 8 kHz), short settings ring a little longer than the label in the presence band, "∞" is ≈ 80 s.
+// Rows: label (s), the engine's RT60 (mid band), bass / high multipliers (fitted through Foil's own engine, plate.py)
+struct FoilVoicingRow { double label, rt, low, high; };
+LYNX_FIT_TABLE FoilVoicingRow foilVoicingRows[] = {
+#include "core/FoilVoicing.inc"
+};
+constexpr int foilVoicingCount = (int) (sizeof (foilVoicingRows) / sizeof (foilVoicingRows[0]));
+FoilVoicingRow foilVoicingAt (double label) noexcept
+{
+    const auto& a = foilVoicingRows[0];
+    if (label <= a.label)
+        return a;
+    for (int i = 1; i < foilVoicingCount; ++i)
+    {
+        const auto& lo = foilVoicingRows[i - 1];
+        const auto& hi = foilVoicingRows[i];
+        if (label <= hi.label || i == foilVoicingCount - 1)
+        {
+            const auto t = std::clamp (std::log (label / lo.label) / std::log (hi.label / lo.label), 0.0, 1.0);
+            const auto lg = [t] (double x, double y) { return std::exp (std::log (x) + t * (std::log (y) - std::log (x))); };
+            return { label, lg (lo.rt, hi.rt), lg (lo.low, hi.low), lg (lo.high, hi.high) };
+        }
+    }
+    return foilVoicingRows[foilVoicingCount - 1];
+}
+
 class FoilFx final : public VerbEffect
 {
 public:
@@ -1011,6 +1040,19 @@ protected:
         // round 135: a low cut on the plate's output, 20 Hz … 1 kHz (0 = off; 12 dB/oct)
         s.outLowCut = foil::lowCutHz (p[13]);
         s.outLowOrder = 2;
+        // round 150: the measured plate voicing (the Little Plate role): no plate delay, the measured decay per band
+        if (p[14] >= 0.5f)
+        {
+            const auto row = foilVoicingAt (infinite ? 1000.0 : rt);
+            s.predelaySec = epochPredelay (p[1]) / 1000.0 + 0.0005;
+            s.rt60 = row.rt;
+            s.lowMult = row.low;
+            s.lowXover = 300.0;
+            s.highMult = row.high;
+            s.highXover = 3000.0;
+            s.bandLimit = 0.0;
+            s.gain *= 0.82; // −1.7 dB: the trial's tail energy (impulse, Mix 100 %, 0.5 … 20 s within ±0.5 dB)
+        }
     }
 };
 
@@ -1413,7 +1455,8 @@ const EffectInfo& info (EffectKind kind)
         params ({ { "Mix", 1.0f }, { "Predelay", 0.0f }, { "Decay", 0.5f }, { "Size", 0.5f }, { "Width", 0.5f },
                   { "Mod rate", 0.365345f }, { "Mod depth", 0.0f }, { "Low EQ freq", 0.343434f }, { "Low EQ gain", 0.5f },
                   { "High EQ freq", 0.494949f }, { "High EQ gain", 0.5f }, { "Type", 0.0f }, // EQ at 700 Hz / 10 kHz (round 129)
-                  { "Infinite", 0.0f }, { "Low cut", 0.0f } }) }; // round 135 (the Little Plate role)
+                  { "Infinite", 0.0f }, { "Low cut", 0.0f }, // round 135 (the Little Plate role)
+                  { "Voicing", 0.0f } }) }; // round 150: the measured plate voicing (off = the plate types as before)
     static const EffectInfo nebulaInfo { "Nebula",
         params ({ { "Mix", 0.5f }, { "Sync", 0.0f }, { "Note", 0.333333f }, { "Delay", 0.5f }, { "Warp", 0.0f },
                   { "Feedback", 0.5f }, { "Density", 0.0f }, { "Width", 1.0f }, { "Low cut", 0.0f }, { "High cut", 1.0f },
@@ -1492,6 +1535,7 @@ std::string paramText (EffectKind kind, int param, float v, double bpm)
                 case 11: return foil::typeName (choice (v, foil::typeCount));
                 case 12: return v >= 0.5f ? "on" : "off";
                 case 13: return v <= 0.0f ? "off" : hz (foil::lowCutHz (v));
+                case 14: return v >= 0.5f ? "measured" : "off";
                 default: return pct (v);
             }
         case EffectKind::nebula:

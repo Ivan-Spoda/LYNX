@@ -27,6 +27,12 @@ constexpr double satC = 0.8510, satP = 1.9762, satB = 0.0929, satGain = 1.01899;
 // the reduction smoothed with a 4.88 ms attack and an immediate release (0.2 dB rms on the bursts)
 constexpr double hotRmsMs = 3.19, hotAttackMs = 4.88, hotThreshold = -11.22, hotKnee = 5.28, hotRatio = 2.209;
 
+// [EXEC] round 150: PanMan's Tweak envelope (OffsetMod +90°, Width 0, 1 kHz stairs and steps, REA_rodada150a §6): the
+// modulation follows the input before Input / Output gain, 0 below −20 dBFS (a sine's peak), linear in amplitude to
+// full at −9 dBFS; a step to −6 dBFS reaches 90 % in ≈ 50 ms, falls to half in ≈ 200 ms — fitted (2 % rms) by a 1 ms
+// mean square, then 21.3 ms attack / 291.5 ms release on the peak-equivalent level
+constexpr double envMeanMs = 1.0, envAttackMs = 21.3, envReleaseMs = 291.5;
+
 double side (double v) noexcept { return v / std::pow (1.0 + std::pow (std::abs (v / satC), satP), 1.0 / satP); }
 const double sideB = side (satB);
 
@@ -53,6 +59,7 @@ void Engine::reset() noexcept
     for (auto& h : hist)
         h.fill (0.0f);
     histPos = 0;
+    envMs = env = envAmount = extraPhase = 0.0;
 }
 
 void Engine::set (const Settings& settings) noexcept
@@ -65,6 +72,9 @@ void Engine::set (const Settings& settings) noexcept
     outGain = std::pow (10.0, s.outputDb / 20.0);
     rmsA = std::exp (-1.0 / (hotRmsMs * 0.001 * sr));
     attA = std::exp (-1.0 / (hotAttackMs * 0.001 * sr));
+    msA = std::exp (-1.0 / (envMeanMs * 0.001 * sr));
+    envAtt = std::exp (-1.0 / (envAttackMs * 0.001 * sr));
+    envRel = std::exp (-1.0 / (envReleaseMs * 0.001 * sr));
     // bilinear transform of g (s + wz) / (s + wp)
     const double k = 2.0 * sr, wz = 2.0 * pi * lfZeroHz, wp = 2.0 * pi * lfPoleHz;
     shB0 = lfGain * (k + wz) / (k + wp);
@@ -84,13 +94,27 @@ void Engine::process (float* left, float* right, int n, double beatPos, double b
     const double bps = std::max (bpm, 1.0) / 60.0;
     // the pattern's phase: free = seconds since the song start × rate; synced = beats / period, both + the start phase
     const double cyclesPerSample = s.sync ? bps / sr / std::max (s.beats, 1e-6) : s.rateHz / sr;
-    double phase = s.phase + (s.sync ? beatPos / std::max (s.beats, 1e-6) : beatPos / bps * s.rateHz);
+    double phase = s.phase + (s.sync ? beatPos / std::max (s.beats, 1e-6) : beatPos / bps * s.rateHz) - s.feel / steps;
+    const bool tweak = s.rateMod != 0.0 || s.offsetMod != 0.0 || s.widthMod != 0.0;
+    const double thr = std::pow (10.0, s.envThresholdDb / 20.0), full = std::pow (10.0, (s.envThresholdDb + std::max (0.1, s.envRangeDb)) / 20.0);
     // the glide: `smoothing` of a step, at least 55 samples at 48 kHz (the trial's ramp with Smoothing 0)
     const double stepSamples = 1.0 / std::max (cyclesPerSample * steps, 1e-12);
     const double glide = std::max (s.smoothing, std::min (1.0, 55.0 * sr / 48000.0 / stepSamples));
     for (int i = 0; i < n; ++i, phase += cyclesPerSample)
     {
         float a = left != nullptr ? left[i] : 0.0f, b = right != nullptr ? right[i] : 0.0f;
+        double offset = s.offset, width = s.width;
+        if (tweak) // round 150: the Tweak page's envelope follower (the input as it comes in)
+        {
+            envMs = (double) (a * a + b * b) + msA * (envMs - (double) (a * a + b * b)); // 2 × the mean square per channel
+            const double lvl = std::sqrt (envMs);                                           // a sine's peak
+            env = lvl + (lvl > env ? envAtt : envRel) * (env - lvl);
+            envAmount = std::clamp ((env - thr) / (full - thr), 0.0, 1.0);
+            offset = std::clamp (offset + s.offsetMod * envAmount, -105.0, 105.0);
+            width = std::clamp (width + s.widthMod * envAmount, 0.0, 210.0);
+            if (s.rateMod != 0.0)
+                extraPhase += cyclesPerSample * (std::pow (2.0, s.rateMod * envAmount) - 1.0);
+        }
         if (s.analog == 1)
         {
             a = analogStage (a, 0);
@@ -122,15 +146,24 @@ void Engine::process (float* left, float* right, int n, double beatPos, double b
         }
         histPos = (histPos + 1) & 31;
         // the step position with its glide
-        const double ph = phase - std::floor (phase);
-        const double pos = ph * steps;
+        const double ph = phase + extraPhase - std::floor (phase + extraPhase);
+        double pos = ph * steps;
+        if (s.groove != 0.0 && steps >= 2) // round 150: the odd steps start late (+) or early (−) by groove × a step
+        {
+            const double pair = 2.0 * std::floor (pos / 2.0), u = pos - pair, mid = 1.0 + std::clamp (s.groove, -0.25, 0.25);
+            pos = pair + (u < mid ? u / mid : 1.0 + (u - mid) / (2.0 - mid));
+            pos = std::min (pos, (double) steps - 1e-9);
+        }
         const int k = std::min ((int) pos, steps - 1);
         const double fr = std::clamp ((pos - k) / glide, 0.0, 1.0);
         const double cur = values[(size_t) k], prev = values[(size_t) ((k + steps - 1) % steps)];
-        const double theta = std::clamp (45.0 + 0.5 * s.offset + 0.25 * s.width * (prev + (cur - prev) * fr), 0.0, 90.0) * pi / 180.0;
+        // round 150 [EXEC]: past the speakers (offset + width / 2 beyond ±90°) the angle folds back with the far side's
+        // polarity inverted (offset 45° + OffsetMod 90° → the left at tan 7.5° of the right, inverted); else clipped
+        const double angle = 45.0 + 0.5 * offset + 0.25 * width * (prev + (cur - prev) * fr);
+        const double theta = (s.beyond ? std::clamp (angle, -52.5, 142.5) : std::clamp (angle, 0.0, 90.0)) * pi / 180.0;
         if (left != nullptr) left[i] = (float) (fa * std::cos (theta) * outGain);
         if (right != nullptr) right[i] = (float) (fb * std::sin (theta) * outGain);
-        current = (float) (theta * 2.0 / pi);
+        current = (float) std::clamp (theta * 2.0 / pi, 0.0, 1.0);
     }
 }
 } // namespace lynx::rhythmpan

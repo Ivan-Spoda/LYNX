@@ -2665,6 +2665,32 @@ private:
                     png.writeImageToStream (image, *stream);
             }
 
+            // round 150: Auto-pan's Rhythm voicing with its Tweak row (PanMan's role)
+            {
+                auto fx = lynx::makeEffectSlot (lynx::EffectKind::autoPan);
+                fx.params[lynx::autopan::count] = 1.0f;          // the Rhythm voicing
+                fx.params[lynx::autopan::count + 13] = 0.75f;   // offset mod +90°
+                lynx::Song song;
+                song.mixer.resize (2);
+                song.mixer[0].name = "Master";
+                song.mixer[1].name = "Insert 1";
+                song.mixer[1].effects.push_back (fx);
+                offline.setSong (std::move (song));
+                offline.dispatchPendingMessages();
+                auto editor = lynx::makeNativeEffectEditor (offline, 1, 0, 1.0f, 0);
+                juce::Image image (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
+                {
+                    juce::Graphics g (image);
+                    g.fillAll (lynx::theme::panel);
+                    editor->paintEntireComponent (g, false);
+                }
+                const auto file = out.getChildFile ("Auto-pan-tweak.png");
+                file.deleteFile();
+                juce::PNGImageFormat png;
+                if (auto stream = file.createOutputStream())
+                    png.writeImageToStream (image, *stream);
+            }
+
             // LYNX's own editors with live displays (round 103): Facet EQ (a mixing curve, one dynamic band, demo analyser)
             // and LYNX Tune (demo pitch phrase)
             {

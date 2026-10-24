@@ -4203,3 +4203,11 @@ countries: br
 "Wavefold" = "Dobra de onda"
 "Octave rectifier" = "Retificador de oitava"
 "Wreck" = "Destroço"
+# round 150 (parity150a): Auto-pan's Rhythm voicing — the Tweak page (PanMan's role)
+"Rate mod" = "Mod. da taxa"
+"Offset mod" = "Mod. do deslocamento"
+"Width mod" = "Mod. da largura"
+"Beyond" = "Além"
+# round 150 (parity150a): Foil Plate's measured plate voicing
+"Measured plate" = "Placa medida"
+"Thresh." = "Limiar"

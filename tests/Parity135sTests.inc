@@ -194,7 +194,7 @@ TEST (autopan_panner_sources_round135s)
     using namespace lynx;
     namespace ap = autopan;
     auto base = makeEffectSlot (EffectKind::autoPan).params;
-    CHECK (effectInfo (EffectKind::autoPan).params.size() == (std::size_t) ap::count + 12); // + round 136's Rhythm voicing
+    CHECK (effectInfo (EffectKind::autoPan).params.size() == (std::size_t) ap::count + 20); // + round 136's Rhythm voicing + round 150's Tweak block
     CHECK (ap::sourceOf (base[ap::source]) == ap::Source::fl); // older projects / FL conversions keep FL's LFO
     CHECK (std::abs (ap::rateHz (base[ap::rate]) - 0.25) < 0.01); // the reference's default 0.25 Hz
     CHECK (formatEffectParam (EffectKind::autoPan, ap::rate, ap::rateValue (3.56), 120.0) == "3.56 Hz");
