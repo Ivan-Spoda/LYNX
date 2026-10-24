@@ -1505,8 +1505,9 @@ public:
     }
 
 private:
-    enum { idPrev = 1, idNext, idClose, idRange, idAnalyzer, idClassic, idSolo0 = 20, idMute0 = 30 };
+    enum { idPrev = 1, idNext, idClose, idRange, idAnalyzer, idClassic, idExpert, idSolo0 = 20, idMute0 = 30 };
     int selected = 0, hoverBand = -1, dragBand = -1, dragEdge = -1;
+    bool expert = false; // round 147: the band panel's expert part (side-chain filtering, stereo link), view only
     double rangeView = 12.0;
     int analyzer = 3; // 0 off, 1 pre, 2 post, 3 pre + post (view only)
     juce::Point<float> dragStart;
@@ -1520,7 +1521,8 @@ private:
     juce::Rectangle<float> panelArea() const
     {
         const auto p = plot();
-        return { p.getCentreX() - 300.0f, p.getBottom() - 176.0f, 600.0f, 166.0f };
+        const auto w = expert ? 820.0f : 600.0f;
+        return { p.getCentreX() - w * 0.5f, p.getBottom() - 176.0f, w, 166.0f };
     }
 
     static int bp (int b, int f) { return dyn::prism::param (b, f); }
@@ -1669,6 +1671,18 @@ private:
             out.push_back (menu ({ a.getX() + 522.0f, a.getY() + 36.0f, 70.0f, 22.0f }, slope, tr ("Slope"), "12 dB|24 dB|48 dB"));
             out.push_back (menu ({ a.getX() + 522.0f, a.getY() + 76.0f, 70.0f, 22.0f }, scExternal, tr ("Side chain"), "Int|Ext"));
             out.push_back (tabs ({ a.getX() + 12.0f, a.getY() + 72.0f, 64.0f, 22.0f }, panMode, "L/R|M/S")); // round 144: what PAN balances
+            // round 147: the expert part (the reference's »): side-chain filtering and the stereo link of this band
+            out.push_back (button ({ a.getX() + 12.0f, a.getY() + 104.0f, 64.0f, 22.0f }, idExpert, expert ? tr ("Expert <<") : tr ("Expert >>"), expert,
+                                   tr ("Show the band's expert settings: side-chain filtering (band or a free range) and the stereo link")));
+            if (expert)
+            {
+                const auto x0 = a.getX() + 600.0f;
+                add (tabs ({ x0 + 10.0f, a.getY() + 26.0f, 100.0f, 22.0f }, bandScFree0 + b, "Band|Free"));
+                add (knob ({ x0 + 4.0f, a.getY() + 56.0f, 56.0f, 74.0f }, bandScLow0 + b, tr ("Low"), 0));
+                add (knob ({ x0 + 58.0f, a.getY() + 56.0f, 56.0f, 74.0f }, bandScHigh0 + b, tr ("High"), 0));
+                add (knob ({ x0 + 126.0f, a.getY() + 22.0f, 84.0f, 92.0f }, bandLink0 + b, tr ("Link"), 1));
+                add (tabs ({ x0 + 132.0f, a.getY() + 122.0f, 74.0f, 22.0f }, bandLinkMode0 + b, "Mid|Side"));
+            }
             out.push_back (button ({ a.getRight() - 72.0f, a.getY() + 8.0f, 20.0f, 20.0f }, idPrev, "<", false, tr ("Previous / next band")));
             out.push_back (button ({ a.getRight() - 50.0f, a.getY() + 8.0f, 20.0f, 20.0f }, idNext, ">", false, tr ("Previous / next band")));
             out.push_back (button ({ a.getRight() - 26.0f, a.getY() + 8.0f, 20.0f, 20.0f }, idClose, "x", false, tr ("Close the band panel (click on the empty display does the same)")));
@@ -1701,6 +1715,7 @@ private:
         else if (c.id == idRange) rangeView = rangeView >= 30.0 ? 3.0 : rangeView >= 12.0 ? 30.0 : rangeView >= 6.0 ? 12.0 : 6.0;
         else if (c.id == idAnalyzer) { showAnalyzerMenu(); return; }
         else if (c.id == idClassic) set ({ { dynamicEngine, 1.0f } });
+        else if (c.id == idExpert) expert = ! expert;
         else if (c.id >= idSolo0 && c.id < idSolo0 + bands) set ({ { bp (c.id - idSolo0, fSolo), v (bp (c.id - idSolo0, fSolo)) >= 0.5f ? 0.0f : 1.0f } });
         else if (c.id >= idMute0 && c.id < idMute0 + bands) set ({ { bp (c.id - idMute0, fEnabled), bandOn (c.id - idMute0) ? 0.0f : 1.0f } });
         repaint();
@@ -1973,6 +1988,14 @@ private:
             g.setFont (font (type::small, true));
             g.drawText (tr ("Band {0}", { juce::String (selected + 1) }), juce::Rectangle<float> (a.getRight() - 160.0f, a.getY() + 8.0f, 86.0f, 20.0f), juce::Justification::centredRight, false);
             caption (g, { a.getX() + 86.0f, a.getY() + 114.0f, 184.0f, 12.0f }, tr ("Mode"));
+            if (expert) // round 147: the expert part's captions and its separator
+            {
+                const auto x0 = a.getX() + 600.0f;
+                g.setColour (colour::border);
+                g.drawVerticalLine ((int) x0, a.getY() + 10.0f, a.getBottom() - 10.0f);
+                caption (g, { x0 + 6.0f, a.getY() + 10.0f, 110.0f, 12.0f }, tr ("Side chain"));
+                caption (g, { x0 + 120.0f, a.getY() + 10.0f, 96.0f, 12.0f }, tr ("Stereo link"));
+            }
         }
         // output meter
         const auto m = juce::Rectangle<float> ((float) getWidth() - 14.0f, p.getY(), 8.0f, p.getHeight());

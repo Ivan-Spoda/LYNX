@@ -2056,6 +2056,24 @@ Layout prismMultiband()
     v.push_back (tabs (402, 566, 150, 20, "Oversampling", "Off|2x|4x", { 0.0f, 0.5f, 1.0f }));
     v.push_back (label (570, 566, 40, 20, TR_NOOP ("Pan")));
     v.push_back (tabs (612, 566, 110, 20, "Pan mode", "L/R|M/S"));
+    // round 147: Dynamic phase's engine (classic = projects saved before round 147) and each band's expert settings
+    v.push_back (tabs (736, 566, 156, 20, "Dynamic engine", TR_NOOP ("Classic|Measured")));
+    v.push_back (section (8, 596, 884, 64, TR_NOOP ("Expert (selected band)"), boxed));
+    static const char* links[6] { "B1 link", "B2 link", "B3 link", "B4 link", "B5 link", "B6 link" };
+    static const char* linkModes[6] { "B1 link mode", "B2 link mode", "B3 link mode", "B4 link mode", "B5 link mode", "B6 link mode" };
+    static const char* scFree[6] { "B1 SC filter", "B2 SC filter", "B3 SC filter", "B4 SC filter", "B5 SC filter", "B6 SC filter" };
+    static const char* scLow[6] { "B1 SC low", "B2 SC low", "B3 SC low", "B4 SC low", "B5 SC low", "B6 SC low" };
+    static const char* scHigh[6] { "B1 SC high", "B2 SC high", "B3 SC high", "B4 SC high", "B5 SC high", "B6 SC high" };
+    for (int b = 0; b < 6; ++b)
+    {
+        auto add = [&] (LayoutItem i) { i.colour = b; v.push_back (onPage (std::move (i), b)); };
+        add (tabs (16, 626, 150, 22, scFree[b], TR_NOOP ("Band|Free")));
+        add (dial (210, 630, 20, scLow[b], TR_NOOP ("SC low")));
+        add (dial (290, 630, 20, scHigh[b], TR_NOOP ("SC high")));
+        add (dial (420, 630, 20, links[b], TR_NOOP ("Stereo link")));
+        add (tabs (480, 626, 130, 22, linkModes[b], TR_NOOP ("Mid|Side")));
+    }
+    l.height = 668;
     return l;
 }
 

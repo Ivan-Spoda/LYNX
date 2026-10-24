@@ -3940,3 +3940,11 @@ countries: br
 # round 147 (parity147): Prism Multiband's measured Dynamic phase
 "Classic dynamic" = "Dinâmica clássica"
 "This project's Dynamic phase runs the engine it was saved with (before round 147). Click to use the measured one (Pro-MB's response)." = "A fase dinâmica deste projeto usa o motor com que foi salvo (antes da rodada 147). Clique para usar o medido (a resposta do Pro-MB)."
+"Expert >>" = "Avançado >>"
+"Expert <<" = "Avançado <<"
+"Show the band's expert settings: side-chain filtering (band or a free range) and the stereo link" = "Mostra os ajustes avançados da banda: filtro do side chain (a banda ou uma faixa livre) e o link estéreo"
+"Band|Free" = "Banda|Livre"
+"SC low" = "SC grave"
+"SC high" = "SC agudo"
+"Expert (selected band)" = "Avançado (banda selecionada)"
+"Classic|Measured" = "Clássico|Medido"

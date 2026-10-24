@@ -264,10 +264,10 @@ lookahead on, expert mode, display range, analyser options.
 | S / M buttons per band | ✅ | |
 | Floating band panel: power, THRESHOLD, RANGE, ATTACK, RELEASE, OUTPUT, mode, RATIO, KNEE | ✅ | |
 | LOOKAHEAD per band | ✅ | round 128: LOOKAHEAD in the band panel (0–20 ms, capped by the global look-ahead, which sets the latency); translated from Pro-MB |
-| EXPERT (»): side-chain filtering, external side chain, stereo link per band | ⚠️ | round 135: external side chain (bottom bar Int / Ext: the detectors hear the side chain split by the same crossovers); no side-chain filtering or per-band stereo link |
+| EXPERT (»): side-chain filtering, external side chain, stereo link per band | ✅ | round 135: external side chain (Int / Ext: the detectors hear the side chain split by the same crossovers); round 147: **Expert >>** in the band panel — side-chain filtering Band / Free with Low / High (30 Hz – 30 kHz; the free filter measured: 4th-order sides, −24 dB an octave out; one octave and wider within 1 dB, narrower bands boost less than the reference), **stereo link** 0–100 % and 100 % + mid- / side-only with its Mid / Side mode (measured laws, within 0.25 dB of the trial); translated from Pro-MB states (only when its Expert mode is on, as the reference does); the side-chain input stays one switch for all bands |
 | Band output pan (mid / side) | ✅ | round 135: PAN in the band panel (left / right balance of the band); round 144: L/R \| M/S switch in the band panel (mid / side = the reference's law, measured: the far side's gain 1 − \|pan\|), translated from Pro-MB states |
 | Crossover slope per band 6–48 dB/oct | ⚠️ | one global slope 12 / 24 / 48 (round 144: in the band panel, where the reference has it) |
-| Processing mode Linear / Dynamic / Minimum phase | ✅ | round 144: Phase menu in the bottom bar; linear = FIR crossovers with the same magnitudes, 3072 samples at 48 kHz (measured); minimum = all-pass compensated sum; dynamic = the old engine (its crossover shape when a band works still differs: REA_rodada144b); translated |
+| Processing mode Linear / Dynamic / Minimum phase | ✅ | round 144: Phase menu in the bottom bar; linear = FIR crossovers with the same magnitudes, 3072 samples at 48 kHz (measured); minimum = all-pass compensated sum; translated. Round 147: **Dynamic phase measured and rebuilt** — each working band is a minimum-phase filter with the linear-phase magnitude, the bands in cascade (Pro-MB's −4.1 dB / +53° at the crossover, −8.15 dB for two adjacent −12 dB bands: matched within 0.05 dB / 1°); projects saved before round 147 keep the classic engine ("Classic dynamic" in the bottom bar updates them) |
 | Oversampling | ✅ | round 144: Off / 2x / 4x in the bottom bar: the gains applied at the high rate; latency + the oversampler's; translated |
 | Display range 3 / 6 / 12 / 30 dB | ✅ | round 128: 3 dB added |
 | Analyser off / pre / post / pre+post | ✅ | |
@@ -276,6 +276,8 @@ lookahead on, expert mode, display range, analyser options.
 | Output meter | ✅ | |
 
 **After round 144** (REA_rodada144b): configuration 7 → **9**/10, design 7 → **8**/10 — processing modes, oversampling, mid / side band pan, analyser resolution / tilt, the reference's bottom-bar order. Left: per-band slopes, side-chain filtering, per-band stereo link, the dynamic mode's crossover shape, free band placement.
+
+**After round 147** (REA_rodada147 §1–2): configuration **9**/10 (the expert controls are in, per-band slopes are still missing), design 8 → **9**/10 — the measured Dynamic phase (the reference's sound when bands work), the expert panel (side-chain filtering, stereo link per band). Left: per-band slopes (6–48 dB/oct per side; LYNX: one 12 / 24 / 48 for all), free band placement with gaps, a side-chain input per band, the free side-chain filter's extra boost on bands narrower than an octave.
 
 ## Sentry Gate ← Pro-G
 

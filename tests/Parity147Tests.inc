@@ -160,3 +160,143 @@ TEST (prism_old_projects_keep_classic_dynamic_round147)
     upgradeLoadedEffectParams (crest, 3);
     CHECK (crest.params == before);
 }
+
+namespace p147
+{
+// one band over the whole spectrum compressing: threshold, ratio, range −30, knee 0 (the trial's settings)
+inline lynx::EffectParams wholeBand (double thresholdDb, double ratio)
+{
+    auto p = dyn108::defaults (lynx::EffectKind::prismMultiband);
+    p[m::bandCountParam] = m::bandCountValue (1);
+    p[(std::size_t) m::param (0, m::fThreshold)] = m::thresholdValue (thresholdDb);
+    p[(std::size_t) m::param (0, m::fRatio)] = lynx::dyn::crest::ratioValue (ratio);
+    p[(std::size_t) m::param (0, m::fRange)] = 0.0f; // −30 dB
+    p[(std::size_t) m::param (0, m::fKnee)] = 0.0f;
+    return p;
+}
+
+// steady gains (dB) of a 200 Hz tone of the given left / right amplitudes: { left, right, mid, side }
+inline std::array<double, 4> stereoGains (const lynx::EffectParams& p, double aL, double aR)
+{
+    auto slot = lynx::makeEffectSlot (lynx::EffectKind::prismMultiband);
+    slot.params = p;
+    auto fx = lynx::makeEffect (slot);
+    fx->prepare (dyn108::sr);
+    fx->reset();
+    const int n = 72000;
+    std::vector<float> l (n), r (n);
+    for (int i = 0; i < n; ++i)
+    {
+        const auto s = std::sin (2.0 * dyn108::pi * 200.0 * i / dyn108::sr);
+        l[(std::size_t) i] = (float) (aL * s);
+        r[(std::size_t) i] = (float) (aR * s);
+    }
+    const auto il = l, ir = r;
+    for (int off = 0; off < n; off += 512)
+        fx->process (l.data() + off, r.data() + off, std::min (512, n - off), p, 120.0);
+    const auto rms = [&] (const std::vector<float>& a, const std::vector<float>& b, double ka, double kb) {
+        double e = 0.0;
+        for (int i = 48000; i < n; ++i)
+        {
+            const auto v = ka * a[(std::size_t) i] + kb * b[(std::size_t) i];
+            e += v * v;
+        }
+        return 10.0 * std::log10 (e + 1e-30);
+    };
+    return { rms (l, r, 1, 0) - rms (il, ir, 1, 0), rms (l, r, 0, 1) - rms (il, ir, 0, 1),
+             rms (l, r, 0.5, 0.5) - rms (il, ir, 0.5, 0.5), rms (l, r, 0.5, -0.5) - rms (il, ir, 0.5, -0.5) };
+}
+} // namespace p147
+
+TEST (prism_stereo_link_round147)
+{
+    using namespace lynx;
+    namespace m = dyn::prism;
+    CHECK (m::bandLink0 == 88 && m::count == 118 && (int) effectInfo (EffectKind::prismMultiband).params.size() == m::count);
+    CHECK (formatEffectParam (EffectKind::prismMultiband, m::bandLink0, 0.25f, 120.0) == "50%");
+    CHECK (formatEffectParam (EffectKind::prismMultiband, m::bandLink0 + 2, 0.75f, 120.0) == "100%, 50% only");
+    CHECK (formatEffectParam (EffectKind::prismMultiband, m::bandScLow0, m::scFilterValue (2000.0), 120.0) == "2.00 kHz");
+    // [EXEC] Pro-MB, one band, threshold −30 dB, 4 : 1, range −30, knee 0; 200 Hz at −6 dB left, −36 dB right
+    struct Case { float link, mode; double l, r, mid, side; bool ms; };
+    const Case cases[] {
+        { 0.0f, 0.0f, -17.74, 0.0, 0, 0, false },      // unlinked: the quiet right side untouched
+        { 0.25f, 0.0f, -17.74, -13.47, 0, 0, false },  // 50 %
+        { 0.5f, 0.0f, -17.74, -17.74, 0, 0, false },   // 100 % (the old detector)
+        { 1.0f, 0.0f, 0, 0, -13.47, 0.0, true },       // 100 % + 100 % mid only: the side untouched
+        { 1.0f, 1.0f, 0, 0, 0.0, -13.06, true },       // side only
+        { 0.75f, 0.0f, 0, 0, -15.95, -4.74, true },    // 100 % + 50 % mid only
+    };
+    for (const auto& c : cases)
+    {
+        auto p = p147::wholeBand (-30.0, 4.0);
+        p[m::bandLink0] = c.link;
+        p[m::bandLinkMode0] = c.mode;
+        const auto g = p147::stereoGains (p, 0.5, 0.5 * std::pow (10.0, -1.5));
+        std::printf ("  Prism link %.2f mode %.0f: L %.2f R %.2f M %.2f S %.2f dB (Pro-MB %s %.2f / %.2f)\n", c.link, c.mode, g[0], g[1], g[2], g[3],
+                     c.ms ? "M/S" : "L/R", c.ms ? c.mid : c.l, c.ms ? c.side : c.r);
+        CHECK (std::abs ((c.ms ? g[2] : g[0]) - (c.ms ? c.mid : c.l)) < 0.8);
+        CHECK (std::abs ((c.ms ? g[3] : g[1]) - (c.ms ? c.side : c.r)) < 0.8);
+    }
+}
+
+TEST (prism_free_sidechain_filter_round147)
+{
+    using namespace lynx;
+    namespace m = dyn::prism;
+    // [EXEC] Pro-MB, one band, threshold −60, 2 : 1, range −30: the detector level of a −20 dB probe (from its gain)
+    // with a free side-chain filter 2 – 4 kHz: 1 kHz −22.4, 2 kHz +2.1, 3 kHz +5.5, 8 kHz −23.5 dB (relative)
+    const double hz[] { 1000.0, 2000.0, 3000.0, 8000.0 };
+    const double rel[] { -22.4, 2.1, 5.5, -23.5 };
+    for (int k = 0; k < 4; ++k)
+    {
+        auto p = p147::wholeBand (-60.0, 2.0);
+        p[m::bandScFree0] = 1.0f;
+        p[m::bandScLow0] = m::scFilterValue (2000.0);
+        p[m::bandScHigh0] = m::scFilterValue (4000.0);
+        const auto g = p147::toneGain (p, hz[k]);
+        // tone at −12 dBFS (0.25): detector = −2·gain − 60 → relative to the probe's own level
+        const auto det = -2.0 * g - 60.0 - (-12.04);
+        std::printf ("  Prism free side chain 2-4 kHz: %.0f Hz detector %+.1f dB (Pro-MB %+.1f)\n", hz[k], det, rel[k]);
+        CHECK (std::abs (det - rel[k]) < 2.0);
+    }
+    // band side chain (the default) is unchanged by the free filter's settings
+    auto a = p147::wholeBand (-60.0, 2.0), b = a;
+    b[m::bandScLow0] = m::scFilterValue (2000.0);
+    CHECK (std::abs (p147::toneGain (a, 300.0) - p147::toneGain (b, 300.0)) < 1e-6);
+}
+
+TEST (prism_promb_expert_translation_round147)
+{
+    using namespace lynx;
+    namespace m = dyn::prism;
+    std::vector<std::pair<int, float>> mb { { 0, 1.0f }, { 1, (float) std::log2 (30.0) }, { 2, 0.5f }, { 3, (float) std::log2 (30000.0) }, { 4, 0.5f },
+                                            { 6, 0.5f }, { 8, 0.6f }, { 133, 1.0f }, { 139, 1.0f },
+                                            { 15, 1.0f }, { 16, (float) std::log2 (2000.0) }, { 17, (float) std::log2 (4000.0) }, { 19, 0.25f }, { 20, 1.0f } };
+    for (int b = 1; b < 6; ++b)
+        mb.push_back ({ 22 * b, 2.0f });
+    PluginIdentity id;
+    id.format = ForeignPlugin::Format::vst3;
+    id.name = "FabFilter Pro-MB";
+    for (const float expertOn : { 0.0f, 1.0f })
+    {
+        auto values = mb;
+        values.push_back ({ 142, expertOn });
+        id.state = dyn108::fabf (151, values);
+        const auto* entry = findPluginSubstitute (id, false);
+        CHECK (entry != nullptr);
+        if (entry == nullptr)
+            continue;
+        const auto slot = makeSubstituteSlot (*entry, &id, nullptr);
+        // the band is our band 1 (from 30 Hz); expert off: the reference ignores the expert settings
+        const bool on = expertOn > 0.5f;
+        CHECK (std::abs (slot.params[m::bandLink0] - (on ? 0.25f : 0.5f)) < 1e-6f);
+        CHECK (slot.params[m::bandLinkMode0] == (on ? 1.0f : 0.0f));
+        CHECK (slot.params[m::bandScFree0] == (on ? 1.0f : 0.0f));
+        if (on)
+        {
+            CHECK (std::abs (m::scFilterHz (slot.params[m::bandScLow0]) - 2000.0) < 1.0);
+            CHECK (std::abs (m::scFilterHz (slot.params[m::bandScHigh0]) - 4000.0) < 2.0);
+        }
+        CHECK (m::measuredDynamic (slot.params)); // a translated state runs the measured Dynamic phase
+    }
+}

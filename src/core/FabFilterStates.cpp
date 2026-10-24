@@ -253,7 +253,7 @@ int fromProC3 (const State& s, EffectSlot& slot)
 // 134 input level, 136 output level, 139 processing mode, 140 oversampling, 141 look-ahead on
 int fromProMB (const State& s, EffectSlot& slot)
 {
-    if (slot.kind != EffectKind::prismMultiband || ! s.named || s.count != 151 || ! finiteAll (s, 142))
+    if (slot.kind != EffectKind::prismMultiband || ! s.named || s.count != 151 || ! finiteAll (s, 143))
         return 0;
     using namespace dyn::prism;
     auto& p = slot.params;
@@ -344,6 +344,19 @@ int fromProMB (const State& s, EffectSlot& slot)
         la = std::max (la, (double) s.at (base + 12));
         set (bandLookaheadParam (b), linValue (s.at (base + 12), 0.0, 20.0)); // round 128: the band's own
         set (bandPanParam (b), (float) ((std::clamp ((double) s.at (base + 14), -1.0, 1.0) + 1.0) * 0.5)); // round 144: mid / side
+        // round 147: the expert panel (read black-box from the trial's states; the reference ignores it while its
+        // Expert mode, slot 142, is off): 15 side-chain filtering (0 band, 1 free), 16 / 17 its low / high (log2 Hz),
+        // 18 side-chain input (0 plug-in, 1 external), 19 stereo link (the parameter's own value), 20 link mode
+        if (s.at (142) >= 0.5f)
+        {
+            set (bandLink0 + b, clamp01 (s.at (base + 19)));
+            set (bandLinkMode0 + b, s.at (base + 20) >= 0.5f ? 1.0f : 0.0f);
+            set (bandScFree0 + b, s.at (base + 15) >= 0.5f ? 1.0f : 0.0f);
+            set (bandScLow0 + b, scFilterValue (std::pow (2.0, (double) s.at (base + 16))));
+            set (bandScHigh0 + b, scFilterValue (std::pow (2.0, (double) s.at (base + 17))));
+            if (s.at (base + 18) >= 0.5f)
+                set (Global::scExternal, 1.0f);
+        }
         if (b == 0)
         {
             // the slope: the steeper of the band's sides, to our nearest
