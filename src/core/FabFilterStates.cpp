@@ -253,7 +253,7 @@ int fromProC3 (const State& s, EffectSlot& slot)
 // 134 input level, 136 output level, 139 processing mode, 140 oversampling, 141 look-ahead on
 int fromProMB (const State& s, EffectSlot& slot)
 {
-    if (slot.kind != EffectKind::prismMultiband || ! s.named || s.count != 151 || ! finiteAll (s, 142))
+    if (slot.kind != EffectKind::prismMultiband || ! s.named || s.count != 151 || ! finiteAll (s, 143))
         return 0;
     using namespace dyn::prism;
     auto& p = slot.params;
@@ -344,12 +344,36 @@ int fromProMB (const State& s, EffectSlot& slot)
         la = std::max (la, (double) s.at (base + 12));
         set (bandLookaheadParam (b), linValue (s.at (base + 12), 0.0, 20.0)); // round 128: the band's own
         set (bandPanParam (b), (float) ((std::clamp ((double) s.at (base + 14), -1.0, 1.0) + 1.0) * 0.5)); // round 144: mid / side
+        // round 147: the expert panel (read black-box from the trial's states; the reference ignores it while its
+        // Expert mode, slot 142, is off): 15 side-chain filtering (0 band, 1 free), 16 / 17 its low / high (log2 Hz),
+        // 18 side-chain input (0 plug-in, 1 external), 19 stereo link (the parameter's own value), 20 link mode
+        if (s.at (142) >= 0.5f)
+        {
+            set (bandLink0 + b, clamp01 (s.at (base + 19)));
+            set (bandLinkMode0 + b, s.at (base + 20) >= 0.5f ? 1.0f : 0.0f);
+            set (bandScFree0 + b, s.at (base + 15) >= 0.5f ? 1.0f : 0.0f);
+            set (bandScLow0 + b, scFilterValue (std::pow (2.0, (double) s.at (base + 16))));
+            set (bandScHigh0 + b, scFilterValue (std::pow (2.0, (double) s.at (base + 17))));
+            if (s.at (base + 18) >= 0.5f)
+                set (Global::scExternal, 1.0f);
+        }
         if (b == 0)
         {
             // the slope: the steeper of the band's sides, to our nearest
             const auto dbOct = 6.0 + 42.0 * std::max (s.at (base + 2), s.at (base + 4));
             set (Global::slope, dbOct < 18.0 ? 0.0f : (dbOct < 36.0 ? 0.5f : 1.0f));
         }
+    }
+    // round 147: each crossover's own slope — the band below's high slope, or the band above's low slope (gaps)
+    for (int k = 0; k + 1 < std::min (nb, nseg); ++k)
+    {
+        const auto& lo = segs[(std::size_t) k];
+        const auto& hi = segs[(std::size_t) (k + 1)];
+        const auto norm = lo.ref >= 0 ? s.at ((std::size_t) (22 * lo.ref + 4)) : (hi.ref >= 0 ? s.at ((std::size_t) (22 * hi.ref + 2)) : -1.0f);
+        if (norm < 0.0f)
+            continue;
+        const auto dbOct = 6.0 + 42.0 * std::clamp ((double) norm, 0.0, 1.0);
+        set (xoverSlope0 + k, crossoverSlopeValue (dbOct < 18.0 ? 12 : (dbOct < 36.0 ? 24 : 48)));
     }
     set (Global::lookahead, s.at (141) >= 0.5f ? linValue (la, 0.0, 20.0) : 0.0f);
     set (Global::mix, clamp01 (s.at (133)));
@@ -418,7 +442,8 @@ int fromProG (const State& s, EffectSlot& slot)
 // ---------------------------------------------------------------- Saturn 2 -> Ember Saturator
 // layout (FFBS v1, 951 values): 0 input gain dB, 2 output gain dB, 5 mix %, 6 band count, band b at 7 + 17b:
 // 2 dynamics, 3 style, 4 drive (norm), 6 … 9 bass / mid / treble / presence dB, 10 mix %, 11 level, 13 enabled,
-// 15 crossover (log2 Hz, the band's upper edge), 16 crossover slope (6, 12, 24, 36, 48)
+// 15 crossover (log2 Hz, the band's upper edge), 16 crossover slope (6, 12, 24, 36, 48); round 147: 5 drive pan,
+// 12 band pan (−1 … +1), 695 the channel mode (0 left / right, 1 mid / side)
 int fromSaturn2 (const State& s, EffectSlot& slot)
 {
     if (slot.kind != EffectKind::ember || s.named || s.count != 951 || ! finiteAll (s, 7 + 17 * 6))
@@ -466,6 +491,9 @@ int fromSaturn2 (const State& s, EffectSlot& slot)
             const auto st = roundIndex (s.at (base + 14));
             set (bandExtra (b, 1), st == 1 ? 0.5f : (st == 2 || st == 3) ? 1.0f : 0.0f);
         }
+        // round 147 (measured on the trial, REA_rodada147b): drive pan at 5 and band pan at 12, both −1 … +1
+        set (bandDrivePanParam (b), (float) (0.5 + 0.5 * std::clamp ((double) s.at (base + 5), -1.0, 1.0)));
+        set (bandPanParam (b), (float) (0.5 + 0.5 * std::clamp ((double) s.at (base + 12), -1.0, 1.0)));
         if (b == 0)
         {
             static constexpr int slopes[5] { 12, 12, 24, 24, 48 };
@@ -477,6 +505,7 @@ int fromSaturn2 (const State& s, EffectSlot& slot)
     set (inputGain, linValue (std::clamp ((double) s.at (0), -24.0, 24.0), -24.0, 24.0)); // round 128
     set (output, linValue (s.at (2), -18.0, 18.0));
     set (autoGain, 1.0f); // Saturn compensates its level as the drive rises (§4)
+    set (channelMode, s.at (695) >= 0.5f ? 1.0f : 0.0f); // round 147: the channel mode (0 left / right, 1 mid / side)
     return n;
 }
 

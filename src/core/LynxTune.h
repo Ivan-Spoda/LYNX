@@ -18,6 +18,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <utility>
 #include <string>
 
 namespace lynx
@@ -73,8 +74,25 @@ enum Param : int
     drive,                   // 0 … 10
     wideFormant,             // on: Formant shift reaches ±12 semitones
     outputTrim,              // −24 … +24 dB
+    // round 147 (appended; the Waves Tune Real-Time role's keyboard, REA_rodada147b; defaults = the old behaviour):
+    // what an illegal (removed) note does — 0 the nearest legal note (as before), 0.5 the next legal note up, 1 the next
+    // one down — and the keyboard's range: sung notes outside [low, high] pass uncorrected
+    noteDirC,                // 12 values (C … B)
+    rangeLow = noteDirC + 12, // MIDI note = round (127 v); default 0
+    rangeHigh,               // default 127
     count
 };
+enum class NoteDir { nearest, up, down };
+NoteDir noteDir (float v) noexcept;
+int rangeNote (float v) noexcept;       // 0 … 127
+float rangeNoteValue (int note) noexcept;
+// the keyboard's range presets (LYNX's own spans, classical voice ranges with a margin): low / high MIDI notes
+constexpr int rangePresets = 7;          // Bass, Baritone, Tenor, Alto, Mezzo, Soprano, Generic (the whole keyboard)
+const char* rangePresetName (int k) noexcept;
+std::pair<int, int> rangePresetNotes (int k) noexcept;
+// The target note (a MIDI note number) for a sung pitch (notes): the nearest legal one with the hysteresis toward
+// `previous`, then an illegal note's direction (noteDirs: the 12 directions); −1 = none legal
+int targetNote (double sung, std::uint16_t legal, int previous, double hysteresis, const NoteDir* noteDirs) noexcept;
 
 constexpr int vibratoShapes = 4;
 

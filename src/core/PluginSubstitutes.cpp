@@ -230,8 +230,9 @@ vendor = Soundtoys
 # round 129 (docs/PARITY.md): LYNX's multi-mode echo plays EchoBoy's role. Round 136: her states play Echoform's Tape
 # voicing (the loop structures measured on the official trial, REA_rodada136 §4), recognised by the hash of the encoded
 # preset (not decoded here); any other state: round 129's tape echo, 1/4 note at the project tempo, 25 % feedback, 25 % mix
+# (round 147: in the Studio reel voicing — EchoBoy's default style, measured black-box, REA_rodada147a)
 lynx = Echoform
-preset = Mode=0.0415; Sync L=0.6248; Note L=0.4498; Feedback=0.125; Mix=0.25
+preset = Mode=0.0415; Sync L=0.6248; Note L=0.4498; Feedback=0.125; Mix=0.25; Echo voicing=0.064516
 # [DATA] VST2 unique ID from real projects
 vst2 = StEB
 names = EchoBoy; EchoBoyJr; EchoBoy Jr
@@ -1520,8 +1521,8 @@ int translateSslVocalstrip2 (const std::vector<std::uint8_t>& state, EffectSlot&
 // 30 output dB, 31 analog, 39 phase, 40 input dB). Round 123: Ridge Strip's "E" voicing (core/VoiceMatch.h) is the
 // console measured black-box on the official trial — every EQ band and filter from its impulse responses, the
 // feedback compressor and expander from sine stairs, tone bursts, noise and her takes — so the controls map one to
-// one in the console's own units (docs/analise/REA_rodada123.md). Not translated: analog (off in every state of her
-// corpus), EQ to the dynamics side chain.
+// one in the console's own units (docs/analise/REA_rodada123.md). Round 147b: analog translated (off in every state of
+// her corpus). Not translated: EQ to the dynamics side chain.
 int translateWavesSslChannel (const std::vector<std::uint8_t>& state, EffectSlot& slot)
 {
     namespace r = mixsuite::ridge;
@@ -1569,7 +1570,8 @@ int translateWavesSslChannel (const std::vector<std::uint8_t>& state, EffectSlot
     p[r::filterSplit] = at (29, 1.0) == 1.0 ? 1.0f : 0.0f;
     p[r::filtersToSidechain] = 0.0f;
     p[r::compMix] = 1.0f;
-    return 30;
+    p[r::analog] = at (31, 0.0) > 0.5 ? 1.0f : 0.0f; // round 147b: ANALOG (its noise floor, measured on the trial)
+    return 31;
 }
 
 // H-Delay (RealWorld list, round 119): 1 sync (0 BPM, 1 host, 2 ms), 2 BPM, 3 delay ms, 4 note (3 per length: triplet,

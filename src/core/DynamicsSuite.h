@@ -139,7 +139,19 @@ enum Global { xover1 = legacyBands * fieldsPerBand, xover2, xover3, slope, looka
               // round 144: what each band's PAN balances — left / right (0, as before) or mid / side (1, the reference's
               // band pan: mid gain = 1 − pan right of centre, side gain = 1 + pan left of it)
               panMode,
-              count };
+              // round 147 (REA_rodada147 §1): Dynamic phase's engine — 1 = the measured one (each working band a
+              // minimum-phase filter with the linear-phase magnitude, the bands in cascade: core/MinPhaseBand.h), 0 = the
+              // round-108 construction (input + each band's gain change), kept for projects saved before round 147
+              dynamicEngine,
+              // round 147 (Pro-MB's expert panel, measured black-box): each band's stereo link (the reference's value
+              // law: 0 … 0.5 = 0 … 100 % linked, 0.5 … 1 = 100 % + 0 … 100 % mid- / side-only; default 100 % = the old
+              // detector), its mode (mid / side), the side-chain filtering (band / free) and the free filter's low /
+              // high frequency (30 Hz … 30 kHz)
+              bandLink0, bandLinkMode0 = bandLink0 + bands, bandScFree0 = bandLinkMode0 + bands,
+              bandScLow0 = bandScFree0 + bands, bandScHigh0 = bandScLow0 + bands,
+              // round 147: each crossover's own slope (Pro-MB's per-band slopes): 0 = the global Slope, then 12 / 24 / 48
+              xoverSlope0 = bandScHigh0 + bands,
+              count = xoverSlope0 + bands - 1 };
 inline int param (int band, int field) noexcept
 {
     return band < legacyBands ? band * fieldsPerBand + field : band5 + (band - legacyBands) * fieldsPerBand + field;
@@ -173,6 +185,15 @@ double trimDb (float v) noexcept;        // ±36 dB
 // classic crossover sum, all-pass compensated: the crossovers' phase is always there)
 enum class Phase { linear, dynamic, minimum };
 Phase phaseOf (float v) noexcept;
+bool measuredDynamic (const EffectParams& p) noexcept; // round 147: Dynamic phase runs the measured engine
+// round 147: the stereo link's two parts — linked (0 … 1) and mid- / side-only (0 … 1, only once fully linked)
+double linkAmount (float v) noexcept;
+double linkOnly (float v) noexcept;
+double scFilterHz (float v) noexcept;   // 30 Hz … 30 kHz (30 · 1000^v, the reference's law)
+float scFilterValue (double hz) noexcept;
+int crossoverSlopeDbOct (const EffectParams& p, int k) noexcept; // round 147: crossover k's slope (its own or the global)
+float crossoverSlopeValue (int dbOct) noexcept;                  // 12 / 24 / 48 → its own value (0 = global)
+inline int slopeOrder (int dbOct) noexcept { return dbOct <= 12 ? 1 : (dbOct <= 24 ? 2 : 4); } // n of LR(2n)
 int oversamplingOf (float v) noexcept;   // 1 (off), 2 or 4
 int linearFftSize (double sampleRate) noexcept; // 4096 up to 50 kHz, ×2 per doubling of the rate
 int linearLatency (double sampleRate) noexcept; // 3/4 of the FFT size (3072 samples at 48 kHz, as measured)
