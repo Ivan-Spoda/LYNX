@@ -169,7 +169,7 @@ beside Low cut. The Little Plate substitute plays it.
 - Not done: the offset law at offsets other than 8 ms (the Tweak panel is not reachable through host parameters);
   the Diffused style's static right side (its wobble only on the left; Echoform swings both); EchoBoy's per-style
   Style Edit details (per-repeat decay, Mid Res); PrimalTap's per-tap VCO; Auto-pan ← PanMan Tweak and Foil ←
-  Little Plate — done in §6 / §7.
+  Little Plate — done in §6 / §7 (after merging origin/main: build-local with the FL Data dir 1 648 225 checks, 0 failures; Windows build OK; `--plugui` also writes Auto-pan-tweak.png).
 - Auto-pan: the Tweak page's divider and manual trigger (not observable black-box), PanMan's own threshold /
   sensitivity values other than the default, Feel / Groove's real law in the rhythm modes, the rhythm-shape editor.
 - Foil: Mod's narrowing of the tail, the ∞ setting's long highs, a single-knob view.
