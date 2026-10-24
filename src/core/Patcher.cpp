@@ -1,6 +1,7 @@
 #include "core/Patcher.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <map>
@@ -316,7 +317,8 @@ Graph::Graph (const PatcherDoc& doc, double sampleRate, const Factories& factori
                 && std::find (noteTargets.begin(), noteTargets.end(), src.to) == noteTargets.end())
                 noteTargets.push_back (src.to);
         }
-        else if (validNode (src.from) && validNode (src.to) && src.enabled && src.toPort >= 0)
+        else if (validNode (src.from) && validNode (src.to) && src.enabled && src.toPort >= 0
+                 && std::max (0, src.fromPort) < nodePorts (doc.nodes[(std::size_t) src.from]).controlOuts) // (a source with that output)
         {
             ControlWire c;
             c.from = src.from;
@@ -1010,12 +1012,13 @@ bool connect (PatcherDoc& doc, const PatchWire& wire)
 
 std::string nodeName (const PatchNode& node)
 {
-    if (! node.label.empty())
+    auto blank = [] (const std::string& t) { return std::all_of (t.begin(), t.end(), [] (unsigned char c) { return std::isspace (c) != 0; }); };
+    if (! blank (node.label))
         return node.label;
     if (node.generator)
-        return ! node.channel.plugin.name.empty() ? node.channel.plugin.name : node.channel.name;
+        return ! blank (node.channel.plugin.name) ? node.channel.plugin.name : ! blank (node.channel.name) ? node.channel.name : "Instrument";
     if (node.effect.kind == EffectKind::plugin)
-        return node.effect.plugin.name;
+        return ! blank (node.effect.plugin.name) ? node.effect.plugin.name : "Plugin";
     return effectInfo (node.effect.kind).name;
 }
 } // namespace lynx::patcher

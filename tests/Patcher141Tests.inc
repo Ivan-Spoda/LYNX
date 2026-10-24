@@ -394,3 +394,77 @@ TEST (patcher_state_from_fl_becomes_the_graph)
     CHECK (lynx::fruitySendTarget (fx) == 5);
     CHECK (std::isfinite (run (fx, 0.5f).first));
 }
+
+TEST (patcher_demo_graphs_import_and_run)
+{
+    // every Patcher of FL's demo projects becomes a LYNX graph (mixer slots and generator channels) that runs
+    if (realFlpDir.empty())
+        return;
+    int flSlots = 0, slots = 0, flChannels = 0, channels = 0, sounding = 0, nodes = 0, controls = 0, notes = 0, finite = 0;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator (std::filesystem::path (realFlpDir) / "Demo projects"))
+    {
+        if (entry.path().extension() != ".flp")
+            continue;
+        std::ifstream in (entry.path(), std::ios::binary);
+        const std::vector<std::uint8_t> file ((std::istreambuf_iterator<char> (in)), {});
+        try
+        {
+            const auto project = flp::parseProject (file);
+            int here = 0;
+            for (const auto& insert : project.mixer)
+                for (const auto& slot : insert.slots)
+                    here += slot.plugin == "Patcher";
+            for (const auto& c : project.channels)
+                flChannels += c.pluginName == "Patcher";
+            if (here == 0 && std::none_of (project.channels.begin(), project.channels.end(), [] (const flp::Channel& c) { return c.pluginName == "Patcher"; }))
+                continue;
+            flSlots += here;
+            const auto song = lynx::importFlp (project);
+            for (const auto& track : song.mixer)
+                for (const auto& fx : track.effects)
+                    if (fx.kind == lynx::EffectKind::patcher)
+                    {
+                        ++slots;
+                        nodes += (int) fx.patcher.nodes.size();
+                        for (const auto& w : fx.patcher.wires)
+                            controls += w.kind == lynx::PatchWire::Kind::control;
+                        auto effect = lynx::patcher::makeEffect (fx, 44100.0, lynx::patcher::builtInFactories (44100.0));
+                        effect->prepare (44100.0);
+                        std::vector<float> l (4096), r (4096);
+                        std::uint32_t seed = 1;
+                        double e = 0.0;
+                        bool ok = true;
+                        for (int b = 0; b < 4; ++b)
+                        {
+                            for (std::size_t i = 0; i < l.size(); ++i)
+                            {
+                                seed = seed * 1664525u + 1013904223u;
+                                l[i] = r[i] = (float) ((seed >> 9) & 0xffff) / 65536.0f * 0.5f - 0.25f;
+                            }
+                            effect->process (l.data(), r.data(), 4096, {}, song.bpm);
+                            for (std::size_t i = 0; i < l.size(); ++i)
+                            {
+                                ok = ok && std::isfinite (l[i]) && std::isfinite (r[i]);
+                                e += (double) l[i] * l[i];
+                            }
+                        }
+                        finite += ok;
+                        sounding += e > 1e-6;
+                        if (e <= 1e-6)
+                            std::printf ("  (silent with noise in: %s, %d nodes)\n", entry.path().filename().string().c_str(), (int) fx.patcher.nodes.size());
+                    }
+            for (const auto& c : song.channels)
+                if (c.instrument == lynx::InstrumentKind::patcher)
+                {
+                    ++channels;
+                    for (const auto& w : c.patcher.wires)
+                        notes += w.kind == lynx::PatchWire::Kind::midi;
+                }
+        }
+        catch (const flp::Error&) {}
+    }
+    std::printf ("  Patcher graphs: %d of %d mixer slots (%d nodes, %d control cables; %d run finite, %d sounding), %d of %d channels (%d note cables)\n",
+                 slots, flSlots, nodes, controls, finite, sounding, channels, flChannels, notes);
+    CHECK (slots == flSlots && slots >= 20 && finite == slots && sounding >= slots - 2);
+    CHECK (channels >= 2 && notes >= channels && controls > 0);
+}

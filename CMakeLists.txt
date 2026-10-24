@@ -272,6 +272,7 @@ if(LYNX_BUILD_APP)
         src/ui/PluginHeader.cpp
         src/ui/PluginSkin.cpp
         src/ui/PluginEditors.cpp
+        src/ui/PatcherEditor.cpp
         src/ui/DynamicsDisplays.cpp
         src/ui/ExportDialog.cpp
         src/ui/AutomationUi.cpp

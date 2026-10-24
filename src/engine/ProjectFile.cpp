@@ -673,7 +673,6 @@ std::vector<Clip> clipsFromVar (const juce::var& v, const Song& song)
 
     return out;
 }
-} // namespace
 
 juce::var channelToVar (const ChannelDef& c)
 {
@@ -1037,6 +1036,8 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
         def.patcher = patcherFromVar (c["patcher"], song);
     return def;
 }
+
+} // namespace
 
 juce::String toJson (const Song& song)
 {

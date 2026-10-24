@@ -1446,9 +1446,20 @@ TEST (flp_real_files)
                         flangerSlots += slot.plugin == "Fruity Flanger";
                         phaserSlots += slot.plugin == "Fruity Phaser";
                     }
+                // (the slots and the nodes of the Patcher graphs, as when Patchers were flattened into slots)
+                std::vector<const lynx::EffectSlot*> allSlots;
+                std::function<void (const lynx::EffectSlot&)> collect = [&] (const lynx::EffectSlot& fx) {
+                    allSlots.push_back (&fx);
+                    for (const auto& n : fx.patcher.nodes)
+                        if (! n.generator)
+                            collect (n.effect);
+                };
                 for (const auto& t : full.mixer)
                     for (const auto& fx : t.effects)
+                        collect (fx);
+                for (const auto* slotPointer : allSlots)
                     {
+                        const auto& fx = *slotPointer;
                         if (fx.kind == lynx::EffectKind::maximus)
                         {
                             const auto blob = lynx::maximusfx::unpack (fx.state);
@@ -2213,8 +2224,8 @@ TEST (flp_real_files)
     std::printf ("  Fruity Parametric EQ 2 / Parametric EQ: %d of %d slots on the exact engine\n", flPeqExact, flPeqSlots);
     CHECK (flPeqExact >= flPeqSlots && flPeqSlots >= 1100); // REA_rodada50
     std::printf ("  Fruity PanOMatic / Balance / Blood Overdrive: %d of %d slots on the exact engines\n", basicExact, basicSlots);
-    // one PanOMatic of "Bombs Away" (insert 69, last slot) falls off LYNX's 10-slot limit after a serial Patcher expands
-    CHECK (basicExact + 1 >= basicSlots && basicSlots >= 270); // REA_rodada58
+    // (since round 141 a Patcher stays one slot: "Bombs Away" insert 69 keeps its last PanOMatic)
+    CHECK (basicExact >= basicSlots && basicSlots >= 270); // REA_rodada58
     // (Patcher graphs can add Distructor nodes of their own to the imported mixer)
     std::printf ("  Distructor: %d of %d slots on the exact engine (%d cabinet impulses read from the installation)\n",
                  distructorExact, distructorSlots, distructorImpulses);

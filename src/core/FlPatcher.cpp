@@ -39,11 +39,35 @@ bool forEachChunk (const std::uint8_t* p, std::size_t size, const std::function<
 std::string text (const std::uint8_t* p, std::size_t size, bool wide)
 {
     std::string out;
-    if (wide)
+    if (wide) // UTF-16LE → UTF-8 (labels may have any character; plugin names are ASCII)
         for (std::size_t i = 0; i + 1 < size; i += 2)
-            out += (char) (p[i] | (p[i + 1] != 0 ? 0x80 : 0)); // plugin names are ASCII
-    else
-        out.assign (reinterpret_cast<const char*> (p), size);
+        {
+            std::uint32_t c = (std::uint32_t) p[i] | ((std::uint32_t) p[i + 1] << 8);
+            if (c >= 0xD800 && c < 0xDC00 && i + 3 < size)
+            {
+                const auto low = (std::uint32_t) p[i + 2] | ((std::uint32_t) p[i + 3] << 8);
+                if (low >= 0xDC00 && low < 0xE000)
+                {
+                    c = 0x10000 + ((c - 0xD800) << 10) + (low - 0xDC00);
+                    i += 2;
+                }
+            }
+            if (c < 0x80)
+                out += (char) c;
+            else if (c < 0x800)
+                out += (char) (0xC0 | (c >> 6)), out += (char) (0x80 | (c & 0x3F));
+            else if (c < 0x10000)
+                out += (char) (0xE0 | (c >> 12)), out += (char) (0x80 | ((c >> 6) & 0x3F)), out += (char) (0x80 | (c & 0x3F));
+            else
+                out += (char) (0xF0 | (c >> 18)), out += (char) (0x80 | ((c >> 12) & 0x3F)), out += (char) (0x80 | ((c >> 6) & 0x3F)),
+                    out += (char) (0x80 | (c & 0x3F));
+        }
+    else // 8-bit (version 3): Windows-1252 / Latin-1 → UTF-8
+        for (std::size_t i = 0; i < size; ++i)
+            if (p[i] < 0x80)
+                out += (char) p[i];
+            else
+                out += (char) (0xC0 | (p[i] >> 6)), out += (char) (0x80 | (p[i] & 0x3F));
     while (! out.empty() && out.back() == '\0')
         out.pop_back();
     return out;

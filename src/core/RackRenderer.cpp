@@ -1327,7 +1327,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         // after 4 s; built-ins after 1 s, which is well beyond their tail)
         const auto key = (std::size_t) track * maxEffectSlots + i;
         const auto isPlugin = slots[i].kind == EffectKind::plugin;
-        const auto hold = (int) (sampleRate * (isPlugin ? 4.0 : 1.0));
+        const auto hold = (int) (sampleRate * (isPlugin || slots[i].kind == EffectKind::patcher ? 4.0 : 1.0)); // (a Patcher may hold plugins)
 
         // (not Gross Beat: its buffer must keep recording the silence it may play back later, as in FL)
         // (nor Newtone / Newtime: in slave mode they play their sample whatever the input)

@@ -1369,6 +1369,26 @@ void AudioEngine::prepareFlpImport (const juce::File& file, const std::map<std::
             for (const auto& fx : out.song.mixer[t].effects)
                 if (fx.kind == EffectKind::plugin && fx.plugin.foreign.format != ForeignPlugin::Format::none)
                     out.uses.push_back ({ fx.plugin.foreign.name, userOf (out.song, t), false });
+        // (and the ones inside Patchers, REA_rodada141)
+        std::function<void (const PatcherDoc&, const std::string&)> patcherUses = [&] (const PatcherDoc& doc, const std::string& user) {
+            for (const auto& n : doc.nodes)
+            {
+                const auto& ref = n.generator ? n.channel.plugin : n.effect.plugin;
+                if (ref.foreign.format != ForeignPlugin::Format::none)
+                    out.uses.push_back ({ ref.foreign.name, user + " (Patcher)", n.generator });
+                if (n.generator && n.channel.instrument == InstrumentKind::patcher)
+                    patcherUses (n.channel.patcher, user);
+                if (! n.generator && n.effect.kind == EffectKind::patcher)
+                    patcherUses (n.effect.patcher, user);
+            }
+        };
+        for (const auto& c : out.song.channels)
+            if (c.instrument == InstrumentKind::patcher)
+                patcherUses (c.patcher, c.name);
+        for (std::size_t t = 0; t < out.song.mixer.size(); ++t)
+            for (const auto& fx : out.song.mixer[t].effects)
+                if (fx.kind == EffectKind::patcher)
+                    patcherUses (fx.patcher, userOf (out.song, t));
 
         // the samples, decoded now (in parallel, off the message thread) so building the rack only finds them ready
         std::vector<std::string> paths;
