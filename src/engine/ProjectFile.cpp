@@ -111,6 +111,7 @@ const char* instrumentId (InstrumentKind k)
         case InstrumentKind::fruitydance: return "fruitydance";
         case InstrumentKind::directwave: return "directwave";
         case InstrumentKind::midiOut: return "midiOut";
+        case InstrumentKind::patcher: return "patcher";
     }
     return "synth";
 }
@@ -125,7 +126,7 @@ InstrumentKind instrumentFromId (const juce::String& id)
                     InstrumentKind::fruitkick, InstrumentKind::bassdrum, InstrumentKind::toxic,
                     InstrumentKind::threeosc, InstrumentKind::autogun, InstrumentKind::transistorbass,
                     InstrumentKind::simsynth, InstrumentKind::wasp, InstrumentKind::plucked, InstrumentKind::beepmap, InstrumentKind::sawer, InstrumentKind::flkeys,
-                    InstrumentKind::granulizer, InstrumentKind::drumaxx, InstrumentKind::slayer, InstrumentKind::fruitydance, InstrumentKind::directwave, InstrumentKind::midiOut })
+                    InstrumentKind::granulizer, InstrumentKind::drumaxx, InstrumentKind::slayer, InstrumentKind::fruitydance, InstrumentKind::directwave, InstrumentKind::midiOut, InstrumentKind::patcher })
         if (id == instrumentId (k))
             return k;
 
@@ -154,6 +155,7 @@ const char* effectId (EffectKind k)
         case EffectKind::pitchShift: return "pitchShift";
         case EffectKind::freqShift: return "freqShift";
         case EffectKind::parallel: return "parallel";
+        case EffectKind::patcher: return "patcher";
         case EffectKind::lofi: return "lofi";
         case EffectKind::effector: return "effector";
         case EffectKind::crossover: return "crossover";
@@ -274,6 +276,128 @@ PluginRef pluginFromVar (const juce::var& v)
 
 std::optional<EffectKind> effectFromId (const juce::String& id);
 
+juce::var channelToVar (const ChannelDef& c);
+ChannelDef channelFromVar (const juce::var& c, const Song& song);
+juce::var effectToVar (const EffectSlot& slot);
+std::optional<EffectSlot> effectFromVar (const juce::var& e);
+
+// FL's Patcher graph (REA_rodada141): nodes (an effect or a channel each, nested Patchers too), cables, the host
+// nodes' places and the extra outputs' inserts
+juce::var patcherToVar (const PatcherDoc& doc)
+{
+    auto o = std::make_unique<juce::DynamicObject>();
+    juce::Array<juce::var> nodes;
+    for (const auto& n : doc.nodes)
+    {
+        auto v = std::make_unique<juce::DynamicObject>();
+        if (n.generator)
+            v->setProperty ("channel", channelToVar (n.channel));
+        else
+            v->setProperty ("effect", effectToVar (n.effect));
+        if (! n.label.empty())
+            v->setProperty ("label", str (n.label));
+        v->setProperty ("x", juce::roundToInt (n.x * 10.0f) / 10.0);
+        v->setProperty ("y", juce::roundToInt (n.y * 10.0f) / 10.0);
+        if (! n.busHeads.empty())
+        {
+            juce::Array<juce::var> heads;
+            for (const auto& h : n.busHeads)
+            {
+                auto hv = std::make_unique<juce::DynamicObject>();
+                hv->setProperty ("bus", h.bus);
+                hv->setProperty ("gain", h.gain);
+                if (h.head)
+                    hv->setProperty ("head", effectToVar (*h.head));
+                heads.add (juce::var (hv.release()));
+            }
+            v->setProperty ("busHeads", heads);
+        }
+        nodes.add (juce::var (v.release()));
+    }
+    o->setProperty ("nodes", nodes);
+    juce::Array<juce::var> wires;
+    for (const auto& w : doc.wires)
+    {
+        // [kind (0 audio, 1 MIDI, 2 control), from, from port, to, to port, gain, on, curve…]
+        juce::Array<juce::var> wire { (int) w.kind, w.from, w.fromPort, w.to, w.toPort, w.gain, w.enabled };
+        for (const auto v : w.curve)
+            wire.add (juce::roundToInt (v * 10000.0f) / 10000.0);
+        wires.add (wire);
+    }
+    o->setProperty ("wires", wires);
+    o->setProperty ("io", juce::Array<juce::var> { doc.inputX, doc.inputY, doc.outputX, doc.outputY });
+    if (! doc.outputTracks.empty())
+    {
+        juce::Array<juce::var> tracks;
+        for (const auto t : doc.outputTracks)
+            tracks.add (t);
+        o->setProperty ("outputTracks", tracks);
+    }
+    return juce::var (o.release());
+}
+
+PatcherDoc patcherFromVar (const juce::var& v, const Song& song)
+{
+    PatcherDoc doc;
+    if (auto* nodes = v["nodes"].getArray())
+        for (const auto& n : *nodes)
+        {
+            PatchNode node;
+            if (n.hasProperty ("channel"))
+            {
+                node.generator = true;
+                node.channel = channelFromVar (n["channel"], song);
+            }
+            else if (auto fx = effectFromVar (n["effect"]))
+                node.effect = std::move (*fx);
+            else
+                node.effect = makeEffectSlot (EffectKind::utility); // an effect from a future version: a pass-through
+            node.label = n.getProperty ("label", "").toString().toStdString();
+            node.x = (float) (double) n.getProperty ("x", 0.0);
+            node.y = (float) (double) n.getProperty ("y", 0.0);
+            if (auto* heads = n["busHeads"].getArray())
+                for (const auto& h : *heads)
+                {
+                    PatchNode::BusHead head;
+                    head.bus = juce::jlimit (1, 64, (int) h.getProperty ("bus", 1));
+                    head.gain = juce::jlimit (0.0f, 16.0f, (float) (double) h.getProperty ("gain", 1.0));
+                    if (h.hasProperty ("head"))
+                        head.head = effectFromVar (h["head"]);
+                    node.busHeads.push_back (std::move (head));
+                }
+            doc.nodes.push_back (std::move (node));
+        }
+    const auto count = (int) doc.nodes.size();
+    if (auto* wires = v["wires"].getArray())
+        for (const auto& w : *wires)
+            if (w.isArray() && w.size() >= 7)
+            {
+                PatchWire wire;
+                wire.kind = (PatchWire::Kind) juce::jlimit (0, 2, (int) w[0]);
+                wire.from = juce::jlimit (patchToHost, count - 1, (int) w[1]);
+                wire.fromPort = juce::jmax (0, (int) w[2]);
+                wire.to = juce::jlimit (patchToHost, count - 1, (int) w[3]);
+                wire.toPort = juce::jmax (0, (int) w[4]);
+                wire.gain = juce::jlimit (-16.0f, 16.0f, (float) (double) w[5]);
+                wire.enabled = (bool) w[6];
+                for (int k = 7; k < w.size(); ++k)
+                    wire.curve.push_back (juce::jlimit (0.0f, 1.0f, (float) (double) w[k]));
+                if (wire.from != patchToHost && wire.to != patchFromHost)
+                    doc.wires.push_back (std::move (wire));
+            }
+    if (const auto& io = v["io"]; io.isArray() && io.size() == 4)
+    {
+        doc.inputX = (float) (double) io[0];
+        doc.inputY = (float) (double) io[1];
+        doc.outputX = (float) (double) io[2];
+        doc.outputY = (float) (double) io[3];
+    }
+    if (auto* tracks = v["outputTracks"].getArray())
+        for (const auto& t : *tracks)
+            doc.outputTracks.push_back (juce::jlimit (-1, maxMixerTracks - 1, (int) t));
+    return doc;
+}
+
 juce::var effectToVar (const EffectSlot& slot)
 {
     auto e = std::make_unique<juce::DynamicObject>();
@@ -311,6 +435,9 @@ juce::var effectToVar (const EffectSlot& slot)
         e->setProperty ("plugin", pluginToVar (slot.plugin));
     else if (slot.isSubstitute()) // a LYNX substitute: the original plugin travels with it, unchanged
         e->setProperty ("substituteFor", pluginToVar (slot.substituteFor));
+
+    if (slot.kind == EffectKind::patcher)
+        e->setProperty ("patcher", patcherToVar (slot.patcher));
 
     if (slot.kind == EffectKind::parallel) // container branches, each with its own chain
     {
@@ -396,6 +523,8 @@ std::optional<EffectSlot> effectFromVar (const juce::var& e)
                         branch.chain.push_back (std::move (*c)); // containers can be nested
             slot.branches.push_back (std::move (branch));
         }
+    if (*kind == EffectKind::patcher && e.hasProperty ("patcher"))
+        slot.patcher = patcherFromVar (e["patcher"], Song {});
     if (auto* links = e["links"].getArray())
         for (const auto& l : *links)
         {
@@ -432,7 +561,7 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::echoform, EffectKind::spiralEcho, EffectKind::orbit, EffectKind::latticeMod,
                     EffectKind::fruitySend,
                     EffectKind::crestCompressor, EffectKind::prismMultiband, EffectKind::sentryGate,
-                    EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::formulaController, EffectKind::voiceShift })
+                    EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::formulaController, EffectKind::voiceShift, EffectKind::patcher })
         if (id == effectId (k))
             return k;
 
@@ -545,6 +674,370 @@ std::vector<Clip> clipsFromVar (const juce::var& v, const Song& song)
 
     return out;
 }
+
+juce::var channelToVar (const ChannelDef& c)
+{
+    auto o = std::make_unique<juce::DynamicObject>();
+    o->setProperty ("name", str (c.name));
+    o->setProperty ("instrument", instrumentId (c.instrument));
+    o->setProperty ("volume", c.volume);
+    o->setProperty ("pan", c.pan);
+    o->setProperty ("muted", c.muted);
+
+    if (! c.samplePath.empty())
+        o->setProperty ("sample", str (c.samplePath));
+
+    if (! c.controllerState.empty())
+        o->setProperty ("controllerState", juce::Base64::toBase64 (c.controllerState.data(), c.controllerState.size()));
+    if (! c.pluginState.empty())
+        o->setProperty ("pluginState", juce::Base64::toBase64 (c.pluginState.data(), c.pluginState.size()));
+    if (! c.modelParams.empty())
+    {
+        juce::StringArray values;
+        for (auto v : c.modelParams)
+            values.add (juce::String (v, 7));
+        o->setProperty ("modelParams", values.joinIntoString (" "));
+    }
+
+    if (! c.zones.empty()) // [file, root, min key, max key, min velocity, max velocity, tune, gain]
+    {
+        juce::Array<juce::var> zones;
+        for (const auto& z : c.zones)
+            zones.add (juce::Array<juce::var> { str (z.path), z.rootKey, z.lowKey, z.highKey, z.lowVelocity, z.highVelocity, z.tune, z.gain,
+                                                (juce::int64) z.loopStart, (juce::int64) z.loopEnd, z.loopMode });
+        o->setProperty ("zones", zones);
+    }
+
+    o->setProperty ("mixer", c.mixerTrack);
+
+    if (c.colour != 0)
+        o->setProperty ("colour", juce::String::toHexString ((juce::int64) (c.colour & 0xFFFFFF)).paddedLeft ('0', 6));
+    if (c.group >= 0)
+        o->setProperty ("group", c.group);
+    if (c.swingMix != 1.0f)
+        o->setProperty ("swingMix", c.swingMix);
+    if (c.arp.enabled())
+        o->setProperty ("arp", juce::Array<juce::var> { c.arp.direction, c.arp.range, c.arp.stepBeats, c.arp.gate, c.arp.repeat });
+    if (c.cutGroup != 0 || c.cutBy != 0)
+        o->setProperty ("cut", juce::Array<juce::var> { c.cutGroup, c.cutBy });
+
+    if (! (c.synth == SynthSettings {}))
+    {
+        auto synth = std::make_unique<juce::DynamicObject>();
+        juce::Array<juce::var> oscs;
+
+        for (const auto& osc : c.synth.osc)
+            oscs.add (juce::Array<juce::var> { (int) osc.wave, osc.octave, osc.detune, osc.level, osc.semitones, osc.pan });
+
+        synth->setProperty ("osc", oscs);
+        if (std::any_of (c.synth.spectrum.begin(), c.synth.spectrum.end(), [] (float a) { return a != 0.0f; }))
+        {
+            juce::StringArray amplitudes, phases;
+            for (int h = 0; h < SynthSettings::spectrumSize; ++h)
+            {
+                amplitudes.add (juce::String (c.synth.spectrum[(std::size_t) h], 6));
+                phases.add (juce::String (c.synth.spectrumPhase[(std::size_t) h], 6));
+            }
+            synth->setProperty ("spectrum", amplitudes.joinIntoString (" "));
+            synth->setProperty ("spectrumPhase", phases.joinIntoString (" "));
+            if (std::any_of (c.synth.spectrumDecay.begin(), c.synth.spectrumDecay.end(), [] (float t) { return t != 0.0f; }))
+            {
+                juce::StringArray decays;
+                for (auto t : c.synth.spectrumDecay)
+                    decays.add (juce::String (t, 4));
+                synth->setProperty ("spectrumDecay", decays.joinIntoString (" "));
+                if (std::any_of (c.synth.spectrumTarget.begin(), c.synth.spectrumTarget.end(), [] (float a) { return a != 0.0f; }))
+                {
+                    juce::StringArray targets;
+                    for (auto a : c.synth.spectrumTarget)
+                        targets.add (juce::String (a, 6));
+                    synth->setProperty ("spectrumTarget", targets.joinIntoString (" "));
+                }
+            }
+        }
+        synth->setProperty ("adsr", juce::Array<juce::var> { c.synth.attack, c.synth.decay, c.synth.sustain, c.synth.release });
+        synth->setProperty ("filter", juce::Array<juce::var> { c.synth.cutoff, c.synth.resonance, c.synth.filterType });
+        if (c.synth.ladder)
+            synth->setProperty ("ladder", true);
+        if (c.synth.chorus > 0)
+            synth->setProperty ("chorus", c.synth.chorus);
+        if (c.synth.stereoTremolo > 0.0f)
+            synth->setProperty ("stereoTremolo", c.synth.stereoTremolo);
+        if (c.synth.vibratoCents > 0.0f)
+            synth->setProperty ("vibratoCents", c.synth.vibratoCents);
+        if (c.synth.mono)
+            synth->setProperty ("mono", true);
+        if (c.synth.porta)
+            synth->setProperty ("porta", true);
+        if (c.synth.portaBeats != SynthSettings {}.portaBeats)
+            synth->setProperty ("portaTime", c.synth.portaBeats);
+        if (c.synth.am)
+            synth->setProperty ("am", true);
+        if (c.synth.ring)
+            synth->setProperty ("ring", true);
+        if (c.synth.keyTrack != 0.0f)
+            synth->setProperty ("keyTrack", c.synth.keyTrack);
+        if (c.synth.bandGain != std::array<float, 3> { 1.0f, 1.0f, 1.0f })
+            synth->setProperty ("bands", juce::String (c.synth.bandGain[0]) + " " + juce::String (c.synth.bandGain[1]) + " " + juce::String (c.synth.bandGain[2]));
+        if (c.synth.sweep > 0.0f)
+        {
+            synth->setProperty ("sweep", c.synth.sweep);
+            synth->setProperty ("sweepTime", c.synth.sweepTime);
+        }
+        if (c.synth.fm > 0.0f)
+            synth->setProperty ("fm", juce::Array<juce::var> { c.synth.fm, c.synth.fmDecay, c.synth.fmSustain });
+
+        writeEnvelopes (*synth, c.synth.filterEnv, c.synth.pitchEnv);
+        writeLfos (*synth, c.synth.lfo);
+        o->setProperty ("synthSettings", juce::var (synth.release()));
+    }
+
+    if (! (c.sampler == SamplerSettings {}))
+    {
+        auto sampler = std::make_unique<juce::DynamicObject>();
+        sampler->setProperty ("pitch", c.sampler.pitch);
+        sampler->setProperty ("attack", c.sampler.attack);
+        sampler->setProperty ("decay", c.sampler.decay);
+        sampler->setProperty ("sustain", c.sampler.sustain);
+        sampler->setProperty ("release", c.sampler.release);
+        sampler->setProperty ("stretchBeats", c.sampler.stretchBeats);
+        sampler->setProperty ("keepPitch", c.sampler.keepPitch);
+        sampler->setProperty ("region", juce::Array<juce::var> { c.sampler.regionStart, c.sampler.regionEnd });
+
+        if (! c.sampler.slices.empty())
+        {
+            juce::Array<juce::var> slices;
+            for (auto v : c.sampler.slices)
+                slices.add (juce::roundToInt (v * 100000.0f) / 100000.0);
+            sampler->setProperty ("slices", slices);
+        }
+        sampler->setProperty ("reverse", c.sampler.reverse);
+        sampler->setProperty ("cut", c.sampler.cut);
+        if (c.sampler.porta)
+            sampler->setProperty ("porta", true);
+        if (c.sampler.portaBeats != SamplerSettings {}.portaBeats)
+            sampler->setProperty ("portaTime", c.sampler.portaBeats);
+        sampler->setProperty ("filter", juce::Array<juce::var> { c.sampler.cutoff, c.sampler.resonance, c.sampler.filterType });
+        if (c.sampler.gainDb != 0.0f)
+            sampler->setProperty ("gainDb", c.sampler.gainDb);
+        if (! c.sampler.flVolumeEnvelope.empty())
+        {
+            juce::Array<juce::var> env;
+            for (auto v : c.sampler.flVolumeEnvelope)
+                env.add ((int) v);
+            sampler->setProperty ("flVolumeEnvelope", env);
+        }
+        if (! c.sampler.flChannel.empty())
+        {
+            juce::Array<juce::var> fl;
+            for (auto v : c.sampler.flChannel)
+                fl.add ((int) v);
+            sampler->setProperty ("flChannel", fl);
+        }
+        writeEnvelopes (*sampler, c.sampler.filterEnv, c.sampler.pitchEnv);
+        writeLfos (*sampler, c.sampler.lfo);
+        o->setProperty ("samplerSettings", juce::var (sampler.release()));
+    }
+
+    if (c.instrument == InstrumentKind::plugin)
+        o->setProperty ("plugin", pluginToVar (c.plugin));
+    if (c.instrument == InstrumentKind::patcher)
+        o->setProperty ("patcher", patcherToVar (c.patcher));
+
+    return juce::var (o.release());
+}
+
+ChannelDef channelFromVar (const juce::var& c, const Song& song)
+{
+    ChannelDef def;
+    def.name = c["name"].toString().toStdString();
+    def.instrument = instrumentFromId (c["instrument"].toString());
+    def.volume = juce::jlimit (0.0f, 1.0f, (float) c.getProperty ("volume", 0.8));
+    def.pan = juce::jlimit (-1.0f, 1.0f, (float) c.getProperty ("pan", 0.0));
+    def.muted = (bool) c.getProperty ("muted", false);
+    def.samplePath = c["sample"].toString().toStdString();
+
+    {
+        const auto values = juce::StringArray::fromTokens (c.getProperty ("modelParams", "").toString(), " ", "");
+        for (int k = 0; k < values.size() && k < 8192; ++k) // (DrumSynth Live: 4562)
+            def.modelParams.push_back (values[k].getFloatValue());
+    }
+    if (const auto encoded = c["pluginState"].toString(); encoded.isNotEmpty())
+    {
+        juce::MemoryOutputStream decoded;
+        if (juce::Base64::convertFromBase64 (decoded, encoded))
+        {
+            const auto* bytes = static_cast<const std::uint8_t*> (decoded.getData());
+            def.pluginState.assign (bytes, bytes + decoded.getDataSize());
+        }
+    }
+    if (const auto encoded = c["controllerState"].toString(); encoded.isNotEmpty())
+    {
+        juce::MemoryOutputStream decoded;
+        if (juce::Base64::convertFromBase64 (decoded, encoded))
+        {
+            const auto* bytes = static_cast<const std::uint8_t*> (decoded.getData());
+            def.controllerState.assign (bytes, bytes + decoded.getDataSize());
+        }
+    }
+
+    if (auto* zones = c["zones"].getArray())
+        for (const auto& z : *zones)
+            if (z.isArray() && z.size() >= 8)
+            {
+                def.zones.push_back ({ z[0].toString().toStdString(), juce::jlimit (0, 127, (int) z[1]), juce::jlimit (0, 127, (int) z[2]),
+                                       juce::jlimit (0, 127, (int) z[3]), juce::jlimit (0, 127, (int) z[4]), juce::jlimit (0, 127, (int) z[5]),
+                                       juce::jlimit (-48.0f, 48.0f, (float) (double) z[6]), juce::jlimit (0.0f, 4.0f, (float) (double) z[7]) });
+
+                if (z.size() >= 11) // loop
+                {
+                    def.zones.back().loopStart = juce::jmax<juce::int64> (0, (juce::int64) z[8]);
+                    def.zones.back().loopEnd = juce::jmax<juce::int64> (0, (juce::int64) z[9]);
+                    def.zones.back().loopMode = juce::jlimit (0, 2, (int) z[10]);
+                }
+            }
+    def.mixerTrack = juce::jlimit (0, maxMixerTracks - 1, (int) c.getProperty ("mixer", 0));
+    def.plugin = pluginFromVar (c["plugin"]);
+
+    if (c.hasProperty ("colour"))
+        def.colour = 0xFF000000u | (std::uint32_t) c["colour"].toString().getHexValue32();
+    if (const int group = c.getProperty ("group", -1); group >= 0 && group < (int) song.channelGroups.size())
+        def.group = group;
+
+    def.swingMix = juce::jlimit (0.0f, 1.0f, (float) (double) c.getProperty ("swingMix", 1.0));
+
+    if (const auto& arp = c["arp"]; arp.isArray() && arp.size() == 5)
+        def.arp = { juce::jlimit (0, 4, (int) arp[0]), juce::jlimit (1, 4, (int) arp[1]),
+                    juce::jlimit (1.0f / 32.0f, 4.0f, (float) (double) arp[2]), juce::jlimit (0.05f, 1.0f, (float) (double) arp[3]),
+                    juce::jlimit (1, 16, (int) arp[4]) };
+
+    if (const auto& cut = c["cut"]; cut.isArray() && cut.size() == 2)
+    {
+        def.cutGroup = (int) cut[0];
+        def.cutBy = (int) cut[1];
+    }
+
+    if (const auto& s = c["synthSettings"]; s.isObject())
+    {
+        if (auto* oscs = s["osc"].getArray())
+            for (int i = 0; i < oscs->size() && i < 3; ++i)
+                if (const auto& o = (*oscs)[i]; o.isArray() && o.size() >= 4)
+                {
+                    auto& osc = def.synth.osc[(std::size_t) i];
+                    osc = { (Waveform) juce::jlimit (0, 5, (int) o[0]), juce::jlimit (-3, 3, (int) o[1]),
+                            juce::jlimit (-100.0f, 100.0f, (float) (double) o[2]), juce::jlimit (0.0f, 4.0f, (float) (double) o[3]) }; // > 1: Harmor with volume above 0 dB
+
+                    if (o.size() >= 6) // semitones and pan (since the 3x Osc import)
+                    {
+                        osc.semitones = juce::jlimit (-11, 11, (int) o[4]);
+                        osc.pan = juce::jlimit (-1.0f, 1.0f, (float) (double) o[5]);
+                    }
+                }
+
+        if (const auto& a = s["adsr"]; a.isArray() && a.size() == 4)
+        {
+            def.synth.attack = juce::jlimit (0.0f, 10.0f, (float) (double) a[0]);
+            def.synth.decay = juce::jlimit (0.0f, 10.0f, (float) (double) a[1]);
+            def.synth.sustain = juce::jlimit (0.0f, 1.0f, (float) (double) a[2]);
+            def.synth.release = juce::jlimit (0.0f, 10.0f, (float) (double) a[3]);
+        }
+
+        if (const auto& f = s["filter"]; f.isArray() && f.size() >= 2)
+        {
+            def.synth.cutoff = juce::jlimit (20.0f, 20000.0f, (float) (double) f[0]);
+            def.synth.resonance = juce::jlimit (0.0f, 1.0f, (float) (double) f[1]);
+            def.synth.filterType = f.size() >= 3 ? juce::jlimit (0, 3, (int) f[2]) : 0;
+            def.synth.ladder = (bool) s.getProperty ("ladder", false);
+            def.synth.chorus = juce::jlimit (0, 3, (int) s.getProperty ("chorus", 0));
+            def.synth.stereoTremolo = juce::jlimit (0.0f, 1.0f, (float) (double) s.getProperty ("stereoTremolo", 0.0));
+            def.synth.vibratoCents = juce::jlimit (0.0f, 100.0f, (float) (double) s.getProperty ("vibratoCents", 0.0));
+        }
+
+        def.synth.mono = (bool) s.getProperty ("mono", false);
+        def.synth.porta = (bool) s.getProperty ("porta", false);
+        def.synth.portaBeats = juce::jlimit (0.0f, 8.0f, (float) (double) s.getProperty ("portaTime", (double) SynthSettings {}.portaBeats));
+        def.synth.am = (bool) s.getProperty ("am", false);
+        def.synth.ring = (bool) s.getProperty ("ring", false);
+        for (const auto& [key, target] : { std::pair { "spectrum", &def.synth.spectrum }, std::pair { "spectrumPhase", &def.synth.spectrumPhase } })
+        {
+            const auto values = juce::StringArray::fromTokens (s.getProperty (key, "").toString(), " ", "");
+            for (int h = 0; h < values.size() && h < SynthSettings::spectrumSize; ++h)
+                (*target)[(std::size_t) h] = juce::jlimit (-16.0f, 16.0f, values[h].getFloatValue());
+        }
+        {
+            const auto values = juce::StringArray::fromTokens (s.getProperty ("spectrumDecay", "").toString(), " ", "");
+            for (int h = 0; h < values.size() && h < SynthSettings::spectrumSize; ++h)
+                def.synth.spectrumDecay[(std::size_t) h] = juce::jlimit (0.0f, 60.0f, values[h].getFloatValue());
+            const auto targets = juce::StringArray::fromTokens (s.getProperty ("spectrumTarget", "").toString(), " ", "");
+            for (int h = 0; h < targets.size() && h < SynthSettings::spectrumSize; ++h)
+                def.synth.spectrumTarget[(std::size_t) h] = juce::jlimit (0.0f, 16.0f, targets[h].getFloatValue());
+        }
+        def.synth.keyTrack = juce::jlimit (-2.0f, 2.0f, (float) (double) s.getProperty ("keyTrack", 0.0));
+        if (const auto bands = juce::StringArray::fromTokens (s.getProperty ("bands", "").toString(), " ", ""); bands.size() == 3)
+            for (int b = 0; b < 3; ++b)
+                def.synth.bandGain[(std::size_t) b] = juce::jlimit (0.0f, 4.0f, bands[b].getFloatValue());
+        def.synth.sweep = juce::jlimit (0.0f, 200.0f, (float) (double) s.getProperty ("sweep", 0.0));
+        def.synth.sweepTime = juce::jlimit (0.0005f, 30.0f, (float) (double) s.getProperty ("sweepTime", 0.1));
+        if (const auto* fm = s.getProperty ("fm", {}).getArray(); fm != nullptr && fm->size() >= 3)
+        {
+            def.synth.fm = juce::jlimit (0.0f, 16.0f, (float) (double) (*fm)[0]);
+            def.synth.fmDecay = juce::jlimit (0.0f, 30.0f, (float) (double) (*fm)[1]);
+            def.synth.fmSustain = juce::jlimit (0.0f, 1.0f, (float) (double) (*fm)[2]);
+        }
+
+        readEnvelopes (s, def.synth.filterEnv, def.synth.pitchEnv);
+        readLfos (s, def.synth.lfo);
+    }
+
+    if (const auto& s = c["samplerSettings"]; s.isObject())
+    {
+        def.sampler.pitch = juce::jlimit (-24.0f, 24.0f, (float) (double) s.getProperty ("pitch", 0.0));
+        def.sampler.attack = juce::jlimit (0.0f, 2.0f, (float) (double) s.getProperty ("attack", 0.0));
+        def.sampler.release = juce::jlimit (0.0f, 4.0f, (float) (double) s.getProperty ("release", 0.0));
+        def.sampler.decay = juce::jlimit (0.0f, 10.0f, (float) (double) s.getProperty ("decay", 0.0));
+        def.sampler.sustain = juce::jlimit (0.0f, 1.0f, (float) (double) s.getProperty ("sustain", 1.0));
+        def.sampler.stretchBeats = juce::jmax (0.0f, (float) (double) s.getProperty ("stretchBeats", 0.0));
+        def.sampler.keepPitch = (bool) s.getProperty ("keepPitch", false);
+
+        if (auto* slices = s["slices"].getArray())
+            for (const auto& v : *slices)
+                def.sampler.slices.push_back (juce::jlimit (0.0f, 1.0f, (float) (double) v));
+
+        if (const auto& region = s["region"]; region.isArray() && region.size() == 2)
+        {
+            def.sampler.regionStart = juce::jlimit (0.0f, 1.0f, (float) (double) region[0]);
+            def.sampler.regionEnd = juce::jlimit (0.0f, 1.0f, (float) (double) region[1]);
+        }
+        def.sampler.reverse = (bool) s.getProperty ("reverse", false);
+        def.sampler.cut = (bool) s.getProperty ("cut", false);
+        def.sampler.porta = (bool) s.getProperty ("porta", false);
+        def.sampler.portaBeats = juce::jlimit (0.0f, 8.0f, (float) (double) s.getProperty ("portaTime", (double) SamplerSettings {}.portaBeats));
+        def.sampler.gainDb = juce::jlimit (-24.0f, 24.0f, (float) (double) s.getProperty ("gainDb", 0.0));
+
+        if (auto* env = s["flVolumeEnvelope"].getArray(); env != nullptr && env->size() == 18)
+            for (const auto& v : *env)
+                def.sampler.flVolumeEnvelope.push_back ((std::int32_t) (int) v);
+
+        if (auto* fl = s["flChannel"].getArray(); fl != nullptr && (fl->size() == 89 || fl->size() == 90))
+            for (const auto& v : *fl)
+                def.sampler.flChannel.push_back ((std::int32_t) (int) v);
+
+        if (const auto& filter = s["filter"]; filter.isArray() && filter.size() >= 2)
+        {
+            def.sampler.cutoff = juce::jlimit (20.0f, 20000.0f, (float) (double) filter[0]);
+            def.sampler.resonance = juce::jlimit (0.0f, 1.0f, (float) (double) filter[1]);
+            def.sampler.filterType = filter.size() >= 3 ? juce::jlimit (0, 3, (int) filter[2]) : 0;
+        }
+
+        readEnvelopes (s, def.sampler.filterEnv, def.sampler.pitchEnv);
+        readLfos (s, def.sampler.lfo);
+    }
+
+    if (def.instrument == InstrumentKind::patcher && c.hasProperty ("patcher"))
+        def.patcher = patcherFromVar (c["patcher"], song);
+    return def;
+}
+
 } // namespace
 
 juce::String toJson (const Song& song)
@@ -589,174 +1082,7 @@ juce::String toJson (const Song& song)
     juce::Array<juce::var> channels;
 
     for (const auto& c : song.channels)
-    {
-        auto o = std::make_unique<juce::DynamicObject>();
-        o->setProperty ("name", str (c.name));
-        o->setProperty ("instrument", instrumentId (c.instrument));
-        o->setProperty ("volume", c.volume);
-        o->setProperty ("pan", c.pan);
-        o->setProperty ("muted", c.muted);
-
-        if (! c.samplePath.empty())
-            o->setProperty ("sample", str (c.samplePath));
-
-        if (! c.controllerState.empty())
-            o->setProperty ("controllerState", juce::Base64::toBase64 (c.controllerState.data(), c.controllerState.size()));
-        if (! c.pluginState.empty())
-            o->setProperty ("pluginState", juce::Base64::toBase64 (c.pluginState.data(), c.pluginState.size()));
-        if (! c.modelParams.empty())
-        {
-            juce::StringArray values;
-            for (auto v : c.modelParams)
-                values.add (juce::String (v, 7));
-            o->setProperty ("modelParams", values.joinIntoString (" "));
-        }
-
-        if (! c.zones.empty()) // [file, root, min key, max key, min velocity, max velocity, tune, gain]
-        {
-            juce::Array<juce::var> zones;
-            for (const auto& z : c.zones)
-                zones.add (juce::Array<juce::var> { str (z.path), z.rootKey, z.lowKey, z.highKey, z.lowVelocity, z.highVelocity, z.tune, z.gain,
-                                                    (juce::int64) z.loopStart, (juce::int64) z.loopEnd, z.loopMode });
-            o->setProperty ("zones", zones);
-        }
-
-        o->setProperty ("mixer", c.mixerTrack);
-
-        if (c.colour != 0)
-            o->setProperty ("colour", juce::String::toHexString ((juce::int64) (c.colour & 0xFFFFFF)).paddedLeft ('0', 6));
-        if (c.group >= 0)
-            o->setProperty ("group", c.group);
-        if (c.swingMix != 1.0f)
-            o->setProperty ("swingMix", c.swingMix);
-        if (c.arp.enabled())
-            o->setProperty ("arp", juce::Array<juce::var> { c.arp.direction, c.arp.range, c.arp.stepBeats, c.arp.gate, c.arp.repeat });
-        if (c.cutGroup != 0 || c.cutBy != 0)
-            o->setProperty ("cut", juce::Array<juce::var> { c.cutGroup, c.cutBy });
-
-        if (! (c.synth == SynthSettings {}))
-        {
-            auto synth = std::make_unique<juce::DynamicObject>();
-            juce::Array<juce::var> oscs;
-
-            for (const auto& osc : c.synth.osc)
-                oscs.add (juce::Array<juce::var> { (int) osc.wave, osc.octave, osc.detune, osc.level, osc.semitones, osc.pan });
-
-            synth->setProperty ("osc", oscs);
-            if (std::any_of (c.synth.spectrum.begin(), c.synth.spectrum.end(), [] (float a) { return a != 0.0f; }))
-            {
-                juce::StringArray amplitudes, phases;
-                for (int h = 0; h < SynthSettings::spectrumSize; ++h)
-                {
-                    amplitudes.add (juce::String (c.synth.spectrum[(std::size_t) h], 6));
-                    phases.add (juce::String (c.synth.spectrumPhase[(std::size_t) h], 6));
-                }
-                synth->setProperty ("spectrum", amplitudes.joinIntoString (" "));
-                synth->setProperty ("spectrumPhase", phases.joinIntoString (" "));
-                if (std::any_of (c.synth.spectrumDecay.begin(), c.synth.spectrumDecay.end(), [] (float t) { return t != 0.0f; }))
-                {
-                    juce::StringArray decays;
-                    for (auto t : c.synth.spectrumDecay)
-                        decays.add (juce::String (t, 4));
-                    synth->setProperty ("spectrumDecay", decays.joinIntoString (" "));
-                    if (std::any_of (c.synth.spectrumTarget.begin(), c.synth.spectrumTarget.end(), [] (float a) { return a != 0.0f; }))
-                    {
-                        juce::StringArray targets;
-                        for (auto a : c.synth.spectrumTarget)
-                            targets.add (juce::String (a, 6));
-                        synth->setProperty ("spectrumTarget", targets.joinIntoString (" "));
-                    }
-                }
-            }
-            synth->setProperty ("adsr", juce::Array<juce::var> { c.synth.attack, c.synth.decay, c.synth.sustain, c.synth.release });
-            synth->setProperty ("filter", juce::Array<juce::var> { c.synth.cutoff, c.synth.resonance, c.synth.filterType });
-            if (c.synth.ladder)
-                synth->setProperty ("ladder", true);
-            if (c.synth.chorus > 0)
-                synth->setProperty ("chorus", c.synth.chorus);
-            if (c.synth.stereoTremolo > 0.0f)
-                synth->setProperty ("stereoTremolo", c.synth.stereoTremolo);
-            if (c.synth.vibratoCents > 0.0f)
-                synth->setProperty ("vibratoCents", c.synth.vibratoCents);
-            if (c.synth.mono)
-                synth->setProperty ("mono", true);
-            if (c.synth.porta)
-                synth->setProperty ("porta", true);
-            if (c.synth.portaBeats != SynthSettings {}.portaBeats)
-                synth->setProperty ("portaTime", c.synth.portaBeats);
-            if (c.synth.am)
-                synth->setProperty ("am", true);
-            if (c.synth.ring)
-                synth->setProperty ("ring", true);
-            if (c.synth.keyTrack != 0.0f)
-                synth->setProperty ("keyTrack", c.synth.keyTrack);
-            if (c.synth.bandGain != std::array<float, 3> { 1.0f, 1.0f, 1.0f })
-                synth->setProperty ("bands", juce::String (c.synth.bandGain[0]) + " " + juce::String (c.synth.bandGain[1]) + " " + juce::String (c.synth.bandGain[2]));
-            if (c.synth.sweep > 0.0f)
-            {
-                synth->setProperty ("sweep", c.synth.sweep);
-                synth->setProperty ("sweepTime", c.synth.sweepTime);
-            }
-            if (c.synth.fm > 0.0f)
-                synth->setProperty ("fm", juce::Array<juce::var> { c.synth.fm, c.synth.fmDecay, c.synth.fmSustain });
-
-            writeEnvelopes (*synth, c.synth.filterEnv, c.synth.pitchEnv);
-            writeLfos (*synth, c.synth.lfo);
-            o->setProperty ("synthSettings", juce::var (synth.release()));
-        }
-
-        if (! (c.sampler == SamplerSettings {}))
-        {
-            auto sampler = std::make_unique<juce::DynamicObject>();
-            sampler->setProperty ("pitch", c.sampler.pitch);
-            sampler->setProperty ("attack", c.sampler.attack);
-            sampler->setProperty ("decay", c.sampler.decay);
-            sampler->setProperty ("sustain", c.sampler.sustain);
-            sampler->setProperty ("release", c.sampler.release);
-            sampler->setProperty ("stretchBeats", c.sampler.stretchBeats);
-            sampler->setProperty ("keepPitch", c.sampler.keepPitch);
-            sampler->setProperty ("region", juce::Array<juce::var> { c.sampler.regionStart, c.sampler.regionEnd });
-
-            if (! c.sampler.slices.empty())
-            {
-                juce::Array<juce::var> slices;
-                for (auto v : c.sampler.slices)
-                    slices.add (juce::roundToInt (v * 100000.0f) / 100000.0);
-                sampler->setProperty ("slices", slices);
-            }
-            sampler->setProperty ("reverse", c.sampler.reverse);
-            sampler->setProperty ("cut", c.sampler.cut);
-            if (c.sampler.porta)
-                sampler->setProperty ("porta", true);
-            if (c.sampler.portaBeats != SamplerSettings {}.portaBeats)
-                sampler->setProperty ("portaTime", c.sampler.portaBeats);
-            sampler->setProperty ("filter", juce::Array<juce::var> { c.sampler.cutoff, c.sampler.resonance, c.sampler.filterType });
-            if (c.sampler.gainDb != 0.0f)
-                sampler->setProperty ("gainDb", c.sampler.gainDb);
-            if (! c.sampler.flVolumeEnvelope.empty())
-            {
-                juce::Array<juce::var> env;
-                for (auto v : c.sampler.flVolumeEnvelope)
-                    env.add ((int) v);
-                sampler->setProperty ("flVolumeEnvelope", env);
-            }
-            if (! c.sampler.flChannel.empty())
-            {
-                juce::Array<juce::var> fl;
-                for (auto v : c.sampler.flChannel)
-                    fl.add ((int) v);
-                sampler->setProperty ("flChannel", fl);
-            }
-            writeEnvelopes (*sampler, c.sampler.filterEnv, c.sampler.pitchEnv);
-            writeLfos (*sampler, c.sampler.lfo);
-            o->setProperty ("samplerSettings", juce::var (sampler.release()));
-        }
-
-        if (c.instrument == InstrumentKind::plugin)
-            o->setProperty ("plugin", pluginToVar (c.plugin));
-
-        channels.add (juce::var (o.release()));
-    }
+        channels.add (channelToVar (c));
 
     root->setProperty ("channels", channels);
 
@@ -1051,193 +1377,7 @@ std::optional<Song> fromJson (const juce::String& json, juce::String& error)
 
     if (auto* channels = root["channels"].getArray())
         for (const auto& c : *channels)
-        {
-            ChannelDef def;
-            def.name = c["name"].toString().toStdString();
-            def.instrument = instrumentFromId (c["instrument"].toString());
-            def.volume = juce::jlimit (0.0f, 1.0f, (float) c.getProperty ("volume", 0.8));
-            def.pan = juce::jlimit (-1.0f, 1.0f, (float) c.getProperty ("pan", 0.0));
-            def.muted = (bool) c.getProperty ("muted", false);
-            def.samplePath = c["sample"].toString().toStdString();
-
-            {
-                const auto values = juce::StringArray::fromTokens (c.getProperty ("modelParams", "").toString(), " ", "");
-                for (int k = 0; k < values.size() && k < 8192; ++k) // (DrumSynth Live: 4562)
-                    def.modelParams.push_back (values[k].getFloatValue());
-            }
-            if (const auto encoded = c["pluginState"].toString(); encoded.isNotEmpty())
-            {
-                juce::MemoryOutputStream decoded;
-                if (juce::Base64::convertFromBase64 (decoded, encoded))
-                {
-                    const auto* bytes = static_cast<const std::uint8_t*> (decoded.getData());
-                    def.pluginState.assign (bytes, bytes + decoded.getDataSize());
-                }
-            }
-            if (const auto encoded = c["controllerState"].toString(); encoded.isNotEmpty())
-            {
-                juce::MemoryOutputStream decoded;
-                if (juce::Base64::convertFromBase64 (decoded, encoded))
-                {
-                    const auto* bytes = static_cast<const std::uint8_t*> (decoded.getData());
-                    def.controllerState.assign (bytes, bytes + decoded.getDataSize());
-                }
-            }
-
-            if (auto* zones = c["zones"].getArray())
-                for (const auto& z : *zones)
-                    if (z.isArray() && z.size() >= 8)
-                    {
-                        def.zones.push_back ({ z[0].toString().toStdString(), juce::jlimit (0, 127, (int) z[1]), juce::jlimit (0, 127, (int) z[2]),
-                                               juce::jlimit (0, 127, (int) z[3]), juce::jlimit (0, 127, (int) z[4]), juce::jlimit (0, 127, (int) z[5]),
-                                               juce::jlimit (-48.0f, 48.0f, (float) (double) z[6]), juce::jlimit (0.0f, 4.0f, (float) (double) z[7]) });
-
-                        if (z.size() >= 11) // loop
-                        {
-                            def.zones.back().loopStart = juce::jmax<juce::int64> (0, (juce::int64) z[8]);
-                            def.zones.back().loopEnd = juce::jmax<juce::int64> (0, (juce::int64) z[9]);
-                            def.zones.back().loopMode = juce::jlimit (0, 2, (int) z[10]);
-                        }
-                    }
-            def.mixerTrack = juce::jlimit (0, maxMixerTracks - 1, (int) c.getProperty ("mixer", 0));
-            def.plugin = pluginFromVar (c["plugin"]);
-
-            if (c.hasProperty ("colour"))
-                def.colour = 0xFF000000u | (std::uint32_t) c["colour"].toString().getHexValue32();
-            if (const int group = c.getProperty ("group", -1); group >= 0 && group < (int) song.channelGroups.size())
-                def.group = group;
-
-            def.swingMix = juce::jlimit (0.0f, 1.0f, (float) (double) c.getProperty ("swingMix", 1.0));
-
-            if (const auto& arp = c["arp"]; arp.isArray() && arp.size() == 5)
-                def.arp = { juce::jlimit (0, 4, (int) arp[0]), juce::jlimit (1, 4, (int) arp[1]),
-                            juce::jlimit (1.0f / 32.0f, 4.0f, (float) (double) arp[2]), juce::jlimit (0.05f, 1.0f, (float) (double) arp[3]),
-                            juce::jlimit (1, 16, (int) arp[4]) };
-
-            if (const auto& cut = c["cut"]; cut.isArray() && cut.size() == 2)
-            {
-                def.cutGroup = (int) cut[0];
-                def.cutBy = (int) cut[1];
-            }
-
-            if (const auto& s = c["synthSettings"]; s.isObject())
-            {
-                if (auto* oscs = s["osc"].getArray())
-                    for (int i = 0; i < oscs->size() && i < 3; ++i)
-                        if (const auto& o = (*oscs)[i]; o.isArray() && o.size() >= 4)
-                        {
-                            auto& osc = def.synth.osc[(std::size_t) i];
-                            osc = { (Waveform) juce::jlimit (0, 5, (int) o[0]), juce::jlimit (-3, 3, (int) o[1]),
-                                    juce::jlimit (-100.0f, 100.0f, (float) (double) o[2]), juce::jlimit (0.0f, 4.0f, (float) (double) o[3]) }; // > 1: Harmor with volume above 0 dB
-
-                            if (o.size() >= 6) // semitones and pan (since the 3x Osc import)
-                            {
-                                osc.semitones = juce::jlimit (-11, 11, (int) o[4]);
-                                osc.pan = juce::jlimit (-1.0f, 1.0f, (float) (double) o[5]);
-                            }
-                        }
-
-                if (const auto& a = s["adsr"]; a.isArray() && a.size() == 4)
-                {
-                    def.synth.attack = juce::jlimit (0.0f, 10.0f, (float) (double) a[0]);
-                    def.synth.decay = juce::jlimit (0.0f, 10.0f, (float) (double) a[1]);
-                    def.synth.sustain = juce::jlimit (0.0f, 1.0f, (float) (double) a[2]);
-                    def.synth.release = juce::jlimit (0.0f, 10.0f, (float) (double) a[3]);
-                }
-
-                if (const auto& f = s["filter"]; f.isArray() && f.size() >= 2)
-                {
-                    def.synth.cutoff = juce::jlimit (20.0f, 20000.0f, (float) (double) f[0]);
-                    def.synth.resonance = juce::jlimit (0.0f, 1.0f, (float) (double) f[1]);
-                    def.synth.filterType = f.size() >= 3 ? juce::jlimit (0, 3, (int) f[2]) : 0;
-                    def.synth.ladder = (bool) s.getProperty ("ladder", false);
-                    def.synth.chorus = juce::jlimit (0, 3, (int) s.getProperty ("chorus", 0));
-                    def.synth.stereoTremolo = juce::jlimit (0.0f, 1.0f, (float) (double) s.getProperty ("stereoTremolo", 0.0));
-                    def.synth.vibratoCents = juce::jlimit (0.0f, 100.0f, (float) (double) s.getProperty ("vibratoCents", 0.0));
-                }
-
-                def.synth.mono = (bool) s.getProperty ("mono", false);
-                def.synth.porta = (bool) s.getProperty ("porta", false);
-                def.synth.portaBeats = juce::jlimit (0.0f, 8.0f, (float) (double) s.getProperty ("portaTime", (double) SynthSettings {}.portaBeats));
-                def.synth.am = (bool) s.getProperty ("am", false);
-                def.synth.ring = (bool) s.getProperty ("ring", false);
-                for (const auto& [key, target] : { std::pair { "spectrum", &def.synth.spectrum }, std::pair { "spectrumPhase", &def.synth.spectrumPhase } })
-                {
-                    const auto values = juce::StringArray::fromTokens (s.getProperty (key, "").toString(), " ", "");
-                    for (int h = 0; h < values.size() && h < SynthSettings::spectrumSize; ++h)
-                        (*target)[(std::size_t) h] = juce::jlimit (-16.0f, 16.0f, values[h].getFloatValue());
-                }
-                {
-                    const auto values = juce::StringArray::fromTokens (s.getProperty ("spectrumDecay", "").toString(), " ", "");
-                    for (int h = 0; h < values.size() && h < SynthSettings::spectrumSize; ++h)
-                        def.synth.spectrumDecay[(std::size_t) h] = juce::jlimit (0.0f, 60.0f, values[h].getFloatValue());
-                    const auto targets = juce::StringArray::fromTokens (s.getProperty ("spectrumTarget", "").toString(), " ", "");
-                    for (int h = 0; h < targets.size() && h < SynthSettings::spectrumSize; ++h)
-                        def.synth.spectrumTarget[(std::size_t) h] = juce::jlimit (0.0f, 16.0f, targets[h].getFloatValue());
-                }
-                def.synth.keyTrack = juce::jlimit (-2.0f, 2.0f, (float) (double) s.getProperty ("keyTrack", 0.0));
-                if (const auto bands = juce::StringArray::fromTokens (s.getProperty ("bands", "").toString(), " ", ""); bands.size() == 3)
-                    for (int b = 0; b < 3; ++b)
-                        def.synth.bandGain[(std::size_t) b] = juce::jlimit (0.0f, 4.0f, bands[b].getFloatValue());
-                def.synth.sweep = juce::jlimit (0.0f, 200.0f, (float) (double) s.getProperty ("sweep", 0.0));
-                def.synth.sweepTime = juce::jlimit (0.0005f, 30.0f, (float) (double) s.getProperty ("sweepTime", 0.1));
-                if (const auto* fm = s.getProperty ("fm", {}).getArray(); fm != nullptr && fm->size() >= 3)
-                {
-                    def.synth.fm = juce::jlimit (0.0f, 16.0f, (float) (double) (*fm)[0]);
-                    def.synth.fmDecay = juce::jlimit (0.0f, 30.0f, (float) (double) (*fm)[1]);
-                    def.synth.fmSustain = juce::jlimit (0.0f, 1.0f, (float) (double) (*fm)[2]);
-                }
-
-                readEnvelopes (s, def.synth.filterEnv, def.synth.pitchEnv);
-                readLfos (s, def.synth.lfo);
-            }
-
-            if (const auto& s = c["samplerSettings"]; s.isObject())
-            {
-                def.sampler.pitch = juce::jlimit (-24.0f, 24.0f, (float) (double) s.getProperty ("pitch", 0.0));
-                def.sampler.attack = juce::jlimit (0.0f, 2.0f, (float) (double) s.getProperty ("attack", 0.0));
-                def.sampler.release = juce::jlimit (0.0f, 4.0f, (float) (double) s.getProperty ("release", 0.0));
-                def.sampler.decay = juce::jlimit (0.0f, 10.0f, (float) (double) s.getProperty ("decay", 0.0));
-                def.sampler.sustain = juce::jlimit (0.0f, 1.0f, (float) (double) s.getProperty ("sustain", 1.0));
-                def.sampler.stretchBeats = juce::jmax (0.0f, (float) (double) s.getProperty ("stretchBeats", 0.0));
-                def.sampler.keepPitch = (bool) s.getProperty ("keepPitch", false);
-
-                if (auto* slices = s["slices"].getArray())
-                    for (const auto& v : *slices)
-                        def.sampler.slices.push_back (juce::jlimit (0.0f, 1.0f, (float) (double) v));
-
-                if (const auto& region = s["region"]; region.isArray() && region.size() == 2)
-                {
-                    def.sampler.regionStart = juce::jlimit (0.0f, 1.0f, (float) (double) region[0]);
-                    def.sampler.regionEnd = juce::jlimit (0.0f, 1.0f, (float) (double) region[1]);
-                }
-                def.sampler.reverse = (bool) s.getProperty ("reverse", false);
-                def.sampler.cut = (bool) s.getProperty ("cut", false);
-                def.sampler.porta = (bool) s.getProperty ("porta", false);
-                def.sampler.portaBeats = juce::jlimit (0.0f, 8.0f, (float) (double) s.getProperty ("portaTime", (double) SamplerSettings {}.portaBeats));
-                def.sampler.gainDb = juce::jlimit (-24.0f, 24.0f, (float) (double) s.getProperty ("gainDb", 0.0));
-
-                if (auto* env = s["flVolumeEnvelope"].getArray(); env != nullptr && env->size() == 18)
-                    for (const auto& v : *env)
-                        def.sampler.flVolumeEnvelope.push_back ((std::int32_t) (int) v);
-
-                if (auto* fl = s["flChannel"].getArray(); fl != nullptr && (fl->size() == 89 || fl->size() == 90))
-                    for (const auto& v : *fl)
-                        def.sampler.flChannel.push_back ((std::int32_t) (int) v);
-
-                if (const auto& filter = s["filter"]; filter.isArray() && filter.size() >= 2)
-                {
-                    def.sampler.cutoff = juce::jlimit (20.0f, 20000.0f, (float) (double) filter[0]);
-                    def.sampler.resonance = juce::jlimit (0.0f, 1.0f, (float) (double) filter[1]);
-                    def.sampler.filterType = filter.size() >= 3 ? juce::jlimit (0, 3, (int) filter[2]) : 0;
-                }
-
-                readEnvelopes (s, def.sampler.filterEnv, def.sampler.pitchEnv);
-                readLfos (s, def.sampler.lfo);
-            }
-
-            song.channels.push_back (std::move (def));
-        }
+            song.channels.push_back (channelFromVar (c, song));
 
     if (auto* patterns = root["patterns"].getArray())
         for (const auto& p : *patterns)

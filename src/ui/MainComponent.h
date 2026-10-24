@@ -44,7 +44,8 @@ public:
 
     // Opens .lynx or .flp (also used by the command line).
     void openFile (const juce::File& file);
-    void showSetupWizard(); // first run, or Options > Setup wizard
+    void showSetupWizard(); // first run, or Options > Setup wizard (an overlay over this component)
+    void closeSetupWizardForSnapshot() { setupOverlay.reset(); }
 
     // Asks "save changes?" if there are any; `then` runs unless the user cancels.
     void confirmDiscard (std::function<void()> then);
@@ -198,6 +199,7 @@ private:
     void setToolbarEditing (bool editing);
     void undoRedo (bool redo); // with "Undone: ..." and the undo level in the hint bar
     std::unique_ptr<toolbar::EditOverlay> toolbarEditor;
+    std::unique_ptr<juce::Component> setupOverlay; // the first-start / Options > Setup wizard, over everything
     toolbar::EditOverlay::Bounds panelBounds {}; // each shown toolbar panel (for the edit mode)
     juce::Rectangle<int> fixedToolbarArea;       // the menu and the hint bar
     void newProject (bool askAlways = false); // File › New: the New project window unless turned off
