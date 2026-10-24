@@ -775,6 +775,12 @@ void PianoRollComponent::paint (juce::Graphics& g)
                 g.fillRoundedRectangle (gripX, r.getY() + 2.0f, 2.0f, juce::jmax (2.0f, r.getHeight() - 4.0f), 1.0f);
             }
 
+            if (n.group != 0 && r.getWidth() > 10.0f) // grouped: a small link mark at the top right
+            {
+                g.setColour (bg0.withAlpha (0.7f));
+                g.fillEllipse (r.getRight() - 6.0f, r.getY() + 1.5f, 3.5f, 3.5f);
+            }
+
             if (n.porta) // porta: slanted stroke at the start, like the glide
             {
                 g.setColour (bg0.withAlpha (0.65f));
@@ -1504,7 +1510,7 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
     // Pencil (and Brush on an existing note): Shift+drag on a note drags a copy
     if (hit >= 0 && e.mods.isShiftDown() && ! rightEdge && ! leftEdge)
     {
-        const auto sources = isSelected (hit) ? selection : std::vector<int> { hit };
+        const auto sources = isSelected (hit) ? selection : notetools::groupOf (currentPattern (engine.getSong()), hit);
         const auto grabbedAt = (std::size_t) (std::find (sources.begin(), sources.end(), hit) - sources.begin());
         std::vector<int> added;
 
@@ -1513,7 +1519,10 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
         for (auto i : sources)
             ordered.push_back (currentPattern (engine.getSong()).notes[(std::size_t) i]);
 
-        editNotes ([&] (Pattern& p) { added = noteedit::paste (p, ordered, 0); });
+        editNotes ([&] (Pattern& p) {
+            added = noteedit::paste (p, ordered, 0);
+            notetools::regroup (p, added);
+        });
         setSelection (added);
         dragIndices = added;
         dragOriginals = ordered;
@@ -1526,8 +1535,11 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
 
     if (hit >= 0)
     {
-        if (! isSelected (hit))
-            setSelection ({});
+        if (! isSelected (hit)) // a grouped note brings its group along (FL's note groups)
+        {
+            const auto members = notetools::groupOf (currentPattern (engine.getSong()), hit);
+            setSelection (members.size() > 1 ? members : std::vector<int> {});
+        }
 
         const auto& notes = currentPattern (engine.getSong()).notes;
         const auto& n = notes[(std::size_t) hit];
@@ -2775,6 +2787,9 @@ juce::PopupMenu PianoRollComponent::selectMenu()
     menu.addItem (tr ("Overlapping notes"), [choose] { choose ([] (const Pattern& p, const std::vector<int>& t) { return notetools::selectOverlapping (p, t); }); });
     menu.addItem (tr ("Stacked notes (hidden duplicates)"), [choose] { choose ([] (const Pattern& p, const std::vector<int>& t) { return notetools::selectStacked (p, t); }); });
     menu.addItem (tr ("Same colour as the selection") + "\tShift+C", [this] { runAction ("pianoRoll.selectByColour"); });
+    menu.addSeparator();
+    menu.addItem (tr ("Group the selected notes") + "\tShift+G", selection.size() > 1, false, [this] { runAction ("pianoRoll.groupNotes"); });
+    menu.addItem (tr ("Ungroup the selected notes") + "\tAlt+G", ! selection.empty(), false, [this] { runAction ("pianoRoll.ungroupNotes"); });
     return menu;
 }
 
@@ -2879,6 +2894,20 @@ bool PianoRollComponent::runAction (const std::string& id)
         selectByColour (! selection.empty() && selection.front() < (int) notes.size() ? notes[(std::size_t) selection.front()].colour : noteColour);
     }
     else if (is ("pianoRoll.invertSelection")) setSelection (notetools::invertSelection (channelNotes(), selection));
+    else if (is ("pianoRoll.groupNotes") || is ("pianoRoll.ungroupNotes"))
+    {
+        const auto target = selection;
+        if (target.empty())
+            return true;
+        const auto group = is ("pianoRoll.groupNotes");
+        editNotes ([&] (Pattern& p) {
+            if (group)
+                notetools::groupNotes (p, target);
+            else
+                notetools::ungroupNotes (p, target);
+        });
+        repaint();
+    }
     else
         return false;
 
@@ -3027,7 +3056,10 @@ void PianoRollComponent::paste()
     // as in FL: pastes at the same position, already selected for dragging
     std::vector<int> added;
     const auto channel = engine.getSelectedChannel();
-    editNotes ([&added, channel] (Pattern& p) { added = noteedit::paste (p, clipboard, 0, channel); });
+    editNotes ([&added, channel] (Pattern& p) {
+        added = noteedit::paste (p, clipboard, 0, channel);
+        notetools::regroup (p, added); // copies of grouped notes form groups of their own
+    });
     setSelection (added);
     sortNotes();
 }
@@ -3041,7 +3073,10 @@ void PianoRollComponent::duplicateSelection()
 
     std::vector<int> added;
     const auto grid = gridTicks();
-    editNotes ([&added, &source, grid] (Pattern& p) { added = noteedit::duplicate (p, source, grid); });
+    editNotes ([&added, &source, grid] (Pattern& p) {
+        added = noteedit::duplicate (p, source, grid);
+        notetools::regroup (p, added);
+    });
     setSelection (added);
     sortNotes();
 }

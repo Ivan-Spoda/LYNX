@@ -721,6 +721,7 @@ struct Note
     float release = 0.5f;     // release velocity 0..1 (Note inspector; stored, not yet used by the instruments)
     float modX = 0.5f, modY = 0.5f; // two free per-note modulation values 0..1 (stored, not yet routed)
     int colour = 0;           // note colour group 0..15 (FL's note colours; .flp note byte 'extra' bits 0-3)
+    int group = 0;            // note group (FL's Group, Shift+G: clicking one note selects the group); 0 = none
 };
 
 constexpr int noteColourCount = 16;
@@ -844,6 +845,7 @@ struct Clip
     int automation = -1;      // automation clips: index into Song::automations
     std::int64_t fadeIn = 0, fadeOut = 0; // audio clips: fades (ticks)
     float gain = 1.0f;        // audio clips: clip volume
+    float pan = 0.0f;         // audio clips: clip pan -1..1 (FL 2026's clip pan; REA round 153)
     bool muted = false;       // clip-level mute (the Mute tool); independent of the track mute
 
     std::int64_t end() const noexcept { return start + length; }
