@@ -1825,7 +1825,8 @@ const EffectInfo& echoformInfo()
                                      { "Tap 6", 1.0f }, { "Tap 7", 1.0f }, { "Tap 8", 1.0f }, { "Tap 9", 1.0f }, { "Tap 10", 1.0f },
                                      { "Tap 11", 1.0f }, { "Tap 12", 1.0f }, { "Tap 13", 1.0f }, { "Tap 14", 1.0f }, { "Tap 15", 1.0f },
                                      { "LoFi", 0.0f },
-                                     { "Tape voicing", 0.0f } } }; // round 136 (after round 137's)    return info;
+                                     { "Tape voicing", 0.0f } } }; // round 136 (after round 137's)
+    return info;
 }
 
 const EffectInfo& spiralInfo()
