@@ -114,8 +114,15 @@ enum Param
     vDpOn, vDpFreq, vDpThreshold, vDpSplit, vDpLookahead, vDpListen,
     vEqOn, vHpfOn, vHpfFreq, vNotchOn, vNotchFreq, vNotchGain, vHighOn, vHighFreq, vHighGain,
     vCompOn, vExpThreshold, vCompThreshold, vRatio, vAttack, vRelease, vMakeup, vKnee, vDrive,
+    // round 147b (appended, off by default = the old sound): Ridge's own engine gets the reference console's automatic
+    // make-up (the level its compressor gives back for the threshold and ratio, measured in round 123 — the E voicing
+    // always has it) and the ANALOG switch (the console emulation's colour)
+    autoMakeup, analog,
     count
 };
+// round 147b: the auto make-up (dB) for Ridge's own compressor: the console's for the same threshold (dBFS + 18 = the
+// console's dBu scale) and ratio; 0 with the compressor off
+double autoMakeupDb (const EffectParams& p) noexcept;
 
 double hpfHz (float v) noexcept;      // 0 = off, else 16 .. 350 Hz (18 dB/oct)
 double lpfHz (float v) noexcept;      // 0 = off, else 22 kHz .. 3 kHz (12 dB/oct)

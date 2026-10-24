@@ -180,3 +180,60 @@ TEST (lynx_tune_note_status_directions_and_range_round147b)
     CHECK (std::abs (corrected - 440.0) < 3.0);
     CHECK (std::abs (outside - 450.0) < 3.0);
 }
+
+TEST (ridge_auto_makeup_and_analog_round147b)
+{
+    using namespace lynx;
+    namespace r = mixsuite::ridge;
+    CHECK ((int) effectInfo (EffectKind::ridgeStrip).params.size() == r::count);
+    auto p = makeEffectSlot (EffectKind::ridgeStrip).params;
+    CHECK (p[r::autoMakeup] == 0.0f && p[r::analog] == 0.0f); // the old sound
+    // the console's make-up for the same threshold / ratio (round 123's measured law): none at 1:1, more with more
+    // compression
+    p[r::compRatio] = 0.0f;
+    CHECK (r::autoMakeupDb (p) == 0.0);
+    p[r::compRatio] = 0.4f;                                         // 1 + 19·0.16 = 4.04 : 1
+    p[r::compThreshold] = 0.5f;                                     // −20 dBFS = the console's −2 dB
+    const auto mk = r::autoMakeupDb (p);
+    vmatch::echannel::Settings e;
+    e.compRatio = r::ratio (0.4f);
+    e.compThreshold = -2.0;
+    CHECK (std::abs (mk - vmatch::echannel::compMakeupDb (e)) < 1e-9 && mk > 0.5);
+    p[r::compThreshold] = 0.25f;                                    // −30 dBFS: deeper, more make-up
+    CHECK (r::autoMakeupDb (p) > mk);
+    p[r::compThreshold] = 0.5f;
+    // processed: switching it on raises the output by exactly that much
+    auto run = [] (const EffectParams& q, float level) {
+        auto fx = makeEffect (EffectKind::ridgeStrip);
+        fx->prepare (48000.0);
+        std::vector<float> l (48000), rr (48000);
+        for (int i = 0; i < 48000; ++i) l[(std::size_t) i] = rr[(std::size_t) i] = level * (float) std::sin (2.0 * 3.14159265358979 * 1000.0 * i / 48000.0);
+        for (int at = 0; at < 48000; at += 512)
+            fx->process (l.data() + at, rr.data() + at, std::min (512, 48000 - at), q, 120.0);
+        return std::make_pair (l, rr);
+    };
+    const auto off = run (p, 0.3f).first;
+    p[r::autoMakeup] = 1.0f;
+    const auto onOut = run (p, 0.3f).first;
+    CHECK (std::abs (20.0 * std::log10 (p147b::peakOf (onOut) / p147b::peakOf (off)) - mk) < 0.01);
+    // ANALOG [EXEC]: white noise at −110.7 dBFS RMS per channel, uncorrelated; off = digital silence
+    auto q = makeEffectSlot (EffectKind::ridgeStrip).params;
+    const auto silent = run (q, 0.0f);
+    CHECK (p147b::peakOf (silent.first) == 0.0);
+    q[r::analog] = 1.0f;
+    const auto noisy = run (q, 0.0f);
+    double sl = 0.0, sr = 0.0, slr = 0.0;
+    for (std::size_t i = 4800; i < noisy.first.size(); ++i)
+    {
+        sl += (double) noisy.first[i] * noisy.first[i];
+        sr += (double) noisy.second[i] * noisy.second[i];
+        slr += (double) noisy.first[i] * noisy.second[i];
+    }
+    const auto count = (double) (noisy.first.size() - 4800);
+    CHECK (std::abs (10.0 * std::log10 (sl / count) + 110.73) < 0.3);
+    CHECK (std::abs (10.0 * std::log10 (sr / count) + 110.73) < 0.3);
+    CHECK (std::abs (slr / std::sqrt (sl * sr)) < 0.03);
+    // the E voicing gets the same noise
+    q[r::voicing] = 1.0f;
+    CHECK (p147b::peakOf (run (q, 0.0f).first) > 1e-6);
+}

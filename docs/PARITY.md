@@ -610,7 +610,7 @@ Trial on this PC: yes (older capture used).
 | Comp THRESHOLD | +10…−20 dBu (= −8…−38 dBFS), default 0 dBu (−18 dBFS); clockwise = lower | −40…0 dBFS, default 0 dBFS; clockwise = higher | ⚠️ | different unit and reference, opposite direction, default 18 dB higher |
 | Comp RELEASE | 0.1–4 s, default 0.4 | 0.1–4 s, default 0.29 | ✅ | |
 | Comp F.ATK | fast 1 ms; off = auto, program dependent | "Fast attack" 1 ms; off = fixed 10 ms | ⚠️ | no program-dependent attack |
-| Auto make-up from ratio + threshold | always on (the manual) | none (the translator adds +0.9 dB output) | ❌ | engine |
+| Auto make-up from ratio + threshold | always on (the manual) | none (the translator adds +0.9 dB output) | ✅ | round 123: the E voicing has the console's measured make-up; round 147b: "Auto make-up" (Compressor section) gives Ridge's own engine the same law (threshold dBFS + 18 = the console's scale, ratio) |
 | Comp Mix | — | "Mix" 0–100 % | ➕ | |
 | Comp curve display | — | static transfer curve | ➕ | |
 | Expander THRESHOLD | −30…+10 dBu (−48…−8 dBFS), default −30 | −80…0 dBFS, default −60 | ⚠️ | |
@@ -620,7 +620,7 @@ Trial on this PC: yes (older capture used).
 | GATE switch (Exp default) | button + LED; expander is the default | "Gate \| Expand" tabs, default **Gate** | ⚠️ | default is the opposite |
 | Threshold hysteresis | variable (program dependent) | fixed 4 dB (gate) | ⚠️ | |
 | GR indicators | two LED ladders (comp, exp) 3/6/10/14/20 dB + gate LED | two horizontal bars "Comp" / "Gate" 0–30 dB | ✅ | different form, same information; no gate-open LED |
-| ANALOG on/off | switch, centre right; default (her state) Off | none | ❌ | engine (colour) |
+| ANALOG on/off | switch, centre right; default (her state) Off | none | ✅ | round 147b: "Analog" (Dynamics section) [EXEC trial: Analog on adds white noise of −110.7 dBFS RMS per channel at the output, uncorrelated L / R, whatever the input / output / compressor settings; harmonics unchanged]; both voicings; translated (RealWorld 31) |
 | INPUT trim | ±18 dB, knob in the Gain block | "Input" ±20 dB | ✅ | |
 | Phase Ø | button + LED | "Phase" toggle | ✅ | |
 | OUTPUT fader | fader −24…+12 dB beside the meter | "Output" knob ±20 dB | ⚠️ | knob, not a fader; different range |
@@ -629,6 +629,8 @@ Trial on this PC: yes (older capture used).
 | Latency | 1 sample | 0 | ✅ | irrelevant |
 | Vocalstrip 2 (SSL Native) role | de-esser, de-ploser, 3-band EQ, compander with knee/makeup/drive, process order | round 145: Ridge's **Vocal strip voicing** — every control of the reference (34 parameters, its own laws), its own panel (level, compander, de-esser / de-ploser, equaliser, order menu, GR meters), measured on the official trial; her state translated (−60 … −67 dB null on her takes) | ✅ | REA_rodada145 §2; the broadband de-esser / de-ploser on bursts is the least exact part (−13 … −25 dB) |
 | Saved-state translation | — | filters, 4 bands, comp (threshold, ratio, release, fast), output, dyn/EQ bypass translated; Split, Dyn S.C., Ch Out, expander, Analog, Input, Phase not translated (order forced to Dyn>EQ) | ⚠️ | round 113 §3c |
+
+**Round 147b:** configuration 7 → 8 (auto make-up, ANALOG measured and translated), design 7 → 7.
 
 **Scores:** configuration 6/10, design 6/10. An SSL user finds every knob in the expected column. What is missing
 or wrong: Split / Dyn S.C. semantics, Analog, auto make-up, the In/Out meter with the output fader, and

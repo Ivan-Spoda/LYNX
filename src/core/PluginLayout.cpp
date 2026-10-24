@@ -1621,6 +1621,7 @@ Layout ridgeStrip()
     v.push_back (dial (410, 150, 32, "Comp. release", TR_NOOP ("Release")));
     v.push_back (dial (490, 150, 28, "Comp. mix", TR_NOOP ("Mix")));
     v.push_back (toggle (296, 206, 110, 20, "Fast attack", TR_NOOP ("Fast attack")));
+    v.push_back (toggle (414, 206, 136, 20, "Auto make-up", TR_NOOP ("Auto make-up"))); // round 147b: the console's
     v.push_back (section (284, 244, 272, 196, TR_NOOP ("Expander / gate")));
     v.push_back (dial (480, 296, 46, "Gate threshold", TR_NOOP ("Threshold"), big));
     v.push_back (dial (330, 290, 32, "Gate range", TR_NOOP ("Range")));
@@ -1632,6 +1633,7 @@ Layout ridgeStrip()
     v.push_back (meter (292, 484, 256, 12, 1, TR_NOOP ("Gate")));
     v.push_back (toggle (292, 508, 84, 20, "Dynamics on", TR_NOOP ("Dyn in")));
     v.push_back (tabs (384, 508, 164, 20, "Order", TR_NOOP ("EQ>Dyn|Dyn>EQ")));
+    v.push_back (toggle (292, 540, 84, 20, "Analog", TR_NOOP ("Analog"))); // round 147b: the console emulation's colour
     // the GAIN block (round 129, the reference's): input trim and phase, the output fader beside the input / output
     // level meter with its peak read-outs
     v.push_back (section (284, 580, 272, 132, TR_NOOP ("Gain")));

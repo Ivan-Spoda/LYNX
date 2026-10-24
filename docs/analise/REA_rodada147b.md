@@ -50,9 +50,8 @@ Appended after the Classic voicing (round 136): `Channel mode` (0 L/R, 1 M/S), `
 [MANUAL] (docs/specs/waves-tune-real-time.md, the v16 guide): a multi-octave keyboard with per-note statuses (Legal,
 Illegal, Illegal-Pitch-Up, Illegal-Pitch-Down, Bypass; a click cycles), the range (boundary handles + presets Bass,
 Baritone, Tenor, Alto, Mezzo Soprano, Soprano, Generic; notes outside → bypassed), Group Octaves, Reset Scale,
-Send / Receive, view buttons (− / + and ◀ / ▶ under the keys, `parity129/ref/wtune.png`). [EXEC] attempt: the Waves
-shell hung in our host while scanning (as in round 144: no parameter list in 200 s; the process was killed by its PID)
-— nothing was measured on Waves this round.
+Send / Receive, view buttons (− / + and ◀ / ▶ under the keys, `parity129/ref/wtune.png`). [EXEC] the keyboard's statuses
+and range are not host parameters of the trial (§3), so they were not measured.
 
 LYNX (src/core/LynxTune.{h,cpp}, the `tunekeys` display in src/ui/PluginEditors.cpp; appended after `outputTrim`):
 
@@ -72,8 +71,49 @@ the detector's input type (low male / alto-tenor / soprano). Group Octaves stays
 
 ## 3. Ridge Strip: auto make-up and ANALOG
 
-Waits for round 145 (vox145), which appends ~34 Vocal-strip parameters to Ridge; see "Where I stopped".
+Round 145 (vox145) landed first; Ridge's new parameters follow its Vocal-strip block: `Auto make-up`, `Analog`
+(defaults off = the old sound).
+
+[EXEC] SSL E-Channel trial (Waves, demo mode; the shell needs ~10 min to describe its 714 plug-ins the first time —
+round 144's "hang" — then loads from fxmeasure-cache.xml; loading DeEsser Mono first makes the shell give the
+requested plug-in, as in round 113). Host parameters: `Analog` (index 1, Off / On), `Gain`, `InputLevel`,
+`CompThresh`, `CompRatio` … (164 parameters). Silence, a 1 kHz / −20 dBFS and a 100 Hz / −6 dBFS sine, Analog off and
+on (blocks muted by the demo are masked out):
+
+| | Analog off | Analog on |
+|---|---|---|
+| silence | digital zero | white noise, −110.7 dBFS RMS per channel (≈ −154.5 dB/Hz from 20 Hz to 20 kHz), L / R correlation −0.001 |
+| 1 kHz / −20 dBFS: H2 / H3 | −134.1 / −122.1 dB | −134.0 / −121.6 dB |
+| 100 Hz / −6 dBFS: H2 / H3 | −106.1 / −80.0 dB | −106.1 / −80.1 dB |
+| output fader −12 dB / input −12 dB / compressor 4:1 at −20 | — | the noise stays at −110.9 / −110.8 / −110.2 dBFS |
+
+So ANALOG is the console emulation's noise floor, added at the very output. LYNX: Gaussian (Irwin–Hall) white noise
+at that level, one generator per channel, in both of Ridge's own voicings (classic and E console); translated from
+E-Channel states (RealWorld 31).
+
+Auto make-up: the reference's compressor always gives back level for its threshold and ratio; round 123 measured that
+law (`VoiceMatchDynamics.inc`, the E voicing has it). "Auto make-up" applies it to Ridge's own compressor
+(`ridge::autoMakeupDb`: the console's make-up for threshold dBFS + 18 on its dBu scale and the same ratio; 0 at 1:1 or
+with the dynamics off). Editor: "Auto make-up" in the Compressor section, "Analog" in the Dynamics section.
+
+WTRT note: Waves Tune Real-Time's host parameters (143) were listed this way too — Speed, Note Transition, Link,
+Correction (+ on / off), Reference, Tolerance time / cents, Vibrato depth / on, Scale type (44), Scale root (17); the
+keyboard statuses and the range are not host parameters (editor state only), so the range presets stay [model].
+
+## Scores (docs/PARITY.md)
+
+| LYNX engine | Original | Config | Design |
+|---|---|---|---|
+| Ember Saturator | Saturn 2 | 6 → 7 | 7 → 7 |
+| LYNX Tune | Waves Tune Real-Time | 8 → 9 | 6 → 7 |
+| Ridge Strip | SSL E-Channel | 7 → 8 | 7 → 7 |
 
 ## Where I stopped
 
-- (filled at the end of the round)
+- Ember: Saturn's global Input / Output pan (measured value texts, not implemented), 6 bands, 28 styles, modulation,
+  linear phase.
+- LYNX Tune: Group Octaves off (per-octave statuses), Send / Receive between instances, MIDI reference tone; the
+  range presets' spans are LYNX's own (the trial keeps them in its editor state, not in host parameters).
+- Ridge: Split / Dyn S.C. semantics, the threshold's units / direction in the classic engine (unchanged).
+- Waves in our host: the first load of the shell takes ~10 min (it describes all 714 plug-ins; cached afterwards in
+  the data folder's fxmeasure-cache.xml); load DeEsser Mono first to get the requested plug-in.

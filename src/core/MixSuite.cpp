@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 
 #include "core/Biquad.h"
@@ -298,6 +299,15 @@ double eGateRangeDb (float v) noexcept { return lin (v, 0.0, 40.0); }
 double eGateThresholdDb (float v) noexcept { return lin (v, -30.0, 10.0); }
 bool eVoicing (const EffectParams& p) noexcept { return on (p[voicing]); }
 bool vocalVoicing (const EffectParams& p) noexcept { return on (p[vocal]); }
+double autoMakeupDb (const EffectParams& p) noexcept
+{
+    if (p[compRatio] <= 0.0005f || ! on (p[dynOn]))
+        return 0.0;
+    vmatch::echannel::Settings e;
+    e.compRatio = ratio (p[compRatio]);
+    e.compThreshold = std::clamp (compThresholdDb (p[compThreshold]) + 18.0, -20.0, 10.0);
+    return vmatch::echannel::compMakeupDb (e);
+}
 
 // round 145: the Vocal strip voicing's settings (the reference's own laws, core/VoxStrip.h)
 voxstrip::Settings vocalSettings (const EffectParams& p) noexcept
@@ -451,6 +461,8 @@ public:
         {
             const auto inPeak = Meters::peak (l, r, n);
             console.process (l, r, n, consoleSettings (p));
+            if (on (p[analog]))
+                addAnalogNoise (l, r, n);
             meters.set (console.compReductionDb(), console.gateReductionDb(), inPeak, Meters::peak (l, r, n));
             return;
         }
@@ -458,7 +470,8 @@ public:
         side.design (p, sr);
         const auto inPeak = Meters::peak (l, r, n);
         const auto inGain = (float) dbToGain (trimDb (p[input]));
-        const auto outGain = (float) (dbToGain (trimDb (p[output])) * (on (p[phase]) ? -1.0 : 1.0));
+        // round 147b: + the console's automatic make-up when switched on
+        const auto outGain = (float) (dbToGain (trimDb (p[output]) + (on (p[autoMakeup]) ? autoMakeupDb (p) : 0.0)) * (on (p[phase]) ? -1.0 : 1.0));
         const bool eq = on (p[eqOn]), dyn = on (p[dynOn]), eqFirst = ! on (p[order]), fts = on (p[filtersToSidechain]);
 
         // compressor
@@ -539,10 +552,36 @@ public:
             l[i] = a * outGain;
             r[i] = b * outGain;
         }
+        if (on (p[analog]))
+            addAnalogNoise (l, r, n);
         meters.set (maxComp, maxGate, inPeak, Meters::peak (l, r, n));
     }
 
 private:
+    // round 147b: ANALOG — [EXEC] the reference console with Analog on adds, at its very output (whatever the input,
+    // output or compressor settings), white noise of −110.7 dBFS RMS per channel, the two channels uncorrelated; its
+    // harmonics are unchanged (H2 … H5 of a 1 kHz / −20 dBFS and a 100 Hz / −6 dBFS sine within 0.4 dB). Gaussian
+    // (Irwin–Hall, four uniforms) from a small xorshift generator, one per channel.
+    void addAnalogNoise (float* l, float* r, int n) noexcept
+    {
+        constexpr float sigma = 2.91e-6f; // 10^(−110.73 / 20)
+        const auto gauss = [] (std::uint32_t& st) noexcept {
+            float sum = 0.0f;
+            for (int k = 0; k < 4; ++k)
+            {
+                st ^= st << 13; st ^= st >> 17; st ^= st << 5;
+                sum += (float) (st >> 8) * (1.0f / 16777216.0f);
+            }
+            return (sum - 2.0f) * 1.7320508f; // variance 4/12 → 1
+        };
+        for (int i = 0; i < n; ++i)
+        {
+            l[i] += sigma * gauss (noiseL);
+            r[i] += sigma * gauss (noiseR);
+        }
+    }
+    std::uint32_t noiseL = 0x9e3779b9u, noiseR = 0x85ebca6bu;
+
     // E voicing: Ridge's controls in the console's units (the shared ranges use Ridge's own laws)
     static vmatch::echannel::Settings consoleSettings (const EffectParams& p) noexcept
     {
@@ -2042,7 +2081,9 @@ const EffectInfo& ridgeInfo()
                                      { "High band", 1.0f }, { "High freq.", 0.0f }, { "High gain", 0.5f },
                                      { "Compander", 0.0f }, { "Expander threshold", 0.0f }, { "Compander threshold", 1.0f },
                                      { "Compander ratio", 0.504899f }, { "Compander attack", 0.0f }, { "Compander release", 0.049762f },
-                                     { "Make-up", 0.0f }, { "Soft knee", 0.0f }, { "Drive", 0.0f } } };
+                                     { "Make-up", 0.0f }, { "Soft knee", 0.0f }, { "Drive", 0.0f },
+                                     // round 147b
+                                     { "Auto make-up", 0.0f }, { "Analog", 0.0f } } };
     return info;
 }
 
