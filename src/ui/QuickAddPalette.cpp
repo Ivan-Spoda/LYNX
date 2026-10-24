@@ -5,6 +5,7 @@
 #include "core/SearchQuery.h"
 #include "ui/I18n.h"
 #include "ui/MixerComponent.h"
+#include "ui/ChannelRackComponent.h"
 #include "ui/Theme.h"
 #include "ui/ToolWindow.h"
 
@@ -125,8 +126,21 @@ public:
                                             targets.addInstrument (c);
                                         } });
 
+        // FL's own instrument engines (round 142): those this PC can make (the user's FL installation)
+        for (const auto& e : natives::instrumentEngines())
+            if (natives::available (e, flStudioAccess()))
+                instruments.all.push_back ({ flEngineName (e), tr ("built-in FL engine"), [this, kind = e.kind] {
+                                                if (auto c = natives::makeChannel (kind, flStudioAccess()))
+                                                    targets.addInstrument (*c);
+                                            } });
+
         for (auto kind : addableEffects())
-            effects.all.push_back ({ juce::String::fromUTF8 (effectInfo (kind).name), tr ("built-in"), [this, kind] { targets.addEffect (makeEffectSlot (kind)); } });
+            if (addableEffectAvailable (kind)) // (FL engines without the user's FL installation are left out)
+                effects.all.push_back ({ addableEffectName (kind), natives::effectEngine (kind) != nullptr ? tr ("built-in FL engine") : tr ("built-in"),
+                                         [this, kind, bpm = engine.getSong().bpm] {
+                                             if (const auto fx = newAddableEffect (kind, bpm))
+                                                 targets.addEffect (*fx);
+                                         } });
         // LYNX equivalents of well-known third-party effects (the substitutes table): findable by the product's name
         for (const auto& entry : pluginSubstitutes())
             if (! entry.instrument)

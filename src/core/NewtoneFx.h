@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "core/Effects.h"
+#include "core/TimeStretch.h"
 
 namespace lynx
 {
@@ -94,4 +95,44 @@ std::unique_ptr<Effect> make (std::shared_ptr<const SampleData> source, const st
 // disabled notes — with LYNX's own pitch analysis (YIN) and TD-PSOLA (core/VocalPitch.h). Unedited notes are copied
 // sample for sample. nullptr when nothing differs from the source.
 std::shared_ptr<SampleData> renderEdits (const SampleData& source, const Track& track);
+
+// ------------------------------------------------------------------------------------------------------------------
+// LYNX's own Newtone / Newtime projects (round 142, issue #5): a slot made in a LYNX project keeps its edits in its
+// own format in EffectSlot::state (FL's XML project is only read). The source sample is EffectSlot::samplePath.
+
+// LYNX's note analysis of a sample (YIN pitch track, core/VocalPitch.h): voiced stretches of steady pitch become
+// notes (Note.origPitch = their median pitch; nothing edited). Newtone: timeWarp = false.
+Track analyseNotes (const SampleData& source);
+
+// Newtone: the track's notes. "LXNT" + version + frames + global formant + the notes.
+std::vector<std::uint8_t> writeNative (const Track& track);
+std::optional<Track> parseNative (const std::vector<std::uint8_t>& state);
+// The track a slot's state describes: LYNX's own, or the first Newtone track of FL's state (nullopt: none)
+std::optional<Track> trackOf (const std::vector<std::uint8_t>& state);
+
+// Newtime: warp markers (source sample → output sample), in increasing order on both axes; between two markers the
+// source plays stretched (pitch kept) so that it lasts the output distance. Implicit markers at 0 → 0 and at the
+// end (the last marker's slope continued). "LXNW" + version + frames + the markers.
+struct WarpMarker
+{
+    std::int64_t source = 0, output = 0;
+    bool operator== (const WarpMarker&) const = default;
+};
+struct WarpMap
+{
+    std::int64_t frames = 0; // the source's length when the markers were placed
+    std::vector<WarpMarker> markers;
+    bool operator== (const WarpMap&) const = default;
+};
+std::vector<std::uint8_t> writeWarp (const WarpMap& map);
+std::optional<WarpMap> parseWarp (const std::vector<std::uint8_t>& state);
+// The output length of the warped source; and where a source sample lands (and back)
+std::int64_t warpedLength (const WarpMap& map, std::int64_t frames);
+double warpToOutput (const WarpMap& map, std::int64_t frames, double source);
+double warpToSource (const WarpMap& map, std::int64_t frames, double output);
+// The warped source (nullptr: no marker moves anything)
+std::shared_ptr<SampleData> renderWarp (const SampleData& source, const WarpMap& map);
+
+// What a slot plays in slave mode: the source with its edits (Newtone notes / Newtime warp; LYNX's or FL's state)
+std::shared_ptr<const SampleData> renderedSource (std::shared_ptr<const SampleData> source, const std::vector<std::uint8_t>& state);
 } // namespace lynx::newtonefx
