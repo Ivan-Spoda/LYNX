@@ -21,6 +21,7 @@
 #include "core/FlpImport.h"
 #include "core/History.h"
 #include "core/NativeEngines.h"
+#include "core/PluginWarmup.h"
 #include "core/SnapshotExchange.h"
 #include "core/Song.h"
 #include "engine/PluginHost.h"
@@ -79,6 +80,14 @@ public:
     void capturePluginStates();
     // Offline render mode for the hosted plugins (setNonRealtime), around renderOffline.
     void setPluginsRenderMode (bool offline);
+    // Every hosted plugin of the song that has not crashed (channels, inserts, inside Patchers); `notifyRender` is the
+    // plugin's "Notify about rendering mode" option. Message thread or the render thread, while nothing else edits.
+    void forEachHostedPlugin (const std::function<void (juce::AudioPluginInstance&, bool notifyRender)>& visit) const;
+    // The render's plugin warm-up (renderOffline, round 155): silent discarded blocks until the hosted plugins settle,
+    // then a new PDC plan if a latency changed and LYNX's own units reset. Returns blocks == 0 when the song has no
+    // hosted plugin. `latency` receives the delay compensation's total afterwards.
+    warmup::Result warmUpPlugins (const warmup::Settings& settings, double sampleRate, int blockSize,
+                                  const std::function<bool (double)>& progress, int& latency);
 
     void play() noexcept;
     void stop() noexcept; // also cancels a count-in or a wait for the first note
@@ -351,6 +360,12 @@ public:
         bool hqAllPlugins = true;
         // receives every rendered block after the PDC trim (left, right, frames), like `output` does
         std::function<void (const float*, const float*, int)> capture;
+        // trim the delay compensation's latency as the plugins report it after the warm-up (adds to trimSamples)
+        bool trimPdc = false;
+        // Export "Plugin warm-up" (round 155, core/PluginWarmup.h): with hosted plugins in the song, silent blocks are
+        // processed and thrown away before the render until the plugins have settled
+        bool pluginWarmUp = true;
+        warmup::Settings warmUp;
     };
 
     float renderOffline (const RenderOptions& options);
@@ -359,6 +374,8 @@ public:
     struct RenderStats
     {
         double graphMs = 0.0, writeMs = 0.0;
+        warmup::Result warmUp; // the plugin warm-up before the render (blocks == 0: none ran)
+        int trimmedSamples = 0; // the PDC trim used
     };
     RenderStats getLastRenderStats() const noexcept { return lastRenderStats; }
     float renderOffline (double seconds, double sampleRate, juce::AudioFormatWriter* output = nullptr)
