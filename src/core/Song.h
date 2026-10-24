@@ -320,10 +320,22 @@ struct PatchWire
     bool operator== (const PatchWire&) const = default;
 };
 
+// A parameter the Patcher publishes (FL's record 1100): automating the Patcher's parameter k moves this node parameter
+// (through `curve`, as a control cable). node −1 = an unused index.
+struct PatchParam
+{
+    int node = -1, param = 0;
+    std::vector<float> curve;
+    std::string name;
+
+    bool operator== (const PatchParam&) const = default;
+};
+
 struct PatcherDoc
 {
     std::vector<PatchNode> nodes;
     std::vector<PatchWire> wires;
+    std::vector<PatchParam> published; // [Patcher parameter]
     float inputX = 30.0f, inputY = 150.0f, outputX = 560.0f, outputY = 150.0f; // the host nodes in the editor
     // "To LYNX" extra audio outputs (bus 1…): the mixer insert each one feeds (−1 = the k-th insert after the
     // channel's own); generator Patcher only

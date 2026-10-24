@@ -326,6 +326,18 @@ juce::var patcherToVar (const PatcherDoc& doc)
     }
     o->setProperty ("wires", wires);
     o->setProperty ("io", juce::Array<juce::var> { doc.inputX, doc.inputY, doc.outputX, doc.outputY });
+    if (! doc.published.empty()) // [node, parameter, name, curve…] per Patcher parameter
+    {
+        juce::Array<juce::var> published;
+        for (const auto& p : doc.published)
+        {
+            juce::Array<juce::var> entry { p.node, p.param, str (p.name) };
+            for (const auto v : p.curve)
+                entry.add (juce::roundToInt (v * 10000.0f) / 10000.0);
+            published.add (entry);
+        }
+        o->setProperty ("published", published);
+    }
     if (! doc.outputTracks.empty())
     {
         juce::Array<juce::var> tracks;
@@ -392,6 +404,18 @@ PatcherDoc patcherFromVar (const juce::var& v, const Song& song)
         doc.outputX = (float) (double) io[2];
         doc.outputY = (float) (double) io[3];
     }
+    if (auto* published = v["published"].getArray())
+        for (const auto& p : *published)
+            if (p.isArray() && p.size() >= 3)
+            {
+                PatchParam param;
+                param.node = juce::jlimit (-1, count - 1, (int) p[0]);
+                param.param = juce::jmax (0, (int) p[1]);
+                param.name = p[2].toString().toStdString();
+                for (int k = 3; k < p.size(); ++k)
+                    param.curve.push_back (juce::jlimit (0.0f, 1.0f, (float) (double) p[k]));
+                doc.published.push_back (std::move (param));
+            }
     if (auto* tracks = v["outputTracks"].getArray())
         for (const auto& t : *tracks)
             doc.outputTracks.push_back (juce::jlimit (-1, maxMixerTracks - 1, (int) t));

@@ -2065,8 +2065,15 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             else if (c.kind == 1)
             {
                 w.kind = PatchWire::Kind::midi;
-                if (w.from != patchFromHost || w.to < 0)
-                    continue; // (MIDI between nodes / out of the Patcher: not passed yet)
+                if (w.from != patchFromHost)
+                    continue; // (MIDI out of a node: not passed yet)
+                if (w.to == patchToHost) // "MIDI port N": the notes go to the plugins on that MIDI port
+                {
+                    const auto number = dst->name.rfind ("MIDI port ", 0) == 0 ? std::atoi (dst->name.c_str() + 10) : dst->index;
+                    if (number < 0 || number > 255)
+                        continue;
+                    w.toPort = number;
+                }
             }
             else
             {
@@ -2114,6 +2121,34 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 }
             }
             doc.wires.push_back (std::move (w));
+        }
+
+        // the Patcher's published parameters (record 1100): Patcher parameter k → the node's parameter behind that port
+        for (const auto& [portId, k] : graph->exposed)
+        {
+            const auto* port = portOf (portId);
+            if (port == nullptr || k < 0 || k > 4096 || port->node < 0 || (std::size_t) port->node >= nodeOf.size() || nodeOf[(std::size_t) port->node] < 0
+                || port->kind != 2 || ! port->input)
+                continue;
+            PatchParam p;
+            p.node = nodeOf[(std::size_t) port->node];
+            const auto& target = doc.nodes[(std::size_t) p.node];
+            const auto& flTarget = graph->nodes[(std::size_t) port->node];
+            if (target.generator ? target.channel.instrument == InstrumentKind::plugin : target.effect.kind == EffectKind::plugin)
+                p.param = port->index;
+            else if (const auto map = target.generator ? std::nullopt : effectParamFromFl (canonicalFlEffectName (flTarget.plugin), port->index))
+            {
+                p.param = map->param;
+                if (map->convert)
+                    for (int i = 0; i < 33; ++i)
+                        p.curve.push_back (std::clamp (map->convert ((float) i / 32.0f), 0.0f, 1.0f));
+            }
+            else
+                continue;
+            p.name = patcher::nodeName (target) + " " + std::to_string (port->index + 1);
+            if ((int) doc.published.size() <= k)
+                doc.published.resize ((std::size_t) k + 1);
+            doc.published[(std::size_t) k] = std::move (p);
         }
         return doc;
     };
@@ -2598,6 +2633,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 {
                     // the exact Reeverbs keep FL's controls as (raw − min) / range: FL's normalised value as is
                     if (target.param < 0 || target.param >= (fx.kind == EffectKind::reeverb2 ? 15 : reeverb1ParamCount))
+                        target.kind = AutomationTargetKind::none;
+                }
+                else if (target.kind == AutomationTargetKind::effectParam && fx.kind == EffectKind::patcher)
+                {
+                    // the Patcher's own parameter k: one it publishes (REA_rodada141), FL's normalised value as is
+                    if (target.param < 0 || target.param >= (int) fx.patcher.published.size() || fx.patcher.published[(std::size_t) target.param].node < 0)
                         target.kind = AutomationTargetKind::none;
                 }
                 else if (target.kind == AutomationTargetKind::effectParam && fx.kind != EffectKind::plugin)
