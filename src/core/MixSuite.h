@@ -118,6 +118,10 @@ enum Param
     // make-up (the level its compressor gives back for the threshold and ratio, measured in round 123 — the E voicing
     // always has it) and the ANALOG switch (the console emulation's colour)
     autoMakeup, analog,
+    // round 148 (appended, off by default = the old sound): the "4K" voicing — the console measured on the SSL 4K E trial
+    // (core/VoiceMatch.h, echannel model 1: its EQ colours, filters, compressor, gate, mic pre and VCA). It takes the E
+    // voicing's controls (and Auto make-up, Analog = the Analogue VCA, Comp. mix) plus these
+    console4k, k4Colour, k4Pre, k4Mic, k4MakeupOffset,
     count
 };
 // round 147b: the auto make-up (dB) for Ridge's own compressor: the console's for the same threshold (dBFS + 18 = the
@@ -151,6 +155,15 @@ double eGateThresholdDb (float v) noexcept; // -30 .. +10 dB (console scale)
 bool eVoicing (const EffectParams& p) noexcept;
 std::string eParamText (int param, float v);
 bool vocalVoicing (const EffectParams& p) noexcept; // round 145
+// round 148: the 4K voicing and its own scales (dial position 0..1)
+bool k4Voicing (const EffectParams& p) noexcept;
+std::string k4ParamText (int param, float v);
+double k4Q (float v) noexcept;              // mid-band Q 0.5 .. 3 (log; up = narrower)
+float k4QValue (double q) noexcept;
+int k4ColourIndex (float v) noexcept;       // 0 Brown, 1 Black, 2 Orange
+float k4ColourValue (int colour) noexcept;
+double k4MicDb (float v) noexcept;          // 0 .. 50 dB
+double k4OffsetDb (float v) noexcept;       // -12 .. +12 dB
 std::string vocalParamText (int param, float v);
 } // namespace ridge
 

@@ -38,6 +38,16 @@ struct Settings
     bool dynOn = true;
     bool filtersBeforeDynamics = true; // "split": the filters run before the dynamics (otherwise with the EQ)
     bool dynamicsAfterEq = false;      // "dynamics to channel out"
+    // round 148: the console the settings drive — 0 the E-type channel of round 123, 1 the "4K" console measured on the
+    // SSL 4K E trial (REA_rodada148 §2). The 4K's own controls (ignored by model 0):
+    int model = 0;
+    int colour = 0;               // EQ colour: 0 Brown, 1 Black, 2 Orange
+    bool pre = false;             // the mic pre: drive `micDb` (0 … 50 dB, level-compensated)
+    double micDb = 0.0;
+    bool vca = false;             // the Analogue VCA (the dynamics' VCA colour)
+    bool autoMakeup = true;       // the compressor's automatic make-up …
+    double makeupOffsetDb = 0.0;  // … and its offset (−12 … +12 dB)
+    double compMix = 1.0;         // the compressor's dry / wet mix 0 … 1
 };
 
 // Q of the mid bands as the console's dial shows it, for a 0..1 dial position (3.5 at 0 .. 0.1 at 1)
@@ -71,13 +81,14 @@ private:
     double sr = 48000.0;
     Settings designed {};
     bool designedOnce = false;
-    Biquad hp1, hp2, lp, bands[4];
+    Biquad hp1, hp2, lp, bands[4], vcaHp;
     bool hpOn = false, lpOn = false, bandOn[4] {};
     // dynamics state
     double env = 0.0, gr = 0.0, gr1 = 0.0, yl = 0.0, yr = 0.0;
     double genv = 0.0, ggr = 0.0;
     bool gateOpen = false;
     float lastComp = 0.0f, lastGate = 0.0f;
+    std::uint32_t noise[2] { 0x9e3779b9u, 0x85ebca6bu }; // round 148: the 4K's VCA / mic pre hiss
 };
 } // namespace echannel
 

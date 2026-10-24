@@ -302,6 +302,13 @@ double eGateRangeDb (float v) noexcept { return lin (v, 0.0, 40.0); }
 double eGateThresholdDb (float v) noexcept { return lin (v, -30.0, 10.0); }
 bool eVoicing (const EffectParams& p) noexcept { return on (p[voicing]); }
 bool vocalVoicing (const EffectParams& p) noexcept { return on (p[vocal]); }
+bool k4Voicing (const EffectParams& p) noexcept { return on (p[console4k]); }
+double k4Q (float v) noexcept { return logMap (v, 0.5, 3.0); }
+float k4QValue (double q) noexcept { return (float) std::clamp (std::log (std::clamp (q, 0.5, 3.0) / 0.5) / std::log (6.0), 0.0, 1.0); }
+int k4ColourIndex (float v) noexcept { return std::clamp ((int) std::lround (v * 2.0f), 0, 2); }
+float k4ColourValue (int colour) noexcept { return (float) std::clamp (colour, 0, 2) * 0.5f; }
+double k4MicDb (float v) noexcept { return lin (v, 0.0, 50.0); }
+double k4OffsetDb (float v) noexcept { return lin (v, -12.0, 12.0); }
 double autoMakeupDb (const EffectParams& p) noexcept
 {
     if (p[compRatio] <= 0.0005f || ! on (p[dynOn]))
@@ -395,8 +402,63 @@ struct EqDesign
 };
 } // namespace
 
+// E voicing: Ridge's controls in the console's units (the shared ranges use Ridge's own laws)
+vmatch::echannel::Settings consoleSettingsOf (const EffectParams& p) noexcept
+{
+    vmatch::echannel::Settings e;
+    e.inputDb = trimDb (p[input]);
+    e.outputDb = trimDb (p[output]);
+    e.phase = on (p[phase]);
+    e.hpHz = p[hpf] > 0.0f ? hpfHz (p[hpf]) : 0.0;
+    e.lpKHz = p[lpf] > 0.0f ? lpfHz (p[lpf]) / 1000.0 : 0.0;
+    e.lfGain = bandGainDb (p[lfGain], false);
+    e.lfHz = lfHz (p[lfFreq]);
+    e.lfBell = on (p[lfBell]);
+    e.lmfGain = bandGainDb (p[lmfGain], false);
+    e.lmfKHz = lmfHz (p[lmfFreq]) / 1000.0;
+    e.lmfQ = eQ (p[lmfQ]);
+    e.hmfGain = bandGainDb (p[hmfGain], false);
+    e.hmfKHz = hmfHz (p[hmfFreq]) / 1000.0;
+    e.hmfQ = eQ (p[hmfQ]);
+    e.hfGain = bandGainDb (p[hfGain], false);
+    e.hfKHz = hfHz (p[hfFreq]) / 1000.0;
+    e.hfBell = on (p[hfBell]);
+    e.eqOn = on (p[eqOn]);
+    e.compRatio = p[compRatio] <= 0.0005f ? 1.0 : ratio (p[compRatio]);
+    e.compThreshold = eCompThresholdDb (p[compThreshold]);
+    e.compRelease = releaseSeconds (p[ridge::compRelease]);
+    e.compFast = on (p[compFastAttack]);
+    e.expRange = eGateRangeDb (p[gateRange]);
+    e.expThreshold = eGateThresholdDb (p[gateThreshold]);
+    e.expRelease = releaseSeconds (p[ridge::gateRelease]);
+    e.expFast = on (p[gateFastAttack]);
+    e.gate = ! on (p[expander]);
+    e.dynOn = on (p[dynOn]);
+    e.dynamicsAfterEq = ! on (p[order]);
+    e.filtersBeforeDynamics = on (p[filterSplit]);
+    if (k4Voicing (p)) // round 148: the 4K console (its own Q scale, colour, mic pre, VCA, make-up, mix)
+    {
+        e.model = 1;
+        e.colour = k4ColourIndex (p[k4Colour]);
+        e.lmfQ = k4Q (p[lmfQ]);
+        e.hmfQ = k4Q (p[hmfQ]);
+        e.lpKHz = e.lpKHz >= 15.9 ? 0.0 : e.lpKHz;
+        e.filtersBeforeDynamics = true;
+        e.pre = on (p[k4Pre]);
+        e.micDb = k4MicDb (p[k4Mic]);
+        e.vca = on (p[analog]);
+        e.autoMakeup = on (p[autoMakeup]);
+        e.makeupOffsetDb = k4OffsetDb (p[k4MakeupOffset]);
+        e.compMix = std::clamp ((double) p[compMix], 0.0, 1.0);
+    }
+    return e;
+}
+
+
 double responseDb (const EffectParams& p, double sampleRate, double hz)
 {
+    if (k4Voicing (p) || eVoicing (p)) // round 148: the console's own curve
+        return vmatch::echannel::responseDb (consoleSettingsOf (p), sampleRate, hz);
     EqDesign d;
     d.design (p, sampleRate);
     const auto w = 2.0 * pi * hz / sampleRate;
@@ -460,10 +522,17 @@ public:
             return;
         }
         vocalLatency = 0;
+        if (k4Voicing (p)) // round 148
+        {
+            const auto inPeak = Meters::peak (l, r, n);
+            console.process (l, r, n, consoleSettingsOf (p));
+            meters.set (console.compReductionDb(), console.gateReductionDb(), inPeak, Meters::peak (l, r, n));
+            return;
+        }
         if (eVoicing (p))
         {
             const auto inPeak = Meters::peak (l, r, n);
-            console.process (l, r, n, consoleSettings (p));
+            console.process (l, r, n, consoleSettingsOf (p));
             if (on (p[analog]))
                 addAnalogNoise (l, r, n);
             meters.set (console.compReductionDb(), console.gateReductionDb(), inPeak, Meters::peak (l, r, n));
@@ -585,42 +654,6 @@ private:
     }
     std::uint32_t noiseL = 0x9e3779b9u, noiseR = 0x85ebca6bu;
 
-    // E voicing: Ridge's controls in the console's units (the shared ranges use Ridge's own laws)
-    static vmatch::echannel::Settings consoleSettings (const EffectParams& p) noexcept
-    {
-        vmatch::echannel::Settings e;
-        e.inputDb = trimDb (p[input]);
-        e.outputDb = trimDb (p[output]);
-        e.phase = on (p[phase]);
-        e.hpHz = p[hpf] > 0.0f ? hpfHz (p[hpf]) : 0.0;
-        e.lpKHz = p[lpf] > 0.0f ? lpfHz (p[lpf]) / 1000.0 : 0.0;
-        e.lfGain = bandGainDb (p[lfGain], false);
-        e.lfHz = lfHz (p[lfFreq]);
-        e.lfBell = on (p[lfBell]);
-        e.lmfGain = bandGainDb (p[lmfGain], false);
-        e.lmfKHz = lmfHz (p[lmfFreq]) / 1000.0;
-        e.lmfQ = eQ (p[lmfQ]);
-        e.hmfGain = bandGainDb (p[hmfGain], false);
-        e.hmfKHz = hmfHz (p[hmfFreq]) / 1000.0;
-        e.hmfQ = eQ (p[hmfQ]);
-        e.hfGain = bandGainDb (p[hfGain], false);
-        e.hfKHz = hfHz (p[hfFreq]) / 1000.0;
-        e.hfBell = on (p[hfBell]);
-        e.eqOn = on (p[eqOn]);
-        e.compRatio = p[compRatio] <= 0.0005f ? 1.0 : ratio (p[compRatio]);
-        e.compThreshold = eCompThresholdDb (p[compThreshold]);
-        e.compRelease = releaseSeconds (p[ridge::compRelease]);
-        e.compFast = on (p[compFastAttack]);
-        e.expRange = eGateRangeDb (p[gateRange]);
-        e.expThreshold = eGateThresholdDb (p[gateThreshold]);
-        e.expRelease = releaseSeconds (p[ridge::gateRelease]);
-        e.expFast = on (p[gateFastAttack]);
-        e.gate = ! on (p[expander]);
-        e.dynOn = on (p[dynOn]);
-        e.dynamicsAfterEq = ! on (p[order]);
-        e.filtersBeforeDynamics = on (p[filterSplit]);
-        return e;
-    }
 
     vmatch::echannel::Channel console;
     voxstrip::Engine vocalEngine;
@@ -2090,7 +2123,10 @@ const EffectInfo& ridgeInfo()
                                      { "Compander ratio", 0.504899f }, { "Compander attack", 0.0f }, { "Compander release", 0.049762f },
                                      { "Make-up", 0.0f }, { "Soft knee", 0.0f }, { "Drive", 0.0f },
                                      // round 147b
-                                     { "Auto make-up", 0.0f }, { "Analog", 0.0f } } };
+                                     { "Auto make-up", 0.0f }, { "Analog", 0.0f },
+                                     // round 148: the 4K voicing
+                                     { "4K voicing", 0.0f }, { "EQ colour", 0.0f }, { "Mic pre", 0.0f }, { "Mic gain", 0.0f },
+                                     { "Make-up offset", 0.5f } } };
     return info;
 }
 
@@ -2246,6 +2282,20 @@ std::string eParamText (int param, float v)
     }
 }
 
+std::string k4ParamText (int param, float v)
+{
+    switch (param)
+    {
+        case lmfQ: case hmfQ: return fmt ("Q %.2f", k4Q (v));
+        case lpf: return v <= 0.0f || lpfHz (v) >= 15900.0 ? "off" : hzText (lpfHz (v));
+        case k4Colour: { static const char* names[3] { "brown", "black", "orange" }; return names[k4ColourIndex (v)]; }
+        case k4Mic: return fmt ("%.1f dB", k4MicDb (v));
+        case k4MakeupOffset: return fmt ("%+.1f dB", k4OffsetDb (v));
+        case analog: return on (v) ? "VCA on" : "VCA off";
+        default: return eParamText (param, v);
+    }
+}
+
 std::string vocalParamText (int param, float v)
 {
     namespace vs = voxstrip;
@@ -2300,6 +2350,8 @@ std::string paramText (EffectKind kind, int param, float v)
             case expander: return on (v) ? "expander" : "gate";
             case order: return on (v) ? "dyn > EQ" : "EQ > dyn";
             case voicing: return on (v) ? "E console" : "classic";
+            case console4k: return on (v) ? "4K console" : "off";
+            case k4Colour: case k4Mic: case k4MakeupOffset: return k4ParamText (param, v);
             case filterSplit: return on (v) ? "split" : "with EQ";
             case vocal: case vInput: case vOutput: case vOrder: case vDsFreq: case vDsThreshold: case vDsSplit:
             case vDpFreq: case vDpThreshold: case vDpSplit: case vHpfFreq: case vNotchFreq: case vNotchGain: case vHighFreq:

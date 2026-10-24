@@ -1,4 +1,5 @@
 #include "core/VoiceMatch.h"
+#include "core/VoxStrip.h"
 
 #include <algorithm>
 #include <cmath>
@@ -159,6 +160,164 @@ double rateScale (double wref, double sr) noexcept
     const double fs = std::min (f0, 0.45 * sr);
     return (2.0 * sr * std::tan (pi * fs / sr)) / (2.0 * refRate * std::tan (pi * fs / refRate)) * (fs / f0);
 }
+
+// ---- round 148: the "4K" console's EQ and filters ([EXEC] SSL 4K E, official Complete Access trial, impulse responses
+// at 48 kHz with the VCA and auto make-up off, three colours x every band at 8 gains, 4–5 frequencies and 5 Qs;
+// tmp/vox148/k4: k4camp.py, k4eq.py, k4fit2.py, k4tables.py; REA_rodada148 §2). Each band is one second-order
+// section whose (frequency, gain, Q) follow the dials by the fitted tables: the shelves are bilinear sections at 48 kHz
+// (re-warped to keep their frequency at other rates), the bells follow the analog prototype's magnitude up to Nyquist
+// (magnitude-matched), the filters are 12 dB/oct.
+namespace k4
+{
+#include "core/Console4KTables.inc"
+
+double lerp (double a, double b, double t) noexcept { return a + (b - a) * t; }
+
+// position of x among sorted nodes (log axis when `logAxis`): index of the lower node and the fraction, clamped
+Axis nodeAt (const float* nodes, int n, double x, bool logAxis) noexcept
+{
+    int i = 0;
+    while (i < n - 2 && x > nodes[i + 1])
+        ++i;
+    const double a = logAxis ? std::log ((double) nodes[i]) : (double) nodes[i], b = logAxis ? std::log ((double) nodes[i + 1]) : (double) nodes[i + 1];
+    const double v = logAxis ? std::log (std::max (x, 1e-9)) : x;
+    return { i, std::clamp ((v - a) / (b - a), 0.0, 1.0) };
+}
+
+// one section from a row of 8 gain nodes { ratio, gain dB, Q }: piecewise linear between the nodes; between −2 and +2
+// dB the ±2 node's frequency and Q with the gain scaled toward 0
+void fromGainRow (const float (*row)[3], double g, double out[3]) noexcept
+{
+    g = std::clamp (g, -15.0, 15.0);
+    if (std::abs (g) < 2.0)
+    {
+        const auto* nd = row[g < 0.0 ? 3 : 4];
+        out[0] = nd[0];
+        out[1] = nd[1] * std::abs (g) / 2.0;
+        out[2] = nd[2];
+        return;
+    }
+    const auto ax = nodeAt (gainNode, 8, g, false);
+    for (int k = 0; k < 3; ++k)
+        out[k] = lerp (row[ax.i][k], row[ax.i + 1][k], ax.t);
+}
+
+// a bilinear section from the analog (n2 s² + n1 s + n0) / (d2 s² + d1 s + d0), s normalised to w0 (rad/s), at the
+// 48 kHz calibration; at other rates w0 is re-warped so the section's frequency stays where it was at 48 kHz
+void bilinearAt (const double n[3], const double d[3], double f0, double sr, Biquad& b) noexcept
+{
+    double fd = refRate / pi * std::atan (pi * f0 / refRate); // the digital frequency f0 lands on at 48 kHz
+    fd = std::min (fd, 0.495 * sr);
+    const double w0 = 2.0 * sr * std::tan (pi * fd / sr);
+    const double c = 2.0 * sr / w0, c2 = c * c;
+    b.set (n[0] * c2 + n[1] * c + n[2], 2.0 * (n[2] - n[0] * c2), n[0] * c2 - n[1] * c + n[2],
+           d[0] * c2 + d[1] * c + d[2], 2.0 * (d[2] - d[0] * c2), d[0] * c2 - d[1] * c + d[2]);
+}
+
+void shelf (bool low, double f0, double db, double q, double sr, Biquad& b) noexcept
+{
+    const double A = std::pow (10.0, db / 40.0), sa = std::sqrt (A) / q;
+    if (low)
+    {
+        const double n[3] { A, A * sa, A * A }, d[3] { A, sa, 1.0 };
+        bilinearAt (n, d, f0, sr, b);
+    }
+    else
+    {
+        const double n[3] { A * A, A * sa, A }, d[3] { 1.0, sa, A };
+        bilinearAt (n, d, f0, sr, b);
+    }
+}
+
+constexpr float qNode[5] = { 0.5f, 1.0f, 1.5f, 2.0f, 3.0f };
+
+bool band (int which, const Settings& s, double sr, Biquad& out) noexcept
+{
+    const int c = std::clamp (s.colour, 0, 2);
+    double g = 0.0, f = 0.0, q = 1.5;
+    bool bell = false;
+    switch (which)
+    {
+        case 0: g = s.lfGain; f = std::clamp (s.lfHz, 30.0, 450.0); bell = s.lfBell; break;
+        case 1: g = s.lmfGain; f = std::clamp (s.lmfKHz, 0.2, 2.5) * 1000.0; q = s.lmfQ; break;
+        case 2: g = s.hmfGain; f = std::clamp (s.hmfKHz, 0.6, 7.0) * 1000.0; q = s.hmfQ; break;
+        default: g = s.hfGain; f = std::clamp (s.hfKHz, 1.5, 16.0) * 1000.0; bell = s.hfBell; break;
+    }
+    g = std::clamp (g, -15.0, 15.0);
+    if (std::abs (g) < 0.05)
+        return false;
+    double v[3];
+    if (which == 1 || which == 2)
+    {
+        const bool lo = which == 1;
+        const auto& tab = lo ? lmfBell[c] : hmfBell[c];
+        const auto aq = nodeAt (qNode, 5, std::clamp (q, 0.5, 3.0), true);
+        double a[3], b[3];
+        fromGainRow (tab[aq.i], g, a);
+        fromGainRow (tab[aq.i + 1], g, b);
+        for (int k = 0; k < 3; ++k)
+            v[k] = lerp (a[k], b[k], aq.t);
+        const auto* fn = lo ? lmfFreqNode : hmfFreqNode;
+        const auto* fr = lo ? lmfFreqRatio[c] : hmfFreqRatio[c];
+        const auto af = nodeAt (fn, 4, f, true);
+        v[0] *= std::exp (lerp (std::log ((double) fr[af.i]), std::log ((double) fr[af.i + 1]), af.t));
+        voxstrip::matchedPeak (out, sr, f * v[0], v[2], v[1]);
+        return true;
+    }
+    const bool lo = which == 0;
+    if (bell)
+    {
+        // the Bell type, measured at one point (100 Hz / 8 kHz, ±10 dB): its frequency ratio and Q, the gain law of the
+        // mid bells (Q 1.5) scaled to its own ±10 dB gain [model]
+        const auto* bt = lo ? lfbell[c] : hfbell[c];
+        double m[3], m10[3];
+        fromGainRow (lmfBell[c][2], g, m);
+        fromGainRow (lmfBell[c][2], 10.0, m10);
+        voxstrip::matchedPeak (out, sr, f * bt[0], bt[2], m[1] * bt[1] / m10[1]);
+        return true;
+    }
+    const auto* fn = lo ? lfFreqNode : hfFreqNode;
+    const int nf = lo ? 5 : 4;
+    const auto af = nodeAt (fn, nf, f, true);
+    double a[3], b[3];
+    fromGainRow (lo ? lfShelf[c][af.i] : hfShelf[c][af.i], g, a);
+    fromGainRow (lo ? lfShelf[c][af.i + 1] : hfShelf[c][af.i + 1], g, b);
+    v[0] = std::exp (lerp (std::log (a[0]), std::log (b[0]), af.t));
+    v[1] = lerp (a[1], b[1], af.t);
+    v[2] = lerp (a[2], b[2], af.t);
+    shelf (lo, f * v[0], v[1], v[2], sr, out);
+    return true;
+}
+
+double tableAt (const float* xs, const float* ys, int n, double x) noexcept
+{
+    const auto a = nodeAt (xs, n, x, true);
+    return std::exp (lerp (std::log ((double) ys[a.i]), std::log ((double) ys[a.i + 1]), a.t));
+}
+
+bool highPass (const Settings& s, double sr, Biquad& first, Biquad& second) noexcept
+{
+    if (s.hpHz < 16.5)
+        return false;
+    const double f = std::clamp (s.hpHz, 20.0, 350.0);
+    const double f0 = tableAt (hpDial, hpF0, 5, f), q = lerp (hpQ[0], hpQ[4], (f - 20.0) / 330.0);
+    first.set (1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+    const double n[3] { 1.0, 0.0, 0.0 }, d[3] { 1.0, 1.0 / q, 1.0 };
+    bilinearAt (n, d, f0, sr, second);
+    return true;
+}
+
+bool lowPass (const Settings& s, double sr, Biquad& out) noexcept
+{
+    if (s.lpKHz <= 0.0 || s.lpKHz >= 15.9)
+        return false;
+    const double f = std::clamp (s.lpKHz, 3.0, 15.95);
+    const double f0 = tableAt (lpDial, lpF0, 5, f);
+    const double n[3] { 0.0, 0.0, 1.0 }, d[3] { 1.0, 1.0 / 0.716, 1.0 };
+    bilinearAt (n, d, f0, sr, out);
+    return true;
+}
+} // namespace k4
 } // namespace
 
 double qFromDial (double v) noexcept
@@ -179,6 +338,8 @@ double dialFromQ (double q) noexcept
 
 bool bandBiquad (int band, const Settings& s, double sampleRate, Biquad& out)
 {
+    if (s.model == 1)
+        return k4::band (band, s, sampleRate, out);
     double n[3], d[2], wref = 0.0;
     if (! bandAnalog (band, s, n, d, wref))
         return false;
@@ -190,6 +351,8 @@ bool bandBiquad (int band, const Settings& s, double sampleRate, Biquad& out)
 
 bool highPass (const Settings& s, double sampleRate, Biquad& first, Biquad& second)
 {
+    if (s.model == 1)
+        return k4::highPass (s, sampleRate, first, second);
     if (s.hpHz < 16.5)
         return false;
     // 3rd-order Butterworth in the analog domain (a real pole and a Q = 1 pair at the same frequency), measured
@@ -205,6 +368,8 @@ bool highPass (const Settings& s, double sampleRate, Biquad& first, Biquad& seco
 
 bool lowPass (const Settings& s, double sampleRate, Biquad& out)
 {
+    if (s.model == 1)
+        return k4::lowPass (s, sampleRate, out);
     if (s.lpKHz <= 0.0)
         return false;
     const double f = roundTo (std::clamp (s.lpKHz, 3.0, 19.5), 0.1) * 1000.0;
@@ -246,12 +411,114 @@ namespace
 #include "core/VoiceMatchDynamics.inc"
 
 double softplus (double o, double k) noexcept { return o > 30.0 * k ? o : k * std::log1p (std::exp (o / k)); }
+
+// ---- round 148: the "4K" console's dynamics, in the same feedback model ([EXEC] SSL 4K E trial; REA_rodada148 §2)
+#include "core/Console4KDynamics.inc"
+
+double rowInterp (const double* xs, int n, const double* rows, int stride, int k, double x) noexcept
+{
+    if (x <= xs[0]) return rows[k];
+    for (int i = 0; i < n - 1; ++i)
+        if (x <= xs[i + 1])
+        {
+            const double t = (x - xs[i]) / (xs[i + 1] - xs[i]);
+            return rows[i * stride + k] + t * (rows[(i + 1) * stride + k] - rows[i * stride + k]);
+        }
+    return rows[(n - 1) * stride + k];
+}
+
+CompLaw k4CompLaw (const Settings& s) noexcept
+{
+    CompLaw c {};
+    const double r = std::max (1.0, s.compRatio);
+    const double u = r > 1e6 ? 1.0 : 1.0 - 1.0 / r;
+    const double thr = std::clamp (s.compThreshold, -20.0, 10.0);
+    constexpr int nT = (int) std::size (k4Thr), nU = (int) std::size (k4U);
+    int ti = 0;
+    while (ti < nT - 2 && thr < k4Thr[ti + 1]) ++ti;
+    const double tt = std::clamp ((k4Thr[ti] - thr) / (k4Thr[ti] - k4Thr[ti + 1]), 0.0, 1.0);
+    const double uu = std::max (u, k4U[0]);
+    int ui = 0;
+    while (ui < nU - 2 && uu > k4U[ui + 1]) ++ui;
+    const double tu = std::clamp ((uu - k4U[ui]) / (k4U[ui + 1] - k4U[ui]), 0.0, 1.0);
+    auto bil = [&] (const double* g, int stride, int k) {
+        auto at = [&] (int a, int b) { return g[(a * nU + b) * stride + k]; };
+        return (1 - tt) * ((1 - tu) * at (ti, ui) + tu * at (ti, ui + 1)) + tt * ((1 - tu) * at (ti + 1, ui) + tu * at (ti + 1, ui + 1));
+    };
+    // below the lowest measured ratio (1.8) the slope and make-up fade to 0 at 1:1
+    const double fade = u < k4U[0] ? u / k4U[0] : 1.0;
+    c.thresholdOffset = bil (k4Static, 3, 0);
+    c.knee = std::max (0.2, bil (k4Static, 3, 1));
+    c.slope = bil (k4Static, 3, 2) * fade;
+    // the automatic make-up (measured at -60 dBFS) and its offset: [EXEC] +-6 dB of offset moves the make-up by
+    // 1.15 / 1.37 / 1.88 dB at 2.9:1 / 5:1 / inf:1 (never below 0)
+    double mk = bil (k4Makeup, 1, 0) * fade;
+    const double per = u <= 0.655 ? 0.192 * u / 0.655 : (u <= 0.8 ? 0.192 + (u - 0.655) / 0.145 * 0.036 : 0.228 + (u - 0.8) / 0.2 * 0.085);
+    mk = std::max (0.0, mk + per * std::clamp (s.makeupOffsetDb, -12.0, 12.0));
+    c.makeup = s.autoMakeup ? mk : 0.0;
+    // attack: fast = instant (the fit's floor, 0.05 ms); otherwise the console's own time, longer for deeper settings
+    c.attackFastMs = 0.05;
+    c.attackSlowMs = std::exp (k4AttackLaw[0] + k4AttackLaw[1] * u + k4AttackLaw[2] * thr);
+    const double rel = std::clamp (s.compRelease, 0.1, 4.0);
+    const double* knobs = s.compFast ? k4RelKnobFast : k4RelKnobSlow;
+    const double* rows = s.compFast ? k4RelFast : k4RelSlow;
+    const int nk = s.compFast ? (int) std::size (k4RelKnobFast) : (int) std::size (k4RelKnobSlow);
+    c.release1Fraction = rowInterp (knobs, nk, rows, 3, 0, rel);
+    c.release1Ms = rowInterp (knobs, nk, rows, 3, 1, rel);
+    c.releaseMs = rowInterp (knobs, nk, rows, 3, 2, rel);
+    c.detectorAttackMs = 0.021;
+    c.detectorReleaseMs = 0.064;
+    return c;
+}
+
+// [EXEC] the 4K's expander / gate on 1 kHz stairs and bursts: threshold about 23.3 dB under the console's scale, the
+// expander 1.13 dB of reduction per dB below it, the range dial's depth 5 / 10 / 20 / 40 -> 7.8 / 17.1 / 26.7 / 47.3 dB,
+// opening within half a millisecond, closing over 117 ms x (release / 0.1 s)^0.58 (gate) and 21 ms x (release / 0.1 s)^0.6
+// (expander); the gate's hysteresis was not measured (round 123's 3.9 dB kept) [model]
+GateLaw k4GateLaw (const Settings& s) noexcept
+{
+    GateLaw g {};
+    static constexpr double dial[5] { 0.0, 5.0, 10.0, 20.0, 40.0 }, depth[5] { 0.0, 7.8, 17.1, 26.7, 47.3 };
+    g.range = knobInterp (dial, depth, 5, std::clamp (s.expRange, 0.0, 40.0));
+    g.threshold = std::clamp (s.expThreshold, -30.0, 10.0) - 23.3;
+    g.attackMs = s.expFast ? 0.05 : 0.3;
+    const double rel = std::clamp (s.expRelease, 0.1, 4.0) / 0.1;
+    g.releaseMs = s.gate ? 117.0 * std::pow (rel, 0.58) : 21.0 * std::pow (rel, 0.6);
+    g.detectorReleaseMs = 50.92;
+    g.slope = 1.13;
+    g.knee = 0.297;
+    g.hysteresis = 3.859;
+    g.gate = s.gate;
+    return g;
+}
+
+CompLaw lawOf (const Settings& s) noexcept { return s.model == 1 ? k4CompLaw (s) : compLaw (s); }
+GateLaw gateOf (const Settings& s) noexcept { return s.model == 1 ? k4GateLaw (s) : gateLaw (s); }
+
+// the 4K's mic pre ([EXEC] 1 kHz / 100 Hz stairs at Mic 0 … 50 dB, level-compensated by the console): the drive is
+// 0.744 dB per Mic dB into a curve that first expands a little (+0.5 … 0.8 dB just before it saturates) and then clips
+// at 3.9 (+11.8 dB over full scale at the curve's input), with a slight asymmetry (H2 −40 … −75 dBc); Pre In alone −0.27 dB
+double micPre (double x, double drive, double inv) noexcept
+{
+    constexpr double c = 3.901, p = 23.49, b = 0.0264, a = 0.0230;
+    auto curve = [] (double u) { const double v = u + a * u * u * u; return v / std::pow (1.0 + std::pow (std::abs (v / c), p), 1.0 / p); };
+    static const double off = curve (b);
+    return 0.96939 * (curve (x * drive + b) - off) * inv; // 0.96939 = −0.27 dB
+}
+
+// the Analogue VCA ([EXEC] 1 kHz at −30 … −6 dBFS: H2 −77 … −57 dBc, H3 −107 … −66 dBc, level unchanged): x + 0.0089 x² +
+// 0.018 x³, the terms easing off above −10 dBFS
+double vcaColour (double x) noexcept
+{
+    const double e = 1.0 / (1.0 + 2.5 * x * x);
+    return x + (0.0089 * x * x + 0.018 * x * x * x) * e;
+}
 } // namespace
 
 double compStaticGainDb (const Settings& s, double sineDbfs)
 {
     // iterate the feedback loop to its fixed point for a steady sine (peak detector on the output)
-    const auto law = compLaw (s);
+    const auto law = lawOf (s);
     double gr = 0.0;
     for (int it = 0; it < 200; ++it)
     {
@@ -264,19 +531,20 @@ double compStaticGainDb (const Settings& s, double sineDbfs)
 
 double compMakeupDb (const Settings& s) noexcept
 {
-    return s.compRatio > 1.0 ? compLaw (s).makeup : 0.0;
+    return s.compRatio > 1.0 ? lawOf (s).makeup : 0.0;
 }
 
 void Channel::prepare (double sampleRate) noexcept
 {
     sr = sampleRate;
+    vcaHp.filter (sr, 1, 3.0, 0.7071); // round 148: the 4K VCA's coupling high-pass
     designedOnce = false;
     reset();
 }
 
 void Channel::reset() noexcept
 {
-    hp1.reset(); hp2.reset(); lp.reset();
+    hp1.reset(); hp2.reset(); lp.reset(); vcaHp.reset();
     for (auto& b : bands)
         b.reset();
     env = gr = gr1 = yl = yr = genv = ggr = 0.0;
@@ -288,7 +556,8 @@ void Channel::design (const Settings& s) noexcept
     const auto eq = [] (const Settings& a, const Settings& b) {
         return a.hpHz == b.hpHz && a.lpKHz == b.lpKHz && a.lfGain == b.lfGain && a.lfHz == b.lfHz && a.lfBell == b.lfBell
             && a.lmfGain == b.lmfGain && a.lmfKHz == b.lmfKHz && a.lmfQ == b.lmfQ && a.hmfGain == b.hmfGain && a.hmfKHz == b.hmfKHz
-            && a.hmfQ == b.hmfQ && a.hfGain == b.hfGain && a.hfKHz == b.hfKHz && a.hfBell == b.hfBell;
+            && a.hmfQ == b.hmfQ && a.hfGain == b.hfGain && a.hfKHz == b.hfKHz && a.hfBell == b.hfBell
+            && a.model == b.model && a.colour == b.colour;
     };
     if (designedOnce && eq (s, designed))
         return;
@@ -310,16 +579,33 @@ void Channel::process (float* l, float* r, int n, const Settings& s) noexcept
 {
     design (s);
     const double inG = dbToGain (roundTo (s.inputDb, 0.1)), outG = dbToGain (roundTo (s.outputDb, 0.1)) * (s.phase ? -1.0 : 1.0);
-    const auto law = compLaw (s);
+    const auto law = lawOf (s);
     const bool compOn = s.dynOn && s.compRatio > 1.0005;
     const double cA = coefMs (s.compFast ? law.attackFastMs : law.attackSlowMs, sr), cR = coefMs (law.releaseMs, sr), cR1 = coefMs (law.release1Ms, sr);
     const double frac = law.release1Fraction;
     const double dA = coefMs (law.detectorAttackMs, sr), dR = coefMs (law.detectorReleaseMs, sr);
     const double makeup = s.dynOn ? dbToGain (law.makeup) : 1.0;
-    const auto gl = gateLaw (s);
+    const auto gl = gateOf (s);
     const bool gateOn = s.dynOn && gl.range > 0.05;
     const double gA = coefMs (gl.attackMs, sr), gR = coefMs (gl.releaseMs, sr), gD = coefMs (gl.detectorReleaseMs, sr);
     float maxComp = 0.0f, maxGate = 0.0f;
+    // round 148: the 4K's mic pre and compressor mix
+    const bool micOn = s.model == 1 && s.pre;
+    const double micDrive = dbToGain (0.744 * std::clamp (s.micDb, 0.0, 50.0)), micInv = 1.0 / micDrive;
+    const double mix = std::clamp (s.compMix, 0.0, 1.0);
+    const bool mixed = s.model == 1 && mix < 0.9995;
+    // [EXEC] the 4K's hiss between impulses: -106.6 dBFS rms with the Analogue VCA, -104.2 dBFS with the mic pre in
+    // (white, the two channels independent [model]), before the output trim
+    const double hiss = s.model != 1 ? 0.0 : std::sqrt ((s.vca ? 2.188e-11 : 0.0) + (s.pre ? 3.802e-11 : 0.0));
+    auto gauss = [] (std::uint32_t& st) noexcept {
+        double sum = 0.0;
+        for (int k = 0; k < 4; ++k)
+        {
+            st ^= st << 13; st ^= st >> 17; st ^= st << 5;
+            sum += (double) (st >> 8) * (1.0 / 16777216.0);
+        }
+        return (sum - 2.0) * 1.7320508;
+    };
 
     auto filters = [this] (double& a, double& b) {
         if (hpOn)
@@ -344,7 +630,14 @@ void Channel::process (float* l, float* r, int n, const Settings& s) noexcept
 
     for (int i = 0; i < n; ++i)
     {
-        double a = l[i] * inG, b = r[i] * inG;
+        double a = l[i], b = r[i];
+        if (micOn) // the 4K's mic pre sees the input before its trim ([EXEC] the drive does not follow the trim)
+        {
+            a = micPre (a, micDrive, micInv);
+            b = micPre (b, micDrive, micInv);
+        }
+        a *= inG;
+        b *= inG;
         if (s.filtersBeforeDynamics || s.dynamicsAfterEq)
             filters (a, b);
         if (s.dynamicsAfterEq && s.eqOn)
@@ -382,12 +675,28 @@ void Channel::process (float* l, float* r, int n, const Settings& s) noexcept
             const double target = law.slope * softplus (o, law.knee);
             gr1 += (target > gr1 ? cA : cR1) * (target - gr1);
             gr += (target > gr ? cA : cR) * (target - gr);
-            const double g = dbToGain (-(frac * gr1 + (1.0 - frac) * gr));
+            const double grNow = frac * gr1 + (1.0 - frac) * gr;
+            const double g = dbToGain (-grNow);
             yl = a * g;
             yr = b * g;
-            a = yl;
-            b = yr;
+            if (mixed) // round 148: the 4K's mix blends the reduction in dB ([EXEC] 50 % = half the dB at every level)
+            {
+                const double gm = dbToGain (-grNow * mix);
+                a *= gm;
+                b *= gm;
+            }
+            else
+            {
+                a = yl;
+                b = yr;
+            }
             maxComp = std::max (maxComp, (float) (frac * gr1 + (1.0 - frac) * gr));
+        }
+        if (s.model == 1 && s.vca)
+        {
+            // [EXEC] pink noise through the VCA: a coupling high-pass (2nd order, ~3 Hz: 25 deg at 10 Hz, -2.8 dB at 3 Hz)
+            a = vcaHp.process ((float) vcaColour (a), 0);
+            b = vcaHp.process ((float) vcaColour (b), 1);
         }
         a *= makeup;
         b *= makeup;
@@ -398,6 +707,11 @@ void Channel::process (float* l, float* r, int n, const Settings& s) noexcept
                 filters (a, b);
             if (s.eqOn)
                 eq (a, b);
+        }
+        if (hiss > 0.0)
+        {
+            a += hiss * gauss (noise[0]);
+            b += hiss * gauss (noise[1]);
         }
         l[i] = (float) (a * outG);
         r[i] = (float) (b * outG);
