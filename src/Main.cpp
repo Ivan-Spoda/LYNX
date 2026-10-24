@@ -3065,6 +3065,20 @@ private:
                                                      ui.getPlaylistForSnapshot().getTrackMenuForSnapshot (0),
                                                      ui.getMixerForSnapshot().getStripsForSnapshot().buildMenu (1) };
                 saveMenus (juce::StringArray { "Piano roll tools", "Playlist track", "Mixer track" }, menus, prefix + "-menus143.png");
+                // and the clip menus of the first pattern, audio and automation clips of the project
+                juce::StringArray clipNames;
+                std::vector<juce::PopupMenu> clipMenus;
+                for (auto [kind, name] : { std::pair { lynx::ClipKind::pattern, "Pattern clip" }, { lynx::ClipKind::audio, "Audio clip" },
+                                           { lynx::ClipKind::automation, "Automation clip" } })
+                    for (int c = 0; c < (int) offline.getSong().playlist.size(); ++c)
+                        if (offline.getSong().playlist[(std::size_t) c].kind == kind)
+                        {
+                            clipNames.add (name);
+                            clipMenus.push_back (ui.getPlaylistForSnapshot().getClipMenuForSnapshot (c));
+                            break;
+                        }
+                if (! clipMenus.empty())
+                    saveMenus (clipNames, clipMenus, prefix + "-menus143-clips.png");
             }
 
             auto saveAlert = [&] (std::unique_ptr<juce::AlertWindow> alert, const juce::String& name) {
