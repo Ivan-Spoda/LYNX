@@ -12,6 +12,13 @@
 
 namespace lynx
 {
+// The FL instrument engines a native project can add (core/NativeEngines.h, round 142, issue #5) as items of `menu`:
+// a new one starts from the plugin's Default preset of the user's FL installation; without it the item is disabled
+// and says "(requires FL Studio)". `add` receives the new channel (mixerTrack left to it).
+void addFlEngineItems (juce::PopupMenu& menu, std::function<void (ChannelDef)> add);
+// The engine's menu name ("(beta)", "(requires FL Studio)")
+juce::String flEngineName (const natives::InstrumentEngine& e);
+
 // FL-style Channel Rack: one row per channel with mute, pan, volume, mixer insert, name, selector
 // and the step grid of the current pattern.
 //  - steps: left click turns on (drag paints), right click erases

@@ -19,6 +19,7 @@
 #include "core/RtStats.h"
 #include "core/FlpImport.h"
 #include "core/History.h"
+#include "core/NativeEngines.h"
 #include "core/SnapshotExchange.h"
 #include "core/Song.h"
 #include "engine/PluginHost.h"
@@ -36,6 +37,8 @@ namespace lynx
 // snapshot (RackState) to the audio thread.
 // Folders of the most recent FL Studio installation (empty if none).
 FlPathRoots findFlStudioRoots();
+// The user's FL installation as the native FL engines read it (round 142): its folders and this PC's file system
+const natives::FlAccess& flStudioAccess(); // (found once per session)
 
 class AudioEngine final : private juce::AudioIODeviceCallback,
                           private juce::MidiInputCallback,

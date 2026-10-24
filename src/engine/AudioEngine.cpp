@@ -58,6 +58,45 @@ FlPathRoots findFlStudioRoots()
     return roots;
 }
 
+const natives::FlAccess& flStudioAccess()
+{
+    static const natives::FlAccess cached = [] {
+        natives::FlAccess access;
+        access.roots = findFlStudioRoots();
+        access.fileExists = [] (const std::string& path) { return platform::localFile (path).existsAsFile(); };
+        access.readFile = [] (const std::string& path) {
+            juce::MemoryBlock data;
+            platform::localFile (path).loadFileAsData (data);
+            const auto* bytes = static_cast<const std::uint8_t*> (data.getData());
+            return std::vector<std::uint8_t> (bytes, bytes + data.getSize());
+        };
+        access.listPresets = [] (const std::string& folder) {
+            std::vector<std::string> out;
+            auto files = platform::localFile (folder).findChildFiles (juce::File::findFiles, true, "*.fst;*.tbio;*.gmsynth;*.mrp");
+            std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b) {
+                return a.getFullPathName().compareNatural (b.getFullPathName()) < 0;
+            });
+            for (const auto& f : files)
+                out.push_back (f.getFullPathName().toStdString());
+            return out;
+        };
+        // (FL Keys' raw wavetables become WAV files of LYNX's settings folder, like an .flp's embedded samples)
+        access.saveEmbedded = [] (const std::vector<std::uint8_t>& wav, const std::string& name) -> std::string {
+            const auto folder = PluginHost::settingsFolder().getChildFile ("flp-embedded");
+            folder.createDirectory();
+            const auto hash = juce::String::toHexString ((juce::int64) juce::DefaultHashFunctions::generateHash (
+                juce::String::createStringFromData (wav.data(), (int) juce::jmin<std::size_t> (wav.size(), 65536)) + juce::String ((juce::int64) wav.size()),
+                0x7FFFFFFF));
+            const auto file = folder.getChildFile (juce::File::createLegalFileName (juce::String::fromUTF8 (name.c_str())) + "-" + hash + ".wav");
+            if (! file.existsAsFile() && ! file.replaceWithData (wav.data(), wav.size()))
+                return {};
+            return file.getFullPathName().toStdString();
+        };
+        return access;
+    }();
+    return cached;
+}
+
 namespace
 {
 // Audio workers with real-time priority (MMCSS "Pro Audio" on Windows, like the driver; QoS class on macOS; SCHED_FIFO

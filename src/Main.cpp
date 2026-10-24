@@ -1102,7 +1102,71 @@ private:
                         && back->channels.back().patcher.wires == ch.patcher.wires;
         }
 
-        const auto ok = audioOk && projectOk && richOk && substituteOk && patcherOk && undoOk && recordOk && recordUndoOk && midiOk && packageOk
+        // FL engines in a native project (round 142, issue #5): every engine this PC can make survives save / load and
+        // the instruments play through the rack
+        juce::String nativesResult = "OK";
+        int nativesMade = 0, nativesSilent = 0;
+        {
+            auto song = lynx::Song::makeDefault();
+            song.channels.clear();
+            song.patterns[0].notes.clear();
+            song.mixer.resize (3);
+            const auto& fl = lynx::flStudioAccess();
+            for (const auto& e : lynx::natives::instrumentEngines())
+                if (lynx::natives::available (e, fl))
+                    if (auto c = lynx::natives::makeChannel (e.kind, fl))
+                    {
+                        c->mixerTrack = 1;
+                        song.channels.push_back (*c);
+                    }
+            for (const auto& e : lynx::natives::effectEngines())
+                if (auto fx = lynx::natives::makeSlot (e.kind, fl))
+                    song.mixer[2].effects.push_back (*fx);
+            nativesMade = (int) (song.channels.size() + song.mixer[2].effects.size());
+            const auto back = lynx::ProjectFile::fromJson (lynx::ProjectFile::toJson (song), error);
+            auto same = back && back->channels.size() == song.channels.size() && back->mixer.size() >= 3
+                        && back->mixer[2].effects.size() == song.mixer[2].effects.size();
+            for (std::size_t i = 0; same && i < song.channels.size(); ++i)
+            {
+                const auto& a = song.channels[i];
+                const auto& b = back->channels[i];
+                same = a.instrument == b.instrument && a.pluginState == b.pluginState && a.samplePath == b.samplePath && a.zones.size() == b.zones.size()
+                       && a.modelParams.size() == b.modelParams.size();
+                if (! same)
+                    nativesResult = "ERROR channel " + juce::String::fromUTF8 (a.name.c_str());
+            }
+            for (std::size_t i = 0; same && i < song.mixer[2].effects.size(); ++i)
+            {
+                const auto& a = song.mixer[2].effects[i];
+                const auto& b = back->mixer[2].effects[i];
+                same = a.kind == b.kind && a.state == b.state;
+                for (std::size_t p = 0; same && p < a.params.size(); ++p)
+                    same = std::abs (a.params[p] - b.params[p]) < 1.0e-3f;
+                if (! same)
+                    nativesResult = juce::String ("ERROR effect ") + lynx::effectInfo (a.kind).name;
+            }
+            if (! back)
+                nativesResult = "ERROR " + error;
+            // each instrument plays a note alone (the granulizer needs a sample: it is silent here)
+            for (std::size_t i = 0; same && i < song.channels.size(); ++i)
+            {
+                auto one = song;
+                one.channels = { song.channels[i] };
+                one.channels[0].mixerTrack = 1;
+                one.mixer[2].effects.clear();
+                one.patterns[0].notes = { { 0, 1920, 0, song.channels[i].instrument == lynx::InstrumentKind::drumaxx ? 48 : 60, 0.8f } };
+                lynx::AudioEngine player (false);
+                player.setSong (std::move (one));
+                player.dispatchPendingMessages();
+                if (! (player.renderOffline (1.0, 48000.0) > 1.0e-4f) && song.channels[i].instrument != lynx::InstrumentKind::granulizer)
+                    ++nativesSilent;
+            }
+            if (nativesSilent > 0 && nativesResult == "OK")
+                nativesResult = "SILENT " + juce::String (nativesSilent);
+        }
+        const auto nativesOk = nativesResult == "OK";
+
+        const auto ok = audioOk && projectOk && richOk && substituteOk && patcherOk && nativesOk && undoOk && recordOk && recordUndoOk && midiOk && packageOk
                         && wavpack != "ERROR" && effectsOk;
 
         juce::String report;
@@ -1112,6 +1176,7 @@ private:
                << "project_features=" << (richOk ? "OK" : "ERROR") << "\n"
                << "plugin_substitutes=" << (substituteOk ? "OK" : "ERROR") << "\n"
                << "patcher=" << (patcherOk ? "OK" : "ERROR") << "\n"
+               << "native_engines=" << nativesResult << " (" << nativesMade << " made)\n"
                << "undo=" << (undoOk ? "OK" : "ERROR") << "\n"
                << "recording=" << (recordOk && recordUndoOk ? "OK" : "ERROR") << "\n"
                << "midi=" << (midiOk ? "OK" : "ERROR") << "\n"
@@ -1148,7 +1213,8 @@ private:
                     continue;
                 const auto before = lynx::RackRenderer::nonFiniteEffectBlocks();
                 const auto& info = lynx::effectInfo (kind);
-                auto fx = lynx::makeEffectSlot (kind);
+                // (FL engines: a fresh instance as the menus make it, from the user's FL installation; round 142)
+                auto fx = lynx::natives::newEffect (kind, lynx::flStudioAccess()).value_or (lynx::makeEffectSlot (kind));
                 int dragged = 0; // parameter changes made by the mouse drags
 
                 for (int round = 0; round < rounds; ++round)
