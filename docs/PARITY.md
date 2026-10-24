@@ -1645,7 +1645,7 @@ default source.
 | Original feature | Original [EXEC trial] | LYNX now | Status | Note |
 |---|---|---|---|---|
 | Offset | −105…+105°, default 0 | Offset (the Pan control) ±100 % | ✅ | ±90° = a hard side |
-| Width | 0…210°, default 180 | Width (Depth) ±100 % (180° = 100 %) | ⚠️ | no "beyond the speakers" above 180° |
+| Width | 0…210°, default 180 | Width (Depth) ±100 % (180° = 100 %) | ✅ | no "beyond the speakers" above 180°; round 136's Rhythm voicing: 0–210°; **round 150** [EXEC]: past ±90° the angle folds back with the far side inverted (offset 45° + 90° of modulation → left at tan 7.5° of the right, polarity inverted) — the Rhythm voicing's "Beyond" switch (new instances on; projects saved before keep the clipped angle) |
 | Smoothing | Hard…Soft, default Soft | **Smoothing** (LFO: square → sine; steps: jump → glide over a third of a step) | ✅ | round 135 |
 | Pan law | equal power: centre −3 dB per side, the far side silent at the extremes | **equal-power balance** for the new sources (FL's laws for the FL source) | ✅ | round 135, measured |
 | Rate (free) | 100 s … 10 Hz (0.01 · 1000^v Hz), default 0.25 Hz | **Rate** 0.01–10 Hz, same law and default | ✅ | round 135 |
@@ -1654,13 +1654,13 @@ default source.
 | Input / Output | −24…+24 dB, LED meters | **Input / Output** ±24 dB + IN / OUT meters | ✅ | round 135 |
 | Analog / Digital | switch (default Analog): asymmetric saturation, H2 −36 dBc at −18 dBFS | **Digital / Analog** (fitted on the measured harmonics) | ✅ | round 135 |
 | Pan position display | L … C … R LED strip | **pan-position strip** (live) | ✅ | round 135 |
-| Feel / Groove | knobs (rhythm modes) | — | ❌ | |
-| Tweak: envelope / trigger (Rate / Width mod, threshold, divider, manual trigger) | Tweak page | — | ❌ | |
+| Feel / Groove | knobs (rhythm modes) | **round 150**: Feel / Groove ±0.25 of a step in the Rhythm voicing (the whole pattern / the odd steps late or early) | ⚠️ | [EXEC] on the trial they do nothing in LFO mode (all host-parameter runs identical); the rhythm modes are not reachable through host parameters, so the law is LYNX's [model] (EchoBoy's measured Groove / Feel shape) |
+| Tweak: envelope / trigger (Rate / Width mod, threshold, divider, manual trigger) | Tweak page | **round 150**: the Rhythm voicing's Tweak row — Rate mod ±3 oct, Offset mod / Width mod ±180°, Threshold, Range | ⚠️ | [EXEC] (OffsetMod +90°, Width 0, 1 kHz stairs −60 … 0 dBFS and steps): the follower hears the input before Input / Output gain; no modulation below −20 dBFS (a sine's peak), linear in amplitude to full at −9 dBFS (0 / 28 / 54 / 90° at −30 / −15 / −12 / −6 dBFS); attack ≈ 21 ms, release ≈ 290 ms (one-pole fit, 2 % rms); Rate mod = octaves × amount, Offset / Width mod = degrees × amount (offset clamped to ±105°). Left: the editor's threshold / sensitivity values other than the default (not host parameters: LYNX's Threshold / Range follow the measured default, other settings scale it [model]), the divider and ManualTrigger (each `process` restarts the trial's LFO from the same phase, so a trigger is not observable) |
 | Tap tempo / MIDI | in rhythm modes | follows the project tempo | ⚠️ | |
 | Presets | Soundtoys strip | FL presets (Auto-pan is an FL effect) | ⚠️ | |
 | Translation of her saved state | encoded | **her 7 settings translated** (LFO 3.56 Hz / 150° / soft — 52 % of her slots; 5-step and 2-step rhythm presets; analog) | ✅ | round 135: the hidden source / steps / direction read from the trial's window per setting |
 
-**Scores**: configuration 3/10 → **7/10**, design 2/10 → **6/10** (round 135).
+**Scores**: configuration 3/10 → **7/10**, design 2/10 → **6/10** (round 135). **After round 150a**: configuration **8/10**, design **7/10** — the Tweak row (envelope → rate / offset / width, measured follower and default threshold), Feel / Groove, the measured "beyond the speakers" fold; left: the divider / manual trigger, the free rhythm-shape editor, tap tempo / MIDI.
 
 ---
 
@@ -1673,12 +1673,12 @@ Mod on / off; screenshot); `foilInfo` / `FoilFx` in src/core/LynxVerbs.cpp. The 
 | Decay (one big knob) | 0.5 s … 32 s … ∞, default 3 s | Decay 0.5–30 s (big knob) + **Infinite** | ✅ | round 135: ∞ holds the plate |
 | Low Cut | 20 Hz…1 kHz, default 20 | **Low cut** 20 Hz–1 kHz (0 = off), 12 dB/oct | ✅ | round 135 |
 | Mix | 0–100 %, default 100 % | Mix (the substitute: 100 % wet at the slot's 25 %) | ✅ | |
-| Mod | on / off | Mod rate / depth | ✅ | |
-| Plate character | one EMT-style plate | 12 plate types | ✅ | |
+| Mod | on / off | Mod rate / depth | ✅ | [EXEC] round 150: Mod on leaves the decay per band unchanged (≤ 0.1 s at 3 s); its tail tone is narrower, not wider (spectral spread 5.4 → 2.4 Hz on a 1 kHz tail) — not modelled |
+| Plate character | one EMT-style plate | 12 plate types | ✅ | **round 150**: **Measured plate** switch [EXEC] (impulses at Decay 0.5 / 1 / 2 / 3 / 5 / 10 / 20 s and ∞): the plate speaks after 0.7 ms (Foil's types after 1 … 81 ms), the decay per octave against the label (20 s: 35 s at 125 Hz, 14 s at 1 kHz, 5.5 s at 8 kHz; short labels ring a little longer in the presence band; ∞ ≈ 80 s), fitted through Foil's engine: mid / bass / high RT within 5 % at every label up to 20 s (∞: the highs die sooner than on the trial), the tail's energy within ±0.5 dB; the Little Plate substitute plays it |
 | Extras (predelay, size, width, EQ) | none on the panel | yes | ➕ | a fuller panel than the 3-knob original |
 | Presets | Soundtoys strip | LYNX preset bar | ✅ | |
 
-**Scores**: configuration 6/10 → **8/10**, design 5/10 → **6/10** (round 135).
+**Scores**: configuration 6/10 → **8/10**, design 5/10 → **6/10** (round 135). **After round 150a**: configuration **9/10**, design **6/10** — the measured plate voicing (onset, decay per band, level); left: Mod's narrowing of the tail, the single-knob panel (Foil keeps its fuller layout).
 
 ---
 

@@ -2383,6 +2383,18 @@ Layout withRhythmVoicing (Layout l)
     add (dial (676, 80, 36, "Rhythm output", TR_NOOP ("Output"), bipolar));
     add (tabs (610, 216, 132, 22, "Rhythm analog", TR_NOOP ("Digital|Analog|Hot"), { 0.0f, 0.5f, 1.0f }));
     l.items.push_back (toggle (8, 254, 300, 20, "Voicing", TR_NOOP ("Measured rhythm voicing")));
+    // round 150: PanMan's Tweak page role — the input's envelope moves the rate, the offset and the width (its threshold
+    // and range), Feel / Groove of the steps, and the angle past the speakers
+    l.height = 360;
+    add (section (4, 280, 752, 76, TR_NOOP ("Tweak")));
+    add (dial (60, 318, 30, "Rate mod", TR_NOOP ("Rate"), bipolar));
+    add (dial (150, 318, 30, "Offset mod", TR_NOOP ("Offset"), bipolar));
+    add (dial (240, 318, 30, "Width mod", TR_NOOP ("Width"), bipolar));
+    add (dial (340, 318, 30, "Env threshold", TR_NOOP ("Thresh.")));
+    add (dial (430, 318, 30, "Env range", TR_NOOP ("Range")));
+    add (dial (530, 318, 30, "Feel", TR_NOOP ("Feel"), bipolar));
+    add (dial (610, 318, 30, "Groove", TR_NOOP ("Groove"), bipolar));
+    add (toggle (664, 308, 86, 20, "Beyond speakers", TR_NOOP ("Beyond")));
     return l;
 }
 
@@ -2613,6 +2625,8 @@ Layout foilPlateLayout()
     // round 135 (the Little Plate role): the decay's ∞ and a low cut
     v.push_back (toggle (330, 266, 90, 22, "Infinite", TR_NOOP ("Infinite")));
     v.push_back (dial (470, 274, 22, "Low cut", TR_NOOP ("Low cut")));
+    // round 150: the measured plate voicing (the Little Plate role: no plate delay, its decay per band)
+    v.push_back (toggle (560, 266, 150, 22, "Voicing", TR_NOOP ("Measured plate")));
     v.push_back (label (8, 264, 52, 24, TR_NOOP ("Mode"), alignLeft));
     v.push_back (choiceMenu (60, 264, 180, 24, "Type", TR_NOOP ("Type"), TR_NOOP ("Silver|Pewter|Nickel|Bronze|Bismuth|Tin|Zinc|Platinum|Tungsten|Iron|Gold|Lead")));
     return l;

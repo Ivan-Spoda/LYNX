@@ -192,8 +192,9 @@ vendor = Soundtoys
 lynx = Foil Plate
 names = LittlePlate; Little Plate
 # round 129 (docs/PARITY.md): LYNX's plate reverb plays a plate's role (was Reeverb 2); its state is encoded: a
-# 2 s plate, 100 % wet, at the slot's dry / wet 25 % as before
-preset = Decay=0.3; Mix=1
+# 2 s plate, 100 % wet, at the slot's dry / wet 25 % as before. Round 150: in the measured plate voicing (the
+# trial's onset and decay per band, REA_rodada150a §7)
+preset = Decay=0.3; Mix=1; Voicing=1
 mix = 0.25
 
 [waves-reverbs]

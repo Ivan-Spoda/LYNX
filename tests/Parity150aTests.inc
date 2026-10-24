@@ -179,3 +179,115 @@ TEST (echoform_voicing_wobble_shapes_round150a)
     const auto sine = pitch (p147a::echoSine (p147a::voiced (e::voicingForEchoBoyStyle (20), 0.0), 1000.0, -20.0, 5.0, 1.0));
     CHECK (sine.second > 1.3 * sine.first);
 }
+
+// --- Round 150a (second part): Auto-pan's Rhythm voicing ← PanMan's Tweak page; Foil Plate ← Little Plate -----------
+namespace p150a
+{
+// Auto-pan's Rhythm voicing, digital, width 0, centred: only the Tweak modulation moves the pan
+inline lynx::EffectParams tweakPan (double offsetModDeg, double offsetDeg = 0.0)
+{
+    using namespace lynx;
+    auto p = makeEffectSlot (EffectKind::autoPan).params;
+    constexpr int rb = autopan::count;
+    p[rb] = 1.0f;                                          // the Rhythm voicing
+    p[rb + 4] = 0.0f;                                      // width 0°
+    p[rb + 5] = (float) ((offsetDeg + 105.0) / 210.0);     // offset
+    p[rb + 10] = 0.0f;                                     // digital
+    p[rb + 13] = (float) ((offsetModDeg + 180.0) / 360.0); // offset mod
+    return p;
+}
+// a 1 kHz tone (both inputs) of `seconds`, peak `db`; returns the rms of left / right (signed correlation in `corr`)
+// over the last `tail` seconds
+inline void panTone (const lynx::EffectParams& p, double db, double seconds, double tail, double& l, double& r, double* corr = nullptr)
+{
+    auto fx = lynx::makeEffect (lynx::EffectKind::autoPan);
+    fx->prepare (48000.0);
+    const int n = (int) (48000.0 * seconds);
+    std::vector<float> a ((std::size_t) n), b;
+    for (int i = 0; i < n; ++i)
+        a[(std::size_t) i] = (float) (std::pow (10.0, db / 20.0) * std::sin (2.0 * 3.14159265358979 * 1000.0 * i / 48000.0));
+    b = a;
+    for (int at = 0; at < n; at += 256)
+        fx->process (a.data() + at, b.data() + at, std::min (256, n - at), p, 120.0);
+    double sl = 0.0, sr = 0.0, sx = 0.0;
+    const int from = n - (int) (48000.0 * tail);
+    for (int i = from; i < n; ++i)
+    {
+        sl += (double) a[(std::size_t) i] * a[(std::size_t) i];
+        sr += (double) b[(std::size_t) i] * b[(std::size_t) i];
+        sx += (double) a[(std::size_t) i] * b[(std::size_t) i];
+    }
+    l = std::sqrt (sl / (n - from));
+    r = std::sqrt (sr / (n - from));
+    if (corr != nullptr)
+        *corr = sx / std::sqrt (std::max (1e-30, sl * sr));
+}
+inline double panDeg (double l, double r) { return 2.0 * std::atan2 (r, l) * 180.0 / 3.14159265358979 - 90.0; }
+} // namespace p150a
+
+TEST (autopan_tweak_params_round150a)
+{
+    using namespace lynx;
+    constexpr int rb = autopan::count;
+    const auto& info = effectInfo (EffectKind::autoPan);
+    CHECK ((int) info.params.size() == rb + 20);
+    auto slot = makeEffectSlot (EffectKind::autoPan);
+    CHECK (slot.params[rb + 12] == 0.5f && slot.params[rb + 13] == 0.5f && slot.params[rb + 14] == 0.5f); // no modulation
+    CHECK (formatEffectParam (EffectKind::autoPan, rb + 15, slot.params[rb + 15], 120.0) == "-20.0 dB");  // measured threshold
+    CHECK (formatEffectParam (EffectKind::autoPan, rb + 16, slot.params[rb + 16], 120.0) == "11.0 dB");   // measured range
+    CHECK (formatEffectParam (EffectKind::autoPan, rb + 13, 0.75f, 120.0) == "+90 deg");
+    CHECK (slot.params[rb + 19] >= 0.5f);
+    upgradeLoadedEffectParams (slot, (std::size_t) rb + 12); // saved before round 150: the clipped angle
+    CHECK (slot.params[rb + 19] < 0.5f);
+}
+
+TEST (autopan_tweak_envelope_round150a)
+{
+    using namespace lynx;
+    // [EXEC] PanMan, OffsetMod +90°, Width 0: a 1 kHz tone at −30 / −15 / −12 / −6 dBFS (peak) pans to 0 / 28 / 54 / 90°
+    const double levels[4] = { -30.0, -15.0, -12.0, -6.0 }, want[4] = { 0.0, 28.0, 54.0, 90.0 };
+    for (int k = 0; k < 4; ++k)
+    {
+        double l, r;
+        p150a::panTone (p150a::tweakPan (90.0), levels[k], 1.5, 0.3, l, r);
+        CHECK (std::abs (p150a::panDeg (l, r) - want[k]) < 5.0);
+    }
+    // the follower's attack: 50 ms after the tone starts (−6 dBFS) the pan is at ≥ 85 % (measured 88°)
+    double l, r;
+    p150a::panTone (p150a::tweakPan (90.0), -6.0, 0.05, 0.005, l, r);
+    CHECK (p150a::panDeg (l, r) > 70.0 && p150a::panDeg (l, r) < 92.0);
+    // past the speakers: offset 45° + 90° → the left at tan 7.5° of the right, inverted (measured); clipped when off
+    double c = 0.0;
+    p150a::panTone (p150a::tweakPan (90.0, 45.0), -6.0, 1.5, 0.3, l, r, &c);
+    CHECK (std::abs (l / r - 0.1317) < 0.02 && c < -0.99);
+    auto clipped = p150a::tweakPan (90.0, 45.0);
+    clipped[autopan::count + 19] = 0.0f;
+    p150a::panTone (clipped, -6.0, 1.5, 0.3, l, r);
+    CHECK (l < 1e-4 * r);
+}
+
+TEST (foil_measured_plate_voicing_round150a)
+{
+    using namespace lynx;
+    using namespace verbs100;
+    // [EXEC] Little Plate: the plate speaks after 0.7 ms; Decay 3 s / 10 s give a broadband T20 of 2.6 / 11.1 s
+    auto p = defaults (EffectKind::foilPlate);
+    p[0] = 1.0f;
+    p[2] = 0.5f; // 3 s
+    auto onsetMs = [] (const Stereo& s) {
+        float peak = 0.0f;
+        for (std::size_t i = 0; i < s.l.size(); ++i) peak = std::max (peak, std::abs (s.l[i] + s.r[i]));
+        for (std::size_t i = 0; i < s.l.size(); ++i)
+            if (std::abs (s.l[i] + s.r[i]) > 0.05f * peak) return (double) i / 48.0;
+        return -1.0;
+    };
+    const auto plain = impulse (EffectKind::foilPlate, p, 6.0);
+    CHECK (onsetMs (plain) > 15.0);
+    p[14] = 1.0f;
+    const auto voiced = impulse (EffectKind::foilPlate, p, 6.0);
+    CHECK (onsetMs (voiced) >= 0.0 && onsetMs (voiced) < 3.0);
+    CHECK (near (rt60 (voiced), 2.4, 0.25));
+    p[2] = 0.8329f; // 10 s
+    CHECK (near (rt60 (impulse (EffectKind::foilPlate, p, 16.0)), 10.0, 0.3));
+    CHECK (formatEffectParam (EffectKind::foilPlate, 14, 1.0f, 120.0) == "measured");
+}
