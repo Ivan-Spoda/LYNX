@@ -4237,5 +4237,5 @@ countries: br
 "Spectral dynamics: the band works frequency by frequency, only where the sound goes over the threshold (adds 5120 samples of latency) - right-click: density" = "Dinâmica espectral: a banda trabalha frequência por frequência, só onde o som passa do limiar (soma 5120 amostras de latência) - botão direito: densidade"
 "Tilt: the spectral threshold slopes 4.5 dB/oct so the band treats a natural (pink) spectrum evenly" = "Inclinação: o limiar espectral inclina 4,5 dB/oit para a banda tratar por igual um espectro natural (rosa)"
 "EQ match: capture a reference spectrum and this track's, then let Facet place bands that make this track sound like the reference" = "EQ match: capture o espectro de uma referência e o desta faixa; o Facet coloca bandas que deixam esta faixa soando como a referência"
-"EQ match:" = "EQ match:"
+"Match" = "Igualar"
 "Spectral" = "Espectral"

@@ -261,7 +261,7 @@ public:
         out.push_back ({ Ctl::phase, { 44.0f, cy - 11.0f, 150.0f, 22.0f }, phaseParam });
         out.push_back ({ Ctl::analyzer, { 202.0f, cy - 11.0f, 170.0f, 22.0f }, analyzerParam });
         out.push_back ({ Ctl::detector, { 380.0f, cy - 11.0f, 150.0f, 22.0f }, detectorParam });
-        out.push_back ({ Ctl::match, { 538.0f, cy - 11.0f, 150.0f, 22.0f } }); // round 152: EQ match
+        out.push_back ({ Ctl::match, { 536.0f, cy - 11.0f, 48.0f, 22.0f } }); // round 152: EQ match
         out.push_back ({ Ctl::output, { bar.getRight() - 100.0f, cy - 11.0f, 92.0f, 22.0f }, outputParam });
         out.push_back ({ Ctl::scale, { bar.getRight() - 190.0f, cy - 11.0f, 84.0f, 22.0f }, scaleParam });
         out.push_back ({ Ctl::pan, { bar.getRight() - 282.0f, cy - 11.0f, 86.0f, 22.0f }, panParam });
@@ -944,7 +944,7 @@ public:
                 case Ctl::dynamic: h.text = tr ("Dynamic EQ: the band's gain moves by up to its range when its region goes over the threshold"); return h;
                 case Ctl::spectral: h.text = tr ("Spectral dynamics: the band works frequency by frequency, only where the sound goes over the threshold (adds 5120 samples of latency) - right-click: density"); h.hasMenu = true; return h;
                 case Ctl::spectralTilt: h.text = tr ("Tilt: the spectral threshold slopes 4.5 dB/oct so the band treats a natural (pink) spectrum evenly"); return h;
-                case Ctl::match: h.text = tr ("EQ match: capture a reference spectrum and this track's, then let Facet place bands that make this track sound like the reference"); h.hasMenu = true; return h;
+                case Ctl::match: h.text = tr ("EQ match: capture a reference spectrum and this track's, then let Facet place bands that make this track sound like the reference") + " (" + matchStateText() + ")"; h.hasMenu = true; return h;
                 case Ctl::shapeMenu: h.text = tr ("Band shape"); h.hasMenu = true; return h;
                 case Ctl::slopeMenu: h.text = tr ("Slope"); h.hasMenu = true; return h;
                 default: break;
@@ -1028,7 +1028,15 @@ public:
                 for (int i = 1; i < 4; ++i)
                     g.fillRect (juce::Rectangle<float> (k.getX() + k.getWidth() * (float) i / 4.0f - 1.5f, k.getY(), 3.0f, k.getHeight() * 0.55f));
             }
-            else if (c.type == Ctl::phase || c.type == Ctl::analyzer || c.type == Ctl::detector || c.type == Ctl::match)
+            else if (c.type == Ctl::match) // round 152: lit while it captures
+            {
+                const auto on = capture != Capture::none;
+                skin::button (g, c.r, on, hover, colour::accent);
+                g.setColour (on || (refFrames > 0 && curFrames > 0) ? colour::textPrimary : colour::textSecondary);
+                g.setFont (font (type::small, on));
+                g.drawText (tr ("Match"), c.r, juce::Justification::centred);
+            }
+            else if (c.type == Ctl::phase || c.type == Ctl::analyzer || c.type == Ctl::detector)
             {
                 juce::String caption, value;
                 if (c.type == Ctl::phase)
@@ -1041,7 +1049,6 @@ public:
                     if (phase (param01 (phaseParam)) == Phase::linear) value << juce::String::fromUTF8 (" · ") << tr (resShort[facet::resolution (param01 (resolutionParam))]); // round 144
                 }
                 else if (c.type == Ctl::analyzer) { caption = tr ("Analyzer:"); value = tr (analyzerShort[(int) analyzer (param01 (analyzerParam))]); }
-                else if (c.type == Ctl::match) { caption = tr ("EQ match:"); value = matchStateText(); }
                 else
                 {
                     caption = tr ("Detector:");
@@ -1095,7 +1102,7 @@ public:
         {
             g.setColour (colour::textDisabled);
             g.setFont (font (type::caption));
-            g.drawFittedText (tr ("{0} smp", { juce::String (lat) }), juce::Rectangle<float> (692.0f, bar.getY(), bar.getRight() - 376.0f - 692.0f, bar.getHeight()).toNearestInt(),
+            g.drawFittedText (tr ("{0} smp", { juce::String (lat) }), juce::Rectangle<float> (588.0f, bar.getY(), bar.getRight() - 376.0f - 588.0f, bar.getHeight()).toNearestInt(),
                               juce::Justification::centred, 1, 0.7f);
         }
     }
