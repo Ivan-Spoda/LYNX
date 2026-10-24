@@ -190,6 +190,56 @@ void Song::removeDeadMidiLinks()
     midiLinks.erase (std::remove_if (midiLinks.begin(), midiLinks.end(),
                                      [] (const MidiLink& l) { return l.target.kind == AutomationTargetKind::none; }),
                      midiLinks.end());
+    initialValues.erase (std::remove_if (initialValues.begin(), initialValues.end(),
+                                         [] (const InitialValue& v) { return v.target.kind == AutomationTargetKind::none; }),
+                         initialValues.end());
+}
+
+std::vector<MidiLink> linksWithGlobal (const std::vector<MidiLink>& project, const std::vector<MidiLink>& global)
+{
+    auto out = project;
+    for (const auto& g : global)
+    {
+        const auto overridden = std::any_of (project.begin(), project.end(), [&] (const MidiLink& p) {
+            return p.target == g.target || (p.cc == g.cc && (p.channel < 0 || g.channel < 0 || p.channel == g.channel));
+        });
+        if (! overridden && g.target.kind != AutomationTargetKind::none)
+            out.push_back (g);
+    }
+    return out;
+}
+
+int Song::findInitialValue (const AutomationTarget& target) const noexcept
+{
+    for (int i = 0; i < (int) initialValues.size(); ++i)
+        if (initialValues[(std::size_t) i].target == target)
+            return i;
+    return -1;
+}
+
+void Song::setInitialValue (const AutomationTarget& target, float value)
+{
+    if (target.kind == AutomationTargetKind::none)
+        return;
+    value = std::clamp (value, 0.0f, 1.0f);
+    if (const auto i = findInitialValue (target); i >= 0)
+        initialValues[(std::size_t) i].value = value;
+    else
+        initialValues.push_back ({ target, value });
+}
+
+void Song::removeInitialValue (const AutomationTarget& target)
+{
+    initialValues.erase (std::remove_if (initialValues.begin(), initialValues.end(),
+                                         [&] (const InitialValue& v) { return v.target == target; }),
+                         initialValues.end());
+}
+
+void Song::applyInitialValues (const std::function<void (const AutomationTarget&, float)>& plugin)
+{
+    for (const auto& v : initialValues)
+        if (! setTargetValue (v.target, v.value) && plugin)
+            plugin (v.target, v.value);
 }
 
 int fruitySendTarget (const EffectSlot& slot) noexcept

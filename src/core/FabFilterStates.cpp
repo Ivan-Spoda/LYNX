@@ -250,7 +250,7 @@ int fromProC3 (const State& s, EffectSlot& slot)
 // layout (FabF v2, 151 values): band b (0 … 5) at 22b: 0 state (0 disabled, 1 enabled, 2 unused), 1 low crossover
 // (log2 Hz), 2 low slope (norm), 3 high crossover, 4 high slope, 5 mode, 6 threshold (norm), 7 range dB, 8 ratio
 // (norm), 9 attack %, 10 release %, 11 knee dB, 12 look-ahead ms, 13 level dB, 21 solo / mute; 133 mix (0 … 2),
-// 134 input level, 136 output level, 141 look-ahead on
+// 134 input level, 136 output level, 139 processing mode, 140 oversampling, 141 look-ahead on
 int fromProMB (const State& s, EffectSlot& slot)
 {
     if (slot.kind != EffectKind::prismMultiband || ! s.named || s.count != 151 || ! finiteAll (s, 142))
@@ -343,6 +343,7 @@ int fromProMB (const State& s, EffectSlot& slot)
         set (param (b, fSolo), soloMute == 1 || soloMute == 3 ? 1.0f : 0.0f);
         la = std::max (la, (double) s.at (base + 12));
         set (bandLookaheadParam (b), linValue (s.at (base + 12), 0.0, 20.0)); // round 128: the band's own
+        set (bandPanParam (b), (float) ((std::clamp ((double) s.at (base + 14), -1.0, 1.0) + 1.0) * 0.5)); // round 144: mid / side
         if (b == 0)
         {
             // the slope: the steeper of the band's sides, to our nearest
@@ -354,6 +355,11 @@ int fromProMB (const State& s, EffectSlot& slot)
     set (Global::mix, clamp01 (s.at (133)));
     set (Global::input, linValue (levelDb (s.at (134)), -36.0, 36.0));
     set (Global::output, linValue (levelDb (s.at (136)), -36.0, 36.0));
+    // round 144: 139 processing mode (0 linear, 1 dynamic, 2 minimum phase), 140 oversampling (0 off, 1 2x, 2 4x),
+    // read black-box from the trial's saved states (REA_rodada144b); our parameters use the same value law
+    set (Global::processingMode, (float) std::clamp (roundIndex (s.at (139)), 0, 2) * 0.5f);
+    set (Global::oversampling, (float) std::clamp (roundIndex (s.at (140)), 0, 2) * 0.5f);
+    set (Global::panMode, 1.0f); // the reference's band pan is always mid / side (state 14: −1 … +1)
     return n;
 }
 
@@ -480,7 +486,7 @@ int fromSaturn2 (const State& s, EffectSlot& slot)
 // 5 shape (0 bell, 1 low shelf, 2 low cut, 3 high shelf, 4 high cut, 5 notch, 6 band pass, 7 tilt shelf, 8 flat tilt,
 // 9 all pass), 6 slope (0 = 0, 1 … 9 = 6, 12, 18, 24, 30, 36, 48, 72, 96 dB/oct, 10 brickwall), 7 stereo placement
 // (0 left, 1 right, 2 stereo, 3 mid, 4 side), 9 dynamic range dB; 552 processing mode (0 zero latency, 1 natural,
-// 2 linear), 555 gain scale (1 = 100 %), 556 output level (level encoding). Facet EQ has eight stereo bands with the
+// 2 linear), 553 resolution, 554 character (round 144), 555 gain scale (1 = 100 %), 556 output level (level encoding). Facet EQ has eight stereo bands with the
 // same shapes, Q law and slopes: the first eight used, enabled, stereo-placed bands are taken; dynamic bands keep
 // their static curve (her states use none).
 int fromProQ4 (const State& s, EffectSlot& slot)
@@ -517,6 +523,10 @@ int fromProQ4 (const State& s, EffectSlot& slot)
     for (int b = band; b < facet::bands; ++b)
         p[(std::size_t) facet::param (b, 0)] = facet::shapeValue (facet::Shape::off);
     set (facet::phaseParam, facet::phaseValue ((facet::Phase) std::clamp (roundIndex (s.at (552)), 0, facet::phaseCount - 1)));
+    // round 144: 553 the linear-phase resolution (0 Low … 4 Maximum), 554 the character (0 Clean, 1 Subtle, 2 Warm) —
+    // read back black-box: the trial's state after setting each through its parameters (REA_rodada144a §2)
+    set (facet::resolutionParam, facet::resolutionValue (std::clamp (roundIndex (s.at (553)), 0, facet::resolutionCount - 1)));
+    set (facet::characterParam, (float) std::clamp (roundIndex (s.at (554)), 0, 2) / 2.0f);
     set (facet::scaleParam, clamp01 (s.at (555) / 2.0));
     set (facet::outputParam, linValue (levelDb (s.at (556)), -24.0, 24.0));
     return n;

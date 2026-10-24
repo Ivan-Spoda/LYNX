@@ -92,9 +92,20 @@ struct MidiInputPrefs
     bool operator== (const MidiInputPrefs&) const = default;
 };
 
+// A MIDI controller link kept in the settings, for every project (FL's "global" links of the Mapping\Generic
+// folder, made with a parameter's "Override global link...", form TMIDIInputForm_Generic "Global link settings";
+// REA round 146). A project's own link of the same target or controller wins.
+struct GlobalLink
+{
+    int cc = 0, channel = -1;                // channel -1 = any
+    int kind = 0, index = 0, slot = 0, param = 0; // the AutomationTarget (kind = its enum value)
+    bool operator== (const GlobalLink&) const = default;
+};
+
 struct MidiPrefs
 {
     std::vector<MidiInputPrefs> inputs; // the devices the user changed (others use the defaults)
+    std::vector<GlobalLink> globalLinks;
     VelocityCurve velocity = VelocityCurve::linear;
     bool pickup = false;                // a controller takes over a parameter only once it reaches its value
 
