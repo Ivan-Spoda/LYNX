@@ -120,12 +120,17 @@ FL renders vs LYNX's `renderwav` (un-normalized, same length):
 ## 5. Not done / limits
 
 - MIDI between nodes and out of the Patcher ("MIDI port N" pins), MIDI into effect plugins.
-- FL's published Patcher parameters (`1100`) as automation targets: automations of an imported Patcher slot still
-  drop. Control smoothing inside FL not traced (§1).
+- Published parameters: FL's `1100` records become `PatcherDoc::published` (Patcher parameter k → node parameter,
+  with the value map), and an imported automation of the Patcher slot's parameter k drives it (the rack binds it like a
+  plugin parameter); LYNX's editor cannot publish new ones yet. Pattern-event automation of a Patcher still drops
+  (FL's raw range of Patcher parameters not known). Control smoothing inside FL not traced (§1).
 - Instrument nodes have no editor in the Patcher beyond a plugin's own window (built-in instruments keep their
   imported settings).
 - Extra outputs of an *effect* Patcher: only the first one reaches an insert.
 
 ## Where I stopped
 
-Runtime, import, save/load, editor and tests are in; see the report of round 141 for what landed.
+Runtime, import (graph, positions, control cables, side-chain, extra outputs, published parameters), save/load,
+editor (`--patchershot prefix [project]` renders every Patcher's editor to PNG), selftest round trip and tests are in.
+Next candidates: MIDI between nodes and the "MIDI port N" outputs, publishing parameters from LYNX's editor, a
+parameter panel for instrument nodes, more than one extra output on an effect Patcher.
