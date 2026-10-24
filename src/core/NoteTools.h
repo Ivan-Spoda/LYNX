@@ -175,6 +175,14 @@ std::vector<int> selectOverlapping (const Pattern& pattern, const std::vector<in
 // Notes that lie completely inside another note of the same key (exact duplicates: all but the first), so deleting
 // them leaves what is heard unchanged.
 std::vector<int> selectStacked (const Pattern& pattern, const std::vector<int>& indices);
+// Note groups (FL's Group Shift+G / Ungroup Alt+G): grouping gives the notes a new group number; ungrouping clears
+// it. groupOf: the notes of the same channel in `index`'s group (just `index` when it has none). regroup: notes just
+// pasted get new group numbers (each group of the copies its own), so copies never join the originals' groups.
+void groupNotes (Pattern& pattern, const std::vector<int>& indices);
+void ungroupNotes (Pattern& pattern, const std::vector<int>& indices);
+std::vector<int> groupOf (const Pattern& pattern, int index);
+void regroup (Pattern& pattern, const std::vector<int>& indices);
+
 // The General MIDI percussion names (keys 35..81; nullptr elsewhere), for the Piano Roll's key labels.
 const char* generalMidiDrumName (int key) noexcept;
 

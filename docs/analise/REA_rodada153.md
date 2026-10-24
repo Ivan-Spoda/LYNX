@@ -98,7 +98,7 @@ user value / effort: **H** high, **M** medium, **L** low. "153" = done in this r
 | Chord stamp top-down / bottom-up (26.1) | the clicked key is the chord's top note | ✅ **153** top-down (Piano Roll … menu); bottom-up = the default stamp | M |
 | Custom key labels (26.1) | rename piano roll keys (drum maps) | ✅ **153** (right-click a key; per channel, saved; General MIDI drum map preset) | M |
 | Stretch snaps by default (26.1) | | ⚠️ | L |
-| Per-clip pan, normalise clip gain (26.1) | | ⚠️ normalise; no clip pan | M |
+| Per-clip pan, normalise clip gain (26.1) | | ✅ **153** pan (Clip properties; `Clip::pan`, sent as the voice's note pan); normalise ✅ | M |
 | Collapse / expand all groups (26.1) | | ⚠️ per group | L |
 | Performance mode markers (26.1) and Performance mode (≤20) | clip launching by columns | ❌ (large) | M |
 | Sort channels by type (26.1) | | ✅ | — |
@@ -116,7 +116,7 @@ user value / effort: **H** high, **M** medium, **L** low. "153" = done in this r
 | Stamp chords (PRM) | | ✅ chord combo | — |
 | **Note colours** (PRM: Change colour Alt+C, Select by colour Shift+C; the colour is the MIDI channel) | 16 colour groups per note | ✅ **153** (was ❌: the `.flp` byte was read but dropped) | H |
 | **Select menu** (PRM): invert Shift+I, odd, random, muted, overlapping, stacked, by colour | | ✅ **153** (was ⚠️: velocity only) | H |
-| Note group / ungroup Shift+G / Alt+G (PRM) | notes move together | ❌ | M |
+| Note group / ungroup Shift+G / Alt+G (PRM) | notes move together | ✅ **153** (`.flp` group imported) | M |
 | Piano roll time markers (PRM) | | ❌ (Playlist markers only) | L |
 | Snap: line / cell / markers (PRM) | | ⚠️ (R11) | L |
 | Playlist tools and edit menu (PL) | | ✅ (P1 … P17) | — |
@@ -191,16 +191,28 @@ editor's recording tap; one atomic load per block while off); a low-priority thr
 times a second. Turning it off closes the file and the hint bar names it; "Show the audio logger's files" opens the
 folder.
 
+### 2.8 Note groups [DOC PRM] [CODE]
+Shift+G groups the selected notes (a new group number), Alt+G ungroups (also in … → Select). Clicking a note of a
+group selects the whole group (same channel), so a drag, resize or Shift+drag copy takes all of it; copies (Shift+drag,
+Ctrl+B, paste) form groups of their own (`notetools::regroup`). The `.flp` note record keeps the group in its u16 at
+byte 14 (`flp::Note::group`, now read and imported); `.lynx` stores it as the note array's 15th element. Grouped notes
+show a small dot at their top right.
+
+### 2.9 Audio clip pan [DOC N26] [model]
+Clip properties (Alt+double-click an audio clip) → Pan −100 … 100 %: `Clip::pan`, scheduled as the clip voice's note
+pan (the same per-voice constant-power law as a note's pan, on top of the channel's pan); saved as the clip array's
+13th element; part of undo.
+
 ## 3. Next candidates (by priority)
-M: note grouping; per-clip pan; external MIDI clock;
+M: external MIDI clock;
 per-track low-latency monitoring; Patcherize; browser tags; batch render of selected mixer tracks; performance mode.
 ⛔ stays out: FL Cloud (sounds, mastering, backups, Loop Starter content), Gopher and the AI tools; stem separation
 only with a bundled open model (Demucs, MIT) — a separate decision because of the download size.
 
 ## Where I stopped
 - Done and tested (core tests 0 failures; Windows build + `--selftest` OK; `--snapshot` of the Piano Roll checked:
-  coloured notes, the colour swatch and a key label): §2.1 … §2.7.
-- Not done (see §3): note grouping, per-clip pan, MIDI clock sync, per-track low-latency monitoring, Patcherize,
+  coloured notes, the colour swatch and a key label): §2.1 … §2.9 (§2.8 – §2.9 in the second landing).
+- Not done (see §3): MIDI clock sync, per-track low-latency monitoring, Patcherize,
   browser tags, performance mode; stem separation and Loop Starter content need a decision (model download / online
   content).
 - Note for the next round: after header edits clear the build's zig cache — a stale cache gave a LYNX.exe that

@@ -33,6 +33,7 @@ bool read (const Song& song, int clip, Props& out)
     p.length = c.length;
     p.offset = c.offset;
     p.gain = c.gain;
+    p.pan = c.pan;
     p.fadeIn = c.fadeIn;
     p.fadeOut = c.fadeOut;
     p.muted = c.muted;
@@ -90,6 +91,7 @@ bool apply (Song& song, int clip, const Props& p)
     if (c.kind == ClipKind::audio)
     {
         c.gain = std::clamp (p.gain, 0.0f, 4.0f);
+        c.pan = std::clamp (p.pan, -1.0f, 1.0f);
         c.fadeIn = std::clamp<std::int64_t> (p.fadeIn, 0, c.length);
         c.fadeOut = std::clamp<std::int64_t> (p.fadeOut, 0, c.length - c.fadeIn);
     }

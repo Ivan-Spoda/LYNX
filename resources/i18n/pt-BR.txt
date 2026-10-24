@@ -4263,3 +4263,6 @@ countries: br
 "Detector" = "Detector"
 "Hush|Vocal" = "Hush|Vocal"
 "Vocal: the measured single-vocal detector (sibilants that stand out from the voice)" = "Vocal: o detector medido de voz única (sibilantes que se destacam da voz)"
+"Group the selected notes" = "Agrupar as notas selecionadas"
+"Ungroup the selected notes" = "Desagrupar as notas selecionadas"
+"The clip's pan (left -100% ... right 100%), on top of the channel's" = "O pan do clipe (esquerda -100% ... direita 100%), somado ao do canal"

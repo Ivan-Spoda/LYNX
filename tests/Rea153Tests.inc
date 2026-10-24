@@ -203,3 +203,64 @@ TEST (rea153_general_midi_drum_names_for_key_labels)
     b.keyLabels[36] = "Kick";
     CHECK (! (a == b)); // labels are part of the channel (undo history, project equality)
 }
+
+TEST (rea153_note_groups)
+{
+    using namespace lynx::notetools;
+    lynx::Pattern p;
+    p.notes = { n153 (0, 96, 60), n153 (0, 96, 64), n153 (96, 96, 67), n153 (192, 96, 60) };
+    p.notes[3].channel = 1;
+    groupNotes (p, { 0, 1 });
+    CHECK (p.notes[0].group == 1 && p.notes[1].group == 1 && p.notes[2].group == 0);
+    CHECK ((groupOf (p, 0) == std::vector<int> { 0, 1 }));
+    CHECK ((groupOf (p, 2) == std::vector<int> { 2 }));
+    groupNotes (p, { 2 }); // one note is no group
+    CHECK (p.notes[2].group == 0);
+    groupNotes (p, { 2, 3 });
+    CHECK (p.notes[2].group == 2);
+    CHECK ((groupOf (p, 2) == std::vector<int> { 2 })); // groups never span channels
+    // copies of the group form a group of their own
+    p.notes.push_back (p.notes[0]);
+    p.notes.push_back (p.notes[1]);
+    regroup (p, { 4, 5 });
+    CHECK (p.notes[4].group == 3 && p.notes[5].group == 3 && p.notes[0].group == 1);
+    ungroupNotes (p, { 0, 1 });
+    CHECK (p.notes[0].group == 0 && p.notes[1].group == 0);
+
+    // .flp: the note record's u16 at byte 14 is the group
+    flp::Project project;
+    project.channels.push_back ({ 0, flp::ChannelType::sampler, "Keys", "", "", 1 });
+    flp::Pattern pat;
+    pat.index = 1;
+    flp::Note a, b;
+    a.length = b.length = 96;
+    a.group = b.group = 7;
+    b.key = 64;
+    pat.notes = { a, b };
+    project.patterns.push_back (pat);
+    const auto song = lynx::importFlp (project);
+    CHECK (song.patterns.size() == 1 && song.patterns[0].notes.size() == 2);
+    if (song.patterns.size() == 1 && song.patterns[0].notes.size() == 2)
+        CHECK (song.patterns[0].notes[0].group == 7 && song.patterns[0].notes[1].group == 7);
+}
+
+TEST (rea153_audio_clip_pan)
+{
+    lynx::Song song = lynx::Song::makeDefault();
+    lynx::ChannelDef audio;
+    audio.instrument = lynx::InstrumentKind::audioClip;
+    song.channels.push_back (audio);
+    lynx::Clip c;
+    c.kind = lynx::ClipKind::audio;
+    c.channel = (int) song.channels.size() - 1;
+    c.length = 3840;
+    song.playlist = { c };
+    lynx::clipprops::Props p;
+    CHECK (lynx::clipprops::read (song, 0, p) && p.pan == 0.0f);
+    p.pan = -0.5f;
+    CHECK (lynx::clipprops::apply (song, 0, p));
+    CHECK (song.playlist[0].pan == -0.5f);
+    p.pan = 3.0f; // clamped
+    lynx::clipprops::apply (song, 0, p);
+    CHECK (song.playlist[0].pan == 1.0f);
+}
