@@ -145,4 +145,25 @@ bool isInsertFree (const Song& song, int track) noexcept;
 // maxMixerTracks), named and coloured after the channel. Returns the insert of each channel
 // (0 = could not get one).
 std::vector<int> sendChannelsToFreeInserts (Song& song, const std::vector<int>& channels);
+
+// --- Channel settings "Misc" tab (REA round 143b; FL's channel window: Levels, Polyphony, Time, Group, Arpeggiator) --
+// Which of the per-channel functions a channel's instrument has: Mono (one voice, the new note takes over) and
+// Portamento (glide from the previous note) exist for LYNX's synth and sampler; Max polyphony, swing mix, cut groups
+// and the arpeggiator exist for every channel.
+bool channelHasMono (const ChannelDef& c) noexcept;
+bool channelHasPortamento (const ChannelDef& c) noexcept;
+bool channelMono (const ChannelDef& c) noexcept;
+void setChannelMono (ChannelDef& c, bool on) noexcept;
+bool channelPortamento (const ChannelDef& c) noexcept;
+float channelPortamentoBeats (const ChannelDef& c) noexcept;
+void setChannelPortamento (ChannelDef& c, bool on, float beats) noexcept;
+// FL's "Cut self" (the channel's cut group and "cut by" are its own): LYNX gives it the group 1000 + channel.
+bool channelCutsItself (const ChannelDef& c) noexcept;
+void setChannelCutsItself (ChannelDef& c, int channel, bool on) noexcept;
+// The cut-group number as the Misc tab shows it: "--" for none, "self" for the channel's own group, else the number.
+std::string cutGroupText (int group, int channel);
+
+// FL's hint bar over a step shows its song position as bar:step:tick ("1:02:00"): bar from 1, step (a 16th) from 1
+// with two digits, the tick inside the step (in FL's 96-per-quarter units: 24 per step) with two digits.
+std::string stepPositionText (std::int64_t tick, int beatsPerBar);
 } // namespace lynx

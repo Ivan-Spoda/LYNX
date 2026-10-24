@@ -15543,6 +15543,7 @@ TEST (flp_pattern_events_import)
 #include "Rea139Tests.inc"
 #include "Rea143Tests.inc"
 #include "Rea143aTests.inc"
+#include "Rea143bTests.inc"
 #include "AudioEditTests.inc"
 #include "InputTests.inc"
 #include "../asio/InputDrift.h"

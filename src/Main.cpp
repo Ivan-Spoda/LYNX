@@ -3180,6 +3180,9 @@ private:
             }
 
             saveWindow (lynx::makeChannelSettingsPanel (offline, 0), "-sampler.png");
+            // the channel window frame (REA round 143b): header strip + tabs; the Misc tab of the first channel and of a synth
+            saveWindow (lynx::makeChannelFrame (offline, 0), "-channel-frame.png");
+            saveWindow (lynx::makeChannelFrame (offline, 0, -1), "-channel-misc.png");
 
             for (int c = 0; c < (int) offline.getSong().channels.size(); ++c)
                 if (offline.getSong().channels[(std::size_t) c].instrument == lynx::InstrumentKind::synth)
