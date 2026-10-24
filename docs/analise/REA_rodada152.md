@@ -120,7 +120,7 @@ parameter-count checks follow the appended parameters.
 ## Where I stopped
 
 - Done (parent): §1–§5; sub-rounds 152a / 152b / 152c (see their docs). Stale ❌ rows flipped (Crest's Host sync /
-  MIDI trigger and audition — round 137; EchoBoy's state recognition — round 136).
+  MIDI trigger and audition — round 137; EchoBoy's state recognition — round 136; EchoBoy's ping-pong start side — round 135w). After 152c (Facet spectral dynamics ✅, EQ match ⚠️) docs/PARITY.md has no ❌ row left.
 - Prism left: Linear phase on the prewarped axis (≤ 0.35 dB at a 3 kHz edge, 6 dB/oct); mixed 6 / n sides beyond the
   measured table; the narrow-band table's mixed even slopes use their mean [model].
 - Auto-pan left: the trigger laws measured (the sources are not host parameters), the free rhythm-shape editor, tap tempo.
