@@ -4059,6 +4059,9 @@ countries: br
 "Range: drag a boundary; notes sung outside it pass uncorrected" = "Extensão: arraste um limite; notas cantadas fora dela passam sem correção"
 "Click a key: change that note's status in every octave" = "Clique numa tecla: muda o estado dessa nota em todas as oitavas"
 "Click a key: bypass / correct that note in every octave" = "Clique numa tecla: bypass / corrigir essa nota em todas as oitavas"
+"Initialized controls" = "Controles inicializados"
+"Initialized controls: to be reset when the song starts (a control's menu > Init song with this position)" = "Controles inicializados: voltam a este valor quando a música começa (menu de um controle > Iniciar a música com esta posição)"
+"reset to this value when the song starts  [RMB] delete the initial value" = "volta a este valor quando a música começa  [RMB] apagar o valor inicial"
 # --- Round 145: Ridge Strip's Vocal strip voicing
 "Compander" = "Compander"
 "Make-up" = "Ganho de compensação"
