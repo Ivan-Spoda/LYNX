@@ -2488,9 +2488,11 @@ private:
             for (const auto own : lynx::plugui::ownLayoutKinds()) // LYNX's own panels (mixing suite, round 96)
                 kinds.push_back (own);
             kinds.push_back (lynx::EffectKind::apexLimiter); // round 114: display-first editor
+            kinds.push_back (lynx::EffectKind::ridgeStrip); // round 145: the second pass shows the Vocal strip voicing
             const auto database = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin database/Effects");
 
             auto maximusPasses = 0; // Maximus has its own page (first pass); the second pass shows Soundgoodizer
+            auto ridgePasses = 0;
             for (const auto kind : kinds)
             {
                 auto fx = lynx::makeEffectSlot (kind);
@@ -2533,7 +2535,17 @@ private:
                     name = "Soundgoodizer";
                 }
 
-                if (kind == lynx::EffectKind::ridgeStrip) // a vocal setting, so the graphs show something
+                if (kind == lynx::EffectKind::ridgeStrip && ++ridgePasses == 2) // round 145: her Vocalstrip 2 setting
+                {
+                    for (const auto& [param, value] : { std::pair<const char*, float> { "Vocal strip", 1.0f }, { "Compander", 1.0f },
+                                                        { "Compander threshold", 0.3083f }, { "Compander ratio", 0.6929f }, { "Compander attack", 0.2543f },
+                                                        { "Compander release", 0.5316f }, { "Make-up", 0.2917f }, { "Soft knee", 1.0f },
+                                                        { "Expander threshold", 0.2198f }, { "Vocal input", 0.6792f }, { "Vocal output", 0.3938f },
+                                                        { "Process order", 0.4783f }, { "De-esser", 1.0f } })
+                        fx.params[(std::size_t) lynx::plugui::paramIndex (kind, param)] = value;
+                    name = "Ridge Strip (Vocal strip)";
+                }
+                else if (kind == lynx::EffectKind::ridgeStrip) // a vocal setting, so the graphs show something
                     for (const auto& [param, value] : { std::pair<const char*, float> { "HPF", 0.3f }, { "LMF gain", 0.35f }, { "HF gain", 0.7f },
                                                         { "Ratio", 0.3f }, { "Comp. threshold", 0.55f } })
                         fx.params[(std::size_t) lynx::plugui::paramIndex (kind, param)] = value;

@@ -95,8 +95,18 @@ LYNX vs the trial (null over the signal after the first second; `D:\lynx-work\vo
 | de-esser / de-ploser broadband | −13 … −25 dB (level within 0.3–1.4 dB) |
 | de-esser / de-ploser split | −1 … −22 dB (level within 0.1–2.2 dB) |
 
-## 3. Auto-Tune Pro before the trial ends (2026-10-25 21:00)
-(see §3 below — filled in at the end of the round)
+## 3. Auto-Tune Pro before the trial ends (2026-10-25 21:00) [EXEC]
+
+Round 138's open item "tracking / input type on noisy or breathy voices": the official trial at Retune 0 on the
+round-138 test signal with white noise at 20 / 10 dB SNR and with breath noise (1–8 kHz, −12 dB, following the
+voice), Tracking 0 / 25 / 50 / 75 / 100 and the five Input Types, and two of her takes with noise at −40 dBFS
+(`D:\lynx-work\vox138\at\out\track145`, configs `tmp/vox145/at/at145cfg.py`, analysis `anatr.py`): **neither
+control changes the result** (median distance of the output from the nearest semitone 0.1 c clean, 0.1 c at 20 dB SNR,
+1.1 c at 10 dB, 0.7 c with breath, for every setting). LYNX Tune on the same signals (`out\lynx_track145`): 0.3 /
+1.6 / 3.5 / 4.6 c — the same notes, but its pitch estimate jitters more in noise, so the held note wobbles by a few
+cents more. Not changed this round (LYNX Tune's response laws were fitted in round 138; a steadier estimate in noise is
+the next item). The upper / lower tie (§3.1 of round 138) stays: LYNX Tune's `nearestNote` serves the Waves Tune role
+too, which takes the lower note.
 
 ## 4. The rest of Complete Access by role
 Not in her corpus and not measured: `[complete-access-*]` entries map Slate (FG-X 2, VBC, FG-116 / 76 / 2A / A, Infinity
@@ -107,4 +117,13 @@ reverb, pure:, learn:) and Harrison (32C, MPC, De-Esser, gates, delays) to the L
 defaults (reverbs at a 25 % slot mix, delays at Echoform's tape echo), so a project that used them still plays a chain.
 
 ## Where I stopped
-(filled in at the end)
+- Done: §1 inventory, §2 Vocalstrip 2 measured and Ridge's Vocal strip voicing + translator (tests
+  `tests/Vox145Tests.inc`, pt-BR), §3 Auto-Tune tracking / input type in noise, §4 Complete Access role entries.
+- Not done: the de-esser / de-ploser SPLIT detector (the split renders null at −1 … −22 dB: the reduction in split
+  mode is smaller than the broadband law for the same tone; data in `vs\out\dsdp`, `dsdet`, `dstime`); the notch /
+  high band within 0.3–1.5 dB above 10 kHz (the reference is neither bilinear nor exactly the analog prototype there);
+  LYNX Tune's pitch jitter in noise (§3); Soundtoys leftovers (Decapitator ≥ 5 / Punish curve, EchoBoy Dual and the
+  ping-pong kernel, PanMan's first ~200 ms after a reset — the existing round-136 renders start after the host's
+  settle time, so the glide needs new renders; Soundtoys trial until 11-22); FabFilter (~11-16).
+- Trials left: Complete Access Hub 2026-11-03 (iLok 11-13), FabFilter ~11-16, Soundtoys 11-22; Auto-Tune ends
+  2026-10-25 21:00 (all of round 138's and this round's renders are on D:).
