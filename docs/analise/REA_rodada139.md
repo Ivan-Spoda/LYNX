@@ -127,10 +127,34 @@ wrapper flag), and Tools › Macros › **Switch smart disable for all plugins**
 
 ## Part A — FL vs LYNX screens
 
-(filled in below)
+**Method.** REA's native-UI capture is still macOS-only, so FL Studio 2026 (build 5654, 1920×1080) was driven with our
+SendInput / CopyFromScreen helpers (`tmp/flrea139/fl.sh`, under `~/.cache/lynx-fl.lock`) on a copy of `Ookay -
+Thief.flp` on D: **[EXEC]**; LYNX's screens come from `LYNX.exe --snapshot` of this round's build. Side-by-side images:
+`tmp/flrea139/compare/01…10-*.png` (FL left, LYNX right; not in the repo).
+
+| # | Screen | FL Studio 2026 | LYNX before | LYNX now |
+|---|---|---|---|---|
+| 1 | Menu bar | FILE EDIT **ADD** PATTERNS VIEW OPTIONS **TOOLS** HELP | File Edit View Patterns Options Help | FL's eight menus in FL's order |
+| 2 | File menu | New, New from template, Open \| Save … Delete unused files and save project \| Import ▸, **Export ▸** \| **Recent projects** listed in the menu \| Revert to last backup \| Exit | Open recent ▸ submenu; Export audio / package / collect as separate items | FL's grouping: Save items, then **Export ▸** (per format, Last exported, project package, project data files), the **Recent projects** section in the menu (10, the rest under "More recent projects", the folder on the right), Revert / autosave folder, Exit |
+| 3 | Add menu | Channel (every generator by category), Other: Effect ▸, Plugin picker, plugin database, Manage plugins, Automation for last tweaked, Pattern | none (the Channel Rack's "+" only) | **Add**: Channel (LYNX's instruments, controllers, sampler, installed plugins — the rack's list), Other: Pattern, Plugin manager |
+| 4 | Tools menu | Browser find, One-click audio recording, … Macros: Stop sound, Select unused channels, **Switch smart disable for all plugins**, Delete unused files and save project, … | none (scattered in Options / Edit) | **Tools**: Browser find, One-click audio recording (arm the selected insert), Plugin performance monitor; Macros: Stop sound, Select unused channels, Switch smart disable for all plugins, Delete unused recordings and save project, Collect project samples |
+| 5 | Browser | details box under the results: Date, Version, Path (wrapping) | the path only in the row's hint | details box above the preview: Date, Size, Version (.flp), Path (B4) |
+| 6 | Render window | WAV / MP3 / OGG / FLAC / MID / M4A boxes ticked together, Disable maximum polyphony | one format at a time | **Also save** boxes, **Disable maximum polyphony** (B1, B2) |
+| 7 | Mixer slot menu | … CPU: **Allow threaded processing**, **Smart disable** … | Processing ▸ submenu only | a **CPU** section: Allow threaded processing (plugins), Smart disable (B6) |
+| 8 | Record button menu | … Options: …, Enable recording markers \| **Quantize**: Note start time, Note end time, Leave note duration, Record to step sequencer, Automations | one "quantise" item | FL's Quantize section and recording markers (B3) |
+| 9 | Generator / plugin menu | CPU › Allow threaded processing, Smart disable | Processing ▸ (fixed buffers, process, threaded, MIDI port) | + **Use maximum buffer size from host**, **Allow smart disable** (B5, B6) |
+| 10 | Mixer, Channel Rack, Piano roll | (captures 07–09) | layout and information already match (rounds 90/104/115: slots panel with EQ and in/out, rack rows with LED, pan, volume, insert number, steps) | unchanged; recorded differences: FL's slot panel also shows the Master's input selector, FL draws insert names vertically and colours whole strips |
+
 
 ---
 
 ## Where I stopped
 
-(filled in at the end)
+- Done: Part B items B1–B6 and Part A rows 1–9 (code + tests `tests/Rea139Tests.inc`, pt-BR strings).
+- Not done: the record menu's "Automations" quantize (LYNX does not record automation); FL's "Import ▸" submenu
+  (LYNX's Open already reads .flp / .mid / audio); "Automation for last tweaked parameter" and the Last tweaked tools
+  (LYNX keeps no last-tweaked list yet); a per-channel "Smart disable" (LYNX's channels already skip a silent idle
+  instrument, losslessly); per-plugin Max polyphony passed to FL's own engines (the renderer's generic voice limit
+  is used for every instrument); the Master's input selector in the slot panel.
+- Not confirmed: FL's minimum note length after "Note end time" (`PTR_DAT_015e0c60`; LYNX uses one grid step);
+  whether FL honours several Start/Stop recording pairs (LYNX does).
