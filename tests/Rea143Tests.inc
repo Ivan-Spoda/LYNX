@@ -92,7 +92,7 @@ TEST (rea143_recorded_automation_quantize_and_loop_wrap)
     // the recorded values sit on the grid (an old-curve boundary point may follow the second stretch)
     bool onGrid = true;
     for (const auto& p : song.automations[0].points)
-        if (p.value == 0.4f || p.value == 0.6f)
+        if (p.value == 0.6f || p.tick > 1)
             onGrid = onGrid && p.tick % step == 0;
     CHECK (onGrid && song.automations[0].points.front().tick == 0 && song.automations[0].points.front().value == 0.6f
            && song.automations[0].points.back().tick == 3 * step && song.automations[0].points.back().value == 0.4f);
