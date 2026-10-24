@@ -4216,3 +4216,6 @@ countries: br
 "Mic pre" = "Pré de microfone"
 "Mic" = "Mic"
 "Vocal detector" = "Detector vocal"
+"Detector" = "Detector"
+"Hush|Vocal" = "Hush|Vocal"
+"Vocal: the measured single-vocal detector (sibilants that stand out from the voice)" = "Vocal: o detector medido de voz única (sibilantes que se destacam da voz)"

@@ -673,12 +673,16 @@ private:
         out.push_back (custom (outMeter().expanded (4.0f, 28.0f), idOutMeter, -1, tr ("Output level (peak, dBFS): the lamp lights when the output clips, the number holds the highest peak; click to reset")));
         const auto b = barArea();
         const auto cy = b.getCentreY();
-        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 150.0f, 22.0f }, P ("Band detector"), tr ("Detection"), "High-pass|Band", { 0.0f, 1.0f }));
-        out.push_back (barValue ({ 166.0f, cy - 11.0f, 130.0f, 22.0f }, P ("Release"), tr ("Release")));
+        out.push_back (barMenu ({ 10.0f, cy - 11.0f, 130.0f, 22.0f }, P ("Band detector"), tr ("Detection"), "High-pass|Band", { 0.0f, 1.0f }));
+        out.push_back (barValue ({ 146.0f, cy - 11.0f, 110.0f, 22.0f }, P ("Release"), tr ("Release")));
         // round 135: oversampling (the reference's bottom bar; Hush's own voicing)
-        out.push_back (barMenu ({ 302.0f, cy - 11.0f, 124.0f, 22.0f }, P ("Oversampling"), tr ("Oversampling"), "Off|2x|4x|8x"));
-        out.push_back (barValue ({ b.getRight() - 290.0f, cy - 11.0f, 130.0f, 22.0f }, P ("Input"), tr ("In")));
-        out.push_back (barValue ({ b.getRight() - 150.0f, cy - 11.0f, 140.0f, 22.0f }, P ("Output"), tr ("Out")));
+        out.push_back (barMenu ({ 262.0f, cy - 11.0f, 112.0f, 22.0f }, P ("Oversampling"), tr ("Oversampling"), "Off|2x|4x|8x"));
+        // round 148: the measured single-vocal detector (Vocal voicing)
+        auto vocal = barMenu ({ 380.0f, cy - 11.0f, 118.0f, 22.0f }, P ("Vocal voicing"), tr ("Detector"), "Hush|Vocal", { 0.0f, 1.0f });
+        vocal.hint = tr ("Vocal: the measured single-vocal detector (sibilants that stand out from the voice)");
+        out.push_back (vocal);
+        out.push_back (barValue ({ b.getRight() - 214.0f, cy - 11.0f, 100.0f, 22.0f }, P ("Input"), tr ("In")));
+        out.push_back (barValue ({ b.getRight() - 108.0f, cy - 11.0f, 100.0f, 22.0f }, P ("Output"), tr ("Out")));
     }
 
     void buttonPressed (const Ctl& c, const juce::MouseEvent&) override
