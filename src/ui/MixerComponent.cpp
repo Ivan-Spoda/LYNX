@@ -15,6 +15,8 @@
 #include "core/Biquad.h"
 #include "core/Effects.h"
 #include "engine/Text.h"
+#include "engine/ProjectFile.h"
+#include <numeric>
 #include "ui/FacetEqEditor.h"
 #include "ui/ParametricEqEditor.h"
 #include "ui/PluginEditors.h"
@@ -1263,17 +1265,80 @@ void MixerStrips::showTrackEq (int t)
     juce::CallOutBox::launchAsynchronously (std::move (editor), getScreenBounds().withSize (10, 10).translated (getMouseXYRelative().x, getMouseXYRelative().y), nullptr);
 }
 
+namespace
+{
+juce::File mixerStatesFolder()
+{
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("LYNX/Mixer states");
+}
+
+juce::Array<juce::File> savedMixerStates()
+{
+    auto files = mixerStatesFolder().findChildFiles (juce::File::findFiles, false, juce::String ("*") + ProjectFile::mixerTrackStateExtension);
+    files.sort();
+    return files;
+}
+
+std::unique_ptr<juce::FileChooser>& mixerStateChooser()
+{
+    static std::unique_ptr<juce::FileChooser> chooser;
+    return chooser;
+}
+} // namespace
+
+bool loadMixerTrackState (AudioEngine& engine, int track, const juce::File& file, bool asNewInsert)
+{
+    juce::String error;
+    auto state = ProjectFile::mixerTrackStateFromJson (file.loadFileAsString(), error);
+    if (! state || track < 0 || track >= (int) engine.getSong().mixer.size())
+        return false;
+    if (state->name.empty())
+        state->name = file.getFileNameWithoutExtension().toStdString();
+    bool ok = true;
+    engine.editSong ([&] (Song& s) {
+        auto at = track;
+        if (asNewInsert)
+        {
+            at = juce::jmax (1, track + 1);
+            ok = mixerops::insertTrack (s, at);
+        }
+        if (ok)
+            ProjectFile::applyMixerTrackState (s.mixer[(std::size_t) at], *state, asNewInsert);
+    });
+    return ok;
+}
+
+bool saveMixerTrackState (AudioEngine& engine, int track, const juce::File& file)
+{
+    if (track < 0 || track >= (int) engine.getSong().mixer.size())
+        return false;
+    engine.capturePluginStates(); // the plugins' current settings go into the state
+    file.getParentDirectory().createDirectory();
+    return file.replaceWithText (ProjectFile::mixerTrackStateToJson (engine.getSong().mixer[(std::size_t) track]));
+}
+
 void MixerStrips::showMenu (int t)
+{
+    buildMenu (t).showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+}
+
+juce::PopupMenu MixerStrips::buildMenu (int t)
 {
     const auto& song = engine.getSong();
     const auto channel = engine.getSelectedChannel();
     juce::PopupMenu menu;
+    if (t < 0 || t >= (int) song.mixer.size())
+        return menu;
+    // the tracks the "selected track(s)" items act on: the selection when the clicked track is in it
+    const auto targets = std::find (selection.begin(), selection.end(), t) != selection.end() ? selection : std::vector<int> { t };
+    const auto trackName = juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str());
+
     // the title band in the insert's colour (FL tints the whole menu)
-    ui::addItemHeader (menu, t == 0 ? tr ("Master") : tr ("Mixer track {0}", { juce::String (t) }), juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str()),
+    ui::addItemHeader (menu, t == 0 ? tr ("Master") : tr ("Mixer track {0}", { juce::String (t) }), trackName,
                        song.mixer[(std::size_t) t].colour != 0 ? juce::Colour (song.mixer[(std::size_t) t].colour) : juce::Colour());
 
     // FL's first section: name and colour (REA_rodada115)
-    menu.addItem (tr ("Rename and color..."), [this, t] {
+    menu.addItem (tr ("Rename and color...") + "\tF2", [this, t] {
         const auto& track = engine.getSong().mixer[(std::size_t) t];
         showNameAndColourDialog (tr ("Rename track"), juce::String::fromUTF8 (track.name.c_str()), track.colour,
                                  [this, t] (const juce::String& name, std::uint32_t colour) {
@@ -1309,20 +1374,44 @@ void MixerStrips::showMenu (int t)
     });
     menu.addSeparator();
 
-    // FL's second section: insert a blank track here, delete this one (REA_rodada115)
-    if (t > 0)
+    // FL's "File" submenu: the track's state (LYNX's own .lynxtrack files)
     {
-        menu.addItem (tr ("Insert one"), (int) song.mixer.size() < maxMixerTracks, false, [this, t] {
-            engine.editSong ([t] (Song& s) { mixerops::insertTrack (s, t); });
-            setSelection ({ t }, t);
+        juce::PopupMenu file;
+        file.addItem (tr ("Open mixer track state..."), [this, t] {
+            auto& chooser = mixerStateChooser();
+            chooser = std::make_unique<juce::FileChooser> (tr ("Open mixer track state"), mixerStatesFolder(),
+                                                           juce::String ("*") + ProjectFile::mixerTrackStateExtension);
+            juce::Component::SafePointer<MixerStrips> safe (this);
+            chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [safe, t] (const juce::FileChooser& fc) {
+                if (safe != nullptr && fc.getResult().existsAsFile())
+                    loadMixerTrackState (safe->engine, t, fc.getResult(), false);
+            });
         });
-        menu.addItem (tr ("Delete"), [this, t] {
-            engine.editSong ([t] (Song& s) { mixerops::deleteTrack (s, t); });
-            setSelection ({ t }, t);
+        file.addItem (tr ("Save mixer track state as...") + "\tCtrl+Shift+S", [this, t, trackName] {
+            auto& chooser = mixerStateChooser();
+            const auto name = juce::File::createLegalFileName (trackName.isNotEmpty() ? trackName : tr ("Mixer track {0}", { juce::String (t) }));
+            chooser = std::make_unique<juce::FileChooser> (tr ("Save mixer track state"), mixerStatesFolder().getChildFile (name + ProjectFile::mixerTrackStateExtension),
+                                                           juce::String ("*") + ProjectFile::mixerTrackStateExtension);
+            juce::Component::SafePointer<MixerStrips> safe (this);
+            mixerStatesFolder().createDirectory();
+            chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting, [safe, t] (const juce::FileChooser& fc) {
+                if (safe != nullptr && fc.getResult() != juce::File())
+                    saveMixerTrackState (safe->engine, t, fc.getResult().withFileExtension (ProjectFile::mixerTrackStateExtension));
+            });
         });
-        menu.addSeparator();
+        file.addItem (tr ("Browse states"), [] {
+            mixerStatesFolder().createDirectory();
+            mixerStatesFolder().startAsProcess();
+        });
+        const auto states = savedMixerStates();
+        if (! states.isEmpty())
+        {
+            file.addSectionHeader (tr ("States"));
+            for (const auto& f : states)
+                file.addItem (f.getFileNameWithoutExtension(), [this, t, f] { loadMixerTrackState (engine, t, f, false); });
+        }
+        menu.addSubMenu (tr ("File"), file);
     }
-
     if (t > 0)
     {
         const auto& mt = song.mixer[(std::size_t) t];
@@ -1330,27 +1419,48 @@ void MixerStrips::showMenu (int t)
                                  ? juce::String::fromUTF8 (inputSourceName (mt.inputChannel, mt.inputStereo, engine.getInputChannelNames()).c_str())
                                  : tr ("none");
         menu.addItem (tr ("Audio input: {0}...", { current }), [this, t] { mixerinput::showMenu (engine, t, this); });
-        menu.addItem (engine.isInsertArmed (t) ? tr ("Disarm recording") : tr ("Arm recording"), [this, t] { mixerinput::toggleArm (engine, t, this); });
-        menu.addSeparator();
     }
+    menu.addItem (tr ("Open audio editor"), [this] { openAudioEditor (engine); });
+    menu.addItem (tr ("Reset selected track(s) to default"), [this, targets] { engine.editSong ([targets] (Song& s) { mixerops::resetToDefault (s, targets); }); });
 
-    if (channel < (int) song.channels.size())
-        menu.addItem (tr ("Route channel \"{0}\" here", { juce::String::fromUTF8 (song.channels[(std::size_t) channel].name.c_str()) }),
-                      [this, channel, t] { engine.editSong ([channel, t] (Song& s) { s.channels[(std::size_t) channel].mixerTrack = t; }); });
-
-    menu.addItem (tr ("Link the selected channels here") + "\tCtrl+L", [this, t] {
-        setSelection (selection, t);
-        linkSelectedChannels (false);
-    });
-    menu.addItem (tr ("Link the selected channels starting here") + "\tCtrl+Shift+L", [this, t] {
-        setSelection (selection, t);
-        linkSelectedChannels (true);
-    });
-    menu.addItem (tr ("Select the channels linked here") + "\tAlt+L", ! mixerops::channelsOn (song, t).empty(), false, [this, t] {
-        setSelection (selection, t);
-        selectLinkedChannels();
-    });
-
+    // --- FL's "Routing" section -----------------------------------------------------------------------
+    menu.addSectionHeader (tr ("Routing"));
+    {
+        juce::PopupMenu channels;
+        channels.addItem (tr ("Route selected channels to this track") + "\tCtrl+L", [this, t] {
+            setSelection (selection, t);
+            linkSelectedChannels (false);
+        });
+        channels.addItem (tr ("Route selected channels starting from this track") + "\tCtrl+Shift+L", [this, t] {
+            setSelection (selection, t);
+            linkSelectedChannels (true);
+        });
+        if (channel < (int) song.channels.size())
+            channels.addItem (tr ("Route channel \"{0}\" here", { juce::String::fromUTF8 (song.channels[(std::size_t) channel].name.c_str()) }),
+                              [this, channel, t] { engine.editSong ([channel, t] (Song& s) { s.channels[(std::size_t) channel].mixerTrack = t; }); });
+        menu.addSubMenu (tr ("Channel routing"), channels);
+    }
+    {
+        juce::PopupMenu select;
+        select.addItem (tr ("Channels routed to this track") + "\tAlt+L", ! mixerops::channelsOn (song, t).empty(), false, [this, t] {
+            setSelection (selection, t);
+            selectLinkedChannels();
+        });
+        select.addSeparator();
+        const auto destinations = mixerops::destinationsOf (song, t);
+        const auto sources = mixerops::sourcesOf (song, t);
+        select.addItem (tr ("Tracks this one is routed to"), ! destinations.empty(), false, [this, t, destinations] { setSelection (destinations, t); });
+        select.addItem (tr ("Tracks routed to this one"), ! sources.empty(), false, [this, t, sources] { setSelection (sources, t); });
+        select.addSeparator();
+        select.addItem (tr ("All"), [this, t] {
+            std::vector<int> all ((std::size_t) engine.getSong().mixer.size());
+            std::iota (all.begin(), all.end(), 0);
+            setSelection (all, t);
+        });
+        menu.addSubMenu (tr ("Select"), select);
+    }
+    menu.addItem (tr ("Reset selected track(s) routing"), [this, targets] { engine.editSong ([targets] (Song& s) { mixerops::resetRouting (s, targets); }); });
+    menu.addItem (tr ("Unroute tracks routed to the selected track(s)"), [this, targets] { engine.editSong ([targets] (Song& s) { mixerops::unrouteInto (s, targets); }); });
     {
         // route the other selected inserts into this one
         std::vector<int> sources;
@@ -1368,20 +1478,6 @@ void MixerStrips::showMenu (int t)
             });
         }
     }
-
-    if (t > 0)
-    {
-        menu.addItem (tr ("Move left") + "\tAlt+Left", t > 1, false, [this, t] {
-            setSelection ({ t }, t);
-            moveSelected (-1);
-        });
-        menu.addItem (tr ("Move right") + "\tAlt+Right", t + 1 < (int) song.mixer.size(), false, [this, t] {
-            setSelection ({ t }, t);
-            moveSelected (1);
-        });
-    }
-    menu.addSeparator();
-
     if (selected > 0 && selected != t && (t == 0 || song.canRoute (selected, t) || song.routes (selected, t)))
         menu.addItem (tr ("Send \"{0}\" only to this track", { juce::String::fromUTF8 (song.mixer[(std::size_t) selected].name.c_str()) }),
                       [this, from = selected, t] {
@@ -1391,15 +1487,35 @@ void MixerStrips::showMenu (int t)
                               s.setRoute (from, t, true);
                           });
                       });
-
-    if (t > 0 && (! song.mixer[(std::size_t) t].sends.empty() || ! song.mixer[(std::size_t) t].toMaster))
-        menu.addItem (tr ("Send only to the Master again"), [this, t] {
-            engine.editSong ([t] (Song& s) {
-                s.mixer[(std::size_t) t].sends.clear();
-                s.mixer[(std::size_t) t].toMaster = true;
+    menu.addSeparator();
+    {
+        const auto inserts = [targets] {
+            std::vector<int> v;
+            for (auto x : targets)
+                if (x > 0)
+                    v.push_back (x);
+            return v;
+        }();
+        menu.addItem (tr ("Solo selected track(s)") + "\tS", ! inserts.empty(), false, [this, inserts] {
+            engine.editSong ([inserts] (Song& s) {
+                for (std::size_t i = 1; i < s.mixer.size(); ++i)
+                    s.mixer[i].solo = std::find (inserts.begin(), inserts.end(), (int) i) != inserts.end();
             });
         });
+        menu.addItem (tr ("Arm selected track(s)"), ! inserts.empty(), false, [this, inserts] {
+            for (auto x : inserts)
+                if (! engine.isInsertArmed (x))
+                    mixerinput::toggleArm (engine, x, this);
+        });
+        menu.addItem (tr ("Disarm selected track(s)"), ! inserts.empty(), false, [this, inserts] {
+            for (auto x : inserts)
+                if (engine.isInsertArmed (x))
+                    engine.setInsertArmed (x, false);
+        });
+    }
 
+    // --- LYNX's sound items (FL has them on the strip itself) -------------------------------------------
+    menu.addSectionHeader (tr ("Sound"));
     {
         const auto& track = song.mixer[(std::size_t) t];
         juce::PopupMenu stereo;
@@ -1418,43 +1534,58 @@ void MixerStrips::showMenu (int t)
         menu.addItem (tr ("Swap left/right"), true, track.swapChannels, [this, t] {
             engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].swapChannels = ! s.mixer[(std::size_t) t].swapChannels; });
         });
-        menu.addSeparator();
+        if (t > 0)
+            menu.addItem (tr ("Render to audio (freeze)..."), [this, t] { bounceInsertToAudio (engine, t); });
     }
 
-    if (t > 0)
-        menu.addItem (tr ("Render to audio (freeze)..."), [this, t] { bounceInsertToAudio (engine, t); });
-
-    menu.addItem (tr ("Rename..."), [this, t] {
-        auto* window = new juce::AlertWindow (tr ("Rename track"), {}, juce::MessageBoxIconType::NoIcon);
-        window->addTextEditor ("name", juce::String::fromUTF8 (engine.getSong().mixer[(std::size_t) t].name.c_str()));
-        window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
-        window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
-        window->enterModalState (true, juce::ModalCallbackFunction::create ([this, t, window] (int result) {
-                                     const auto name = window->getTextEditorContents ("name").trim().toStdString();
-                                     if (result == 1 && ! name.empty() && t < (int) engine.getSong().mixer.size())
-                                         engine.editSong ([t, name] (Song& s) { s.mixer[(std::size_t) t].name = name; });
-                                 }),
-                                 true);
-    });
-    menu.addItem (tr ("Reset (0 dB, center, no mute/solo)"), [this, t] {
-        engine.editSong ([t] (Song& s) {
-            auto& track = s.mixer[(std::size_t) t];
-            track.volume = unityFader;
-            track.pan = 0.0f;
-            track.muted = track.solo = false;
-        });
-    });
-
-    // FL's last section, "CPU" (REA round 134)
+    // --- FL's "Layout" section --------------------------------------------------------------------------
     if (t > 0)
     {
+        menu.addSectionHeader (tr ("Layout"));
+        menu.addItem (tr ("Move left") + "\tAlt+Left", t > 1, false, [this, t] {
+            setSelection ({ t }, t);
+            moveSelected (-1);
+        });
+        menu.addItem (tr ("Move right") + "\tAlt+Right", t + 1 < (int) song.mixer.size(), false, [this, t] {
+            setSelection ({ t }, t);
+            moveSelected (1);
+        });
+        menu.addSeparator();
+        menu.addItem (tr ("Delete") + "\tDel", [this, t] {
+            engine.editSong ([t] (Song& s) { mixerops::deleteTrack (s, t); });
+            setSelection ({ t }, t);
+        });
+        const auto room = (int) song.mixer.size() < maxMixerTracks;
+        menu.addItem (tr ("Insert one"), room, false, [this, t] {
+            engine.editSong ([t] (Song& s) { mixerops::insertTrack (s, t); });
+            setSelection ({ t }, t);
+        });
+        menu.addItem (tr ("Insert multiple..."), room, false, [this, t] {
+            auto* window = new juce::AlertWindow (tr ("Insert multiple"), tr ("How many blank inserts?"), juce::MessageBoxIconType::NoIcon);
+            window->addTextEditor ("count", "2");
+            window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+            window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+            juce::Component::SafePointer<MixerStrips> safe (this);
+            window->enterModalState (true, juce::ModalCallbackFunction::create ([safe, t, window] (int result) {
+                                         const auto n = juce::jlimit (0, maxMixerTracks, window->getTextEditorContents ("count").getIntValue());
+                                         if (safe != nullptr && result == 1 && n > 0)
+                                             safe->engine.editSong ([t, n] (Song& s) { mixerops::insertTracks (s, t, n); });
+                                     }),
+                                     true);
+        });
+        juce::PopupMenu fromState;
+        for (const auto& f : savedMixerStates())
+            fromState.addItem (f.getFileNameWithoutExtension(), room, false, [this, t, f] { loadMixerTrackState (engine, t - 1, f, true); });
+        menu.addSubMenu (tr ("Insert from state"), fromState, room && fromState.getNumItems() > 0);
+
+        // FL's last section, "CPU" (REA round 134)
         menu.addSectionHeader (tr ("CPU"));
         menu.addItem (tr ("Allow threaded processing"), true, song.mixer[(std::size_t) t].threaded, [this, t] {
             engine.editSong ([t] (Song& s) { s.mixer[(std::size_t) t].threaded = ! s.mixer[(std::size_t) t].threaded; });
         });
     }
 
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    return menu;
 }
 
 void MixerStrips::changeListenerCallback (juce::ChangeBroadcaster*)

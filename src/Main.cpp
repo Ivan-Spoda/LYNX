@@ -3059,6 +3059,13 @@ private:
                 menus.push_back (ui.getToolbarMenuForSnapshot());
                 saveMenus (names, menus, prefix + "-panel-menus.png");
             }
+            {
+                // REA round 143: the piano roll Tools menu, a Playlist track menu and a mixer insert menu (FL's layouts)
+                std::vector<juce::PopupMenu> menus { ui.getPianoRollForSnapshot().getToolsMenuForSnapshot(),
+                                                     ui.getPlaylistForSnapshot().getTrackMenuForSnapshot (0),
+                                                     ui.getMixerForSnapshot().getStripsForSnapshot().buildMenu (1) };
+                saveMenus (juce::StringArray { "Piano roll tools", "Playlist track", "Mixer track" }, menus, prefix + "-menus143.png");
+            }
 
             auto saveAlert = [&] (std::unique_ptr<juce::AlertWindow> alert, const juce::String& name) {
                 alert->setOpaque (true);

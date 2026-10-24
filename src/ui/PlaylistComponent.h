@@ -111,6 +111,7 @@ public:
     // zoom (pixels per bar) and scroll (first bar, first track in view)
     void setViewForSnapshot (double pixelsPerBar, int firstBar, int firstTrack);
     juce::PopupMenu getClipMenuForSnapshot (int index); // --snapshot: the clip menu of that clip
+    juce::PopupMenu getTrackMenuForSnapshot (int track) { return buildTrackMenu (track); }
     // hovers the right edge of the first clip in view (grip, outline, menu button); returns its hint
     ui::Hint hoverForSnapshot();
 
@@ -198,6 +199,7 @@ private:
     void renameArrangement();
     void renameTrack (int track);
     void showTrackMenu (int track);
+    juce::PopupMenu buildTrackMenu (int track);
     void openClipSource (int clip, bool other); // double click: the clip's pattern / automation (Alt: the other editor)
     juce::Rectangle<int> trackLed (int track) const;   // the mute LED on the right of a header
     juce::Rectangle<int> trackArrow (int track) const; // a group header's fold arrow (empty for other tracks)

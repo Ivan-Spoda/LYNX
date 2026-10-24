@@ -19,7 +19,8 @@ namespace lynx
 enum class NoteTool
 {
     strum, arpeggiate, flip, randomise, scaleLevels, limit,
-    quantize, chop, flam, lfo, claw, articulate, riffMachine, chordProgression
+    quantize, chop, flam, lfo, claw, articulate, riffMachine, chordProgression,
+    euclidean, humanize, noteRepeat // LYNX's versions of FL's piano roll scripts (REA round 143)
 };
 
 const char* noteToolTitle (NoteTool tool); // English, for tr()
