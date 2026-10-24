@@ -2754,7 +2754,11 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         {
             AutomationTarget target;
             if (const auto convert = convertor (c.id, target))
-                song.setTargetValue (target, convert (c.value));
+            {
+                const auto value = convert (c.value);
+                song.setTargetValue (target, value);
+                song.setInitialValue (target, value); // kept: reset whenever the song starts (REA round 146)
+            }
         }
     }
 

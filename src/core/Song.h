@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -779,6 +780,10 @@ struct MidiLink
     AutomationTarget target;
 };
 
+// The links a controller move follows: the project's, then the global ones (settings, every project) whose target
+// and controller the project does not link itself (REA round 146: a project link overrides a global one).
+std::vector<MidiLink> linksWithGlobal (const std::vector<MidiLink>& project, const std::vector<MidiLink>& global);
+
 // Header of a Playlist track.
 struct PlaylistTrack
 {
@@ -869,6 +874,8 @@ struct Song
             fn (a.target);
         for (auto& l : midiLinks)
             fn (l.target);
+        for (auto& v : initialValues)
+            fn (v.target);
         for (auto& p : patterns)
             for (auto& lane : p.events)
                 fn (lane.target);
@@ -906,6 +913,22 @@ struct Song
     std::vector<Automation> automations;
     std::vector<PlaylistTrack> playlistTracks; // index = track; tracks past the end use the default
     std::vector<MidiLink> midiLinks;
+    // FL's "initialized controls" (.flp 0xD8; the parameter menu's "Init song with this position", REA round 146):
+    // values the targets are reset to whenever the song starts playing in song mode (from any position), before
+    // the automation clips take over at their own position.
+    struct InitialValue
+    {
+        AutomationTarget target;
+        float value = 0.0f; // 0..1
+    };
+    std::vector<InitialValue> initialValues;
+    // Sets (replaces) / removes the target's initial value; the index into initialValues or -1.
+    void setInitialValue (const AutomationTarget& target, float value);
+    void removeInitialValue (const AutomationTarget& target);
+    int findInitialValue (const AutomationTarget& target) const noexcept;
+    // Resets the model's targets to their initial values; the plugin parameters among them (which don't live in
+    // the model) are passed to `plugin` when given.
+    void applyInitialValues (const std::function<void (const AutomationTarget&, float)>& plugin = {});
 
     bool isTrackMuted (int track) const noexcept
     {
