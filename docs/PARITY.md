@@ -31,6 +31,7 @@ Round 144 (`docs/analise/REA_rodada144.md`, sub-rounds `REA_rodada144a.md` / `RE
 | Lattice Mod | ValhallaUberMod | 8 → 9 | 9 → 9 | DelaySync measured (18 steps, 2750 ms cap) and translated |
 | Facet EQ | Pro-Q 4 | 9 → 9 | 8 → 8 | linear-phase resolution Low … Maximum (the trial's latencies), translated |
 | Hush De-esser | DeEsser | 9 → 9 | 6 → 7 | the GR meter's held peak (click to reset) |
+| Prism Multiband | Pro-MB | 7 → 9 | 7 → 8 | Processing (Dynamic / Linear / Minimum phase, measured latencies), oversampling 2x / 4x, mid / side band pan, analyser resolution / tilt, translated; Dynamic phase still the old engine |
 
 ## Round 137: what changed (config / design, after 135 → after 137)
 
