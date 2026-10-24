@@ -63,6 +63,69 @@ inline std::vector<int> sameSource (const Song& song, int clip)
     return out;
 }
 
+// FL's Playlist Select > Overlapping / Stacked (REA round 153, behaviour from its manual): per track, in time order.
+// Overlapping: clips that start before an earlier clip of the track ends (every layer except the lowest).
+// Stacked: clips lying completely inside another clip of the track (exact duplicates: all but the first), so
+// deleting them leaves what is heard unchanged.
+inline std::vector<int> overlappingClips (const Song& song)
+{
+    std::vector<int> order ((std::size_t) song.playlist.size());
+    for (std::size_t i = 0; i < order.size(); ++i)
+        order[i] = (int) i;
+    std::stable_sort (order.begin(), order.end(), [&song] (int a, int b) {
+        const auto& ca = song.playlist[(std::size_t) a];
+        const auto& cb = song.playlist[(std::size_t) b];
+        return ca.track != cb.track ? ca.track < cb.track : ca.start < cb.start;
+    });
+    std::vector<int> out;
+    int track = -1;
+    std::int64_t reach = 0;
+    for (auto i : order)
+    {
+        const auto& c = song.playlist[(std::size_t) i];
+        if (c.track != track)
+        {
+            track = c.track;
+            reach = c.end();
+            continue;
+        }
+        if (c.start < reach)
+            out.push_back (i);
+        reach = std::max (reach, c.end());
+    }
+    std::sort (out.begin(), out.end());
+    return out;
+}
+
+inline std::vector<int> stackedClips (const Song& song)
+{
+    std::vector<int> out;
+    const auto& list = song.playlist;
+    for (int a = 0; a < (int) list.size(); ++a)
+        for (int b = 0; b < (int) list.size(); ++b)
+        {
+            const auto& c = list[(std::size_t) a];
+            const auto& o = list[(std::size_t) b];
+            if (a == b || o.track != c.track || o.start > c.start || o.end() < c.end())
+                continue;
+            if (! (o.start == c.start && o.end() == c.end()) || b < a)
+            {
+                out.push_back (a);
+                break;
+            }
+        }
+    return out;
+}
+
+inline std::vector<int> mutedClips (const Song& song)
+{
+    std::vector<int> out;
+    for (int i = 0; i < (int) song.playlist.size(); ++i)
+        if (song.playlist[(std::size_t) i].muted)
+            out.push_back (i);
+    return out;
+}
+
 // Audio "Make unique": the clips get their own copy of the audio channel (so reversing, stretching or renaming
 // them leaves the other clips of that sample alone). Returns the new channel, or -1.
 inline int makeAudioUnique (Song& song, const std::vector<int>& clips)

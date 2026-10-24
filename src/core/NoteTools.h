@@ -159,4 +159,25 @@ std::vector<int> repeatNotes (Pattern& pattern, const std::vector<int>& indices,
 std::vector<int> selectByVelocity (const Pattern& pattern, const std::vector<int>& indices, float low, float high);
 // The loudest / quietest `fraction` (0..1) of `indices` (at least one note when there are any).
 std::vector<int> selectLoudest (const Pattern& pattern, const std::vector<int>& indices, float fraction, bool loudest);
+
+// --- selection helpers (FL's piano roll Select menu, behaviour from its manual; REA round 153) ------------------
+// `all` minus `selected` (both index lists; the result is sorted).
+std::vector<int> invertSelection (const std::vector<int>& all, const std::vector<int>& selected);
+// The notes of `indices` in colour group `colour` (0..15).
+std::vector<int> selectByColour (const Pattern& pattern, const std::vector<int>& indices, int colour);
+// Every other note in time order (start, then key): the 1st, 3rd, 5th ...
+std::vector<int> selectOdd (const Pattern& pattern, const std::vector<int>& indices);
+// About `fraction` (0..1) of `indices` chosen at random (each note independently; deterministic for a seed).
+std::vector<int> selectRandom (const Pattern& pattern, const std::vector<int>& indices, float fraction, std::uint32_t seed);
+std::vector<int> selectMuted (const Pattern& pattern, const std::vector<int>& indices);
+// Notes that overlap an earlier note of the same key (every layer except the first of each overlapping run).
+std::vector<int> selectOverlapping (const Pattern& pattern, const std::vector<int>& indices);
+// Notes that lie completely inside another note of the same key (exact duplicates: all but the first), so deleting
+// them leaves what is heard unchanged.
+std::vector<int> selectStacked (const Pattern& pattern, const std::vector<int>& indices);
+// The General MIDI percussion names (keys 35..81; nullptr elsewhere), for the Piano Roll's key labels.
+const char* generalMidiDrumName (int key) noexcept;
+
+// Puts the notes into colour group `colour` (0..15).
+void setColour (Pattern& pattern, const std::vector<int>& indices, int colour);
 } // namespace lynx::notetools

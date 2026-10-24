@@ -9,6 +9,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <map>
 #include <vector>
 #include <utility>
 
@@ -448,6 +449,8 @@ struct ChannelDef
     int group = -1;           // the Channel Rack filter group (index into Song::channelGroups); -1 = none
     PatcherDoc patcher;       // instrument == patcher: its graph (REA_rodada141)
     ChannelMisc misc;         // FL's Misc tab: time shift / gate, echo delay, velocity / key tracking (REA round 146b)
+    // Piano Roll key labels (FL 2026's custom key labels, REA round 153): MIDI key -> the name shown on that key
+    std::map<int, std::string> keyLabels;
 
     bool operator== (const ChannelDef&) const = default;
 };
@@ -717,7 +720,10 @@ struct Note
     bool porta = false;       // inverts the channel's porta on this note (the note glides from the previous one; as in FL)
     float release = 0.5f;     // release velocity 0..1 (Note inspector; stored, not yet used by the instruments)
     float modX = 0.5f, modY = 0.5f; // two free per-note modulation values 0..1 (stored, not yet routed)
+    int colour = 0;           // note colour group 0..15 (FL's note colours; .flp note byte 'extra' bits 0-3)
 };
+
+constexpr int noteColourCount = 16;
 
 // Swing delay (FL's formula, docs/analise/REA_rodada3.md §3): only notes whose nearest step
 // is odd move, with triangular weight by distance to the grid; half a step at swing 1.

@@ -1,6 +1,7 @@
 #include "core/PianoRollTools.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <map>
 #include <random>
@@ -1026,6 +1027,61 @@ std::string chordName (const Chord& c)
         s += std::string ("/") + names[pitchClass (c.bass)];
 
     return s;
+}
+
+std::optional<DetectedChord> detectChord (std::vector<int> keys, bool preferFlats)
+{
+    keys.erase (std::remove_if (keys.begin(), keys.end(), [] (int k) { return k < 0 || k > 127; }), keys.end());
+    std::sort (keys.begin(), keys.end());
+    keys.erase (std::unique (keys.begin(), keys.end()), keys.end());
+    if (keys.size() > 10)
+        keys.resize (10);
+
+    unsigned set = 0;
+    for (auto k : keys)
+        set |= 1u << (k % 12);
+    if (std::popcount (set) < 2)
+        return std::nullopt;
+
+    struct Template { std::initializer_list<int> intervals; const char* suffix; };
+    // in order of preference when one set fits several roots equally
+    static const Template templates[] = {
+        { { 0, 4, 7 }, "" },            { { 0, 3, 7 }, "m" },          { { 0, 3, 6 }, "dim" },
+        { { 0, 4, 8 }, "aug" },         { { 0, 2, 7 }, "sus2" },       { { 0, 5, 7 }, "sus4" },
+        { { 0, 4, 7, 10 }, "7" },       { { 0, 4, 7, 11 }, "maj7" },   { { 0, 3, 7, 10 }, "m7" },
+        { { 0, 3, 6, 10 }, "m7b5" },    { { 0, 3, 6, 9 }, "dim7" },    { { 0, 3, 7, 11 }, "m(maj7)" },
+        { { 0, 4, 7, 9 }, "6" },        { { 0, 3, 7, 9 }, "m6" },      { { 0, 5, 7, 10 }, "7sus4" },
+        { { 0, 2, 4, 7 }, "add9" },     { { 0, 2, 3, 7 }, "madd9" },   { { 0, 4, 8, 10 }, "7#5" },
+        { { 0, 4, 6, 10 }, "7b5" },     { { 0, 4, 8, 11 }, "maj7#5" },
+        { { 0, 2, 4, 7, 10 }, "9" },    { { 0, 2, 4, 7, 11 }, "maj9" }, { { 0, 2, 3, 7, 10 }, "m9" },
+        { { 0, 1, 4, 7, 10 }, "7b9" },  { { 0, 3, 4, 7, 10 }, "7#9" }, { { 0, 2, 4, 7, 9 }, "6/9" },
+        { { 0, 2, 5, 7, 10 }, "9sus4" }, { { 0, 2, 3, 5, 7, 10 }, "m11" }, { { 0, 4, 7, 9, 10 }, "13" },
+        { { 0, 4, 10 }, "7" },          { { 0, 4, 11 }, "maj7" },      { { 0, 3, 10 }, "m7" }, // without the fifth
+        { { 0, 7 }, "5" },
+    };
+    static const char* sharps[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    static const char* flats[] = { "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B" };
+    const auto names = preferFlats ? flats : sharps;
+    const auto bass = keys.front() % 12;
+
+    auto mask = [] (const Template& t, int root) {
+        unsigned m = 0;
+        for (auto i : t.intervals)
+            m |= 1u << ((root + i) % 12);
+        return m;
+    };
+
+    // the bass as the root first, then any template on another root (a slash chord)
+    for (const auto& t : templates)
+        if (mask (t, bass) == set)
+            return DetectedChord { bass, bass, std::string (names[bass]) + t.suffix };
+
+    for (const auto& t : templates)
+        for (int root = 0; root < 12; ++root)
+            if (root != bass && (set >> root & 1u) != 0 && mask (t, root) == set)
+                return DetectedChord { root, bass, std::string (names[root]) + t.suffix + "/" + names[bass] };
+
+    return std::nullopt;
 }
 
 std::string toNumerals (const std::vector<Chord>& chords, int tonic)

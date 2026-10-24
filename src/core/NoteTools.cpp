@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <map>
 #include <tuple>
 
@@ -535,5 +536,141 @@ std::vector<int> selectLoudest (const Pattern& pattern, const std::vector<int>& 
     list.resize (std::min (keep, list.size()));
     std::sort (list.begin(), list.end());
     return list;
+}
+
+// --- selection helpers ------------------------------------------------------------------------
+
+std::vector<int> invertSelection (const std::vector<int>& all, const std::vector<int>& selected)
+{
+    auto a = all, b = selected;
+    std::sort (a.begin(), a.end());
+    a.erase (std::unique (a.begin(), a.end()), a.end());
+    std::sort (b.begin(), b.end());
+    std::vector<int> out;
+    std::set_difference (a.begin(), a.end(), b.begin(), b.end(), std::back_inserter (out));
+    return out;
+}
+
+std::vector<int> selectByColour (const Pattern& pattern, const std::vector<int>& indices, int colour)
+{
+    std::vector<int> out;
+    for (auto i : validSorted (pattern, indices))
+        if (pattern.notes[(std::size_t) i].colour == colour)
+            out.push_back (i);
+    return out;
+}
+
+namespace
+{
+std::vector<int> inTimeOrder (const Pattern& pattern, const std::vector<int>& indices)
+{
+    auto list = validSorted (pattern, indices);
+    std::stable_sort (list.begin(), list.end(), [&pattern] (int a, int b) {
+        const auto& na = pattern.notes[(std::size_t) a];
+        const auto& nb = pattern.notes[(std::size_t) b];
+        return std::tie (na.start, na.key) < std::tie (nb.start, nb.key);
+    });
+    return list;
+}
+} // namespace
+
+std::vector<int> selectOdd (const Pattern& pattern, const std::vector<int>& indices)
+{
+    const auto list = inTimeOrder (pattern, indices);
+    std::vector<int> out;
+    for (std::size_t k = 0; k < list.size(); k += 2)
+        out.push_back (list[k]);
+    std::sort (out.begin(), out.end());
+    return out;
+}
+
+std::vector<int> selectRandom (const Pattern& pattern, const std::vector<int>& indices, float fraction, std::uint32_t seed)
+{
+    Random random (seed);
+    const auto f = std::clamp (fraction, 0.0f, 1.0f);
+    std::vector<int> out;
+    for (auto i : validSorted (pattern, indices))
+        if (random.next() < f)
+            out.push_back (i);
+    return out;
+}
+
+std::vector<int> selectMuted (const Pattern& pattern, const std::vector<int>& indices)
+{
+    std::vector<int> out;
+    for (auto i : validSorted (pattern, indices))
+        if (pattern.notes[(std::size_t) i].muted)
+            out.push_back (i);
+    return out;
+}
+
+std::vector<int> selectOverlapping (const Pattern& pattern, const std::vector<int>& indices)
+{
+    // per key, in time order: a note starting before the furthest end so far overlaps an earlier one
+    const auto list = inTimeOrder (pattern, indices);
+    std::map<int, std::int64_t> reach; // key -> furthest end of the notes seen
+    std::vector<int> out;
+    for (auto i : list)
+    {
+        const auto& n = pattern.notes[(std::size_t) i];
+        const auto it = reach.find (n.key);
+        if (it != reach.end() && n.start < it->second)
+        {
+            out.push_back (i);
+            it->second = std::max (it->second, (n.start + n.length));
+        }
+        else
+            reach[n.key] = (n.start + n.length);
+    }
+    std::sort (out.begin(), out.end());
+    return out;
+}
+
+std::vector<int> selectStacked (const Pattern& pattern, const std::vector<int>& indices)
+{
+    const auto list = inTimeOrder (pattern, indices);
+    std::vector<int> out;
+    for (std::size_t a = 0; a < list.size(); ++a)
+    {
+        const auto& n = pattern.notes[(std::size_t) list[a]];
+        for (std::size_t b = 0; b < list.size(); ++b)
+        {
+            if (a == b)
+                continue;
+            const auto& o = pattern.notes[(std::size_t) list[b]];
+            if (o.key != n.key || o.start > n.start || (o.start + o.length) < (n.start + n.length))
+                continue;
+            // inside `o`; exact duplicates: only the later ones (in time order) count as stacked
+            const auto same = o.start == n.start && (o.start + o.length) == (n.start + n.length);
+            if (! same || b < a)
+            {
+                out.push_back (list[a]);
+                break;
+            }
+        }
+    }
+    std::sort (out.begin(), out.end());
+    return out;
+}
+
+const char* generalMidiDrumName (int key) noexcept
+{
+    // the General MIDI 1 percussion key map (a public standard)
+    static const char* names[] = { "Acoustic Bass Drum", "Bass Drum 1", "Side Stick", "Acoustic Snare", "Hand Clap", "Electric Snare",
+                                   "Low Floor Tom", "Closed Hi-Hat", "High Floor Tom", "Pedal Hi-Hat", "Low Tom", "Open Hi-Hat",
+                                   "Low-Mid Tom", "Hi-Mid Tom", "Crash Cymbal 1", "High Tom", "Ride Cymbal 1", "Chinese Cymbal",
+                                   "Ride Bell", "Tambourine", "Splash Cymbal", "Cowbell", "Crash Cymbal 2", "Vibraslap",
+                                   "Ride Cymbal 2", "Hi Bongo", "Low Bongo", "Mute Hi Conga", "Open Hi Conga", "Low Conga",
+                                   "High Timbale", "Low Timbale", "High Agogo", "Low Agogo", "Cabasa", "Maracas",
+                                   "Short Whistle", "Long Whistle", "Short Guiro", "Long Guiro", "Claves", "Hi Wood Block",
+                                   "Low Wood Block", "Mute Cuica", "Open Cuica", "Mute Triangle", "Open Triangle" };
+    return key >= 35 && key <= 81 ? names[key - 35] : nullptr;
+}
+
+void setColour (Pattern& pattern, const std::vector<int>& indices, int colour)
+{
+    const auto c = std::clamp (colour, 0, noteColourCount - 1);
+    for (auto i : validSorted (pattern, indices))
+        pattern.notes[(std::size_t) i].colour = c;
 }
 } // namespace lynx::notetools

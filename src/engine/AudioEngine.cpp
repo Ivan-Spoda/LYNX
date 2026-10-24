@@ -1,4 +1,5 @@
 #include "engine/AudioEngine.h"
+#include "engine/AudioLogger.h"
 
 #include "core/Patcher.h"
 #include "core/ValueMath.h"
@@ -223,9 +224,17 @@ AudioEngine::AudioEngine (bool openAudioDevice)
     startTimerHz (30); // recording and collection of retired snapshots
 }
 
+AudioLogger& AudioEngine::getAudioLogger()
+{
+    if (audioLogger == nullptr)
+        audioLogger = std::make_unique<AudioLogger> (meters.logTap);
+    return *audioLogger;
+}
+
 AudioEngine::~AudioEngine()
 {
     stopTimer();
+    audioLogger.reset(); // closes the log file
 
     {
         const juce::SpinLock::ScopedLockType lock (takeLock);
@@ -548,10 +557,41 @@ double AudioEngine::getPreviewPosition() const noexcept
     return preview != nullptr ? preview->getPlayPosition() : -1.0;
 }
 
+void AudioEngine::markHeldKey (int key, bool on) noexcept
+{
+    if (key < 0 || key > 127)
+        return;
+    auto& count = heldKeyCount[(std::size_t) key];
+    auto before = count.load();
+    std::uint8_t after = 0;
+    do
+        after = on ? (std::uint8_t) std::min (255, before + 1) : (std::uint8_t) (before > 0 ? before - 1 : 0);
+    while (! count.compare_exchange_weak (before, after));
+    const auto bit = std::uint64_t { 1 } << (key & 63);
+    if (after > 0)
+        heldKeyBits[key >> 6].fetch_or (bit);
+    else
+        heldKeyBits[key >> 6].fetch_and (~bit);
+}
+
+std::vector<int> AudioEngine::heldInputKeys() const
+{
+    std::vector<int> keys;
+    for (int word = 0; word < 2; ++word)
+    {
+        const auto bits = heldKeyBits[word].load();
+        for (int b = 0; b < 64; ++b)
+            if ((bits >> b & 1u) != 0)
+                keys.push_back (word * 64 + b);
+    }
+    return keys;
+}
+
 void AudioEngine::sendLiveNote (int channel, int key, float velocity, bool on, bool record)
 {
     if (record) // played notes (the PC keyboard) follow the scale snap; previews don't
     {
+        markHeldKey (key, on);
         // the note-off stops the key its note-on started, even if the snap changed in between
         const auto requested = key;
         if (on)
@@ -581,6 +621,10 @@ void AudioEngine::panic()
     e.type = NoteEvent::Type::choke;
     e.channel = -1; // every channel
     liveEvents.push (e);
+    for (auto& c : heldKeyCount)
+        c.store (0);
+    for (auto& w : heldKeyBits)
+        w.store (0);
 }
 
 double AudioEngine::estimatedPositionNow() const noexcept
@@ -969,6 +1013,7 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput* source, const juce
         return;
 
     const auto on = m.isNoteOn();
+    markHeldKey (m.getNoteNumber(), on);
 
     if (on)
         startOnInput();
