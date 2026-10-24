@@ -37,7 +37,8 @@ juce::Colour bandColour (int band)
 
 // display names of facet::Shape (core names, translated here)
 const char* const shapeNames[] = { TR_NOOP ("Off"), TR_NOOP ("Bell"), TR_NOOP ("Low shelf"), TR_NOOP ("High shelf"), TR_NOOP ("Low cut"),
-                                   TR_NOOP ("High cut"), TR_NOOP ("Notch"), TR_NOOP ("Band pass"), TR_NOOP ("Tilt shelf") };
+                                   TR_NOOP ("High cut"), TR_NOOP ("Notch"), TR_NOOP ("Band pass"), TR_NOOP ("Tilt shelf"),
+                                   TR_NOOP ("Flat tilt"), TR_NOOP ("All pass") }; // round 135: the last two
 const char* const phaseNames[] = { TR_NOOP ("Zero latency"), TR_NOOP ("Natural phase"), TR_NOOP ("Linear phase") };
 const char* const analyzerShort[] = { TR_NOOP ("Off"), TR_NOOP ("Pre"), TR_NOOP ("Post"), TR_NOOP ("Pre + Post") };
 const char* const analyzerNames[] = { TR_NOOP ("Analyzer off"), TR_NOOP ("Analyzer: pre"), TR_NOOP ("Analyzer: post"), TR_NOOP ("Analyzer: pre + post") };
@@ -539,6 +540,12 @@ public:
         for (int k = 0; k < phaseCount; ++k)
             menu.addItem (tr (phaseNames[k]) + (k == 0 ? juce::String() : "  (" + tr ("latency {0} samples", { juce::String (latencyFor ((Phase) k, displayRate())) }) + ")"),
                           true, m == k, [this, k] { set ({ { phaseParam, phaseValue ((Phase) k) } }); });
+        // round 135: the character (the reference's Clean / Subtle / Warm)
+        menu.addSectionHeader (tr ("Character"));
+        static const char* const characters[] { TR_NOOP ("Clean"), TR_NOOP ("Subtle"), TR_NOOP ("Warm") };
+        const auto ch = facet::character (param01 (characterParam));
+        for (int k = 0; k < 3; ++k)
+            menu.addItem (tr (characters[k]), true, ch == k, [this, k] { set ({ { characterParam, (float) k / 2.0f } }); });
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
     }
 
@@ -915,7 +922,13 @@ public:
             else if (c.type == Ctl::phase || c.type == Ctl::analyzer || c.type == Ctl::detector)
             {
                 juce::String caption, value;
-                if (c.type == Ctl::phase) { caption = tr ("Processing:"); value = tr (phaseNames[(int) phase (param01 (phaseParam))]); }
+                if (c.type == Ctl::phase)
+                {
+                    caption = tr ("Processing:");
+                    value = tr (phaseNames[(int) phase (param01 (phaseParam))]);
+                    static const char* const characters[] { TR_NOOP ("Clean"), TR_NOOP ("Subtle"), TR_NOOP ("Warm") };
+                    if (const auto ch = facet::character (param01 (characterParam)); ch > 0) value << juce::String::fromUTF8 (" Â· ") << tr (characters[ch]);
+                }
                 else if (c.type == Ctl::analyzer) { caption = tr ("Analyzer:"); value = tr (analyzerShort[(int) analyzer (param01 (analyzerParam))]); }
                 else
                 {

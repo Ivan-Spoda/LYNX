@@ -5,6 +5,7 @@
 #include "core/EffectPresets.h"
 #include "core/Effects.h"
 #include "core/FlEffects.h"
+#include "core/ParamHelp.h"
 #include "engine/AudioEngine.h"
 #include "engine/Text.h"
 #include "platform/Paths.h"
@@ -126,85 +127,27 @@ void clearHistory() { histories().clear(); }
 
 juce::String describe (EffectKind kind, const char* param)
 {
-    if (param == nullptr)
-        return {};
-    // own words for LYNX's controls; looked up by the parameter's name, then without a side / section prefix or suffix
-    static const std::map<std::string, const char*> help {
-        { "mix", TR_NOOP ("Balance between the dry signal and the effect") },
-        { "predelay", TR_NOOP ("Time before the reverb starts") },
-        { "decay", TR_NOOP ("How long the reverb takes to die away") },
-        { "size", TR_NOOP ("Size of the space; larger spaces build up more slowly") },
-        { "attack", TR_NOOP ("How the reverb builds up: low = immediate, high = a slow swell") },
-        { "mod rate", TR_NOOP ("Speed of the modulation that keeps the tail moving") },
-        { "mod depth", TR_NOOP ("Amount of modulation: chorus-like movement in the tail") },
-        { "high cut", TR_NOOP ("Removes the effect's highs above this frequency") },
-        { "low cut", TR_NOOP ("Removes the effect's lows below this frequency") },
-        { "bass mult", TR_NOOP ("Decay of the lows relative to the mids (above 1 = longer)") },
-        { "bass xover", TR_NOOP ("Where the lows end for the bass multiplier") },
-        { "high mult", TR_NOOP ("Decay of the highs relative to the mids (below 1 = shorter)") },
-        { "high xover", TR_NOOP ("Where the highs start for the high multiplier") },
-        { "high shelf", TR_NOOP ("How much the highs are damped inside the reverb") },
-        { "high freq", TR_NOOP ("Where the damping of the highs starts") },
-        { "early diffusion", TR_NOOP ("Density of the first reflections: low = audible echoes, high = smooth") },
-        { "late diffusion", TR_NOOP ("Density of the tail: low = grainy, high = smooth") },
-        { "diffusion", TR_NOOP ("Smears the repeats into a wash") },
-        { "diffusion size", TR_NOOP ("Length of the smearing") },
-        { "color", TR_NOOP ("Character of the era the algorithm imitates") },
-        { "colour", TR_NOOP ("Bright or dark tone") },
-        { "mode", TR_NOOP ("The algorithm: each mode is a different space or effect") },
-        { "type", TR_NOOP ("The kind of room or plate") },
-        { "reverb mode", TR_NOOP ("The kind of reverb") },
-        { "width", TR_NOOP ("Stereo width of the effect: 0 = mono") },
-        { "early/late", TR_NOOP ("Balance between the early reflections and the tail") },
-        { "cross", TR_NOOP ("How much the left and right sides feed each other") },
-        { "send", TR_NOOP ("How much of the early reflections feed the tail") },
-        { "space", TR_NOOP ("Feeds the early reflections back for a bigger, longer space") },
-        { "low eq freq", TR_NOOP ("Frequency of the low shelf") },
-        { "low eq gain", TR_NOOP ("Boost or cut of the lows") },
-        { "high eq freq", TR_NOOP ("Frequency of the high shelf") },
-        { "high eq gain", TR_NOOP ("Boost or cut of the highs") },
-        { "feedback", TR_NOOP ("How much of the output is fed back: more repeats, a longer tail") },
-        { "density", TR_NOOP ("From discrete echoes (low) to a dense reverb (high)") },
-        { "warp", TR_NOOP ("Bends the delay lines against each other for an evolving tail") },
-        { "delay", TR_NOOP ("Delay time") },
-        { "time", TR_NOOP ("Delay time in milliseconds") },
-        { "note", TR_NOOP ("Delay time as a note value at the project tempo") },
-        { "sync", TR_NOOP ("Delay time in milliseconds or as a note value (straight, dotted, triplet)") },
-        { "clear", TR_NOOP ("Empties the delay network at once") },
-        { "shift", TR_NOOP ("Pitch or frequency shift of every repeat") },
-        { "shift mode", TR_NOOP ("Which voices the shifter adds (up, up and down, none)") },
-        { "style", TR_NOOP ("Echo layout: single, ratio, four taps, dual or ping-pong") },
-        { "spread", TR_NOOP ("Offsets the two sides in time for width") },
-        { "ratio", TR_NOOP ("Time of the second echo as a share of the first") },
-        { "spacing", TR_NOOP ("Spacing of the four taps") },
-        { "drive", TR_NOOP ("Saturation of the repeats") },
-        { "age", TR_NOOP ("Wear of the machine the mode imitates (noise, darkening)") },
-        { "wow", TR_NOOP ("Slow pitch wobble of a tape transport") },
-        { "flutter", TR_NOOP ("Fast pitch wobble of a tape transport") },
-        { "ducking", TR_NOOP ("Turns the echoes down while you play") },
-        { "output", TR_NOOP ("Output level") },
-        { "pairs", TR_NOOP ("Ping-pong in pairs: each left echo is repeated right at full level") },
-        { "phase", TR_NOOP ("Inverts the echoes of this side") },
-        { "rate", TR_NOOP ("Speed of the modulation") },
-        { "depth", TR_NOOP ("Amount of modulation") },
-        { "manual", TR_NOOP ("Offset of the modulated delay") },
-        { "taps", TR_NOOP ("How many delay taps a side") },
-        { "stereo", TR_NOOP ("Mono or stereo repeats (stereo: the right side shifts the other way)") },
-    };
-    auto folded = juce::String (param).toLowerCase().trim();
-    auto find = [&] (const juce::String& key) -> const char* {
-        const auto it = help.find (key.toStdString());
-        return it != help.end() ? it->second : nullptr;
-    };
-    const char* text = find (folded);
-    if (text == nullptr && (folded.endsWith (" l") || folded.endsWith (" r")))
-        text = find (folded.dropLastCharacters (2));
-    for (const auto* prefix : { "echo ", "early ", "late ", "reverb ", "v1 ", "v2 ", "diffusion " })
-        if (text == nullptr && folded.startsWith (prefix))
-            text = find (folded.substring ((int) std::strlen (prefix)));
-    (void) kind;
+    // round 135: the texts moved to core/ParamHelp (tested; every LYNX engine has its own wording)
+    const auto* text = paramhelp::describe (kind, param);
     return text != nullptr ? tr (text) : juce::String();
 }
+
+juce::String modeLine (EffectKind kind, const EffectParams& params, double bpm)
+{
+    const auto s = paramhelp::summary (kind, params);
+    if (s.param < 0)
+        return {};
+    const auto& info = effectInfo (kind);
+    auto line = tr (info.params[(std::size_t) s.param].name) + ": " + tr (juce::String::fromUTF8 (formatEffectParam (kind, s.param, params[(std::size_t) s.param], bpm, params).c_str()));
+    if (s.text != nullptr)
+        line << juce::String::fromUTF8 (" \xe2\x80\x94 ") << tr (s.text);
+    if (s.detail != nullptr)
+        line << ", " << tr (s.detail);
+    return line;
+}
+
+bool isMixLocked (EffectKind kind) { return mixLocked (kind); }
+void toggleMixLock (EffectKind kind) { setMixLocked (kind, ! mixLocked (kind)); }
 
 PresetBar::PresetBar (AudioEngine& e, int t, int s) : engine (e), track (t), slot (s)
 {

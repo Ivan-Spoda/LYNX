@@ -284,20 +284,26 @@ bool paint (juce::Graphics& g, const juce::String& id, juce::Rectangle<float> r,
         g.setColour (colour::bg0);
         g.fillRoundedRectangle (r, radius::md * s);
         using namespace dyn::prism;
-        const double xo[3] { crossoverHz (p[xover1]), crossoverHz (p[xover2]), crossoverHz (p[xover3]) };
-        const float edges[5] { a.getX(), freqX (xo[0], a), freqX (xo[1], a), freqX (xo[2], a), a.getRight() };
+        // round 135: up to six bands (the band count)
+        const auto nb = bandCount (p);
+        const auto xo = crossovers (p);
+        float edges[bands + 1] {};
+        edges[0] = a.getX();
+        for (int k = 0; k < nb - 1; ++k)
+            edges[k + 1] = freqX (xo[(std::size_t) k], a);
+        edges[nb] = a.getRight();
         double live[bands] {};
-        for (int b = 0; b < bands; ++b)
+        for (int b = 0; b < nb; ++b)
         {
             const auto on = p[(std::size_t) param (b, fEnabled)] >= 0.5f;
-            live[b] = on ? (double) meter (b) * 30.0 + levelDb (p[(std::size_t) param (b, fLevel)]) : 0.0;
+            live[b] = on ? (double) meter (bandMeter (b)) * 30.0 + levelDb (p[(std::size_t) param (b, fLevel)]) : 0.0;
             const auto area = juce::Rectangle<float> (edges[b], a.getY(), juce::jmax (1.0f, edges[b + 1] - edges[b]), a.getHeight());
             const auto c = peqview::bandColour (b);
             g.setColour (c.withAlpha (on && enabled ? 0.10f : 0.03f));
             g.fillRect (area);
             // the live gain change: a bar from the middle line (up = boost, down = reduction), ±18 dB
             const auto mid = a.getCentreY();
-            const auto gainChange = on ? (float) meter (b) * 30.0f : 0.0f;
+            const auto gainChange = on ? (float) meter (bandMeter (b)) * 30.0f : 0.0f;
             const auto hBar = a.getHeight() * 0.5f * juce::jlimit (-1.0f, 1.0f, gainChange / 18.0f);
             const auto bar = juce::Rectangle<float> (area.getCentreX() - 10.0f * s, hBar < 0 ? mid : mid - hBar, 20.0f * s, std::abs (hBar));
             g.setColour (c.withAlpha (enabled ? 0.75f : 0.25f));
@@ -309,7 +315,7 @@ bool paint (juce::Graphics& g, const juce::String& id, juce::Rectangle<float> r,
         }
         freqLabels (g, a, s);
         g.setColour (colour::textSecondary);
-        for (int k = 1; k <= 3; ++k)
+        for (int k = 1; k < nb; ++k)
             g.drawVerticalLine ((int) edges[k], a.getY(), a.getBottom());
         g.setColour (colour::gridBar);
         g.drawHorizontalLine ((int) a.getCentreY(), a.getX(), a.getRight());
@@ -367,13 +373,13 @@ int crossoverParams (const EffectSlot& fx, int* params, double* hz)
     if (fx.kind == EffectKind::prismMultiband)
     {
         using namespace dyn::prism;
-        const int ps[3] { xover1, xover2, xover3 };
-        for (int k = 0; k < 3; ++k)
+        const auto nb = bandCount (fx.params);
+        for (int k = 0; k < nb - 1; ++k)
         {
-            params[k] = ps[k];
-            hz[k] = crossoverHz (fx.params[(std::size_t) ps[k]]);
+            params[k] = crossoverParam (k);
+            hz[k] = crossoverHz (fx.params[(std::size_t) params[k]]);
         }
-        return 3;
+        return nb - 1;
     }
     if (fx.kind == EffectKind::ember)
     {
@@ -394,8 +400,8 @@ int crossoverParams (const EffectSlot& fx, int* params, double* hz)
 int crossoverNear (const EffectSlot& fx, juce::Rectangle<float> r, float x, float tolerance)
 {
     const auto a = r.reduced (6.0f);
-    int params[3];
-    double hz[3];
+    int params[5];
+    double hz[5];
     const auto n = crossoverParams (fx, params, hz);
     int best = -1;
     float bestDist = tolerance;
@@ -411,8 +417,8 @@ int crossoverNear (const EffectSlot& fx, juce::Rectangle<float> r, float x, floa
 int bandAt (const EffectSlot& fx, juce::Rectangle<float> r, float x)
 {
     const auto a = r.reduced (6.0f);
-    int params[3];
-    double hz[3];
+    int params[5];
+    double hz[5];
     const auto n = crossoverParams (fx, params, hz);
     int band = 0;
     for (int k = 0; k < n; ++k)

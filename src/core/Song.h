@@ -453,8 +453,11 @@ enum class EffectKind : std::uint8_t
     quellDenoiser,   // LYNX's Quell Denoiser (REA_rodada119, core/VoiceTools.h): one-knob multiband noise suppressor
     geminiDoubler,   // LYNX's Gemini Doubler (REA_rodada119, core/VoiceTools.h): two pitch-shifted delay voices
     formulaController, // FL's Formula Controller (REA_rodada133, core/FormulaController.h): no sound; output = formula of a, b, c
-    patcher       // FL's Patcher (REA_rodada141, core/Patcher.h): a graph of effects / instruments in EffectSlot::patcher
+    patcher,         // FL's Patcher (REA_rodada141, core/Patcher.h): a graph of effects / instruments in EffectSlot::patcher
+    voiceShift       // LYNX's Voice Shift (REA_rodada135s, core/VoiceShift.h): pitch / formant / quantize / robot + drive
 };
+// the last EffectKind (loops over every kind; update when one is appended)
+constexpr EffectKind lastEffectKind = EffectKind::voiceShift;
 
 constexpr int maxEffectParams = 96; // LuxeVerb uses 53 (FL's 49 controls + 4 sync switches); Facet EQ 88 (round 128)
 constexpr int maxEffectSlots = 10; // as in FL

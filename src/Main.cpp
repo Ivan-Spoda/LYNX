@@ -1141,10 +1141,10 @@ private:
             juce::Random random (111);
             const auto value = [&] { const auto r = random.nextInt (6); return r == 0 ? 0.0f : r == 1 ? 1.0f : random.nextFloat(); };
 
-            for (int k = 0; k <= (int) lynx::EffectKind::formulaController; ++k)
+            for (int k = 0; k <= (int) lynx::lastEffectKind; ++k)
             {
                 const auto kind = (lynx::EffectKind) k;
-                if (! lynx::NativeEffectWindows::canOpen (kind))
+                if (! lynx::NativeEffectWindows::canOpen (kind) || kind == lynx::EffectKind::patcher) // (the Patcher's editor is a graph window)
                     continue;
                 const auto before = lynx::RackRenderer::nonFiniteEffectBlocks();
                 const auto& info = lynx::effectInfo (kind);
@@ -2574,6 +2574,7 @@ private:
                     tune.params[lynx::lynxtune::vibratoShape] = 1.0f / 3.0f;
                     own (tune, "LYNX Tune-p2.png", false, 1);
                 }
+                own (lynx::makeEffectSlot (lynx::EffectKind::lynxTune), "LYNX Tune-p3.png", false, 2); // round 135w: Real-time
                 lynx::setNativeEditorDemo (false);
             }
 
