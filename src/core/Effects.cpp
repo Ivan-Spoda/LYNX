@@ -15,6 +15,7 @@
 #include "core/ConvolverFx.h"
 #include "core/VintagePhaser.h"
 #include "core/EmphasizerFx.h"
+#include "core/FreqShifterFl.h"
 #include "core/Vocodex.h"
 #include "core/FruityVocoder.h"
 #include "core/MaximusFx.h"
@@ -2854,6 +2855,15 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                            { "Level matching", 0.0f }, { "Bypass", 0.0f }, { "Output", 1.0f } } };
             return info;
         }
+        case EffectKind::flFrequencyShifter:
+        {
+            // FL's controls and defaults (a new instance: Mix 100 %, Frequency shifter, +200 Hz in the 200 Hz range)
+            static const EffectInfo info { "Frequency Shifter", { { "Mix", 1.0f }, { "Type", 0.5f }, { "Frequency", 1.0f },
+                                                                  { "L/R phase offset", 0.0f }, { "L shape", 1.0f }, { "R shape", 1.0f },
+                                                                  { "Feedback", 0.5f }, { "Mono/stereo", 1.0f }, { "Range", 0.5f },
+                                                                  { "Left phase offset", 0.5f } } };
+            return info;
+        }
     }
     return eq;
 }
@@ -3305,6 +3315,8 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return voiceshift::paramText (param, v);
         case EffectKind::emphasizer:
             return emphasizer::paramText (param, v);
+        case EffectKind::flFrequencyShifter:
+            return fsfl::paramText (param, v);
 
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
@@ -3534,6 +3546,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::formulaController: return formula::makeEffect ({});
         case EffectKind::voiceShift: return voiceshift::make(); // round 135
         case EffectKind::emphasizer: return emphasizer::make(); // round 154
+        case EffectKind::flFrequencyShifter: return fsfl::make(); // round 154
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();

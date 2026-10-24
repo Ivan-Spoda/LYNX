@@ -85,6 +85,7 @@
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
 #include "core/EmphasizerFx.h"
+#include "core/FreqShifterFl.h"
 #include "core/Reeverb2.h"
 #include "core/LuxeVerb.h"
 #include "core/Denormals.h"
@@ -15876,4 +15877,54 @@ TEST (emphasizer_matches_fl_engine)
     CHECK (lynx::formatEffectParam (lynx::EffectKind::emphasizer, 0, 0.5f, 120.0) == "+12.0 dB");
     CHECK (lynx::formatEffectParam (lynx::EffectKind::emphasizer, 5, 1.0f, 120.0) == "0.0 dB");
     CHECK (lynx::formatEffectParam (lynx::EffectKind::emphasizer, 2, 1.0f, 120.0) == "Soft");
+}
+
+TEST (fl_frequency_shifter_matches_fl_engine)
+{
+    // REA_rodada154 §4: FL's Frequency Shifter (import → slot → effect) against goldens of the installation's
+    // Engine_x64.dll driven by its front end (rate before the state, transport stopped, 120 BPM): FNV-1a of the output
+    struct Case { std::array<int, 10> raw; double rate; std::uint64_t hash; };
+    const Case cases[] { { { 10000, 0, -60480, 0, 10000, 10000, 5000, 10000, 1, 5000 }, 44100.0, 0x326aa161d74aa77cull },
+                         { { 7000, 2, 40000, 3000, 10000, 10000, 8000, 6000, 0, 2000 }, 44100.0, 0xc3feb760dd2a4311ull },
+                         { { 6000, 1, -30000, 6000, 3000, 7000, 3000, 4000, 0, 5000 }, 48000.0, 0x3ab8edef44a90586ull },
+                         { { 10000, 0, 51542, 2000, 8000, 10000, 5000, 10000, 0, 5000 }, 48000.0, 0x960c788c5d50fd0bull } };
+    for (const auto& c : cases)
+    {
+        std::vector<std::uint8_t> state (4 + 40 + 8, 0);
+        const std::int32_t version = 4;
+        std::memcpy (state.data(), &version, 4);
+        std::memcpy (state.data() + 4, c.raw.data(), 40);
+        const auto slot = lynx::effectFromFl ("Frequency Shifter", state);
+        CHECK (slot && slot->kind == lynx::EffectKind::flFrequencyShifter);
+        if (! slot)
+            continue;
+        auto fx = lynx::makeEffect (slot->kind);
+        fx->prepare (c.rate);
+        std::vector<float> l (24000), r (24000);
+        std::uint32_t s = 12345;
+        const float amps[] { 0.3f, 1.5f, 0.05f, 3.0f, 0.8f, 0.0f, 2.0f, 0.4f };
+        for (int i = 0; i < 24000; ++i)
+        {
+            const float a = amps[(i / 3000) % 8];
+            s = s * 1664525u + 1013904223u;
+            l[(std::size_t) i] = (float) ((s >> 8) / 8388608.0 - 1.0) * a;
+            s = s * 1664525u + 1013904223u;
+            r[(std::size_t) i] = (float) ((s >> 8) / 8388608.0 - 1.0) * a;
+        }
+        for (int i = 0; i < 24000; i += 800)
+            fx->process (l.data() + i, r.data() + i, 800, slot->params, 120.0);
+        std::uint64_t h = 0xcbf29ce484222325ull;
+        for (int i = 0; i < 24000; ++i)
+            for (float v : { l[(std::size_t) i], r[(std::size_t) i] })
+            {
+                std::uint32_t u;
+                std::memcpy (&u, &v, 4);
+                h = (h ^ u) * 0x100000001b3ull;
+            }
+        CHECK (h == c.hash);
+    }
+    // the engine's tanhf against points of the library's
+    CHECK (lynx::fsfl::tanhf_ (0.0f) == 0.0f && lynx::fsfl::tanhf_ (20.0f) == 1.0f && lynx::fsfl::tanhf_ (-20.0f) == -1.0f);
+    CHECK (std::fabs (lynx::fsfl::tanhf_ (0.5f) - 0.462117165f) < 1e-7f && std::fabs (lynx::fsfl::tanhf_ (2.0f) - 0.964027584f) < 1e-7f);
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::flFrequencyShifter, 1, 1.0f, 120.0) == "Ring modulator");
 }

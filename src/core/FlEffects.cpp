@@ -28,6 +28,7 @@
 #include "core/FlangusFastDist.h"
 #include "core/FruityPhaser.h"
 #include "core/EmphasizerFx.h"
+#include "core/FreqShifterFl.h"
 #include "core/SytrusEngine.h"
 #include "core/FlSynths.h"
 
@@ -1201,6 +1202,13 @@ std::optional<EffectSlot> effectFromFl (const std::string& pluginName, const std
             emphasizer::toParams (*s, slot.params.data());
             return slot;
         }
+    if (pluginName == "Frequency Shifter") // REA_rodada154 §4: FL's own engine
+        if (const auto s = fsfl::parse (state))
+        {
+            auto slot = makeEffectSlot (EffectKind::flFrequencyShifter);
+            fsfl::toParams (*s, slot.params.data());
+            return slot;
+        }
     if (auto exact = fruityDelayExact (pluginName, state))
         return exact;
     if (auto exact = fruityDynamicsExact (pluginName, state))
@@ -1500,6 +1508,7 @@ std::vector<std::string> flPluginsForEffect (EffectKind kind)
         case EffectKind::formulaController: return { "Fruity Formula Controller" }; // LYNX's own effects: no FL counterpart
         case EffectKind::voiceShift: return {}; // LYNX's own effect: no FL counterpart
         case EffectKind::emphasizer: return { "Emphasizer" };
+        case EffectKind::flFrequencyShifter: return { "Frequency Shifter" };
         case EffectKind::limiter:
         case EffectKind::compressor: return { "Fruity Limiter", "Fruity Compressor" };
         case EffectKind::reverb:

@@ -233,6 +233,7 @@ const char* effectId (EffectKind k)
         case EffectKind::formulaController: return "formulaController";
         case EffectKind::voiceShift: return "voiceShift";
         case EffectKind::emphasizer: return "emphasizer";
+        case EffectKind::flFrequencyShifter: return "flFrequencyShifter";
     }
     return "eq";
 }
@@ -607,7 +608,7 @@ std::optional<EffectKind> effectFromId (const juce::String& id)
                     EffectKind::echoform, EffectKind::spiralEcho, EffectKind::orbit, EffectKind::latticeMod,
                     EffectKind::fruitySend,
                     EffectKind::crestCompressor, EffectKind::prismMultiband, EffectKind::sentryGate,
-                    EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::formulaController, EffectKind::voiceShift, EffectKind::patcher, EffectKind::emphasizer })
+                    EffectKind::quellDenoiser, EffectKind::geminiDoubler, EffectKind::formulaController, EffectKind::voiceShift, EffectKind::patcher, EffectKind::emphasizer, EffectKind::flFrequencyShifter })
         if (id == effectId (k))
             return k;
 

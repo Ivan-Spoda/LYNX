@@ -4226,3 +4226,8 @@ countries: br
 "SOFT CLIPPING" = "CLIPAGEM SUAVE"
 "LEVEL MATCHING" = "IGUALAR NÍVEL"
 "BYPASS" = "BYPASS"
+"L/R phase offset" = "Defasagem E/D"
+"L shape" = "Forma E"
+"R shape" = "Forma D"
+"Mono/stereo" = "Mono/estéreo"
+"Left phase offset" = "Fase esquerda"
