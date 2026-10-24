@@ -112,6 +112,7 @@ add_library(lynx_core STATIC
     src/core/NewtoneFx.cpp
     src/core/MixSuite.cpp
     src/core/EmberClassic.cpp
+    src/core/VoxStrip.cpp
     src/core/RhythmPan.cpp
     src/core/VoiceMatch.cpp
     src/core/EchoSuite.cpp
