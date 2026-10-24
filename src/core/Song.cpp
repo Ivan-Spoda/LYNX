@@ -194,6 +194,8 @@ void Song::removeDeadMidiLinks()
 
 int fruitySendTarget (const EffectSlot& slot) noexcept
 {
+    if (slot.kind == EffectKind::patcher) // a Patcher's first extra output (REA_rodada141)
+        return ! slot.patcher.outputTracks.empty() && slot.patcher.outputTracks.front() > 0 ? slot.patcher.outputTracks.front() : -1;
     if (slot.kind != EffectKind::fruitySend)
         return -1;
     const auto track = (int) std::lround (std::clamp ((double) slot.params[3], 0.0, 1.0) * (maxMixerTracks - 1));
@@ -859,6 +861,40 @@ std::int64_t swingDelay (std::int64_t start, float swing, float channelMix) noex
 
     const auto w = s - 2 * std::abs (start - k * s);
     return (std::int64_t) std::llround ((double) w * std::clamp (swing, 0.0f, 1.0f) * std::clamp (channelMix, 0.0f, 1.0f) * 0.5);
+}
+
+bool PatcherDoc::operator== (const PatcherDoc& o) const
+{
+    return nodes == o.nodes && wires == o.wires && published == o.published && inputX == o.inputX && inputY == o.inputY && outputX == o.outputX && outputY == o.outputY
+           && outputTracks == o.outputTracks;
+}
+
+bool PatchNode::BusHead::operator== (const BusHead& o) const { return bus == o.bus && head == o.head && gain == o.gain; }
+
+bool PatchNode::operator== (const PatchNode& o) const
+{
+    return generator == o.generator && label == o.label && x == o.x && y == o.y && busHeads == o.busHeads
+           && (generator ? channel == o.channel : effect == o.effect);
+}
+
+bool EffectSlot::operator== (const EffectSlot& o) const
+{
+    if (kind != o.kind || enabled != o.enabled || params != o.params || mix != o.mix || ! (plugin == o.plugin) || sidechain != o.sidechain
+        || sidechain2 != o.sidechain2 || state != o.state || samplePath != o.samplePath || ! (substituteFor == o.substituteFor)
+        || presetName != o.presetName || abOther != o.abOther || abShowingB != o.abShowingB || branches.size() != o.branches.size()
+        || links.size() != o.links.size() || ! (patcher == o.patcher))
+        return false;
+    for (std::size_t i = 0; i < branches.size(); ++i)
+        if (branches[i].gain != o.branches[i].gain || branches[i].chain != o.branches[i].chain)
+            return false;
+    for (std::size_t i = 0; i < links.size(); ++i)
+    {
+        const auto& a = links[i];
+        const auto& b = o.links[i];
+        if (a.branch != b.branch || a.source != b.source || a.target != b.target || a.param != b.param || a.curve != b.curve)
+            return false;
+    }
+    return true;
 }
 
 float channelGain (float volume) noexcept

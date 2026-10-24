@@ -1,4 +1,5 @@
 #include "core/FlpImport.h"
+#include "core/Patcher.h"
 #include <filesystem>
 #include "core/EditorPolish.h"
 #include "core/FruityPhaser.h"
@@ -157,9 +158,9 @@ std::string resolveFlPath (const std::string& flPath, const FlPathRoots& roots)
     return flPath;
 }
 
-std::optional<EffectKind> effectForFlPlugin (const std::string& name)
+namespace
 {
-    static const std::pair<const char*, EffectKind> table[] = {
+const std::pair<const char*, EffectKind> flEffectTable[] = {
         { "Fruity Parametric EQ 2", EffectKind::parametricEq }, { "Fruity Parametric EQ", EffectKind::parametricEq },
         { "Fruity 7 Band EQ", EffectKind::parametricEq },
         { "Fruity Limiter", EffectKind::limiter },     { "Maximus", EffectKind::limiter },           { "Fruity Soft Clipper", EffectKind::distortion },
@@ -185,16 +186,29 @@ std::optional<EffectKind> effectForFlPlugin (const std::string& name)
         { "Vintage Phaser", EffectKind::vintagePhaser },     { "Fruity Squeeze", EffectKind::squeeze },
         { "Hardcore", EffectKind::hardcore },
         { "Multiband Delay", EffectKind::delay },
-    };
+};
+} // namespace
 
+std::optional<EffectKind> effectForFlPlugin (const std::string& name)
+{
     // old presets (FL 3) store the name with different casing ("Fruity delay 2")
     const auto wanted = lowercase (name);
 
-    for (const auto& [plugin, kind] : table)
+    for (const auto& [plugin, kind] : flEffectTable)
         if (wanted == lowercase (plugin))
             return kind;
 
     return std::nullopt;
+}
+
+// FL's own spelling of a native effect's name (Patcher nodes keep old casings: "Fruity delay 2", REA_rodada14 §1.3)
+static std::string canonicalFlEffectName (const std::string& name)
+{
+    const auto wanted = lowercase (name);
+    for (const auto& entry : flEffectTable)
+        if (wanted == lowercase (entry.first))
+            return entry.first;
+    return name;
 }
 
 // Range of an FL parameter's raw value (what FL's parameter setter stores and what pattern events 0xDF / 0xD8 hold),
@@ -1880,6 +1894,283 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         }
     };
 
+    // FL's Patcher as LYNX's real graph (REA_rodada141): every node (effects through the same converters as the mixer
+    // slots, instruments through a one-channel import), every cable (audio with its gain, notes, control values mapped
+    // to LYNX's parameters), the editor positions and the extra outputs
+    std::function<std::optional<PatcherDoc> (const std::vector<std::uint8_t>&, const flp::Channel*)> patcherFromFl;
+    int patcherSidechain = -1; // the last converted Patcher's side-chain pin: "7 Sidechain" = insert 7
+    patcherFromFl = [&] (const std::vector<std::uint8_t>& state, const flp::Channel* asChannel) -> std::optional<PatcherDoc> {
+        const auto graph = parsePatcher (state);
+        if (! graph)
+            return std::nullopt;
+        PatcherDoc doc;
+        std::vector<int> nodeOf (graph->nodes.size(), -1);
+        for (std::size_t n = 0; n < graph->nodes.size(); ++n)
+        {
+            const auto& fl = graph->nodes[n];
+            PatchNode node;
+            node.label = fl.label;
+            // FL's boxes are small: its positions spread to LYNX's node size (FL's dense graphs sit ~60 px apart)
+            constexpr float spreadX = 2.0f, spreadY = 1.6f;
+            node.x = fl.x * spreadX;
+            node.y = fl.y * spreadY;
+            if (fl.generator)
+            {
+                node.generator = true;
+                flp::Project mini;
+                mini.header = project.header;
+                mini.tempo = project.tempo;
+                flp::Channel ch;
+                if (asChannel != nullptr)
+                    ch = *asChannel;
+                ch.index = 0;
+                ch.pluginName = fl.plugin;
+                ch.pluginState = fl.state;
+                if (! fl.label.empty())
+                    ch.name = fl.label;
+                mini.channels = { ch };
+                auto miniOptions = options;
+                miniOptions.report = nullptr;
+                auto sub = importFlp (mini, miniOptions);
+                if (sub.channels.empty())
+                    continue;
+                node.channel = std::move (sub.channels.front());
+                node.channel.mixerTrack = 0;
+                node.channel.volume = 1.0f; // (FL's node has no channel volume: unity)
+                node.channel.pan = 0.0f;
+            }
+            else
+            {
+                std::optional<EffectSlot> made;
+                ForeignPlugin foreign;
+                if (lowercase (fl.plugin) == "patcher")
+                {
+                    if (auto inner = patcherFromFl (fl.state, nullptr))
+                    {
+                        made = makeEffectSlot (EffectKind::patcher);
+                        made->patcher = std::move (*inner);
+                    }
+                }
+                else if (fl.plugin == "Fruity Wrapper" && parseFlWrapper (fl.state, foreign))
+                {
+                    if (foreign.format == ForeignPlugin::Format::vst2 && effectForFlPlugin (foreign.name))
+                        made = effectFromFl (foreign.name, wrappedFruityState (foreign), song.bpm);
+                    else
+                    {
+                        made = makeEffectSlot (EffectKind::plugin);
+                        made->plugin.name = foreign.name;
+                        applyFlWrapperOptions (foreign, made->plugin);
+                        made->plugin.foreign = std::move (foreign);
+                    }
+                }
+                else if ((made = effectFromFl (canonicalFlEffectName (fl.plugin), fl.state, song.bpm, flData)))
+                    noteFallback (canonicalFlEffectName (fl.plugin), *made);
+                if (! made)
+                {
+                    // a pass-through in its place (controllers and visualizers have nothing to pass anyway)
+                    made = makeEffectSlot (EffectKind::utility);
+                    if (node.label.empty())
+                        node.label = fl.plugin;
+                    if (options.report != nullptr)
+                        ++options.report->partialEffects["Patcher: " + fl.plugin + " (no equivalent: passes the signal)"];
+                }
+                if ((fl.flags & 4) != 0)
+                    made->enabled = false;
+                node.effect = std::move (*made);
+                // the extra outputs FL's splitters have (bands / difference) as LYNX bus heads
+                for (const auto& cable : graph->cables)
+                    for (const auto& [id, port] : graph->ports)
+                        if (id == cable.source && port.node == (int) n && ! port.input && port.kind == 0 && port.index > 0
+                            && std::none_of (node.busHeads.begin(), node.busHeads.end(), [&] (const PatchNode::BusHead& h) { return h.bus == port.index; }))
+                        {
+                            const auto head = patcherBranchHead (canonicalFlEffectName (fl.plugin), fl.state, port.index);
+                            if (! head.valid)
+                                continue;
+                            PatchNode::BusHead h;
+                            h.bus = port.index;
+                            h.head = head.slot;
+                            h.gain = head.gain;
+                            node.busHeads.push_back (std::move (h));
+                        }
+            }
+            nodeOf[n] = (int) doc.nodes.size();
+            doc.nodes.push_back (std::move (node));
+        }
+        if (graph->ioPlaced)
+        {
+            doc.inputX = graph->inputX * 2.0f;
+            doc.inputY = graph->inputY * 1.6f;
+            doc.outputX = graph->outputX * 2.0f;
+            doc.outputY = graph->outputY * 1.6f;
+        }
+        else if (! doc.nodes.empty()) // around the nodes
+        {
+            float lo = doc.nodes.front().x, hi = lo, mid = 0.0f;
+            for (const auto& n : doc.nodes)
+            {
+                lo = std::min (lo, n.x);
+                hi = std::max (hi, n.x);
+                mid += n.y / (float) doc.nodes.size();
+            }
+            doc.inputX = lo - 160.0f;
+            doc.outputX = hi + 160.0f;
+            doc.inputY = doc.outputY = mid;
+        }
+
+        auto portOf = [&] (std::uint64_t id) -> const PatcherPort* {
+            for (const auto& [pid, port] : graph->ports)
+                if (pid == id)
+                    return &port;
+            return nullptr;
+        };
+        for (const auto& c : graph->cables)
+        {
+            const auto* src = portOf (c.source);
+            const auto* dst = portOf (c.destination);
+            if (src == nullptr || dst == nullptr)
+                continue;
+            PatchWire w;
+            w.enabled = ! c.disabled;
+            w.gain = std::isfinite (c.gain) ? c.gain : 1.0f;
+            if (src->node >= 0)
+            {
+                if ((std::size_t) src->node >= nodeOf.size() || nodeOf[(std::size_t) src->node] < 0)
+                    continue;
+                w.from = nodeOf[(std::size_t) src->node];
+            }
+            if (dst->node >= 0)
+            {
+                if ((std::size_t) dst->node >= nodeOf.size() || nodeOf[(std::size_t) dst->node] < 0)
+                    continue;
+                w.to = nodeOf[(std::size_t) dst->node];
+            }
+            if (c.kind == 0)
+            {
+                w.kind = PatchWire::Kind::audio;
+                w.fromPort = src->node < 0 ? (src->index > 0 ? 1 : 0) : std::max (0, src->index);
+                if (src->node < 0 && src->index > 0)
+                    if (const auto track = std::atoi (src->name.c_str()); track > 0 && track < maxMixerTracks)
+                        patcherSidechain = track;
+                w.toPort = dst->node < 0 ? std::max (0, dst->index) : std::min (1, std::max (0, dst->index));
+                if (w.to == patchToHost && w.toPort > 0) // an extra output: "Insert N" names its insert
+                {
+                    while ((int) doc.outputTracks.size() < w.toPort)
+                        doc.outputTracks.push_back (-1);
+                    int insertNumber = -1;
+                    if (dst->name.rfind ("Insert ", 0) == 0)
+                        insertNumber = std::atoi (dst->name.c_str() + 7);
+                    if (insertNumber > 0 && insertNumber < maxMixerTracks)
+                        doc.outputTracks[(std::size_t) w.toPort - 1] = insertNumber;
+                }
+            }
+            else if (c.kind == 1)
+            {
+                w.kind = PatchWire::Kind::midi;
+                if (w.from != patchFromHost)
+                    continue; // (MIDI out of a node: not passed yet)
+                if (w.to == patchToHost) // "MIDI port N": the notes go to the plugins on that MIDI port
+                {
+                    const auto number = dst->name.rfind ("MIDI port ", 0) == 0 ? std::atoi (dst->name.c_str() + 10) : dst->index;
+                    if (number < 0 || number > 255)
+                        continue;
+                    w.toPort = number;
+                }
+            }
+            else
+            {
+                w.kind = PatchWire::Kind::control;
+                if (w.from < 0 || w.to < 0)
+                    continue; // (the Patcher's own published parameters)
+                w.fromPort = src->index >= 0x10000000 ? src->index - 0x10000000 : std::max (0, src->index);
+                const auto& source = doc.nodes[(std::size_t) w.from];
+                if (! source.generator && source.effect.kind == EffectKind::peakController) // FL: peak, LFO, peak + LFO
+                    w.fromPort = w.fromPort == 0 ? 1 : w.fromPort == 1 ? 2 : 0;
+                if (w.fromPort >= patcher::nodePorts (source).controlOuts)
+                {
+                    // the source has no such output in LYNX (an X-Y controller, a Control Surface…): its target keeps the
+                    // value FL saved instead of being pinned to 0
+                    if (options.report != nullptr)
+                        ++options.report->partialEffects["Patcher: control from " + graph->nodes[(std::size_t) src->node].plugin + " (not reproduced)"];
+                    continue;
+                }
+                const auto& target = doc.nodes[(std::size_t) w.to];
+                const auto& flTarget = graph->nodes[(std::size_t) dst->node];
+                if (target.generator)
+                {
+                    if (target.channel.instrument != InstrumentKind::plugin)
+                        continue;
+                    w.toPort = dst->index;
+                }
+                else if (target.effect.kind == EffectKind::plugin)
+                    w.toPort = dst->index;
+                else if (const auto map = effectParamFromFl (canonicalFlEffectName (flTarget.plugin), dst->index))
+                {
+                    w.toPort = map->param;
+                    if (map->convert)
+                    {
+                        constexpr int points = 33;
+                        for (int k = 0; k < points; ++k)
+                            w.curve.push_back (std::clamp (map->convert ((float) k / (float) (points - 1)), 0.0f, 1.0f));
+                    }
+                }
+                else
+                {
+                    if (options.report != nullptr)
+                        ++options.report->partialEffects["Patcher: control of " + flTarget.plugin + " parameter " + std::to_string (dst->index)
+                                                         + " (not mapped)"];
+                    continue;
+                }
+            }
+            doc.wires.push_back (std::move (w));
+        }
+
+        // the Patcher's published parameters (record 1100): Patcher parameter k → the node's parameter behind that port
+        for (const auto& [portId, k] : graph->exposed)
+        {
+            const auto* port = portOf (portId);
+            if (port == nullptr || k < 0 || k > 4096 || port->node < 0 || (std::size_t) port->node >= nodeOf.size() || nodeOf[(std::size_t) port->node] < 0
+                || port->kind != 2 || ! port->input)
+                continue;
+            PatchParam p;
+            p.node = nodeOf[(std::size_t) port->node];
+            const auto& target = doc.nodes[(std::size_t) p.node];
+            const auto& flTarget = graph->nodes[(std::size_t) port->node];
+            if (target.generator ? target.channel.instrument == InstrumentKind::plugin : target.effect.kind == EffectKind::plugin)
+                p.param = port->index;
+            else if (const auto map = target.generator ? std::nullopt : effectParamFromFl (canonicalFlEffectName (flTarget.plugin), port->index))
+            {
+                p.param = map->param;
+                if (map->convert)
+                    for (int i = 0; i < 33; ++i)
+                        p.curve.push_back (std::clamp (map->convert ((float) i / 32.0f), 0.0f, 1.0f));
+            }
+            else
+                continue;
+            p.name = patcher::nodeName (target) + " " + std::to_string (port->index + 1);
+            if ((int) doc.published.size() <= k)
+                doc.published.resize ((std::size_t) k + 1);
+            doc.published[(std::size_t) k] = std::move (p);
+        }
+        return doc;
+    };
+
+    // generator Patchers: the channel becomes the graph (the main generator stays in it as the import made it)
+    for (const auto& c : input.channels)
+        if (lowercase (c.pluginName) == "patcher")
+            if (const auto mapped = channelMap.find (c.index); mapped != channelMap.end() && mapped->second < (int) song.channels.size())
+                if (auto doc = patcherFromFl (c.pluginState, &c); doc && std::any_of (doc->nodes.begin(), doc->nodes.end(), [] (const PatchNode& n) {
+                                                                      return n.generator;
+                                                                  }))
+                {
+                    auto& def = song.channels[(std::size_t) mapped->second];
+                    def.instrument = InstrumentKind::patcher;
+                    def.patcher = std::move (*doc);
+                    def.plugin = {};
+                    def.pluginState.clear();
+                    if (options.report != nullptr)
+                        ++options.report->converted["Patcher (graph)"];
+                }
+
     for (const auto& insert : project.mixer)
     {
         if (insert.index < 0 || insert.index >= tracks)
@@ -1920,6 +2211,21 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                         for (const auto& note : conversion->notes)
                             ++options.report->partialEffects[note];
                     }
+                    continue;
+                }
+
+            // Patcher (REA_rodada141): the slot holds FL's whole graph, run as it is
+            if (lowercase (original.plugin) == "patcher" && (int) track.effects.size() < maxEffectSlots)
+                if (patcherSidechain = -1; auto doc = patcherFromFl (original.state, nullptr))
+                {
+                    auto slot = makeEffectSlot (EffectKind::patcher);
+                    slot.patcher = std::move (*doc);
+                    if (patcherSidechain > 0 && patcherSidechain < tracks && patcherSidechain != insert.index)
+                        slot.sidechain = patcherSidechain;
+                    effectSlotMap.insert ({ { insert.index, original.index }, { (int) track.effects.size(), original.plugin } });
+                    track.effects.push_back (std::move (slot));
+                    if (options.report != nullptr)
+                        ++options.report->converted["Patcher (graph)"];
                     continue;
                 }
 
@@ -2331,6 +2637,12 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                 {
                     // the exact Reeverbs keep FL's controls as (raw − min) / range: FL's normalised value as is
                     if (target.param < 0 || target.param >= (fx.kind == EffectKind::reeverb2 ? 15 : reeverb1ParamCount))
+                        target.kind = AutomationTargetKind::none;
+                }
+                else if (target.kind == AutomationTargetKind::effectParam && fx.kind == EffectKind::patcher)
+                {
+                    // the Patcher's own parameter k: one it publishes (REA_rodada141), FL's normalised value as is
+                    if (target.param < 0 || target.param >= (int) fx.patcher.published.size() || fx.patcher.published[(std::size_t) target.param].node < 0)
                         target.kind = AutomationTargetKind::none;
                 }
                 else if (target.kind == AutomationTargetKind::effectParam && fx.kind != EffectKind::plugin)

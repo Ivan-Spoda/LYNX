@@ -1,5 +1,6 @@
 #include "engine/AudioEngine.h"
 
+#include "core/Patcher.h"
 #include "core/ValueMath.h"
 #include "platform/Paths.h"
 #include "engine/FlStudio.h"
@@ -1399,6 +1400,26 @@ void AudioEngine::prepareFlpImport (const juce::File& file, const std::map<std::
             for (const auto& fx : out.song.mixer[t].effects)
                 if (fx.kind == EffectKind::plugin && fx.plugin.foreign.format != ForeignPlugin::Format::none)
                     out.uses.push_back ({ fx.plugin.foreign.name, userOf (out.song, t), false });
+        // (and the ones inside Patchers, REA_rodada141)
+        std::function<void (const PatcherDoc&, const std::string&)> patcherUses = [&] (const PatcherDoc& doc, const std::string& user) {
+            for (const auto& n : doc.nodes)
+            {
+                const auto& ref = n.generator ? n.channel.plugin : n.effect.plugin;
+                if (ref.foreign.format != ForeignPlugin::Format::none)
+                    out.uses.push_back ({ ref.foreign.name, user + " (Patcher)", n.generator });
+                if (n.generator && n.channel.instrument == InstrumentKind::patcher)
+                    patcherUses (n.channel.patcher, user);
+                if (! n.generator && n.effect.kind == EffectKind::patcher)
+                    patcherUses (n.effect.patcher, user);
+            }
+        };
+        for (const auto& c : out.song.channels)
+            if (c.instrument == InstrumentKind::patcher)
+                patcherUses (c.patcher, c.name);
+        for (std::size_t t = 0; t < out.song.mixer.size(); ++t)
+            for (const auto& fx : out.song.mixer[t].effects)
+                if (fx.kind == EffectKind::patcher)
+                    patcherUses (fx.patcher, userOf (out.song, t));
 
         // the samples, decoded now (in parallel, off the message thread) so building the rack only finds them ready
         std::vector<std::string> paths;
@@ -1968,6 +1989,28 @@ void AudioEngine::setPluginsRenderMode (bool offline)
         for (std::size_t s = 0; s < song.mixer[t].effects.size(); ++s)
             if (auto* p = dynamic_cast<PluginEffect*> (getEffect ((int) t, (int) s).get()))
                 p->setRenderMode (offline);
+
+    // the plugins inside Patchers (REA_rodada141)
+    std::function<void (patcher::Graph*)> graphMode = [&] (patcher::Graph* graph) {
+        if (graph == nullptr)
+            return;
+        for (int n = 0; n < graph->nodeCount(); ++n)
+        {
+            auto effect = graph->effectAt (n);
+            auto instrument = graph->instrumentAt (n);
+            if (auto* p = dynamic_cast<PluginEffect*> (effect.get()))
+                p->setRenderMode (offline);
+            if (auto* p = dynamic_cast<PluginInstrument*> (instrument.get()))
+                p->setRenderMode (offline);
+            graphMode (patcher::graphOf (effect.get()));
+            graphMode (patcher::graphOf (instrument.get()));
+        }
+    };
+    for (std::size_t i = 0; i < song.channels.size(); ++i)
+        graphMode (patcher::graphOf (getChannelInstrument ((int) i).get()));
+    for (std::size_t t = 0; t < song.mixer.size(); ++t)
+        for (std::size_t s = 0; s < song.mixer[t].effects.size(); ++s)
+            graphMode (patcher::graphOf (getEffect ((int) t, (int) s).get()));
 }
 
 void AudioEngine::capturePluginStates()
@@ -1983,6 +2026,41 @@ void AudioEngine::capturePluginStates()
             if (auto* p = dynamic_cast<PluginEffect*> (getEffect ((int) t, (int) s).get()))
                 if (auto state = p->captureState())
                     song.mixer[t].effects[s].plugin.state = std::move (*state);
+
+    // the plugins inside Patchers (REA_rodada141), nested ones too
+    std::function<void (PatcherDoc&, patcher::Graph*)> captureGraph = [&] (PatcherDoc& doc, patcher::Graph* graph) {
+        if (graph == nullptr)
+            return;
+        for (int n = 0; n < (int) doc.nodes.size() && n < graph->nodeCount(); ++n)
+        {
+            auto& node = doc.nodes[(std::size_t) n];
+            if (node.generator)
+            {
+                auto instrument = graph->instrumentAt (n);
+                if (auto* p = dynamic_cast<PluginInstrument*> (instrument.get()))
+                    if (auto state = p->captureState())
+                        node.channel.plugin.state = std::move (*state);
+                if (node.channel.instrument == InstrumentKind::patcher)
+                    captureGraph (node.channel.patcher, patcher::graphOf (instrument.get()));
+            }
+            else
+            {
+                auto effect = graph->effectAt (n);
+                if (auto* p = dynamic_cast<PluginEffect*> (effect.get()))
+                    if (auto state = p->captureState())
+                        node.effect.plugin.state = std::move (*state);
+                if (node.effect.kind == EffectKind::patcher)
+                    captureGraph (node.effect.patcher, patcher::graphOf (effect.get()));
+            }
+        }
+    };
+    for (std::size_t i = 0; i < song.channels.size(); ++i)
+        if (song.channels[i].instrument == InstrumentKind::patcher)
+            captureGraph (song.channels[i].patcher, patcher::graphOf (getChannelInstrument ((int) i).get()));
+    for (std::size_t t = 0; t < song.mixer.size(); ++t)
+        for (std::size_t s = 0; s < song.mixer[t].effects.size(); ++s)
+            if (song.mixer[t].effects[s].kind == EffectKind::patcher)
+                captureGraph (song.mixer[t].effects[s].patcher, patcher::graphOf (getEffect ((int) t, (int) s).get()));
 
     lastPublishedShape.song.channels = song.channels;
     lastPublishedShape.song.mixer = song.mixer;

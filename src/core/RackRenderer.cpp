@@ -1,5 +1,6 @@
 #include "core/RackRenderer.h"
 #include "core/MidiControls.h"
+#include "core/Patcher.h"
 #include "core/LoadTrace.h"
 #include "core/DynamicsSuite.h"
 #include "core/MixSuite.h"
@@ -96,6 +97,151 @@ std::unique_ptr<const RackState> RackState::build (Song song,
     return build (std::move (song), previous, sampleRate, factories);
 }
 
+namespace
+{
+// A channel's instrument, built new (UI thread)
+std::shared_ptr<Instrument> buildInstrument (const ChannelDef& channel, double sampleRate, double bpm, const RackState::Factories& factories)
+{
+    const auto& samples = factories.samples;
+    const auto kind = channel.instrument;
+
+    if (kind == InstrumentKind::plugin)
+    {
+        std::shared_ptr<Instrument> instrument;
+
+        if (factories.pluginInstruments && ! channel.plugin.id.empty())
+            instrument = factories.pluginInstruments (channel.plugin, sampleRate);
+
+        return instrument != nullptr ? instrument : std::make_shared<SilentInstrument>();
+    }
+
+    // FL Keys: its wavetable built from the channel's files
+    if (kind == InstrumentKind::flkeys)
+    {
+        std::shared_ptr<Instrument> instrument = flkeys::makeFlKeysInstrument (flKeysWavetable (channel, samples));
+        instrument->prepare (sampleRate);
+        instrument->configure (channel, bpm);
+        return instrument;
+    }
+
+    // DirectWave (REA_rodada72): the zones' samples as the plugin holds them
+    if (kind == InstrumentKind::directwave)
+    {
+        const auto formats = dw::decodeFormats (channel.modelParams);
+        std::vector<std::shared_ptr<const dw::ZoneSamples>> zs;
+        for (std::size_t z = 0; z < channel.zones.size(); ++z)
+        {
+            std::shared_ptr<const dw::ZoneSamples> s;
+            if (samples && ! channel.zones[z].path.empty())
+                if (const auto data = samples (channel.zones[z].path))
+                    s = dw::zoneSamples (*data, z < formats.size() && formats[z]);
+            zs.push_back (std::move (s));
+        }
+        std::shared_ptr<Instrument> instrument = dw::makeDirectWaveInstrument (std::move (zs));
+        instrument->prepare (sampleRate);
+        instrument->configure (channel, bpm);
+        return instrument;
+    }
+
+    // multi-sample sampler: one zone per sample (DirectWave, FPC layers...)
+    if (kind == InstrumentKind::sampler && ! channel.zones.empty())
+    {
+        const loadtrace::Scope timing ("rack_zoned");
+        std::vector<LoadedZone> zones;
+
+        for (const auto& z : channel.zones)
+            zones.push_back ({ z, samples ? samples (z.path) : nullptr });
+
+        std::shared_ptr<Instrument> instrument = makeZonedSampler (std::move (zones));
+        instrument->prepare (sampleRate);
+        instrument->configure (channel, bpm);
+        return instrument;
+    }
+
+    std::shared_ptr<const SampleData> sample;
+
+    if ((kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip || kind == InstrumentKind::granulizer) && samples
+        && ! channel.samplePath.empty())
+        sample = samples (channel.samplePath);
+
+    // pitch-preserving stretch: the sample comes already stretched to the current tempo
+    if (sample != nullptr && kind != InstrumentKind::granulizer && channel.sampler.keepPitch && channel.sampler.stretchBeats > 0.0f
+        && factories.stretchedSamples
+        && sample->frames() > 0)
+    {
+        const auto target = channel.sampler.stretchBeats * 60.0 / std::max (1.0, bpm);
+        const auto ratio = target / ((double) sample->frames() / sample->sampleRate);
+
+        if (auto stretched = factories.stretchedSamples (channel.samplePath, ratio))
+            sample = std::move (stretched);
+    }
+
+    const loadtrace::Scope timing ("rack_instruments");
+    std::shared_ptr<Instrument> instrument = makeInstrument (kind, std::move (sample));
+    instrument->prepare (sampleRate);
+    instrument->configure (channel, bpm);
+    return instrument;
+}
+
+// A slot's effect, built new (UI thread)
+std::shared_ptr<Effect> buildEffect (const EffectSlot& slot, double sampleRate, const RackState::Factories& factories)
+{
+    const auto kind = slot.kind;
+    std::shared_ptr<Effect> effect;
+
+    if (kind == EffectKind::plugin)
+    {
+        if (factories.pluginEffects && ! slot.plugin.id.empty())
+            effect = factories.pluginEffects (slot.plugin, sampleRate);
+
+        if (effect == nullptr)
+            effect = std::make_shared<BypassEffect>();
+    }
+    else if ((kind == EffectKind::newtone || kind == EffectKind::newtime))
+    {
+        // Newtone / Newtime: their source sample (loaded off the audio thread), REA_rodada73
+        // (Newtone: its note edits rendered by LYNX's engine, REA_rodada95)
+        effect = newtonefx::make (factories.samples && ! slot.samplePath.empty() ? factories.samples (slot.samplePath) : nullptr,
+                                  slot.state);
+        effect->prepare (sampleRate);
+    }
+    else
+    {
+        const loadtrace::Scope timing ("rack_builtin_fx"); // (round 112: what the open spends on LYNX's own effects)
+        effect = makeEffect (slot);
+        effect->prepare (sampleRate);
+    }
+
+    return effect;
+}
+
+// What a Patcher builds its nodes with: the same builders as the rack's channels and slots
+patcher::Factories patcherFactories (double sampleRate, double bpm, const RackState::Factories& factories)
+{
+    patcher::Factories f;
+    f.effect = [sampleRate, bpm, factories] (const EffectSlot& slot) -> std::shared_ptr<Effect> {
+        if (slot.kind == EffectKind::patcher)
+        {
+            std::shared_ptr<Effect> e = patcher::makeEffect (slot, sampleRate, patcherFactories (sampleRate, bpm, factories));
+            e->prepare (sampleRate);
+            return e;
+        }
+        return buildEffect (slot, sampleRate, factories);
+    };
+    f.instrument = [sampleRate, bpm, factories] (const ChannelDef& channel) -> std::shared_ptr<Instrument> {
+        if (channel.instrument == InstrumentKind::patcher)
+        {
+            std::shared_ptr<Instrument> i = patcher::makeInstrument (channel, sampleRate, patcherFactories (sampleRate, bpm, factories));
+            i->configure (channel, bpm);
+            return i;
+        }
+        return buildInstrument (channel, sampleRate, bpm, factories);
+    };
+    return f;
+}
+
+} // namespace
+
 std::unique_ptr<const RackState> RackState::build (Song song,
                                                    const RackState* previous,
                                                    double sampleRate,
@@ -112,7 +258,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
         const auto kind = channel.instrument;
 
         if (previous != nullptr && i < previous->song.channels.size() && i < previous->instruments.size()
-            && previous->song.channels[i].instrument == kind
+            && previous->song.channels[i].instrument == kind && kind != InstrumentKind::patcher
             && (kind != InstrumentKind::granulizer || previous->song.channels[i].samplePath == channel.samplePath)
             && (kind != InstrumentKind::directwave
                 || (previous->song.channels[i].zones == channel.zones && previous->song.channels[i].modelParams == channel.modelParams
@@ -133,86 +279,23 @@ std::unique_ptr<const RackState> RackState::build (Song song,
             continue;
         }
 
-        if (kind == InstrumentKind::plugin)
+        // FL's Patcher as a generator (REA_rodada141): same structure keeps the running graph (it takes the values)
+        if (kind == InstrumentKind::patcher)
         {
-            std::shared_ptr<Instrument> instrument;
-
-            if (factories.pluginInstruments && ! channel.plugin.id.empty())
-                instrument = factories.pluginInstruments (channel.plugin, sampleRate);
-
-            state->instruments.push_back (instrument != nullptr ? instrument : std::make_shared<SilentInstrument>());
-            continue;
-        }
-
-        // FL Keys: its wavetable built from the channel's files
-        if (kind == InstrumentKind::flkeys)
-        {
-            std::shared_ptr<Instrument> instrument = flkeys::makeFlKeysInstrument (flKeysWavetable (channel, samples));
-            instrument->prepare (sampleRate);
-            instrument->configure (channel, song.bpm);
-            state->instruments.push_back (std::move (instrument));
-            continue;
-        }
-
-        // DirectWave (REA_rodada72): the zones' samples as the plugin holds them
-        if (kind == InstrumentKind::directwave)
-        {
-            const auto formats = dw::decodeFormats (channel.modelParams);
-            std::vector<std::shared_ptr<const dw::ZoneSamples>> zs;
-            for (std::size_t z = 0; z < channel.zones.size(); ++z)
+            const auto* old = previous != nullptr && i < previous->instruments.size() ? previous->instruments[i].get() : nullptr;
+            if (old != nullptr && previous->song.channels[i].instrument == kind && previous->sampleRate == sampleRate
+                && patcher::sameStructure (previous->song.channels[i].patcher, channel.patcher))
             {
-                std::shared_ptr<const dw::ZoneSamples> s;
-                if (samples && ! channel.zones[z].path.empty())
-                    if (const auto data = samples (channel.zones[z].path))
-                        s = dw::zoneSamples (*data, z < formats.size() && formats[z]);
-                zs.push_back (std::move (s));
+                state->instruments.push_back (previous->instruments[i]);
+                state->instruments.back()->configure (channel, song.bpm);
+                continue;
             }
-            std::shared_ptr<Instrument> instrument = dw::makeDirectWaveInstrument (std::move (zs));
-            instrument->prepare (sampleRate);
-            instrument->configure (channel, song.bpm);
-            state->instruments.push_back (std::move (instrument));
+            state->instruments.push_back (patcher::makeInstrument (channel, sampleRate, patcherFactories (sampleRate, song.bpm, factories), old));
+            state->instruments.back()->configure (channel, song.bpm);
             continue;
         }
 
-        // multi-sample sampler: one zone per sample (DirectWave, FPC layers...)
-        if (kind == InstrumentKind::sampler && ! channel.zones.empty())
-        {
-            const loadtrace::Scope timing ("rack_zoned");
-            std::vector<LoadedZone> zones;
-
-            for (const auto& z : channel.zones)
-                zones.push_back ({ z, samples ? samples (z.path) : nullptr });
-
-            std::shared_ptr<Instrument> instrument = makeZonedSampler (std::move (zones));
-            instrument->prepare (sampleRate);
-            instrument->configure (channel, song.bpm);
-            state->instruments.push_back (std::move (instrument));
-            continue;
-        }
-
-        std::shared_ptr<const SampleData> sample;
-
-        if ((kind == InstrumentKind::sampler || kind == InstrumentKind::audioClip || kind == InstrumentKind::granulizer) && samples
-            && ! channel.samplePath.empty())
-            sample = samples (channel.samplePath);
-
-        // pitch-preserving stretch: the sample comes already stretched to the current tempo
-        if (sample != nullptr && kind != InstrumentKind::granulizer && channel.sampler.keepPitch && channel.sampler.stretchBeats > 0.0f
-            && factories.stretchedSamples
-            && sample->frames() > 0)
-        {
-            const auto target = channel.sampler.stretchBeats * 60.0 / std::max (1.0, song.bpm);
-            const auto ratio = target / ((double) sample->frames() / sample->sampleRate);
-
-            if (auto stretched = factories.stretchedSamples (channel.samplePath, ratio))
-                sample = std::move (stretched);
-        }
-
-        const loadtrace::Scope timing ("rack_instruments");
-        std::shared_ptr<Instrument> instrument = makeInstrument (kind, std::move (sample));
-        instrument->prepare (sampleRate);
-        instrument->configure (channel, song.bpm);
-        state->instruments.push_back (std::move (instrument));
+        state->instruments.push_back (buildInstrument (channel, sampleRate, song.bpm, factories));
     }
 
     state->effects.resize (song.mixer.size());
@@ -227,7 +310,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
 
             if (previous != nullptr && t < previous->song.mixer.size() && t < previous->effects.size()
                 && i < previous->song.mixer[t].effects.size() && i < previous->effects[t].size()
-                && previous->song.mixer[t].effects[i].kind == kind
+                && previous->song.mixer[t].effects[i].kind == kind && kind != EffectKind::patcher
                 && (kind != EffectKind::parallel || sameContainer (previous->song.mixer[t].effects[i], slots[i])) // children are built in
                 && previous->song.mixer[t].effects[i].samplePath == slots[i].samplePath
                 && (kind != EffectKind::plugin
@@ -240,32 +323,27 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                 continue;
             }
 
-            std::shared_ptr<Effect> effect;
-
-            if (kind == EffectKind::plugin)
+            // FL's Patcher (REA_rodada141): same structure keeps the running graph (it takes the values)
+            if (kind == EffectKind::patcher)
             {
-                if (factories.pluginEffects && ! slots[i].plugin.id.empty())
-                    effect = factories.pluginEffects (slots[i].plugin, sampleRate);
-
-                if (effect == nullptr)
-                    effect = std::make_shared<BypassEffect>();
-            }
-            else if ((kind == EffectKind::newtone || kind == EffectKind::newtime))
-            {
-                // Newtone / Newtime: their source sample (loaded off the audio thread), REA_rodada73
-                // (Newtone: its note edits rendered by LYNX's engine, REA_rodada95)
-                effect = newtonefx::make (factories.samples && ! slots[i].samplePath.empty() ? factories.samples (slots[i].samplePath) : nullptr,
-                                          slots[i].state);
+                const auto* old = previous != nullptr && t < previous->effects.size() && i < previous->effects[t].size()
+                                          && i < previous->song.mixer[t].effects.size() && previous->song.mixer[t].effects[i].kind == kind
+                                      ? previous->effects[t][i].get()
+                                      : nullptr;
+                if (old != nullptr && previous->sampleRate == sampleRate
+                    && patcher::sameStructure (previous->song.mixer[t].effects[i].patcher, slots[i].patcher)
+                    && patcher::acceptValues (previous->effects[t][i].get(), slots[i]))
+                {
+                    state->effects[t].push_back (previous->effects[t][i]);
+                    continue;
+                }
+                std::shared_ptr<Effect> effect = patcher::makeEffect (slots[i], sampleRate, patcherFactories (sampleRate, song.bpm, factories), old);
                 effect->prepare (sampleRate);
-            }
-            else
-            {
-                const loadtrace::Scope timing ("rack_builtin_fx"); // (round 112: what the open spends on LYNX's own effects)
-                effect = makeEffect (slots[i]);
-                effect->prepare (sampleRate);
+                state->effects[t].push_back (std::move (effect));
+                continue;
             }
 
-            state->effects[t].push_back (std::move (effect));
+            state->effects[t].push_back (buildEffect (slots[i], sampleRate, factories));
         }
     }
 
@@ -479,6 +557,23 @@ void RackState::buildMidiRoutes()
     hasMidiRoutes = false;
     for (std::size_t c = 0; c < count; ++c)
     {
+        // a generator Patcher's "MIDI port N" outputs (REA_rodada141): its notes reach the plugins on those ports, as a
+        // MIDI Out on MIDI channel 1 would send them
+        if (song.channels[c].instrument == InstrumentKind::patcher)
+        {
+            for (const auto& w : song.channels[c].patcher.wires)
+                if (w.kind == PatchWire::Kind::midi && w.enabled && w.from == patchFromHost && w.to == patchToHost)
+                    for (std::size_t t = 0; t < count; ++t)
+                        if (t != c && song.channels[t].instrument == InstrumentKind::plugin && song.channels[t].plugin.midiInPort == w.toPort
+                            && std::find (midiTargets[c].begin(), midiTargets[c].end(), (int) t) == midiTargets[c].end())
+                        {
+                            midiOutChannel[c] = 0;
+                            midiTargets[c].push_back ((int) t);
+                            midiSources[t].push_back ((int) c);
+                            hasMidiRoutes = true;
+                        }
+            continue;
+        }
         if (song.channels[c].instrument != InstrumentKind::midiOut)
             continue;
         const auto settings = midictl::parseMidiOut (song.channels[c].pluginState);
@@ -552,6 +647,7 @@ void RackState::buildAutomationTables()
             case AutomationTargetKind::channelParam:
                 // VST plugins and the exact engines that take FL's parameter automation (FL Slayer: REA_rodada79)
                 if (channelOk && (song.channels[(std::size_t) t.index].instrument == InstrumentKind::plugin
+                                  || song.channels[(std::size_t) t.index].instrument == InstrumentKind::patcher // (its published parameters)
                                   || song.channels[(std::size_t) t.index].instrument == InstrumentKind::slayer
                                   || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::midiOut && midictl::isMidiParam (t.param))))
                     pluginParams.push_back ({ a, t.index, 0, 0, t.param });
@@ -565,7 +661,8 @@ void RackState::buildAutomationTables()
 
                 if (! slotOk)
                     used = false;
-                else if (song.mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].kind == EffectKind::plugin)
+                else if (song.mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].kind == EffectKind::plugin
+                         || song.mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].kind == EffectKind::patcher) // (its published parameters)
                     pluginParams.push_back ({ a, -1, t.index, t.slot, t.param });
                 else if (song.mixer[(std::size_t) t.index].effects[(std::size_t) t.slot].isSubstitute())
                     used = false; // the missing plugin's parameters: kept for when it is back, they don't drive the substitute
@@ -1024,6 +1121,7 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
         state.instruments[(std::size_t) i]->setSongPosition (chunkTick);
 
     auto& instrument = *state.instruments[(std::size_t) i];
+    instrument.beginChunk (n); // (extra outputs: a generator Patcher's, REA_rodada141)
 
     // idle channel, no notes in this chunk and no PDC: nothing to do (neither clear nor sum into the mixer)
     const auto hasDelay = (std::size_t) i < state.channelDelays.size() && state.channelDelays[(std::size_t) i] != nullptr;
@@ -1257,7 +1355,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
         // after 4 s; built-ins after 1 s, which is well beyond their tail)
         const auto key = (std::size_t) track * maxEffectSlots + i;
         const auto isPlugin = slots[i].kind == EffectKind::plugin;
-        const auto hold = (int) (sampleRate * (isPlugin ? 4.0 : 1.0));
+        const auto hold = (int) (sampleRate * (isPlugin || slots[i].kind == EffectKind::patcher ? 4.0 : 1.0)); // (a Patcher may hold plugins)
 
         // (not Gross Beat: its buffer must keep recording the silence it may play back later, as in FL)
         // (nor Newtone / Newtime: in slave mode they play their sample whatever the input)
@@ -1309,7 +1407,7 @@ void RackRenderer::runEffects (const RackState& state, int track, int n) noexcep
                                &units->effectMaxNs[std::min (key, units->effectNs.size() - 1)]);
 
         // Fruity Send: what it sends goes to its own buffer, pulled by the destination insert (processed later)
-        if (slots[i].kind == EffectKind::fruitySend)
+        if (slots[i].kind == EffectKind::fruitySend || slots[i].kind == EffectKind::patcher)
         {
             const auto tap = (std::size_t) track < state.slotTap.size() && i < state.slotTap[(std::size_t) track].size()
                                  ? state.slotTap[(std::size_t) track][i]
@@ -1758,6 +1856,27 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         {
             dl[k] += sl[k];
             dr[k] += sr[k];
+        }
+
+        // extra outputs to other inserts (a generator Patcher's, REA_rodada141)
+        if ((std::size_t) c < state.instruments.size() && state.instruments[(std::size_t) c] != nullptr)
+        {
+            const auto& instrument = *state.instruments[(std::size_t) c];
+            for (int k = 0; k < instrument.auxOutputCount(); ++k)
+            {
+                const auto target = instrument.auxOutputTrack (k);
+                const auto* al = instrument.auxOutputData (k, 0);
+                const auto* ar = instrument.auxOutputData (k, 1);
+                if (target < 0 || target >= tracks || al == nullptr || ar == nullptr)
+                    continue;
+                auto* tl = trackBuffer (target, 0);
+                auto* tr = trackBuffer (target, 1);
+                for (int x = 0; x < numSamples; ++x)
+                {
+                    tl[x] += al[x];
+                    tr[x] += ar[x];
+                }
+            }
         }
     }
 

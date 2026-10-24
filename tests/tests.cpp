@@ -38,6 +38,7 @@
 #include "core/FlEffects.h"
 #include "core/ProjectContents.h"
 #include "core/FlPatcher.h"
+#include "core/Patcher.h"
 #include "core/FlSamplers.h"
 #include "core/FlSynths.h"
 #include "core/Inflate.h"
@@ -1445,9 +1446,20 @@ TEST (flp_real_files)
                         flangerSlots += slot.plugin == "Fruity Flanger";
                         phaserSlots += slot.plugin == "Fruity Phaser";
                     }
+                // (the slots and the nodes of the Patcher graphs, as when Patchers were flattened into slots)
+                std::vector<const lynx::EffectSlot*> allSlots;
+                std::function<void (const lynx::EffectSlot&)> collect = [&] (const lynx::EffectSlot& fx) {
+                    allSlots.push_back (&fx);
+                    for (const auto& n : fx.patcher.nodes)
+                        if (! n.generator)
+                            collect (n.effect);
+                };
                 for (const auto& t : full.mixer)
                     for (const auto& fx : t.effects)
+                        collect (fx);
+                for (const auto* slotPointer : allSlots)
                     {
+                        const auto& fx = *slotPointer;
                         if (fx.kind == lynx::EffectKind::maximus)
                         {
                             const auto blob = lynx::maximusfx::unpack (fx.state);
@@ -2212,8 +2224,8 @@ TEST (flp_real_files)
     std::printf ("  Fruity Parametric EQ 2 / Parametric EQ: %d of %d slots on the exact engine\n", flPeqExact, flPeqSlots);
     CHECK (flPeqExact >= flPeqSlots && flPeqSlots >= 1100); // REA_rodada50
     std::printf ("  Fruity PanOMatic / Balance / Blood Overdrive: %d of %d slots on the exact engines\n", basicExact, basicSlots);
-    // one PanOMatic of "Bombs Away" (insert 69, last slot) falls off LYNX's 10-slot limit after a serial Patcher expands
-    CHECK (basicExact + 1 >= basicSlots && basicSlots >= 270); // REA_rodada58
+    // (since round 141 a Patcher stays one slot: "Bombs Away" insert 69 keeps its last PanOMatic)
+    CHECK (basicExact >= basicSlots && basicSlots >= 270); // REA_rodada58
     // (Patcher graphs can add Distructor nodes of their own to the imported mixer)
     std::printf ("  Distructor: %d of %d slots on the exact engine (%d cabinet impulses read from the installation)\n",
                  distructorExact, distructorSlots, distructorImpulses);
@@ -2227,7 +2239,7 @@ TEST (flp_real_files)
     std::printf ("  Fruity Delay 2: %d of %d slots on the exact engine; Fruity Delay 3: %d of %d\n", delay2Exact, delay2Slots,
                  delay3Exact, delay3Slots);
     // (FL 11 files' slots are read since round 80; Patcher graphs can add Delay 2 nodes of their own)
-    CHECK (delay2Exact >= delay2Slots && delay2Slots >= 60 && delay3Exact == delay3Slots && delay3Slots >= 100); // REA_rodada52
+    CHECK (delay2Exact >= delay2Slots && delay2Slots >= 60 && delay3Exact >= delay3Slots && delay3Slots >= 100); // REA_rodada52
     std::printf ("  Chorus family: %d of %d slots on the exact engines\n", chorusExact, chorusSlots);
     CHECK (chorusExact >= chorusSlots && chorusSlots >= 47); // REA_rodada59
     std::printf ("  Fruity Fast Dist: %d of %d slots on the exact engine; Fruity Flangus: %d of %d; Fruity Flanger: %d of %d\n", fastDistExact,
@@ -15782,3 +15794,4 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Parity135fTests.inc"
 #include "Feat132Tests.inc"
 #include "Parity135sTests.inc"
+#include "Patcher141Tests.inc"

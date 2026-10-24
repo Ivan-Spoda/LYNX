@@ -1,3 +1,4 @@
+#include "core/Patcher.h"
 #include "core/Effects.h"
 #include "core/FormulaController.h"
 #include "core/MixSuite.h"
@@ -2427,6 +2428,7 @@ const EffectInfo& effectInfo (EffectKind kind)
     static const EffectInfo pitchShift { "Pitch shift", { { "Semitones", 0.5f }, { "Cents", 0.5f }, { "Mix", 1.0f }, { "Window", 0.4f } } };
     static const EffectInfo freqShift { "Frequency shifter", { { "Shift", 0.5f }, { "Mix", 1.0f }, { "Stereo", 0.0f } } };
     static const EffectInfo parallelInfo { "Patcher (parallel)", {} };
+    static const EffectInfo patcherInfo { "Patcher", {} };
     static const EffectInfo crossoverInfo { "Crossover", { { "High-pass", 0.0f }, { "HP cutoff", 0.3f }, { "HP slope", 3.0f / 7.0f },
                                                            { "Low-pass", 0.0f }, { "LP cutoff", 0.7f }, { "LP slope", 3.0f / 7.0f } } };
     static const EffectInfo rhythmInfo = [] {
@@ -2697,6 +2699,7 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::pitchShift: return pitchShift;
         case EffectKind::freqShift: return freqShift;
         case EffectKind::parallel: return parallelInfo;
+        case EffectKind::patcher: return patcherInfo;
         case EffectKind::lofi: return lofiInfo;
         case EffectKind::effector: return effectorInfo;
         case EffectKind::crossover: return crossoverInfo;
@@ -3225,6 +3228,7 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
 
         case EffectKind::plugin:
         case EffectKind::parallel:
+        case EffectKind::patcher:
         case EffectKind::vocodex:
         case EffectKind::maximus:
             break;
@@ -3241,6 +3245,8 @@ EffectSlot makeEffectSlot (EffectKind kind)
 
     for (std::size_t i = 0; i < info.params.size() && i < slot.params.size(); ++i)
         slot.params[i] = info.params[i].defaultValue;
+    if (kind == EffectKind::patcher) // a new Patcher passes its input through, as FL's
+        slot.patcher.wires.push_back ({});
 
     return slot;
 }
@@ -3254,6 +3260,10 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
 {
     if (slot.kind == EffectKind::parallel)
         return makeParallelEffect (slot);
+    if (slot.kind == EffectKind::patcher) // built-in nodes only; the rack builds it with its plugins (core/Patcher.h)
+    {
+        return patcher::makeEffect (slot, 44100.0, patcher::builtInFactories (44100.0));
+    }
     if (slot.kind == EffectKind::formulaController)
         return formula::makeEffect (slot.state);
     if (slot.kind == EffectKind::vocodex)
@@ -3320,6 +3330,7 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::pitchShift: return std::make_unique<PitchShift>();
         case EffectKind::freqShift: return std::make_unique<FreqShift>();
         case EffectKind::parallel: return std::make_unique<ParallelEffect> (EffectSlot {}); // empty: use makeParallelEffect
+        case EffectKind::patcher: return makeEffect (makeEffectSlot (EffectKind::patcher)); // empty graph: silence
         case EffectKind::lofi: return std::make_unique<LoFi>();
         case EffectKind::effector: return effector::make();
         case EffectKind::crossover: return std::make_unique<Crossover>();

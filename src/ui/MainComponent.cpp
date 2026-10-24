@@ -714,6 +714,11 @@ void MainComponent::resized()
         toolbarEditor->toFront (false);
     }
     workspace.setBounds (getLocalBounds().withTrimmedTop (toolbarHeight + tray));
+    if (setupOverlay != nullptr)
+    {
+        setupOverlay->setBounds (getLocalBounds());
+        setupOverlay->toFront (false);
+    }
 }
 
 // --- toolbar layout ------------------------------------------------------------------------------
@@ -3907,10 +3912,25 @@ void MainComponent::showHelp()
 
 void MainComponent::showSetupWizard()
 {
-    lynx::showSetupWizard (engine, [safe = juce::Component::SafePointer<MainComponent> (this)] (const juce::String& language) {
-        if (safe != nullptr)
-            safe->showLanguageChoice (language);
-    });
+    // on top of the main window (round 140), so the DAW is visible behind it from the first start on
+    if (setupOverlay != nullptr)
+        return;
+    auto safe = juce::Component::SafePointer<MainComponent> (this);
+    setupOverlay = lynx::makeSetupWizardOverlay (
+        engine,
+        [safe] (const juce::String& language) {
+            if (safe != nullptr)
+                safe->showLanguageChoice (language);
+        },
+        [safe] {
+            juce::MessageManager::callAsync ([safe] { // the overlay's own button is still running
+                if (safe != nullptr)
+                    safe->setupOverlay.reset();
+            });
+        });
+    addAndMakeVisible (*setupOverlay);
+    setupOverlay->setBounds (getLocalBounds());
+    setupOverlay->toFront (true);
 }
 
 void MainComponent::showImportReport()

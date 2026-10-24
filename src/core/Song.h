@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 #include <utility>
@@ -73,8 +74,9 @@ enum class InstrumentKind : std::uint8_t
     slayer,     // FL Slayer (REA_rodada68 §2–6): raw saved state in pluginState, the user's Slayer_Engine.dll in samplePath
     fruitydance, // Fruity Dance (REA_rodada68 §8): a visual plugin (dancing character) that keeps its state and makes no sound
     directwave, // DirectWave (REA_rodada72): raw saved state in pluginState, one zone per zone of the played program, sample formats in modelParams
-    midiOut     // FL's MIDI Out (REA_rodada16 §1, REA_rodada133 §4): no sound; its notes and MIDI controls go to the plugins whose
+    midiOut,    // FL's MIDI Out (REA_rodada16 §1, REA_rodada133 §4): no sound; its notes and MIDI controls go to the plugins whose
                 // MIDI input port is its port (PluginRef::midiInPort). FL's state (channel @4, port @24) in pluginState
+    patcher     // FL's Patcher as a generator (REA_rodada141): a graph of instruments and effects in ChannelDef::patcher
 };
 
 // External plugin: format identifier (the app knows how to find the file) + saved state.
@@ -301,6 +303,55 @@ struct SampleZone
     bool operator== (const SampleZone&) const = default;
 };
 
+// FL's Patcher (REA_rodada141): a user-editable graph of plugins, in a mixer slot (EffectKind::patcher) or as a
+// Channel Rack generator (InstrumentKind::patcher). Nodes are effects or instruments; wires carry audio (summed with
+// a linear gain, FL's IPP multiply-add), notes (MIDI) or control values (a controller's output moving a parameter).
+// The two host nodes are "From LYNX" (patchFromHost: the slot's audio input, its side-chain, the channel's notes)
+// and "To LYNX" (patchToHost: the main audio output and the extra outputs to other mixer inserts).
+struct PatchNode; // defined after EffectSlot
+constexpr int patchFromHost = -1, patchToHost = -2;
+
+struct PatchWire
+{
+    enum class Kind : std::uint8_t { audio, midi, control };
+    Kind kind = Kind::audio;
+    int from = patchFromHost; // source node index (or patchFromHost)
+    int fromPort = 0;         // audio: output bus (host: 0 = input, 1 = side-chain); control: the source's control output
+    int to = patchToHost;     // destination node index (or patchToHost)
+    int toPort = 0;           // audio: input bus (0 = main, 1 = side-chain; host: 0 = main output, k = extra output k);
+                              // control: the destination's parameter index
+    float gain = 1.0f;        // audio: linear cable gain
+    bool enabled = true;      // FL's disabled cable: ignored in the sum
+    std::vector<float> curve; // control: value map over 0..1 (≥ 2 points; empty = straight)
+
+    bool operator== (const PatchWire&) const = default;
+};
+
+// A parameter the Patcher publishes (FL's record 1100): automating the Patcher's parameter k moves this node parameter
+// (through `curve`, as a control cable). node −1 = an unused index.
+struct PatchParam
+{
+    int node = -1, param = 0;
+    std::vector<float> curve;
+    std::string name;
+
+    bool operator== (const PatchParam&) const = default;
+};
+
+struct PatcherDoc
+{
+    std::vector<PatchNode> nodes;
+    std::vector<PatchWire> wires;
+    std::vector<PatchParam> published; // [Patcher parameter]
+    float inputX = 30.0f, inputY = 150.0f, outputX = 560.0f, outputY = 150.0f; // the host nodes in the editor
+    // "To LYNX" extra audio outputs (bus 1…): the mixer insert each one feeds (−1 = the k-th insert after the
+    // channel's own); generator Patcher only
+    std::vector<int> outputTracks;
+
+    bool empty() const noexcept { return nodes.empty() && wires.empty(); }
+    bool operator== (const PatcherDoc& o) const; // (Song.cpp: needs PatchNode)
+};
+
 struct ChannelDef
 {
     std::string name;
@@ -326,6 +377,9 @@ struct ChannelDef
     int cutBy = 0;
     std::uint32_t colour = 0; // 0xFFRRGGBB; 0 = theme default
     int group = -1;           // the Channel Rack filter group (index into Song::channelGroups); -1 = none
+    PatcherDoc patcher;       // instrument == patcher: its graph (REA_rodada141)
+
+    bool operator== (const ChannelDef&) const = default;
 };
 
 enum class EffectKind : std::uint8_t
@@ -421,6 +475,7 @@ enum class EffectKind : std::uint8_t
     quellDenoiser,   // LYNX's Quell Denoiser (REA_rodada119, core/VoiceTools.h): one-knob multiband noise suppressor
     geminiDoubler,   // LYNX's Gemini Doubler (REA_rodada119, core/VoiceTools.h): two pitch-shifted delay voices
     formulaController, // FL's Formula Controller (REA_rodada133, core/FormulaController.h): no sound; output = formula of a, b, c
+    patcher,         // FL's Patcher (REA_rodada141, core/Patcher.h): a graph of effects / instruments in EffectSlot::patcher
     voiceShift       // LYNX's Voice Shift (REA_rodada135s, core/VoiceShift.h): pitch / formant / quantize / robot + drive
 };
 // the last EffectKind (loops over every kind; update when one is appended)
@@ -475,8 +530,33 @@ struct EffectSlot
     std::string presetName;
     std::vector<float> abOther;
     bool abShowingB = false;
+    PatcherDoc patcher; // kind == patcher: its graph (REA_rodada141)
+
+    bool operator== (const EffectSlot& o) const; // every field (Song.cpp)
 
     bool isSubstitute() const noexcept { return ! substituteFor.id.empty() || substituteFor.foreign.format != ForeignPlugin::Format::none; }
+};
+
+// A Patcher node (REA_rodada141): an effect or an instrument, with its place in the editor.
+struct PatchNode
+{
+    bool generator = false;
+    EffectSlot effect;  // !generator: the effect (any kind: built-in, plugin, another Patcher)
+    ChannelDef channel; // generator: the instrument and its settings (name, plugin, state…)
+    std::string label;  // the user's name for the node ("" = the plugin's)
+    float x = 0.0f, y = 0.0f;
+    // Extra audio outputs of a splitting node (FL's Frequency Splitter bands, Stereo Shaper difference): output bus
+    // `bus` is the node's input through `head` (none = direct) × gain. Built on import from FL's state.
+    struct BusHead
+    {
+        int bus = 1;
+        std::optional<EffectSlot> head;
+        float gain = 1.0f;
+        bool operator== (const BusHead& o) const;
+    };
+    std::vector<BusHead> busHeads;
+
+    bool operator== (const PatchNode& o) const;
 };
 
 // The insert a Fruity Send slot sends its mid-chain signal to (1…127), or −1 (none, or not a Fruity Send).
