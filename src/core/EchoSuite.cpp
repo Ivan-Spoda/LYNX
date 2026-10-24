@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -662,6 +663,166 @@ const char* tapeVoicingName (int k) noexcept
     return names[std::clamp (k, 0, tapeVoicingCount)];
 }
 float hybridValue (int h) noexcept { return h <= 0 ? 0.0f : (h == 1 ? 0.5f : 1.0f); }
+
+// ---- round 147: the echo voicings, the saturation curves and Multiply (REA_rodada147a) ---------------------------
+// [EXEC] each voicing is one of EchoBoy's 31 factory styles measured black-box on the official trial (Single, 250 ms,
+// mix 100 %, its Saturation at 0 / 6 / 12 / 18 / 24): the first echo's tone and the tone of every further pass (white
+// noise bursts, 1/3-octave power ratios: rep 1 = output tone × loop tone, rep 2 / rep 1 = feedback × loop tone),
+// the steady-sine gain / 2nd / 3rd harmonic over −40 … 0 dBFS, the pitch wobble of a steady 1 kHz echo and the
+// impulse's spread. LYNX's model (our own code): write path = saturation → loop tone, read path = output tone; the
+// tones are RBJ biquads fitted to the measured curves (≤ 0.3 dB rms), the saturation either a knee shaper
+// x / (1 + |x|^p)^(1/p) with a bias b (even harmonics) between a drive and a gain, or a compressor (the dynamic
+// styles: ratio, threshold, make-up per Saturation step; attack 4 ms, release 120 ms from level steps), linear
+// in dB between the measured Saturation steps; the wobble a sine (or smooth random) delay modulation of the measured
+// depth (cents rms) and rate.
+namespace
+{
+struct VoicingData
+{
+    const char* name;
+    float outGain;                 // dB
+    int outHp, outLp;              // cascaded 2nd-order high / low passes (0 … 2 / 0 … 4)
+    float hpHz, hpQ, lpHz, lpQ;
+    float pkHz[3], pkDb[3], pkQ[3];
+    float lsHz, lsDb, lpkHz, lpkDb, lpkQ; // the loop tone: a low shelf, a bell
+    int loopLp;                    // and 0 … 2 low passes
+    float loopLpHz, loopLpQ;
+    int comp;                      // 0 = the shaper, 1 = the compressor
+    float p, b, driveDb[5], gainDb[5];
+    float ratio, thresholdDb[5], makeupDb[5];
+    float wobbleCents, wobbleHz;
+    int wobbleRandom;
+    float wobblePhase;             // the right side's LFO phase offset (turns)
+    float diffusion;               // 0 … 1, Echoform's diffusion amount
+};
+const VoicingData voicingTable[voicingCount] {
+#include "core/EchoVoicings.inc"
+};
+// the saturation types: the measured curve of a representative style (clean digital, studio tape, valve tape,
+// broadcast FM's compressor, fuzzed, squashed) — LYNX names
+constexpr int satTypeSource[satTypeCount] { 15, 1, 4, 12, 25, 24 };
+
+const VoicingData& voicingData (int k) noexcept { return voicingTable[std::clamp (k - 1, 0, voicingCount - 1)]; }
+const VoicingData& satTypeData (int type) noexcept { return voicingTable[satTypeSource[std::clamp (type - 1, 0, satTypeCount - 1)]]; }
+
+// a value of the five-step table (Saturation 0, 6, 12, 18, 24 dB), linear in between
+double satStep (const float* table, double driveDb) noexcept
+{
+    const auto t = std::clamp (driveDb, 0.0, 24.0) / 6.0;
+    const auto i = std::min (3, (int) t);
+    return (double) table[i] + ((double) table[i + 1] - (double) table[i]) * (t - (double) i);
+}
+
+double kneeShape (double u, double p) noexcept { return u / std::pow (1.0 + std::pow (std::abs (u), p), 1.0 / p); }
+// the shaper with unity slope at 0: (f (u + b) − f (b)) / f′(b), f′(u) = (1 + |u|^p)^(−1/p − 1)
+double biasedShape (double u, double p, double b) noexcept
+{
+    const auto slope = std::pow (1.0 + std::pow (std::abs (b), p), -1.0 / p - 1.0);
+    return (kneeShape (u + b, p) - kneeShape (b, p)) / slope;
+}
+
+// the compressor's static curve (dB of gain reduction for `x` dB above the threshold; 6 dB soft knee)
+double compressCurve (double x, double ratio) noexcept
+{
+    const auto s = 1.0 - 1.0 / std::max (1.0, ratio);
+    if (x < -3.0) return 0.0;
+    if (x > 3.0) return s * x;
+    return s * (x + 3.0) * (x + 3.0) / 12.0;
+}
+
+// the RBJ magnitude (dB) of one biquad at w
+double biquadDb (const Biquad& q, double w) noexcept
+{
+    const std::complex<double> z1 = std::polar (1.0, -w), z2 = z1 * z1;
+    const auto num = q.b0 + q.b1 * z1 + q.b2 * z2, den = 1.0 + q.a1 * z1 + q.a2 * z2;
+    return 20.0 * std::log10 (std::max (1e-12, std::abs (num / den)));
+}
+
+// the voicing's tones as biquads (out: up to 2 HP + 4 LP + 3 bells; loop: shelf, bell, up to 2 LP)
+int designOutTone (const VoicingData& v, double sr, Biquad* q) noexcept
+{
+    int n = 0;
+    const auto lim = [sr] (double hz) { return std::clamp (hz, 10.0, 0.45 * sr); };
+    for (int i = 0; i < v.outHp; ++i)
+        q[n++].filter (sr, 1, lim (v.hpHz), v.hpQ);
+    if (v.lpHz < 0.45 * sr)
+        for (int i = 0; i < v.outLp; ++i)
+            q[n++].filter (sr, 0, lim (v.lpHz), v.lpQ);
+    for (int i = 0; i < 3; ++i)
+        if (std::abs (v.pkDb[i]) > 0.01f && v.pkHz[i] < 0.45 * sr)
+            q[n++].peaking (sr, lim (v.pkHz[i]), v.pkQ[i], v.pkDb[i]);
+    return n;
+}
+int designLoopTone (const VoicingData& v, double sr, Biquad* q) noexcept
+{
+    int n = 0;
+    const auto lim = [sr] (double hz) { return std::clamp (hz, 10.0, 0.45 * sr); };
+    if (std::abs (v.lsDb) > 0.01f)
+        q[n++].shelf (sr, lim (v.lsHz), v.lsDb, false);
+    if (std::abs (v.lpkDb) > 0.01f && v.lpkHz < 0.45 * sr)
+        q[n++].peaking (sr, lim (v.lpkHz), v.lpkQ, v.lpkDb);
+    if (v.loopLpHz < 0.45 * sr)
+        for (int i = 0; i < v.loopLp; ++i)
+            q[n++].filter (sr, 0, lim (v.loopLpHz), v.loopLpQ);
+    return n;
+}
+} // namespace
+
+int voicingOf (float v) noexcept { return std::clamp ((int) std::lround (clamp01 (v) * voicingCount), 0, voicingCount); }
+float voicingValue (int k) noexcept { return (float) std::clamp (k, 0, voicingCount) / (float) voicingCount; }
+const char* voicingName (int k) noexcept { return k <= 0 ? "off" : voicingData (k).name; }
+int voicingForEchoBoyStyle (int style) noexcept { return style >= 0 && style < voicingCount ? style + 1 : 0; }
+int satTypeOf (float v) noexcept { return std::clamp ((int) std::lround (clamp01 (v) * satTypeCount), 0, satTypeCount); }
+float satTypeValue (int k) noexcept { return (float) std::clamp (k, 0, satTypeCount) / (float) satTypeCount; }
+const char* satTypeName (int k) noexcept
+{
+    static const char* const names[satTypeCount + 1] { "auto", "clean", "tape", "tube", "squash", "grit", "ceiling" };
+    return names[std::clamp (k, 0, satTypeCount)];
+}
+int multiplyOf (float v) noexcept { return 1 << std::clamp ((int) std::lround (clamp01 (v) * 3.0f), 0, 3); }
+float multiplyValue (int factor) noexcept
+{
+    int k = 0;
+    while (k < 3 && (1 << k) < factor)
+        ++k;
+    return (float) k / 3.0f;
+}
+// [EXEC] PrimalTap 5.5.5: Multiply 2x / 4x / 8x doubles / quadruples / octuples the delay and leaves a brick-wall
+// band of ≈ 6.2 / 3.1 / 1.55 kHz (−1 … −2 dB just below, −43 … −49 dB a third of an octave above)
+double multiplyCutoffHz (int factor) noexcept { return factor <= 1 ? 0.0 : 12400.0 / (double) factor; }
+
+double voicingToneDb (int k, bool loop, double hz, double sampleRate)
+{
+    if (k <= 0)
+        return 0.0;
+    const auto& v = voicingData (k);
+    std::array<Biquad, 9> q {};
+    const int n = loop ? designLoopTone (v, sampleRate, q.data()) : designOutTone (v, sampleRate, q.data());
+    const auto w = twoPi * hz / sampleRate;
+    double db = loop ? 0.0 : (double) v.outGain;
+    for (int i = 0; i < n; ++i)
+        db += biquadDb (q[(std::size_t) i], w);
+    return db;
+}
+
+double satGainDb (int k, int type, double driveDb, double levelDb)
+{
+    const auto& v = type > 0 ? satTypeData (type) : voicingData (k);
+    if (v.comp != 0)
+        return satStep (v.makeupDb, driveDb) - compressCurve (levelDb - satStep (v.thresholdDb, driveDb), v.ratio);
+    // the fundamental of the shaped sine (64 points)
+    const auto d = std::pow (10.0, satStep (v.driveDb, driveDb) / 20.0), a = std::pow (10.0, levelDb / 20.0);
+    double re = 0.0, im = 0.0;
+    for (int i = 0; i < 64; ++i)
+    {
+        const auto ph = twoPi * i / 64.0;
+        const auto y = biasedShape (a * d * std::sin (ph), (double) v.p, (double) v.b);
+        re += y * std::sin (ph);
+        im += y * std::cos (ph);
+    }
+    const auto fund = 2.0 * std::sqrt (re * re + im * im) / 64.0;
+    return satStep (v.gainDb, driveDb) + 20.0 * std::log10 (std::max (1e-12, fund / (a * d)));
+}
 Mode modeOf (float v) noexcept { return (Mode) std::clamp ((int) std::floor (clamp01 (v) * (float) modeCount), 0, modeCount - 1); }
 float modeValue (Mode m) noexcept { return ((float) m + 0.5f) / (float) modeCount; }
 Style styleOf (float v) noexcept { return (Style) std::clamp ((int) std::floor (clamp01 (v) * (float) styleCount), 0, styleCount - 1); }
@@ -732,6 +893,12 @@ public:
         eqBass.reset();
         eqMid.reset();
         eqTreble.reset();
+        for (auto& q : outQ) q.reset();
+        for (auto& q : loopQ) q.reset();
+        multLp1.reset();
+        multLp2.reset();
+        compEnv[0] = compEnv[1] = 0.0;
+        voicePhase = 0.0;
         lfoPhase = 0.0;
         envelope = 0.0f;
         duckGr = 0.0;
@@ -777,8 +944,23 @@ private:
 
     void echoProcess (float* l, float* r, int n, const EffectParams& p, double bpm) noexcept
     {
-
-        const auto md = modeOf (p[mode]);
+        // round 147: a measured echo voicing replaces the mode's character (its read path is the clean one), and the
+        // saturation curve can be chosen apart from it
+        const int vk = voicingOf (p[voicing]);
+        const VoicingData* vd = vk > 0 ? &voicingData (vk) : nullptr;
+        const int stk = satTypeOf (p[satType]);
+        prepareSaturation (stk > 0 ? &satTypeData (stk) : vd, 24.0 * (double) clamp01 (p[drive]));
+        if (vd != nullptr && (vk != toneVoicing || sr != toneSr))
+        {
+            toneVoicing = vk;
+            toneSr = sr;
+            for (auto& q : outQ) q = {};
+            for (auto& q : loopQ) q = {};
+            outN = designOutTone (*vd, sr, outQ.data());
+            loopN = designLoopTone (*vd, sr, loopQ.data());
+            outLin = (float) std::pow (10.0, vd->outGain / 20.0);
+        }
+        const auto md = vd != nullptr ? Mode::clean : modeOf (p[mode]);
         const bool rhythmOn = p[rhythm] >= 0.5f; // round 137: Rhythm mode overrides the style
         const auto st = rhythmOn ? Style::single : styleOf (p[style]);
         float dryGain = 1.0f, wetGain = 0.0f;
@@ -794,6 +976,15 @@ private:
         const auto spreadMs = 20.0 * bipolar (p[spread]);
         tL = std::max (0.0, tL + spreadMs * 0.25);
         tR = std::max (0.0, tR - spreadMs * 0.25);
+        // round 147: PrimalTap's Multiply — the times × 1 / 2 / 4 / 8 (up to the line's 20 s), the band ÷ the same
+        const int mult = multiplyOf (p[multiply]);
+        if (mult > 1)
+        {
+            tL = std::min (tL * mult, 20000.0);
+            tR = std::min (tR * mult, 20000.0);
+            multLp1.set (multiplyCutoffHz (mult), sr);
+            multLp2.set (multiplyCutoffHz (mult), sr);
+        }
         std::array<RhythmTap, 16> rTaps {};
         double rSlot0 = 0.0;
         int rCount = 0;
@@ -811,7 +1002,7 @@ private:
         const auto ageV = clamp01 (p[age]);
         const auto driveGain = (float) std::pow (10.0, 24.0 * (double) clamp01 (p[drive]) / 20.0);
         const auto widthV = (float) bipolar (p[width]);
-        const auto diffAmount = clamp01 (p[diffusion]);
+        const auto diffAmount = std::max (clamp01 (p[diffusion]), vd != nullptr ? vd->diffusion : 0.0f); // round 147: the voicing's own
         const auto diffScale = 0.25 + 0.75 * (double) clamp01 (p[diffSize]);
         const auto duck = clamp01 (p[ducking]);
         // round 144: the LFO locked to a note value of the tempo (Mod sync), else its free rate
@@ -879,6 +1070,11 @@ private:
         const auto maxRead = ch[0].line.maxDelay() - 2.0;
         const auto loopG = freezeOn ? 1.0 : (twoTap ? g * g : g);
 
+        // round 147: the voicing's wobble as a delay swing (ms): a sine of depth c cents rms at f Hz swings the delay by
+        // √2 · c / (1731.2 · 2π f) s (the smooth random LFO about its rms, so without the √2)
+        wobbleMs = vd != nullptr && vd->wobbleCents > 0.0f
+                       ? 1000.0 * (vd->wobbleRandom != 0 ? 1.0 : std::sqrt (2.0)) * vd->wobbleCents / (1731.234 * twoPi * std::max (0.05f, vd->wobbleHz))
+                       : 0.0;
         for (int i = 0; i < n; ++i)
         {
             const float in[2] = { l[i], r[i] };
@@ -887,7 +1083,23 @@ private:
             lfoPhase += rate / sr;
             lfoPhase -= std::floor (lfoPhase);
             double modMs[2] = { 0.0, 0.0 };
-            for (int c = 0; c < 2; ++c)
+            if (vd != nullptr && vd->wobbleCents > 0.0f) // round 147: the voicing's measured wobble
+            {
+                voicePhase += vd->wobbleHz / sr;
+                voicePhase -= std::floor (voicePhase);
+                for (int c = 0; c < 2; ++c)
+                {
+                    if (vd->wobbleRandom != 0) // both sides on one random swing when the reference's are in step
+                        modMs[c] = c == 1 && vd->wobblePhase == 0.0f ? modMs[0]
+                                                                     : wobbleMs * (double) ch[(std::size_t) c].drift.next (2.0 * vd->wobbleHz, sr); // ≈ unit rms
+                    else
+                    {
+                        auto ph = voicePhase + (c == 1 ? (double) vd->wobblePhase : 0.0);
+                        modMs[c] = wobbleMs * std::sin (twoPi * (ph - std::floor (ph)));
+                    }
+                }
+            }
+            for (int c = 0; c < 2 && vd == nullptr; ++c)
             {
                 auto& s = ch[(std::size_t) c];
                 switch (modulation)
@@ -1021,6 +1233,12 @@ private:
                 }
                 if (st != Style::quad && ! twoTap && ! feelTap && ! rhythmOn) // the quad style feeds back its last tap as read
                     fbSig[c] = y;
+                if (vd != nullptr) // round 147: the voicing's output tone (once, on the way out)
+                {
+                    y *= outLin;
+                    for (int k = 0; k < outN; ++k)
+                        y = outQ[(std::size_t) k].process (y, c);
+                }
                 echo[c] = y;
             }
 
@@ -1060,12 +1278,21 @@ private:
                 if (diffAmount > 0.0f && ! postDiff)
                     for (std::size_t k = 0; k < 4; ++k)
                         u = s.diff[k].process (u, diffMs[k] * diffScale * 0.001 * sr * (c == 1 ? 1.07 : 1.0), 0.65f * diffAmount);
-                u = character (s, c, u, md, ageV, driveGain);
+                if (vd != nullptr) // round 147: the voicing's saturation and loop tone (every pass)
+                {
+                    u = saturate (u, c);
+                    for (int k = 0; k < loopN; ++k)
+                        u = loopQ[(std::size_t) k].process (u, c);
+                }
+                else
+                    u = character (s, c, u, md, ageV, driveGain);
                 u = s.highCut.lp (s.lowCut.hp (u));
                 if (loopEq) // round 144: the loop EQ shapes every repeat again
                     u = eqTreble.process (eqMid.process (eqBass.process (u, c), c), c);
                 if (lofiOn)
                     u = lofiLp.process (u, c);
+                if (mult > 1) // round 147: Multiply's band
+                    u = multLp2.process (multLp1.process (u, c), c);
                 s.line.push (softLimit (u));
             }
 
@@ -1202,7 +1429,8 @@ private:
 
     float character (Channel& s, int c, float u, Mode m, float ageV, float driveGain) noexcept
     {
-        const auto drive = [this, driveGain] (float x) { return shaper (x * driveGain) / driveGain; };
+        // round 147: a chosen saturation type replaces the mode's own shaper
+        const auto drive = [this, driveGain, c] (float x) { return satCurve != nullptr ? saturate (x, c) : shaper (x * driveGain) / driveGain; };
         switch (m)
         {
             case Mode::tape:
@@ -1467,6 +1695,55 @@ private:
             r[i] = dryGain * (float) xr + wetGain * (float) out[1];
         }
     }
+
+    // ---- round 147: the saturation curve of the block (a voicing's own or a chosen type) -------------------------------
+    void prepareSaturation (const VoicingData* v, double driveDb) noexcept
+    {
+        satCurve = v;
+        if (v == nullptr)
+            return;
+        if (v->comp != 0)
+        {
+            satThreshold = satStep (v->thresholdDb, driveDb);
+            satMakeup = satStep (v->makeupDb, driveDb);
+            compAttack = 1.0 - std::exp (-1.0 / (0.004 * sr));
+            compRelease = 1.0 - std::exp (-1.0 / (0.120 * sr));
+        }
+        else
+        {
+            satDrive = std::pow (10.0, satStep (v->driveDb, driveDb) / 20.0);
+            satGain = std::pow (10.0, satStep (v->gainDb, driveDb) / 20.0);
+            satSlope = std::pow (1.0 + std::pow (std::abs ((double) v->b), (double) v->p), -1.0 / v->p - 1.0);
+            satKb = kneeShape ((double) v->b, (double) v->p);
+        }
+    }
+
+    float saturate (float x, int c) noexcept
+    {
+        const auto& v = *satCurve;
+        if (v.comp != 0)
+        {
+            auto& e = compEnv[c];
+            const auto a = (double) std::abs (x);
+            e += (a - e) * (a > e ? compAttack : compRelease);
+            const auto lvl = 20.0 * std::log10 (std::max (1e-9, e));
+            const auto gdb = satMakeup - compressCurve (lvl - satThreshold, v.ratio);
+            return (float) (x * std::exp (gdb * 0.11512925464970228)); // 10^(dB / 20)
+        }
+        const auto u = satDrive * (double) x + (double) v.b;
+        const auto y = (kneeShape (u, (double) v.p) - satKb) / satSlope;
+        return (float) (satGain * y / satDrive);
+    }
+
+    const VoicingData* satCurve = nullptr;
+    double satDrive = 1.0, satGain = 1.0, satSlope = 1.0, satKb = 0.0, satThreshold = 0.0, satMakeup = 0.0;
+    double compAttack = 0.0, compRelease = 0.0, compEnv[2] {};
+    std::array<Biquad, 9> outQ {};
+    std::array<Biquad, 4> loopQ {};
+    int outN = 0, loopN = 0, toneVoicing = -1;
+    double toneSr = 0.0, voicePhase = 0.0, wobbleMs = 0.0;
+    float outLin = 1.0f;
+    Butter8 multLp1, multLp2;
 
     double sr = 48000.0;
     std::array<Channel, 2> ch;
@@ -2047,7 +2324,9 @@ const EffectInfo& echoformInfo()
                                      // round 144: the Style-Edit-role controls (appended; the defaults = the old sound)
                                      { "Input level", 0.5f }, { "FB balance", 0.5f }, { "Diffusion post", 0.0f },
                                      { "Mod shape", 0.0f }, { "Mod sync", 0.0f },
-                                     { "Loop bass", 0.5f }, { "Loop mid", 0.5f }, { "Loop treble", 0.5f } } };
+                                     { "Loop bass", 0.5f }, { "Loop mid", 0.5f }, { "Loop treble", 0.5f },
+                                     // round 147: the echo voicings, the saturation type, Multiply (appended; off = the old sound)
+                                     { "Echo voicing", 0.0f }, { "Saturation type", 0.0f }, { "Multiply", 0.0f } } };
     return info;
 }
 
@@ -2172,6 +2451,9 @@ std::string paramText (EffectKind kind, int param, float v)
                 return syncs[modSyncOf (v)];
             }
             case loopBass: case loopMid: case loopTreble: return fmt ("%+.1f dB", loopEqDb (v));
+            case voicing: return voicingName (voicingOf (v));
+            case satType: return satTypeName (satTypeOf (v));
+            case multiply: return fmt ("%dx", multiplyOf (v));
             case rhythmEdit: return rhythmEditOf (v) == RhythmEdit::even ? "even" : rhythmEditOf (v) == RhythmEdit::free ? "free" : "grid";
             case rhythmGrid:
             {

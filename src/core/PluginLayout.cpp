@@ -9,6 +9,7 @@
 #include <mutex>
 #include <string>
 
+#include "core/EchoSuite.h"
 #include "core/Effects.h"
 #include "core/MaximusFx.h"
 #include "core/MultibandDelayFx.h"
@@ -2716,6 +2717,27 @@ Layout echoformLayout()
     v.push_back (off (menuOf (492, 402, 130, 20, "Mod shape", TR_NOOP ("Shape"), TR_NOOP ("Sine|Triangle|Square|Saw|Random"), stepCentres (5))));
     v.push_back (off (label (640, 404, 40, 20, TR_NOOP ("Sync"))));
     v.push_back (off (menuOf (682, 402, 110, 20, "Mod sync", TR_NOOP ("Sync"), TR_NOOP ("Free|1/16|1/8|1/4|1/2|1 bar|2 bars"), stepCentres (7))));
+    // ---- round 147: the measured echo voicings (EchoBoy's style role), the saturation curve and PrimalTap's Multiply
+    {
+        std::vector<float> voicings;
+        for (int k = 0; k <= echosuite::echoform::voicingCount; ++k)
+            voicings.push_back (echosuite::echoform::voicingValue (k));
+        v.push_back (off (label (640, 372, 52, 20, TR_NOOP ("Voicing"))));
+        v.push_back (off (menuOf (694, 372, 100, 20, "Echo voicing", TR_NOOP ("Echo voicing"),
+                                  TR_NOOP ("Off|Mastering reel|Studio reel|Cartridge echo|Multi-head tape|Valve tape|Worn cassette|Pedal BBD|"
+                                           "Compact BBD|Oil drum|Magnetic drum|Phone line|Medium wave|Broadcast FM|Distant station|"
+                                           "Walkie-talkie|Pristine digital|Warm analog|Digital ensemble|Analog ensemble|Pedal ensemble|"
+                                           "Seasick|Hot glow|Thick|Battered|Squashed|Fuzzed|Honky|Haze|Smeared|Scattered|Roomy"),
+                                  voicings)));
+        std::vector<float> types;
+        for (int k = 0; k <= echosuite::echoform::satTypeCount; ++k)
+            types.push_back (echosuite::echoform::satTypeValue (k));
+        v.push_back (off (label (800, 372, 38, 20, TR_NOOP ("Sat."))));
+        v.push_back (off (menuOf (840, 372, 100, 20, "Saturation type", TR_NOOP ("Saturation type"),
+                                  TR_NOOP ("Auto|Clean|Tape|Tube|Squash|Grit|Ceiling"), types)));
+        v.push_back (off (label (800, 402, 38, 20, TR_NOOP ("Mult."))));
+        v.push_back (off (tabs (840, 402, 100, 20, "Multiply", TR_NOOP ("1x|2x|4x|8x"), { 0.0f, 1.0f / 3.0f, 2.0f / 3.0f, 1.0f })));
+    }
     return l;
 }
 
