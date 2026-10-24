@@ -18,6 +18,7 @@
 #include "core/VocalPitch.h"
 #include "core/VoiceTools.h"
 #include "core/VoiceShift.h"
+#include "core/VoxStrip.h"
 #include "core/EchoSuite.h"
 #include "core/DynamicsSuite.h"
 
@@ -483,6 +484,88 @@ product = SSL Native Channel Strip / 4K E
 vendor = Solid State Logic
 lynx = Ridge Strip
 names = SSL Native Channel Strip 2; SSL Native Channel Strip; SSL 4K E; SSL 4K B; Vocalstrip 2; SSL Native Vocalstrip 2
+# round 145: a Vocalstrip 2 state (XML, the original's own units) is translated to Ridge's Vocal strip voicing, measured
+# black-box on the official trial (de-esser, de-ploser, EQ, compander, order; REA_rodada145 §2); the other strips'
+# states are not read (Ridge at its defaults)
+translate = ssl-vocalstrip-2
+
+# round 145: the rest of Complete Access (Slate Digital, Solid State Logic, LiquidSonics, sonible, Harrison; official
+# trials on this PC) by role only — their states are not read (not in her corpus, not measured): LYNX's effect for
+# the same job at its defaults, so a project that used them still plays a sensible chain
+[complete-access-strips]
+product = channel strips (SSL 4K G, Harrison 32C / MPC, Slate VCC / Virtual Mix Rack)
+vendor = Complete Access (role)
+lynx = Ridge Strip
+names = SSL 4K G; Harrison 32C; Harrison_32ClassicChannelStrip; Harrison 32Classic; Harrison_MPCChannelStrip; VM VCC Channel; Virtual Mix Rack; VBC Rack; SSL Guitarstrip; SSL Native Drumstrip v6
+
+[complete-access-bus-comps]
+product = bus / smart compressors (SSL Bus Compressor 2, G3, VBC, sonible smart:comp, pure:comp)
+vendor = Complete Access (role)
+lynx = Crest Compressor
+names = SSL Native Bus Compressor 2; SSL G3 MultiBusComp; SSL 360 Link Bus Compressor; SSL Native X-Comp v6; SSL Fusion HF Compressor; VBC FG-Grey; VBC FG-MU; VBC FG-Red; smartcomp3; smartcomp2; purecomp; learncomp; Harrison_LookaheadCompressor; Harrison_MPCCompressor; VM FG-Stress; VM FG-Bomber
+
+[complete-access-vintage-comps]
+product = vintage compressor models (Slate FG-116 / FG-76 / FG-401 / FG-A / FG-Dynamics, SSL X-ValveComp)
+vendor = Complete Access (role)
+lynx = Compressor
+names = VM FG-116; VM FG-116 Modern; VM FG-116 Vintage; VM FG-76; VM FG-401; VM FG-A; VM FG-Dynamics; VM The Monster; SSL Native X-ValveComp v6; MO-TT
+
+[complete-access-optos]
+product = optical levelers (Slate FG-2A, SD-3A, Custom Opto)
+vendor = Complete Access (role)
+lynx = Glow Leveler
+names = VM FG-2A; VM SD-3A; VM Custom Opto
+
+[complete-access-limiters]
+product = limiters (Slate FG-X 2, SSL X-Limit, sonible smart:limit, pure:limit)
+vendor = Complete Access (role)
+lynx = Apex Limiter
+names = FG-X 2; FG-X; SSL X-Limit; smartlimit; purelimit; learnlimit; Bus Clipper
+
+[complete-access-eqs]
+product = EQs (Slate Infinity EQ, FG-73 / FG-N / FG-S / SD-PE1 / CS-EQ, Eiosis AirEQ, SSL X-EQ 2, sonible smart:EQ)
+vendor = Complete Access (role)
+lynx = Facet EQ
+names = Inf EQ; Infinity EQ; VM FG-73; VM FG-N; VM FG-S; VM SD-PE1; VM CS-EQ; VM CS-Lift; VM AirEQ Air; VM AirEQ Earth; Eiosis AirEQ; Eiosis AirEQ 5.1; SSL Native X-EQ 2; SSL Fusion Violet EQ; smartEQ4; smartEQ3; pureeq; learneq; Harrison_LegacyEQ; Harrison_MasteringEQ
+
+[complete-access-deessers]
+product = de-essers (SSL DeEss, Slate FG-DS 902, Eiosis E2Deesser, sonible smart:deess)
+vendor = Complete Access (role)
+lynx = Hush De-esser
+names = SSL DeEss; VM FG-DS 902; Eiosis E2Deesser; smartdeess; puredeess; Harrison_De-Esser
+
+[complete-access-gates]
+product = gates (SSL X-Gate, Slate Gate Classic / Drums, Harrison Spectral Gate)
+vendor = Complete Access (role)
+lynx = Sentry Gate
+names = SSL X-Gate; VM Gate Classic; VM Gate Drums; Harrison_SpectralGate
+
+[complete-access-reverbs]
+product = reverbs (LiquidSonics Lustrous Plates / Seventh Heaven / Cinematic Rooms, Slate VerbSuite Classics, SSL FlexVerb / PlateVerb / SpringVerb, sonible smart:reverb)
+vendor = Complete Access (role)
+lynx = Foil Plate
+names = Lustrous Plates; Seventh Heaven; Seventh Heaven Professional; Cinematic Rooms; Cinematic Rooms Professional; Illusion; VerbSuite Classics; SSL Native FlexVerb; SSL PlateVerb; SSL SpringVerb; SSL GateVerb; smartreverb2; smartreverb; pureverb; learnreverb; Vocal Reverb
+preset = Decay=0.3; Mix=1
+mix = 0.25
+
+[complete-access-delays]
+product = delays (SSL X-Echo / X-Delay, Slate Stellar Echo SD-201, Harrison 3D Delay)
+vendor = Complete Access (role)
+lynx = Echoform
+preset = Mode=0.0415; Sync L=0.6248; Note L=0.4498; Feedback=0.125; Mix=0.25
+names = SSL Native X-Echo; SSL X-Delay; Stellar Echo SD-201; Harrison_3DDelay
+
+[complete-access-saturators]
+product = saturators (Slate Heatwave / Revival, SSL Fusion Vintage Drive / X-Saturator, Harrison Tape Saturator)
+vendor = Complete Access (role)
+lynx = Ember Saturator
+names = Heatwave; VM Revival; SSL Fusion Vintage Drive; SSL Native X-Saturator v6; SSL Fusion Transformer; Harrison Tape Saturator
+
+[complete-access-tuners]
+product = pitch correction (Slate MetaTune)
+vendor = Complete Access (role)
+lynx = LYNX Tune
+names = MetaTune
 
 [waves-s1-imager]
 product = S1 Imager
@@ -1355,6 +1438,80 @@ int translateWavesCla76 (const std::vector<std::uint8_t>& state, EffectSlot& slo
     return 11;
 }
 
+// SSL Native Vocalstrip 2 (round 145): its state is XML with named parameters in the original's own units
+// (<SSL_PLUGIN_STATE … StateASelected="1"><A><PROCESSOR_STATE><PARAM id="compThreshold" value="-33.2"/> …); the A or B
+// setting that plays maps one to one onto Ridge Strip's Vocal strip voicing, which reproduces the official trial
+// measured black-box (docs/analise/REA_rodada145.md §2). Other SSL Native strips keep Ridge's defaults.
+int translateSslVocalstrip2 (const std::vector<std::uint8_t>& state, EffectSlot& slot)
+{
+    namespace r = mixsuite::ridge;
+    namespace vs = voxstrip;
+    const auto root = findBytes (state, "<SSL_PLUGIN_STATE");
+    if (root == std::string::npos || slot.kind != EffectKind::ridgeStrip)
+        return 0;
+    const std::string text (state.begin() + (std::ptrdiff_t) root, state.end());
+    if (attributeIn (text, 0, "PluginName").find ("Vocalstrip 2") == std::string::npos)
+        return 0;
+    const bool useB = attributeIn (text, 0, "StateASelected") == "0";
+    const auto block = text.find (useB ? "<B" : "<A");
+    if (block == std::string::npos)
+        return 0;
+    const auto blockEnd = text.find (useB ? "</B>" : "</A>", block);
+    std::map<std::string, double> v;
+    for (auto q = text.find ("<PARAM ", block); q != std::string::npos && q < blockEnd; q = text.find ("<PARAM ", q + 7))
+    {
+        const auto id = attributeIn (text, q, "id");
+        float value = 0;
+        if (! id.empty() && parseFloat (attributeIn (text, q, "value"), value) && std::isfinite (value))
+            v[id] = value;
+    }
+    if (v.size() < 10)
+        return 0;
+    auto at = [&v] (const char* id, double fallback) {
+        const auto it = v.find (id);
+        return it != v.end() ? it->second : fallback;
+    };
+    auto sw = [&at] (const char* id, bool fallback) { return at (id, fallback ? 1.0 : 0.0) >= 0.5 ? 1.0f : 0.0f; };
+    auto& p = slot.params;
+    p[r::vocal] = 1.0f;
+    p[r::vInput] = vs::gainValue (at ("inputGain", 0.0));
+    p[r::vOutput] = vs::gainValue (at ("outputGain", 0.0));
+    p[r::vOrder] = (float) std::clamp (at ("processOrder", 0.0), 0.0, 1.0);
+    p[r::vDsOn] = sw ("dsOn", false);
+    p[r::vDsFreq] = vs::dsFreqValue (at ("dsFreq", 7500.0));
+    p[r::vDsThreshold] = vs::thresholdValue (at ("dsThreshold", -24.0));
+    p[r::vDsSplit] = sw ("dsSplit", true);
+    p[r::vDsLookahead] = sw ("dsLookAhead", false);
+    p[r::vDsListen] = sw ("dsAudition", false);
+    p[r::vDpOn] = sw ("dpOn", false);
+    p[r::vDpFreq] = vs::dpFreqValue (at ("dpFreq", 120.0));
+    p[r::vDpThreshold] = vs::thresholdValue (at ("dpThreshold", -24.0));
+    p[r::vDpSplit] = sw ("dpSplit", true);
+    p[r::vDpLookahead] = sw ("dpLookAhead", false);
+    p[r::vDpListen] = sw ("dpAudition", false);
+    p[r::vEqOn] = sw ("eqOn", false);
+    p[r::vHpfOn] = sw ("hpfOn", true);
+    p[r::vHpfFreq] = vs::hpfValue (at ("hpfFreq", 30.0));
+    p[r::vNotchOn] = sw ("notchOn", true);
+    p[r::vNotchFreq] = vs::notchValue (at ("notchFreq", 200.0));
+    p[r::vNotchGain] = vs::notchGainValue (at ("notchGain", 0.0));
+    p[r::vHighOn] = sw ("hsOn", true);
+    p[r::vHighFreq] = vs::highValue (at ("hsFreq", 1000.0));
+    p[r::vHighGain] = vs::highGainValue (at ("hsGain", 0.0));
+    p[r::vCompOn] = sw ("compOn", false);
+    p[r::vExpThreshold] = vs::expThresholdValue (at ("expThreshold", -96.0));
+    p[r::vCompThreshold] = vs::thresholdValue (at ("compThreshold", 0.0));
+    p[r::vRatio] = vs::ratioValue (at ("compRatio", 4.0));
+    p[r::vAttack] = vs::attackValue (at ("compAttack", 0.1));
+    p[r::vRelease] = vs::releaseValue (at ("compRelease", 100.0));
+    p[r::vMakeup] = vs::makeupValue (at ("compMakeup", 0.0));
+    p[r::vKnee] = sw ("compKnee", false);
+    p[r::vDrive] = sw ("compDrive", false);
+    if (at ("bypassAll", 0.0) >= 0.5)
+        slot.enabled = false;
+    return (int) v.size();
+}
+
 // SSL E-Channel (57 values; RW index: 0 comp threshold dB, 1 ratio, 2 fast (1 = on), 3 release s, 5 expander threshold,
 // 6 range, 7 gate (1) / expander (0), 8 expander fast attack, 9 expander release, 11 dynamics bypass, 12 dynamics to
 // channel out, 13 LF bell, 14/15 LF gain / Hz, 16/17/18 LMF gain / kHz / Q, 19/20/21 HMF, 22 HF bell, 23/24 HF gain / kHz,
@@ -1815,6 +1972,8 @@ RawTranslator rawTranslatorNamed (std::string_view name)
         return translateWavesDoubler;
     if (name == "waves-ssl-channel")
         return translateWavesSslChannel;
+    if (name == "ssl-vocalstrip-2")
+        return translateSslVocalstrip2;
     if (name == "auto-tune-pro")
         return translateAutoTunePro;
     if (name == "waves-tune")
