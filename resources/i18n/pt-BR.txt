@@ -4021,6 +4021,9 @@ countries: br
 "Links (this project, then global)" = "Vínculos (deste projeto, depois os globais)"
 "global" = "global"
 "Pattern events" = "Eventos do pattern"
+"Initialized controls" = "Controles inicializados"
+"Initialized controls: to be reset when the song starts (a control's menu > Init song with this position)" = "Controles inicializados: voltam a este valor quando a música começa (menu de um controle > Iniciar a música com esta posição)"
+"reset to this value when the song starts  [RMB] delete the initial value" = "volta a este valor quando a música começa  [RMB] apagar o valor inicial"
 # --- Round 145: Ridge Strip's Vocal strip voicing
 "Compander" = "Compander"
 "Make-up" = "Ganho de compensação"

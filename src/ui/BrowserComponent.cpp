@@ -18,6 +18,7 @@
 #include "ui/ValueControl.h"
 #include "ui/WaveformView.h"
 #include "ui/AudioEditor.h"
+#include "ui/AutomationUi.h"
 #include "ui/ChannelRackComponent.h"
 #include "ui/MixerComponent.h"
 
@@ -187,11 +188,12 @@ enum class Category
     effects,
     generators,
     automation,
+    initialized, // FL's "Initialized controls" (REA round 146)
     samples
 };
 
 constexpr Category categories[] = { Category::history, Category::patterns, Category::effects, Category::generators,
-                                     Category::automation, Category::samples };
+                                     Category::automation, Category::initialized, Category::samples };
 
 juce::String categoryName (Category c)
 {
@@ -202,6 +204,7 @@ juce::String categoryName (Category c)
         case Category::effects: return tr ("Effects");
         case Category::generators: return tr ("Generators");
         case Category::automation: return tr ("Automation");
+        case Category::initialized: return tr ("Initialized controls");
         case Category::samples: return tr ("Audio files");
     }
     return {};
@@ -216,6 +219,7 @@ juce::String categoryHint (Category c)
         case Category::effects: return tr ("Effects in use, with the insert they sit on");
         case Category::generators: return tr ("Generators in use (the Channel Rack's channels), with the insert they play into");
         case Category::automation: return tr ("Automation clips of this project");
+        case Category::initialized: return tr ("Initialized controls: to be reset when the song starts (a control's menu > Init song with this position)");
         case Category::samples: return tr ("Audio files used by this project (samples, audio clips), in the colour of the channel that plays them");
     }
     return {};
@@ -230,6 +234,7 @@ Icon categoryIcon (Category c)
         case Category::effects: return Icon::mixer;
         case Category::generators: return Icon::keyboard;
         case Category::automation: return Icon::automate;
+        case Category::initialized: return Icon::automate;
         case Category::samples: return Icon::audioFile;
     }
     return Icon::folder;
@@ -327,6 +332,7 @@ public:
         Category category = Category::samples;
         projectcontents::Item item; // kind == item (history: item.index = the step)
         bool history = false, missing = false, current = false;
+        bool initial = false; // an initialized control (item.index = into Song::initialValues)
         std::function<void()> activate; // kind == plugin: adds it
     };
 
@@ -928,7 +934,7 @@ public:
                     browser.onOpenEffect (item.index, item.slot);
                 break;
             case projectcontents::Kind::automation:
-                if (! n.history && browser.onOpenAutomation)
+                if (! n.history && ! n.initial && browser.onOpenAutomation)
                     browser.onOpenAutomation (item.index);
                 break;
         }
@@ -1082,7 +1088,7 @@ private:
                 listCategory (*child, browser.engine.getSong(), &browser.engine, true); // the counts show while closed
                 child->children.clear();
                 n.children.push_back (std::move (child));
-                if (c == Category::automation && browser.projectFile.existsAsFile()) // then the project's folder (FL's "Project data")
+                if (c == Category::initialized && browser.projectFile.existsAsFile()) // then the project's folder (FL's "Project data")
                 {
                     auto folder = makeFolder (browser.projectFile.getParentDirectory(), tr ("Project folder"), juce::Colour());
                     folder->icon = Icon::folder;
@@ -1207,6 +1213,18 @@ private:
                 for (auto& item : projectcontents::automations (song))
                     add (item, Icon::automate, item.colour != 0 ? juce::Colour (item.colour) : theme::colour::automation);
                 break;
+            case Category::initialized:
+                for (int i = 0; i < (int) song.initialValues.size(); ++i)
+                {
+                    const auto& v = song.initialValues[(std::size_t) i];
+                    projectcontents::Item item;
+                    item.kind = projectcontents::Kind::automation;
+                    item.index = i;
+                    item.name = (engine != nullptr ? describeAutomationTarget (*engine, v.target) : juce::String ("?")).toStdString();
+                    item.detail = std::to_string ((int) std::lround (v.value * 100.0f)) + "%";
+                    add (std::move (item), Icon::automate, theme::colour::automation).initial = true;
+                }
+                break;
             case Category::samples:
                 for (auto& item : projectcontents::samples (song))
                 {
@@ -1274,6 +1292,8 @@ private:
             engine.jumpToHistory (item.index);
             return;
         }
+        if (n.initial)
+            return;
 
         switch (item.kind)
         {
@@ -1298,6 +1318,12 @@ private:
         h.hasMenu = true;
         const auto& item = n.item;
 
+        if (n.initial)
+        {
+            h.text = n.label + ": " + tr ("reset to this value when the song starts  [RMB] delete the initial value");
+            h.value = n.detail;
+            return h;
+        }
         if (n.history)
         {
             h.text = tr ("Undo history: [LMB] go back to this step");
@@ -1385,6 +1411,18 @@ private:
         const auto item = n.item;
         if (n.history)
             return;
+        if (n.initial)
+        {
+            const auto& values = engine.getSong().initialValues;
+            if (! juce::isPositiveAndBelow (item.index, (int) values.size()))
+                return;
+            menu.addSectionHeader (n.label + ": " + n.detail);
+            menu.addItem (tr ("Delete initial value"), [&engine, target = values[(std::size_t) item.index].target] {
+                engine.editSong ([target] (Song& s) { s.removeInitialValue (target); });
+            });
+            menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+            return;
+        }
 
         switch (item.kind)
         {
