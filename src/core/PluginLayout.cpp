@@ -1968,7 +1968,7 @@ Layout prismMultiband()
 {
     Layout l;
     l.width = 900;
-    l.height = 560;
+    l.height = 594; // round 144: + the processing / oversampling / pan-mode row (was 560)
     l.pages = { TR_NOOP ("Band 1"), TR_NOOP ("Band 2"), TR_NOOP ("Band 3"), TR_NOOP ("Band 4"), TR_NOOP ("Band 5"), TR_NOOP ("Band 6") };
     auto& v = l.items;
     // the bands are the display: click one to edit it, drag a crossover line to move it
@@ -2017,6 +2017,13 @@ Layout prismMultiband()
     v.push_back (dial (660, 504, 24, "Mix", TR_NOOP ("Mix")));
     v.push_back (dial (740, 504, 24, "Input", TR_NOOP ("Input"), bipolar));
     v.push_back (dial (820, 504, 24, "Output", TR_NOOP ("Output"), bipolar));
+    // round 144 (Pro-MB's bottom bar): processing mode, oversampling, what the bands' pan balances
+    v.push_back (label (8, 566, 50, 20, TR_NOOP ("Phase")));
+    v.push_back (tabs (56, 566, 240, 20, "Processing", TR_NOOP ("Linear|Dynamic|Minimum"), { 0.0f, 0.5f, 1.0f }));
+    v.push_back (label (310, 566, 90, 20, TR_NOOP ("Oversampling")));
+    v.push_back (tabs (402, 566, 150, 20, "Oversampling", "Off|2x|4x", { 0.0f, 0.5f, 1.0f }));
+    v.push_back (label (570, 566, 40, 20, TR_NOOP ("Pan")));
+    v.push_back (tabs (612, 566, 110, 20, "Pan mode", "L/R|M/S"));
     return l;
 }
 
