@@ -4211,7 +4211,6 @@ countries: br
 # round 150 (parity150a): Foil Plate's measured plate voicing
 "Measured plate" = "Placa medida"
 "Thresh." = "Limiar"
-<<<<<<< HEAD
 # round 152 (parity152a): Compressor ← RComp (measured vintage curve, bipolar gain-change meter), Glow ← CLA-2A (Limit, Auto makeup, Analog)
 "Old|Measured" = "Antigo|Medido"
 "Off|50 Hz|60 Hz" = "Desl.|50 Hz|60 Hz"
@@ -4221,10 +4220,8 @@ countries: br
 "Measured: the reference's static curve at every ratio; old: the curve of projects saved before round 152" = "Medido: a curva estática da referência em cada razão; antigo: a curva dos projetos salvos antes da rodada 152"
 "Vintage curve" = "Curva vintage"
 "Opto law" = "Lei óptica"
-=======
 "Brown|Black|Orange" = "Marrom|Preto|Laranja"
 "4K console" = "Console 4K"
 "Mic pre" = "Pré de microfone"
 "Mic" = "Mic"
 "Vocal detector" = "Detector vocal"
->>>>>>> origin/main
