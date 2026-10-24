@@ -2299,7 +2299,7 @@ Layout withVocalVoicing (Layout l)
     add (dial (60, 310, 34, "Compander release", TR_NOOP ("Release")));
     add (dial (160, 240, 36, "Compander ratio", TR_NOOP ("Ratio")));
     add (dial (264, 230, 48, "Compander threshold", TR_NOOP ("Threshold"), big));
-    add (dial (370, 220, 34, "Expander threshold", TR_NOOP ("Exp. threshold")));
+    add (dial (370, 220, 34, "Expander threshold", TR_NOOP ("Expander")));
     add (dial (370, 310, 34, "Make-up", TR_NOOP ("Make-up")));
     add (toggle (128, 330, 72, 22, "Soft knee", TR_NOOP ("Soft knee")));
     add (toggle (226, 330, 72, 22, "Drive", TR_NOOP ("Drive")));

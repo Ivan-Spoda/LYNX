@@ -87,6 +87,8 @@ LYNX vs the trial (null over the signal after the first second; `D:\lynx-work\vo
 |---|---|
 | **her state on her takes (go / kwe / lu)** | **−66.9 / −61.5 / −60.4 dB** (level ±0.00 dB) |
 | her state on stairs | −56 dB |
+| de-esser (split, −36 dB) on her takes | −46.4 … −48.1 dB |
+| a soft-knee 6:1 compander on her takes | −64 dB |
 | compressor stairs, 32 settings + make-up | −53 … −70 dB |
 | bursts, 7 attacks × 6 releases | −52 … −88 dB (two −42 dB: the trial's carried-over envelope) |
 | drive, gains | below −140 dB |

@@ -3927,7 +3927,6 @@ countries: br
 
 # --- Round 145: Ridge Strip's Vocal strip voicing
 "Compander" = "Compander"
-"Exp. threshold" = "Limiar do expansor"
 "Make-up" = "Ganho de compensação"
 "Soft knee" = "Joelho suave"
 "Broadband|Split" = "Banda larga|Dividido"
@@ -3958,3 +3957,4 @@ countries: br
 "Gain after the compressor" = "Ganho depois do compressor"
 "A gradual start of the compression around the threshold" = "Início gradual da compressão em torno do limiar"
 "Soft clipping after the make-up gain: warmer, louder; stronger with more make-up" = "Saturação suave depois do ganho de compensação: mais quente e mais alto; mais forte com mais compensação"
+"Expander" = "Expansor"
