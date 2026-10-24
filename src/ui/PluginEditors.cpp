@@ -251,7 +251,7 @@ public:
                                                                     || juce::String (item.display) == "prismbands" || juce::String (item.display) == "emberbands"
                                                                     || juce::String (item.display) == "tunekeys" || juce::String (item.display) == "tuneautokey"
                                                                     || juce::String (item.display) == "pitchring"
-                                                                    || isBars (item)))
+                                                                    || isBars (item) || isRhythmEdit (item) || isRhythmPatterns (item)))
                 return i;
             if (item.type == Item::display || (item.param == nullptr && ! hasStyle (item, plugui::pageTabs)))
                 continue;
@@ -2705,7 +2705,7 @@ public:
         const auto p = e.position;
         const auto h = headerItemAt (p);
         const auto i = h == 0 ? itemAt (p) : -1;
-        if (i >= 0 && hasStepArrows (activeLayout().items[(std::size_t) i]))
+        if (i >= 0 && (hasStepArrows (activeLayout().items[(std::size_t) i]) || isRhythmEdit (activeLayout().items[(std::size_t) i])))
         {
             mouseAt = p; // the menu's arrows light under the mouse
             repaint();
@@ -2910,6 +2910,22 @@ public:
             xyMouse (e, item);
             return;
         }
+        if (isRhythmPatterns (item)) // round 144: the rhythm editor's pattern menu
+        {
+            rhythmPatternsMenu (item);
+            return;
+        }
+        if (isRhythmEdit (item))
+        {
+            if (e.mods.isPopupMenu())
+            {
+                rhythmPatternsMenu (item);
+                return;
+            }
+            dragItem = index;
+            rhythmMouse (e, item, true);
+            return;
+        }
         if (isBars (item))
         {
             dragItem = index;
@@ -3087,6 +3103,11 @@ public:
             barsMouse (e, activeLayout().items[(std::size_t) dragItem], false);
             return;
         }
+        if (rhythmDrag >= 0 && dragItem >= 0) // round 144
+        {
+            rhythmMouse (e, activeLayout().items[(std::size_t) dragItem], false);
+            return;
+        }
         if (dragItem < 0 || ! drag.isActive())
             return;
         const auto& item = activeLayout().items[(std::size_t) dragItem];
@@ -3121,6 +3142,13 @@ public:
             dragItem = -1;
             ui::hideValueTip();
         }
+        if (rhythmDrag >= 0 || (dragItem >= 0 && isRhythmEdit (activeLayout().items[(std::size_t) dragItem]))) // round 144
+        {
+            rhythmDrag = -1;
+            dragItem = -1;
+            ui::hideValueTip();
+            repaint();
+        }
         if (xyDragging || sgDragging || barsDragging)
         {
             xyDragging = sgDragging = barsDragging = false;
@@ -3142,6 +3170,13 @@ public:
         if (index < 0)
             return;
         const auto& item = activeLayout().items[(std::size_t) index];
+        if (isRhythmEdit (item)) // round 144: add / remove a tap
+        {
+            rhythmDoubleClick (e, item);
+            return;
+        }
+        if (isRhythmPatterns (item))
+            return;
         if (isGeminiGraph (item)) // round 137: an EQ marker = its shelf on / off
         {
             if (juce::String (item.display) == "geminieq")
@@ -3241,6 +3276,10 @@ public:
             return { tr ("VU display: what the meter shows (input level, gain reduction, output level)"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "xy")
             return { tr ("Drag the point: both values at once"), {}, false, false };
+        if (isRhythmEdit (item)) // round 144
+            return { tr ("Rhythm taps: drag up / down = level, sideways = time; double-click = add or remove a tap; right-click = patterns"), {}, false, false };
+        if (isRhythmPatterns (item))
+            return { tr ("Load a tap pattern (LYNX's own), or go back to even spacing"), {}, false, false };
         if (item.type == Item::display)
             return { tr ("Drag a handle (frequency and gain); mouse wheel = Q; right-click = type; double-click = 0 dB"), {}, false, true };
         if (hasStyle (item, plugui::pageTabs))

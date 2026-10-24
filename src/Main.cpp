@@ -2534,6 +2534,9 @@ private:
                 fx.params[ef::rhythmTap1 + 2] = 0.45f;
                 fx.params[ef::feedback] = 0.25f;
                 fx.params[ef::era] = 0.5f;
+                for (const auto& [param, value] : ef::rhythmPresetEdits (0)) // round 144: a pattern in the rhythm editor (Grid)
+                    fx.params[(std::size_t) param] = value;
+                fx.params[ef::rhythmShape] = 0.5f; // swell
                 lynx::Song song;
                 song.mixer.resize (2);
                 song.mixer[0].name = "Master";

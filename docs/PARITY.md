@@ -754,7 +754,7 @@ Trial on this PC: yes (no screenshot this round).
 | Audio Split / Wideband | button, default **Split** | "Processing: Wide band \| Split band" tabs, default Split | ✅ | Hush's split is 2nd order at the frequency; Waves' is 1st order at ≈ Freq/π (engine) |
 | Monitor Output / SideChain (+ yellow light) | button | "Audition" toggle under the frequency slider (plays the detection band) | ✅ | same function, different name |
 | Energy Detector meter (side-chain energy, dB below 0 dBFS, blue) aligned with the threshold | main meter | "IN" meter = **input** peak, with a threshold arrow | ⚠️ | threshold is compared with an unfiltered level; switch IN to side-chain energy (as Waves) or add it |
-| Attn meter (red, instantaneous GR) + **infinite peak hold, click to reset** | meter | "GR" bar (0–30 dB scale, shared with the IN scale) | ⚠️ | no peak hold / reset |
+| Attn meter (red, instantaneous GR) + **infinite peak hold, click to reset** | meter | "GR" bar with a held-peak line and number, click to reset | ✅ | round 144 |
 | Output meter −30…0 dBFS + peak readout (click to reset) | meter | none (bottom bar shows the Output **setting**) | ✅ | UI; round 135w: OUT meter −30…0 beside IN / GR, clip lamp and highest-peak read-out, click to reset |
 | Frequency-response display | **none in the classic DeEsser** (the manual lists no graph; Renaissance DeEsser has one) | small detector-band graph only in the generic `hushDeEsser()` layout; the display-first editor shows the scrolling waveform with the reduction in red | ➕ | nothing to add for parity |
 | Range | none (the floor is the split's leakage) | "Range" 0–24 dB, default 12 | ➕ | translator fixes it at 12 dB |
@@ -1521,7 +1521,7 @@ Sources: docs/specs/echoboy.md (Pro Tools-era guide pp. 22–54, store page); `[
 | Echo Mode: Single | per-channel echo | Delay model Mono/Stereo | Style "Single" (+ Spread) | ✅ (Echoform) | |
 | Echo Mode: Dual | two independent times, FB mix / balance | Offset only | Style "Dual" (Time L/R, sync L/R) | ⚠️ | no FB cross-mix or FB balance |
 | Echo Mode: Ping-Pong | mono in, L then R | Ping pong | Style "Ping-pong" (+ Pairs) | ✅ | |
-| Echo Mode: Rhythm (≤16 taps, 1–8 beats, grid ½…1/64, Shape) | Rhythm editor | — | round 137: RHYTHM switch (third row): evenly spaced taps (ms / note / dotted / triplet), Repeats 1–16, Decay 0–40 dB, Length 1–8 beats; the echo train shows the pattern | ⚠️ (Echoform) | [EXEC] measured on the trial (impulses at 60 / 120 BPM; its host parameters RhythmMode / Note / Time / Repeats / Decay): Repeats = slots incl. the input, so repeats − 1 taps are heard, each 1 / √slots (equal power, with the decay spread from the first slot to the last); the pattern spans 2 beats (taps past it are dropped) and the feedback replays it every 2 beats — LYNX's Length defaults to 2 beats. Left: the Pattern presets and the Custom (drawn) taps of the rhythm editor (not host parameters, not measured) |
+| Echo Mode: Rhythm (≤16 taps, 1–8 beats, grid ½…1/64, Shape) | Rhythm editor | — | round 137: RHYTHM switch (third row): evenly spaced taps (ms / note / dotted / triplet), Repeats 1–16, Decay 0–40 dB, Length 1–8 beats; the echo train shows the pattern | ✅ (Echoform) | [EXEC] measured on the trial (impulses at 60 / 120 BPM; its host parameters RhythmMode / Note / Time / Repeats / Decay): Repeats = slots incl. the input, so repeats − 1 taps are heard, each 1 / √slots (equal power, with the decay spread from the first slot to the last); the pattern spans 2 beats (taps past it are dropped) and the feedback replays it every 2 beats — LYNX's Length defaults to 2 beats. Left: the Pattern presets and the Custom (drawn) taps of the rhythm editor (not host parameters, not measured); **round 144**: the rhythm editor (a row under the panel): the taps on the pattern's time axis, drag = level / time, double-click = add / remove a tap; Even / Free / Grid edits (Grid ½ … 1/64 — EchoBoy's Custom Time / Custom Beats roles), Shape (Decay, Reverse, Swell, Fade, Nonlin — LYNX's own laws, [model]), and a Patterns menu of 12 LYNX-authored patterns (gallop, tresillo, clave, stutter, triplet roll …; none copied). [EXEC] round 144: on the trial the Pattern / Custom Time / Custom Beats modes give no echo when only its host parameters are set (their taps live in its editor), so those are not measured |
 | Echo Style menu (~30 voicings) | main panel menu | — | Mode menu: 12 (Tape, Lo-Fi, Hi-Fi tape, Bucket brigade, Analog, Digital, Clean, Phaser, Shifter, Pitch, Reverse, Detune) | ⚠️ | covers families: tape/BBD/digital/lo-fi; no radio/telephone, chorus/vibrato, "Diffused/Verbed" variants |
 | Echo Time ms | ms, pitch-bends when moved | Time + Keep pitch | Time L/R 0–20 s, default 300 ms | ✅ | |
 | Note / Dotted / Triplet | Note/Dot/Trip buttons | Tempo sync | Sync menu ms/Note/Dotted/Triplet, 1/64…8/1 | ✅ | |
@@ -1533,16 +1533,16 @@ Sources: docs/specs/echoboy.md (Pro Tools-era guide pp. 22–54, store page); `[
 | Prime Numbers | detunes repeat times | — | — | ✅ | trivial: snap times to primes in samples; round 135w (Echoform): "Primes" — the delay times snap to a prime number of samples |
 | Groove (shuffle…swing) | alternate repeats | — | — | ✅ | round 135w (Echoform): Groove ±25 % = odd repeats late / early by that share of the echo time ([EXEC] EchoBoy trial: +0.25 → +113…125 ms at 500 ms) |
 | Feel (rushin'…draggin') | global pre-delay ± | Offset (partial) | Spread ±20 ms (partial) | ✅ | round 135w (Echoform): Feel ±25 % moves the whole train by that share of the echo time ([EXEC]: +0.125 → +56…62 ms at 500 ms) |
-| Input level (echo path only) | −24…+24 dB | Input Wet | — | ⚠️ | |
+| Input level (echo path only) | −24…+24 dB | Input Wet | — | ✅ | **round 144**: Echoform "Input level" −24 … +24 dB on the echo path only (Style edit row) |
 | Output level (echo only) | −24…+24 dB | Wet | Level ±18 dB | ✅ | |
 | Tweak: Accent | bipolar | — | — | ✅ | round 135w (Echoform): Accent ±100 % (odd vs even repeats) [MANUAL: not a host parameter on the trial, law not measured] |
 | Tweak: Width | min…max, past 3 o'clock out-of-phase | Stereo | Width ±100 % | ✅ | |
 | Tweak: L/R Offset | 0–25 ms, default 8 | Offset | Spread ±20 ms | ✅ | |
-| Tweak Dual: FB Mix / Balance / FB Balance | knobs | — | — | ⚠️ | round 135w (Echoform): X-feed (each side's feedback from the other) and Balance; no FB Balance |
-| Style Edit: 3-band EQ gain + per-repeat Decay, Mid Res | ±18 dB etc. | FB filter only | Low/High cut only | ❌ | the "EQ in the loop vs first repeat" idea is missing |
+| Tweak Dual: FB Mix / Balance / FB Balance | knobs | — | — | ✅ | round 135w (Echoform): X-feed (each side's feedback from the other) and Balance; no FB Balance; **round 144**: FB balance (±100 %, each side's feedback) |
+| Style Edit: 3-band EQ gain + per-repeat Decay, Mid Res | ±18 dB etc. | FB filter only | Low/High cut only | ⚠️ | the "EQ in the loop vs first repeat" idea is missing; **round 144**: loop EQ (bass 120 Hz shelf, mid 1.2 kHz bell, treble 5 kHz shelf, ±18 dB) inside the loop — every repeat is shaped again; no per-repeat decay / Mid Res |
 | Style Edit: saturation type (Clean, Tape, Warm, Pump, Dirt, Limit×4) | menu | Limit/Sat + knee/symmetry | via Mode only | ⚠️ | |
-| Style Edit: Diffusion + Size, Loop/Post | knobs + switch | Diffusion level/spread | Diffusion amount/size | ⚠️ | no Loop/Post choice |
-| Style Edit: Wobble, Rate, Shape (5), Sync | knobs/menu | Mod rate/time | Wow, Flutter (Tape) / Rate, Depth | ⚠️ | no shape menu, no LFO sync |
+| Style Edit: Diffusion + Size, Loop/Post | knobs + switch | Diffusion level/spread | Diffusion amount/size | ✅ | no Loop/Post choice; **round 144**: Diffusion Loop / Post |
+| Style Edit: Wobble, Rate, Shape (5), Sync | knobs/menu | Mod rate/time | Wow, Flutter (Tape) / Rate, Depth | ✅ | no shape menu, no LFO sync; **round 144**: Wobble shape (sine, triangle, square, saw, random) and LFO sync (free, 1/16 … 2 bars) for the LFO modes |
 | Ducking | — (not in EchoBoy) | — | Ducking | ➕ | |
 | Pitch / shifter / reverse modes | — | — | yes | ➕ | |
 | Echo display | Tweak "visualiser" of delay tails | — | "echotrain" display of repeats | ✅ (Echoform) | |
@@ -1553,7 +1553,7 @@ Sources: docs/specs/echoboy.md (Pro Tools-era guide pp. 22–54, store page); `[
 | Gestures, value entry, automation | standard | generic editor: full set | full set | ✅ | |
 | Translation of the saved state | encoded | none, FL defaults (ms delay, FB, etc. unrelated) | none | ❌ | state unreadable; default only |
 
-**Scores**: Fruity Delay 3 as the stand-in: configuration 2/10, design 2/10. Echoform: configuration 5/10, design 5/10.
+**Scores**: Fruity Delay 3 as the stand-in: configuration 2/10, design 2/10. Echoform: configuration 5/10, design 5/10. **After round 144** (Echoform): configuration 9/10, design 8/10 (round 137: 8 / 7) — the rhythm editor (patterns, free / grid taps, shapes) and the Style Edit role (input, loop EQ, FB balance, diffusion place, wobble shape / sync); left: the saturation types, the ~30 style voicings, PrimalTap's Multiply.
 
 **Verdict:** **Echoform is clearly the better EchoBoy (and PrimalTap) substitute.** It has the four-mode-like Style switch (Single/Dual/Ping-pong + Ratio/Quad), a character Mode menu standing in for EchoBoy's Style, Drive ≈ Saturation, Wow/Flutter ≈ Wobble, Diffusion, note/dotted/triplet sync and an echo display. Fruity Delay 3 is a clean FL delay with none of the "style" concept, played at FL defaults. The spec's own recommendation (§7.1) agrees. H-Delay already moved to Echoform in round 119.
 

@@ -572,7 +572,8 @@ public:
     }
 
 private:
-    enum { idThreshold = 1, idFreq, idMeterThreshold, idDisplay, idExternal, idOutMeter };
+    enum { idThreshold = 1, idFreq, idMeterThreshold, idDisplay, idExternal, idOutMeter, idGrMeter };
+    float grHoldDb = 0.0f;     // round 144: the attenuation meter's infinite peak hold (DeEsser's Attn meter), click to reset
     float outPeakDb = -100.0f; // round 135w: the output meter's highest peak since the last click (DeEsser's read-out)
     static constexpr float waveH = 194.0f; // the waveform display (DISPLAY hides it and the window shrinks)
     bool displayShown() const { return v (P ("Display")) >= 0.5f; }
@@ -666,6 +667,9 @@ private:
         // the meter's threshold arrow
         out.push_back (custom ({ meters().getX() - 12.0f, meterY ((float) thresholdDb()) - 7.0f, 12.0f, 14.0f }, idMeterThreshold, pThr(), tr ("Threshold: drag up or down")));
         // round 135w: the output meter (−30 … 0 dBFS, the reference's), its peak read-out and clip lamp: click to reset
+        // round 144: the reduction meter's held peak: click to reset (the reference's Attn meter)
+        out.push_back (custom (meters().translated (32.0f, 0.0f).withWidth (14.0f).expanded (3.0f, 0.0f), idGrMeter, -1,
+                               tr ("Gain reduction (dB); the number and the line hold the deepest reduction; click to reset")));
         out.push_back (custom (outMeter().expanded (4.0f, 28.0f), idOutMeter, -1, tr ("Output level (peak, dBFS): the lamp lights when the output clips, the number holds the highest peak; click to reset")));
         const auto b = barArea();
         const auto cy = b.getCentreY();
@@ -720,6 +724,12 @@ private:
             repaint();
             return;
         }
+        if (c.id == idGrMeter) // round 144
+        {
+            grHoldDb = 0.0f;
+            repaint();
+            return;
+        }
         if (c.id == idExternal)
         {
             const auto* fx = current();
@@ -749,7 +759,7 @@ private:
 
     void customDrag (const Ctl& c, const juce::MouseEvent& e) override
     {
-        if (c.id == idOutMeter)
+        if (c.id == idOutMeter || c.id == idGrMeter)
             return;
         if (c.id == idFreq)
         {
@@ -902,6 +912,16 @@ private:
         g.fillRect (grR);
         g.setColour (colour::accent);
         g.fillRect (grR.withHeight (grR.getHeight() * juce::jlimit (0.0f, 1.0f, newest.gr / 24.0f)));
+        // round 144: the held peak (a line on the bar and the number under it), as the reference's Attn meter
+        grHoldDb = juce::jmax (grHoldDb, newest.gr);
+        if (grHoldDb > 0.05f)
+        {
+            g.setColour (colour::textPrimary);
+            g.fillRect (grR.withY (grR.getY() + grR.getHeight() * juce::jlimit (0.0f, 1.0f, grHoldDb / 24.0f) - 1.0f).withHeight (2.0f));
+        }
+        g.setFont (font (type::caption));
+        g.setColour (colour::textSecondary);
+        g.drawText (juce::String (grHoldDb, 1), juce::Rectangle<float> (grR.getX() - 8.0f, grR.getBottom() - 13.0f, grR.getWidth() + 16.0f, 12.0f), juce::Justification::centred, false);
         g.setFont (font (type::caption));
         g.setColour (colour::textDisabled);
         for (const auto db : { 0.0f, -6.0f, -12.0f, -24.0f, -36.0f, -48.0f })
