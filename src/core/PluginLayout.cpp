@@ -1678,7 +1678,7 @@ Layout compressorLayout()
     v.push_back (when (dial (60, 252, 34, "RC attack", TR_NOOP ("Attack")), "Ranges", 0.5f, 1.0f));
     v.push_back (when (dial (140, 252, 34, "RC release", TR_NOOP ("Release")), "Ranges", 0.5f, 1.0f));
     v.push_back (when (dial (217, 252, 34, "RC ratio", TR_NOOP ("Ratio")), "Ranges", 0.5f, 1.0f));
-    v.push_back (tabs (314, 222, 94, 18, "Ranges", TR_NOOP ("LYNX|RComp")));
+    v.push_back (tabs (318, 7, 90, 16, "Ranges", TR_NOOP ("LYNX|RComp")));
     v.push_back (dial (300, 252, 30, "Mix", TR_NOOP ("Mix")));
     v.push_back (dial (370, 252, 30, "Trim", TR_NOOP ("Trim"), bipolar));
     return l;
