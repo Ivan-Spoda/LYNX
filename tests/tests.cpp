@@ -15795,4 +15795,5 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Parity135fTests.inc"
 #include "Feat132Tests.inc"
 #include "Parity135sTests.inc"
+#include "Parity137Tests.inc"
 #include "Patcher141Tests.inc"
