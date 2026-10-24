@@ -3986,7 +3986,6 @@ countries: br
 "Links (this project, then global)" = "Vínculos (deste projeto, depois os globais)"
 "global" = "global"
 "Pattern events" = "Eventos do pattern"
-<<<<<<< HEAD
 
 # round 147 (parity147): Prism Multiband's measured Dynamic phase
 "Classic dynamic" = "Dinâmica clássica"
@@ -3999,7 +3998,6 @@ countries: br
 "SC high" = "SC agudo"
 "Expert (selected band)" = "Avançado (banda selecionada)"
 "Classic|Measured" = "Clássico|Medido"
-=======
 # --- Round 145: Ridge Strip's Vocal strip voicing
 "Compander" = "Compander"
 "Make-up" = "Ganho de compensação"
@@ -4033,4 +4031,3 @@ countries: br
 "A gradual start of the compression around the threshold" = "Início gradual da compressão em torno do limiar"
 "Soft clipping after the make-up gain: warmer, louder; stronger with more make-up" = "Saturação suave depois do ganho de compensação: mais quente e mais alto; mais forte com mais compensação"
 "Expander" = "Expansor"
->>>>>>> origin/main
