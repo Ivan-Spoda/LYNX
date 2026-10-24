@@ -2712,8 +2712,17 @@ Layout latticeLayout()
     for (int k = 0; k <= 17; ++k)
         syncValues.push_back ((float) k / 17.0f);
     v.push_back (label (178, 268, 36, 18, TR_NOOP ("Sync")));
-    v.push_back (menuOf (214, 266, 88, 22, "Sync", TR_NOOP ("Sync"),
-                         "Free|1/64|1/32T|1/64.|1/32|1/16T|1/32.|1/16|1/8T|1/16.|1/8|1/4T|1/8.|1/4|1/2T|1/4.|1/2|1/1", syncValues));
+    // round 144: the reference's DelaySync list (straight, dotted, triplet groups — measured); the older by-length list
+    // stays in its place for projects that use it, until it is set back to Free
+    std::vector<float> refSync { 0.0f };
+    for (int k = 2; k <= 17; ++k)
+        refSync.push_back (((float) k + 0.5f) / 17.0f);
+    v.push_back (when (menuOf (214, 266, 88, 22, "Delay sync", TR_NOOP ("Sync"),
+                               "Free|1/16|1/8|1/4|1/2|1/1|2/1|1/16.|1/8.|1/4.|1/2.|1/1.|1/16T|1/8T|1/4T|1/2T|1/1T", refSync),
+                       "Sync", 0.0f, 0.5f / 17.0f));
+    v.push_back (when (menuOf (214, 266, 88, 22, "Sync", TR_NOOP ("Sync"),
+                               "Free|1/64|1/32T|1/64.|1/32|1/16T|1/32.|1/16|1/8T|1/16.|1/8|1/4T|1/8.|1/4|1/2T|1/4.|1/2|1/1", syncValues),
+                       "Sync", 0.5f / 17.0f, 1.0f));
     // the pages: modulation, taps, diffusion, EQ, drive, warp
     l.pages = { TR_NOOP ("Mod"), TR_NOOP ("Taps"), TR_NOOP ("Diff"), TR_NOOP ("EQ"), TR_NOOP ("Drive"), TR_NOOP ("Warp") };
     v.push_back (pageTabs (312, 8, 354, 22, TR_NOOP ("Mod|Taps|Diff|EQ|Drive|Warp")));

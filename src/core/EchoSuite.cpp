@@ -1628,6 +1628,36 @@ namespace lattice
 {
 int inputPanOf (float v) noexcept { return std::clamp ((int) std::lround (clamp01 (v) * 8.0f), 0, 8); }
 
+namespace
+{
+// the older Sync law (by length; kept for projects saved before round 144)
+double syncBeats (int index) noexcept
+{
+    static constexpr double beats[18] = { 0.0, 1.0 / 16, 1.0 / 12, 3.0 / 32, 1.0 / 8, 1.0 / 6, 3.0 / 16, 1.0 / 4, 1.0 / 3,
+                                          3.0 / 8, 1.0 / 2, 2.0 / 3, 3.0 / 4, 1.0, 4.0 / 3, 3.0 / 2, 2.0, 4.0 };
+    return beats[std::clamp (index, 0, 17)];
+}
+} // namespace
+
+int delaySyncIndex (float v) noexcept { return std::clamp ((int) std::floor (clamp01 (v) * 17.0f + 1e-5f), 0, 17); }
+
+double delaySyncBeats (int index) noexcept
+{
+    // straight 1/16 … 2/1, dotted 1/16. … 1/1., triplet 1/16T … 1/1T (quarter notes)
+    static constexpr double beats[18] = { 0.0, 0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 0.375, 0.75, 1.5, 3.0, 6.0,
+                                          1.0 / 6.0, 1.0 / 3.0, 2.0 / 3.0, 4.0 / 3.0, 8.0 / 3.0 };
+    return beats[std::clamp (index, 0, 17)];
+}
+
+double syncedDelayMs (const EffectParams& p, double bpm) noexcept
+{
+    const auto tempo = bpm > 1.0 ? bpm : 120.0;
+    if (const auto b = delaySyncBeats (delaySyncIndex (p[delaySync])); b > 0.0)
+        return std::min (delaySyncCapMs, b * 60000.0 / tempo);
+    const auto old = syncBeats ((int) std::lround (clamp01 (p[sync]) * 17.0f));
+    return old > 0.0 ? old * 60000.0 / tempo : 0.0;
+}
+
 int tapCount (float v) noexcept
 {
     static constexpr int counts[10] = { 1, 1, 2, 3, 3, 3, 4, 8, 8, 16 };
@@ -1668,12 +1698,6 @@ double tapLevel (const EffectParams& p, int tap, int taps) noexcept
 
 namespace
 {
-double syncBeats (int index) noexcept
-{
-    static constexpr double beats[18] = { 0.0, 1.0 / 16, 1.0 / 12, 3.0 / 32, 1.0 / 8, 1.0 / 6, 3.0 / 16, 1.0 / 4, 1.0 / 3,
-                                          3.0 / 8, 1.0 / 2, 2.0 / 3, 3.0 / 4, 1.0, 4.0 / 3, 3.0 / 2, 2.0, 4.0 };
-    return beats[std::clamp (index, 0, 17)];
-}
 
 class LatticeMod final : public Effect
 {
@@ -1720,10 +1744,8 @@ public:
         equalPowerMix (p[mix], dryGain, wetGain);
         const auto nTaps = tapCount (p[lattice::taps]);
         const auto half = on (p[halfSpeed]);
-        const auto syncB = syncBeats ((int) std::lround (clamp01 (p[sync]) * 17.0f));
-        const auto delayScale = syncB > 0.0 && delayMs (p[delay]) > 0.0
-                                    ? (syncB * 60000.0 / (bpm > 1.0 ? bpm : 120.0)) * (half ? 2.0 : 1.0) / (delayMs (p[delay]) * (half ? 2.0 : 1.0))
-                                    : 1.0;
+        const auto syncMs = syncedDelayMs (p, bpm); // round 144: the reference's DelaySync law, else the older one
+        const auto delayScale = syncMs > 0.0 && delayMs (p[delay]) > 0.0 ? syncMs / delayMs (p[delay]) : 1.0;
         std::array<std::array<double, 16>, 2> tap {};
         std::array<double, 16> gains {};
         for (int k = 0; k < nTaps; ++k)
@@ -1914,7 +1936,8 @@ const EffectInfo& latticeInfo()
                                      { "Noise", 0.3333333f }, { "Rotate", 0.5f }, { "Smoothing", 0.0990991f }, { "Colour", 0.0f },
                                      { "Sync", 0.0f }, { "Taps", 1.5f / 24.0f } /* round 129: two taps (one a side), the reference default */, { "Diffusion on", 0.0f }, { "Drive on", 0.0f },
                                      { "Drive post", 1.0f }, { "Half speed", 0.0f },
-                                     { "Input pan", 0.125f } /* round 137: index 1 = stereo, the reference default */ } };
+                                     { "Input pan", 0.125f } /* round 137: index 1 = stereo, the reference default */,
+                                     { "Delay sync", 0.0f } /* round 144: the reference's DelaySync law, free */ } };
     return info;
 }
 
@@ -2094,6 +2117,12 @@ std::string paramText (EffectKind kind, int param, float v)
             case diffOn: case driveOn: return on (v) ? "on" : "off";
             case drivePost: return on (v) ? "post" : "pre";
             case halfSpeed: return on (v) ? "1/2x" : "1x";
+            case delaySync:
+            {
+                static const char* const names[18] = { "free", "free", "1/16", "1/8", "1/4", "1/2", "1/1", "2/1", "1/16.", "1/8.",
+                                                       "1/4.", "1/2.", "1/1.", "1/16T", "1/8T", "1/4T", "1/2T", "1/1T" };
+                return names[delaySyncIndex (v)];
+            }
             case inputPan:
             {
                 static const char* const names[9] = { "stereo", "stereo", "swapped", "mono", "mono left", "mono right", "stereo", "stereo", "stereo" };

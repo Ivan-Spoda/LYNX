@@ -600,7 +600,9 @@ TEST (echosuite101_substitutes_translate_valhalla_states)
                             "ColorMode=\"1.0\" DelaySync=\"0.5\" InputPan=\"0.5\"/>",
                             "valhalla-ubermod", lynx::EffectKind::latticeMod);
     CHECK (lt::tapCount (u.params[lt::taps]) == 4 && std::abs (lt::delayMs (u.params[lt::delay]) - 250.0) < 1e-3);
-    CHECK (u.params[lt::diffOn] == 1.0f && u.params[lt::colour] == 1.0f && u.params[lt::sync] == 0.0f); // DelaySync not translated
+    CHECK (u.params[lt::diffOn] == 1.0f && u.params[lt::colour] == 1.0f && u.params[lt::sync] == 0.0f);
+    // round 144: DelaySync onto its own law (0.5 = index 8 = 1/16 dotted)
+    CHECK (std::abs (u.params[lt::delaySync] - 0.5f) < 1e-6f && lt::delaySyncIndex (u.params[lt::delaySync]) == 8);
 
     // by name (no class ID), and the map laws of the table: steps / curve
     lynx::ForeignPlugin byName;

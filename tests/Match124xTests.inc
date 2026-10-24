@@ -119,7 +119,7 @@ TEST (pro_q4_states_translate_onto_facet_and_match_the_reference_round124)
             m124x::proQBand (v, b++, band[0], band[1], band[2], (int) band[3], (int) band[4]);
         int n = 0;
         const auto slot = m124x::substitute ("FabFilter Pro-Q 4", m124x::ffbs (v), n);
-        CHECK (slot.kind == EffectKind::facetEq && n == 5 * (int) c.bands.size() + 3);
+        CHECK (slot.kind == EffectKind::facetEq && n == 5 * (int) c.bands.size() + 5); // round 144: + resolution, character
         const auto mag = m124x::magnitudeDb (slot, hz);
         double worst = 0.0;
         for (std::size_t k = 0; k < hz.size(); ++k)
@@ -137,7 +137,7 @@ TEST (pro_q4_states_translate_onto_facet_and_match_the_reference_round124)
         v[7] = 3.0f; // mid
         int n = 0;
         const auto slot = m124x::substitute ("FabFilter Pro-Q 4", m124x::ffbs (v), n);
-        CHECK (n == 3 && facet::shape (slot.params[(std::size_t) facet::param (0, 0)]) == facet::Shape::off);
+        CHECK (n == 5 && facet::shape (slot.params[(std::size_t) facet::param (0, 0)]) == facet::Shape::off);
         v.resize (599);
         m124x::substitute ("FabFilter Pro-Q 4", m124x::ffbs (v), n);
         CHECK (n == 0);

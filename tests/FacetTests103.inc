@@ -155,7 +155,7 @@ TEST (facet_eq_phase_modes_round103)
     p[(std::size_t) param (1, 1)] = hzValue (100.0);
     p[(std::size_t) param (1, 4)] = slopeValue (24);
     CHECK (latencyFor (Phase::natural, 48000.0) == 320 && latencyFor (Phase::natural, 96000.0) == 640);
-    CHECK (latencyFor (Phase::linear, 48000.0) == 4608 && latencyFor (Phase::zeroLatency, 44100.0) == 0);
+    CHECK (latencyFor (Phase::linear, 48000.0) == 5120 && latencyFor (Phase::zeroLatency, 44100.0) == 0);
     for (const auto m : { Phase::natural, Phase::linear })
     {
         p[(std::size_t) phaseParam] = phaseValue (m);

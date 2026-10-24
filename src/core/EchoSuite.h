@@ -223,9 +223,17 @@ enum Param
     inputPan, // round 137 (appended): what enters the taps, 9 steps (index round (8 v)), measured on the reference
               // [EXEC]: 0 / 1 stereo (default 1), 2 swapped, 3 mono to both, 4 mono to the left, 5 mono to the right,
               // 6–8 stereo (no difference measured with an impulse)
+    delaySync, // round 144 (appended): the reference's DelaySync law, measured [EXEC] (REA_rodada144a §1): index
+               // floor (17 v): 0–1 free, 2–7 1/16 … 2/1, 8–12 1/16. … 1/1., 13–17 1/16T … 1/1T; the synced delay is capped
+               // at 2750 ms. Free (0, the default) leaves the older `sync` law in charge
     paramCount
 };
 int inputPanOf (float v) noexcept;  // 0 … 8
+int delaySyncIndex (float v) noexcept;      // 0 … 17 (round 144)
+double delaySyncBeats (int index) noexcept; // quarter notes, 0 = free (round 144)
+constexpr double delaySyncCapMs = 2750.0;  // the reference's longest synced delay [EXEC]
+// the synced delay of the longest tap (ms) or 0 when free: the round-144 law first, then the older one
+double syncedDelayMs (const EffectParams& p, double bpm) noexcept;
 int tapCount (float v) noexcept;     // 1, 1, 2, 3, 3, 3, 4, 8, 8, 16 (index floor(24 v))
 double delayMs (float v) noexcept;   // 0 .. 1000 ms
 double tapMs (const EffectParams& p, int tap, int taps, bool right) noexcept; // tap position (without modulation)
