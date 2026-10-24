@@ -1166,6 +1166,13 @@ void RackRenderer::renderChannel (const RackState& state, int i, int n) noexcept
 
         int outCount = 0;
         arp.process (i, arp.input.data(), inCount, chunkStartTick, chunkTps, n, c.arp, arp.output.data(), outCount);
+        // FL cuts an arpeggio note at its gate even on a sample that plays out (REA round 146b [EXEC: FL's renders of
+        // its Sampler render test]): the arpeggio is one voice, so its "off" stops the channel's sound (not with the
+        // echo delay, whose echoes keep ringing)
+        if (! c.misc.echo.enabled())
+            for (int k = 0; k < outCount; ++k)
+                if (arp.output[(std::size_t) k].type == NoteEvent::Type::off)
+                    arp.output[(std::size_t) k].type = NoteEvent::Type::choke;
         list = arp.output.data();
         listCount = outCount;
     }
