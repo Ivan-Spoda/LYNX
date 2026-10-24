@@ -32,6 +32,7 @@
 #include "engine/Text.h"
 #include "core/RackOps.h"
 #include "ui/ControllerEditors.h"
+#include "ui/HintBar.h"
 #include "ui/ValueControl.h"
 #include "ui/I18n.h"
 #include "ui/PluginSkin.h"
@@ -2522,7 +2523,7 @@ class ChannelFrame final : public juce::Component,
                            private juce::ChangeListener
 {
 public:
-    static constexpr int headerHeight = 52;
+    static constexpr int headerHeight = 62;
 
     ChannelFrame (AudioEngine& e, int c, std::unique_ptr<juce::Component> instrumentPage, std::unique_ptr<juce::Component> envelopePage)
         : engine (e), channel (c)
@@ -2638,7 +2639,7 @@ public:
         auto tabsArea = getLocalBounds().removeFromTop (headerHeight).reduced (8, 6);
         for (auto& t : tabs)
         {
-            const auto w = juce::jmax (64, juce::Font (theme::font (theme::type::body)).getStringWidth (t->getButtonText()) + 24);
+            const auto w = juce::jmax (64, (int) juce::GlyphArrangement::getStringWidth (juce::Font (theme::font (theme::type::body)), t->getButtonText()) + 24);
             t->setBounds (tabsArea.removeFromLeft (w).withSizeKeepingCentre (w, 26));
             tabsArea.removeFromLeft (4);
         }
