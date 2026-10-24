@@ -119,6 +119,19 @@ LiquidSonics (Lustrous Plates, Seventh Heaven, Cinematic Rooms, Illusion), sonib
 reverb, pure:, learn:) and Harrison (32C, MPC, De-Esser, gates, delays) to the LYNX effect for the same job at its
 defaults (reverbs at a 25 % slot mix, delays at Echoform's tape echo), so a project that used them still plays a chain.
 
+## 5. SSL 4K E against Ridge's E voicing [EXEC]
+The Complete Access SSL 4K E (v1.7.1; XML state like Vocalstrip's, 54 parameters: Mic pre, Analogue VCA, Brown /
+Black / Orange EQ, auto make-up, width / pan) was rendered with the VCA and auto make-up off and compared with Ridge's
+E voicing (the Waves E-Channel measured in round 123) at the same settings (`vs\out\k4e`, `vs\out\lynx_k4e`): they
+are **not the same console model** — LMF +10 dB at 1 kHz, Q 1.5 peaks at 7.4 (Black) / 7.7 (Brown) dB on the 4K E,
+9.5 dB on Ridge E; HF shelf +10 at 8 kHz reaches 8.0–8.3 vs 10.1 dB; LF shelf +10 at 100 Hz 7.5–8.8 vs 10.9 dB at
+30 Hz; the 100 Hz high-pass is −4.1 dB at 60 Hz vs −6.7 dB; the compressor (4:1 at −10) nulls at −24.6 dB. So 4K E
+states are **not translated** onto the E voicing (they would be 2–3 dB off per band); a measured "4K" voicing is the
+next step if a project needs it.
+
+Tried and not adopted: de-esser times 3 ms / 60 ms (band) / 120 ms (whole signal) — better on some broadband tests
+(+2 … 3 dB), worse on others (−3 dB) and on the split renders (−2 … 3 dB).
+
 ## Where I stopped
 - Done: §1 inventory, §2 Vocalstrip 2 measured and Ridge's Vocal strip voicing + translator (tests
   `tests/Vox145Tests.inc`, pt-BR), §3 Auto-Tune tracking / input type in noise, §4 Complete Access role entries.
@@ -127,6 +140,6 @@ defaults (reverbs at a 25 % slot mix, delays at Echoform's tape echo), so a proj
   high band within 0.3–1.5 dB above 10 kHz (the reference is neither bilinear nor exactly the analog prototype there);
   LYNX Tune's pitch jitter in noise (§3); Soundtoys leftovers (Decapitator ≥ 5 / Punish curve, EchoBoy Dual and the
   ping-pong kernel, PanMan's first ~200 ms after a reset — the existing round-136 renders start after the host's
-  settle time, so the glide needs new renders; Soundtoys trial until 11-22); FabFilter (~11-16).
+  settle time, so the glide needs new renders; Soundtoys trial until 11-22); FabFilter (~11-16); a measured SSL 4K voicing (§5).
 - Trials left: Complete Access Hub 2026-11-03 (iLok 11-13), FabFilter ~11-16, Soundtoys 11-22; Auto-Tune ends
   2026-10-25 21:00 (all of round 138's and this round's renders are on D:).
