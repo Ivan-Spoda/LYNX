@@ -1940,7 +1940,7 @@ Layout crestCompressor()
     // round 137 (Pro-C 3's side-chain Host Sync / MIDI inputs): the detector hears a pulse instead of the audio
     v.push_back (onPage (label (192, 562, 52, 20, TR_NOOP ("Trigger")), 2));
     v.push_back (onPage (tabs (246, 562, 196, 20, "Trigger", TR_NOOP ("Off|Host sync|MIDI")), 2));
-    v.push_back (onPage (when (menuOf (450, 562, 70, 20, "Trigger sync", TR_NOOP ("Note"), "1/1|1/2|1/4|1/8|1/16", { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f }), "Trigger", 0.25f, 0.75f), 2));
+    v.push_back (onPage (when (menuOf (450, 562, 70, 20, "Trigger sync", TR_NOOP ("Note"), "1/1|1/2|1/4|1/8|1/16"), "Trigger", 0.25f, 0.75f), 2));
     v.push_back (onPage (when (dial (546, 566, 20, "Trigger rate", TR_NOOP ("Rate")), "Trigger", 0.25f, 0.75f), 2));
     v.push_back (onPage (when (dial (600, 566, 20, "Trigger length", TR_NOOP ("Length")), "Trigger", 0.25f, 0.75f), 2));
     v.push_back (onPage (when (stepper (630, 562, 120, 20, "Trigger channel", TR_NOOP ("MIDI channel"), 129), "Trigger", 0.75f, 1.0f), 2));
