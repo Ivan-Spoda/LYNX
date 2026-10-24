@@ -703,10 +703,10 @@ What the trial shows (rcomp.png):
 | Header: Skins menu | Light / Dark / Legacy | — | ➕/n.a. | not needed |
 | Header: Undo/Redo, A/B, A→B, Load/Save, preset name | WaveSystem bar ("A: Default Preset") | generic header, "(no preset)" | ✅ | round 129's preset bar |
 | Threshold | −60…0 dBFS, default **0**, vertical slider integrated in the input meter | knob −60…0 dB, default **−18** | ⚠️ | range ✅; default and form differ |
-| Ratio | 0.50…50 (below 1 = expansion), default **1.0**, value box inside the GR meter | knob 1…20, default **4:1** | ⚠️ | no expansion, no 20–50:1 |
-| Gain (output) | −30…+30 dB, default 0, vertical fader on the output meter | "Makeup" 0…+24 dB | ⚠️ | no negative gain |
-| Attack | 0.5…500 ms, default 16 ms, horizontal slider | 0.1…100 ms, default 10.2 ms | ⚠️ | |
-| Release | 5…5000 ms, default 160 ms, horizontal slider | 10…1000 ms, default 120 ms | ⚠️ | |
+| Ratio | 0.50…50 (below 1 = expansion), default **1.0**, value box inside the GR meter | knob 1…20, default **4:1** | ✅ | round 150: **Ranges = RComp** (LYNX \| RComp tabs): the reference's own ratio control 50 … 1.00 … 0.50 : 1 (its value law, read from the trial), below 1 : 1 the measured upward expansion above the threshold (0.50 / 0.79 / 0.90 : 1 within 0.4 dB); translated states use it |
+| Gain (output) | −30…+30 dB, default 0, vertical fader on the output meter | "Makeup" 0…+24 dB | ✅ | round 150: with the RComp ranges the Gain fader runs −30 … +30 dB |
+| Attack | 0.5…500 ms, default 16 ms, horizontal slider | 0.1…100 ms, default 10.2 ms | ✅ | round 150: RComp ranges 0.5 … 500 ms (default 16 ms) |
+| Release | 5…5000 ms, default 160 ms, horizontal slider | 10…1000 ms, default 120 ms | ✅ | round 150: RComp ranges 5 … 5000 ms (default 160 ms) |
 | ARC / Manual | toggle, bottom | none (the translator fakes ARC with a fixed 300 ms) | ✅ | engine; round 135w: ARC / Manual switch (vintage voicing; ARC = the fitted program-dependent release, Manual = one release time [model]); translated (RW 17) |
 | Electro / Opto | toggle (GR-dependent release around 3 dB) | none | ✅ | engine; round 135w: Electro / Opto switch (Opto inverts the slow release curve [model]); translated (RW 22) |
 | Warm / Smooth | toggle | none | ✅ | engine; round 135w: Warm / Smooth switch (Smooth = ratio as shown, without Warm's extra reduction [model]); translated (RW 16) |
@@ -725,6 +725,8 @@ What the trial shows (rcomp.png):
 | CLA-76 (same stand-in) | Input/Output −∞…0, Attack/Release 1–7, Ratio 4/8/12/20/All, Meter In/GR/Out, Analog, Bluey/Blacky, Mix | Compressor at a fixed preset, no translation | ✅ | round 127: CLA-76 → Crest Compressor (Bus style) fitted on her state, RealWorld list translated (input / output, attack / release 1–7, ratio buttons, mix) |
 
 **Scores:** configuration 2/10, design 1/10. A plain row of 6 knobs with no meters cannot be read as RComp.
+
+**After round 150** (REA_rodada150 §6): configuration 8 → **9**/10, design 7/10 — the reference's own control ranges (ratio 0.5 … 50 with expansion, gain ±30, attack 0.5 … 500, release 5 … 5000 ms), translated. Left: threshold default 0 dB, the bipolar gain-change meter, the vintage voicing's compression away from her 2.95 : 1 (1.2 – 1.7 dB deeper at 10.46 : 1).
 
 **Answer: does RComp need its own LYNX engine/editor?** **No new engine.** **Crest Compressor**
 (`src/core/DynamicsSuite.cpp` `crest::`, editor `CrestEditor` in `src/ui/ProEditors.cpp`) already has almost

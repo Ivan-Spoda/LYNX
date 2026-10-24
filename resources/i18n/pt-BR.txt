@@ -4124,3 +4124,4 @@ countries: br
 "Free layout: the steepness of the band's upper edge (6 to 48 dB/oct)" = "Layout livre: a inclinação da borda aguda da banda (6 a 48 dB/oit)"
 "What this band's detector hears: the plug-in's input or the external side chain (global: the External SC switch)" = "O que o detector desta banda escuta: a entrada do plug-in ou o side chain externo (global: a chave de SC externo)"
 "Measured: the reference's attack, release and soft range (a range-limited band recovers at once); classic: the detector of projects saved before round 150" = "Medido: o ataque, o release e o range suave da referência (uma banda limitada pelo range se recupera na hora); clássico: o detector dos projetos salvos antes da rodada 150"
+"LYNX|RComp" = "LYNX|RComp"

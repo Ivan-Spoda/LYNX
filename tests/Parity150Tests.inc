@@ -283,3 +283,61 @@ TEST (prism_promb_free_translation_round150)
     const auto L = m::layoutOf (p);
     CHECK (L.segments == 7 && L.bandOf[0] == -1 && L.bandOf[1] == 0 && L.bandOf[2] == -1 && L.bandOf[3] == 1);
 }
+
+TEST (compressor_rcomp_ranges_round150)
+{
+    using namespace lynx;
+    // [EXEC] the Renaissance Compressor's own control laws (the trial's value texts): ratio 50 / 10.46 / 2.19 / 1.00 /
+    // 0.79 / 0.50 at 0 / 0.25 / 0.5 / 0.625 / 0.75 / 1, attack 0.50 / 15.8 / 500 ms, release 5.00 / 158 / 5000 ms, gain ±30 dB
+    const auto t = [] (int prm, float v) { return formatEffectParam (EffectKind::compressor, prm, v, 120.0); };
+    CHECK (t (14, 0.0f) == "50.00:1" && t (14, 0.25f) == "10.46:1" && t (14, 0.5f) == "2.19:1" && t (14, 0.625f) == "1.00:1");
+    CHECK (t (14, 0.75f) == "0.79:1" && t (14, 1.0f) == "0.50:1");
+    CHECK (t (16, 0.0f) == "0.50 ms" && t (16, 0.5f) == "15.8 ms" && t (16, 1.0f) == "500.0 ms");
+    CHECK (t (17, 0.0f) == "5.0 ms" && t (17, 0.5f) == "158 ms" && t (17, 1.0f) == "5000 ms");
+    CHECK (t (15, 0.0f) == "-30.0 dB" && t (15, 1.0f) == "+30.0 dB" && t (13, 0.0f) == "LYNX");
+    auto p = makeEffectSlot (EffectKind::compressor).params;
+    CHECK (p[13] == 0.0f); // older projects and new instances: LYNX's ranges
+    // [EXEC] 1 kHz stairs, threshold −30 dB, Manual: below 1 : 1 the reference expands above the threshold —
+    // 0.50 : 1 +7.05 / +13.17 dB at −24 / −18 dBFS, 0.79 : 1 +3.57 / +6.00, 0.90 : 1 +1.78 / +2.91; 10.46 : 1 −6.99 / −11.98
+    struct Case { float ratioV; double at24, at18; };
+    const Case cases[] { { 1.0f, 7.05, 13.17 }, { 0.75f, 3.57, 6.00 }, { 0.68f, 1.78, 2.91 }, { 0.25f, -6.99, -11.98 } };
+    for (const auto& c : cases)
+    {
+        auto q = p;
+        q[8] = 1.0f;  // the vintage (measured) voicing
+        q[9] = 1.0f;  // Manual
+        q[0] = 0.5f;  // −30 dB
+        q[13] = 1.0f; // the RComp ranges
+        q[14] = c.ratioV;
+        double got[2] {};
+        for (int k = 0; k < 2; ++k)
+        {
+            const auto amp = std::pow (10.0, (k == 0 ? -24.0 : -18.0) / 20.0);
+            std::vector<float> x (48000);
+            for (std::size_t i = 0; i < x.size(); ++i)
+                x[i] = (float) (amp * std::sin (2.0 * dyn108::pi * 1000.0 * (double) i / 48000.0));
+            const auto y = dyn108::run (EffectKind::compressor, q, x);
+            got[k] = dyn108::rmsDb (y, 30000, 46000) - dyn108::rmsDb (x, 30000, 46000);
+        }
+        std::printf ("  Compressor RComp ranges, ratio %s: %+.2f / %+.2f dB at -24 / -18 dBFS (RComp %+.2f / %+.2f)\n",
+                     t (14, c.ratioV).c_str(), got[0], got[1], c.at24, c.at18);
+        // (the vintage voicing's compression away from her 2.95 : 1 keeps round 123's fit: 1.2 – 1.7 dB deeper at 10.46 : 1)
+        const auto tol = c.ratioV < 0.6f ? 2.0 : 1.0;
+        CHECK (std::abs (got[0] - c.at24) < tol && std::abs (got[1] - c.at18) < tol);
+    }
+    // the classic voicing expands too (textbook: 1 / ratio − 1 dB per dB over the threshold)
+    auto q = p;
+    q[0] = 0.5f;
+    q[13] = 1.0f;
+    q[14] = 1.0f; // 0.5 : 1
+    std::vector<float> x (48000);
+    for (std::size_t i = 0; i < x.size(); ++i)
+        x[i] = (float) (0.0631 * std::sin (2.0 * dyn108::pi * 1000.0 * (double) i / 48000.0)); // −24 dBFS
+    const auto y = dyn108::run (EffectKind::compressor, q, x);
+    CHECK (dyn108::rmsDb (y, 30000, 46000) - dyn108::rmsDb (x, 30000, 46000) > 4.0);
+    // a translated RComp state uses the reference's ranges with its own numbers
+    int n = 0;
+    const auto s = vm123::wavesSlot ("RComp", "160.31 -15 -4 * * * * * 0.5 2.96 56.23 10 0 0 149.62 120 0 0 1 0.4 0 1.5 0 * * * 100 0", n);
+    CHECK (s.params[13] == 1.0f && t (14, s.params[14]) == "2.96:1" && t (16, s.params[16]) == "0.50 ms");
+    CHECK (t (17, s.params[17]) == "160 ms" && t (15, s.params[15]) == "-4.0 dB");
+}

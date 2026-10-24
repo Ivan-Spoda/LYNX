@@ -1658,7 +1658,10 @@ Layout compressorLayout()
     v.push_back (slider (Item::vslider, 16, 30, 34, 172, "Threshold", TR_NOOP ("Threshold")));
     v.push_back (display (58, 26, 112, 180, "iometer"));
     v.push_back (meter (184, 26, 66, 180, 0, TR_NOOP ("Reduction")));
-    v.push_back (slider (Item::vslider, 268, 30, 34, 172, "Makeup", TR_NOOP ("Gain")));
+    // round 150: with the RComp ranges the RC controls take the places of LYNX's (gain −30 … +30, ratio 0.5 … 50 : 1,
+    // attack 0.5 … 500 ms, release 5 … 5000 ms)
+    v.push_back (when (slider (Item::vslider, 268, 30, 34, 172, "Makeup", TR_NOOP ("Gain")), "Ranges", 0.0f, 0.5f));
+    v.push_back (when (slider (Item::vslider, 268, 30, 34, 172, "RC gain", TR_NOOP ("Gain")), "Ranges", 0.5f, 1.0f));
     v.push_back (toggle (314, 30, 94, 20, "Auto gain", TR_NOOP ("Auto gain")));
     // round 123: the voicing — LYNX's classic compressor, or the measured program-dependent one (substitutes start there)
     v.push_back (tabs (314, 60, 94, 40, "Voicing", TR_NOOP ("Classic|Vintage")));
@@ -1669,9 +1672,13 @@ Layout compressorLayout()
     v.push_back (when (tabs (314, 156, 94, 20, "Character", TR_NOOP ("Warm|Smooth")), "Voicing", 0.5f, 1.0f));
     v.push_back (toggle (314, 182, 94, 20, "Limiter", TR_NOOP ("Limiter")));
     v.push_back (display (330, 206, 62, 12, "limitpill"));
-    v.push_back (dial (60, 252, 34, "Attack", TR_NOOP ("Attack")));
-    v.push_back (dial (140, 252, 34, "Release", TR_NOOP ("Release")));
-    v.push_back (dial (217, 252, 34, "Ratio", TR_NOOP ("Ratio")));
+    v.push_back (when (dial (60, 252, 34, "Attack", TR_NOOP ("Attack")), "Ranges", 0.0f, 0.5f));
+    v.push_back (when (dial (140, 252, 34, "Release", TR_NOOP ("Release")), "Ranges", 0.0f, 0.5f));
+    v.push_back (when (dial (217, 252, 34, "Ratio", TR_NOOP ("Ratio")), "Ranges", 0.0f, 0.5f));
+    v.push_back (when (dial (60, 252, 34, "RC attack", TR_NOOP ("Attack")), "Ranges", 0.5f, 1.0f));
+    v.push_back (when (dial (140, 252, 34, "RC release", TR_NOOP ("Release")), "Ranges", 0.5f, 1.0f));
+    v.push_back (when (dial (217, 252, 34, "RC ratio", TR_NOOP ("Ratio")), "Ranges", 0.5f, 1.0f));
+    v.push_back (tabs (314, 222, 94, 18, "Ranges", TR_NOOP ("LYNX|RComp")));
     v.push_back (dial (300, 252, 30, "Mix", TR_NOOP ("Mix")));
     v.push_back (dial (370, 252, 30, "Trim", TR_NOOP ("Trim"), bipolar));
     return l;

@@ -96,13 +96,27 @@ keep the classic one through `upgradeLoadedEffectParams`, the editor shows "Old 
   from 3 octaves (rms 0.09 / 0.10 / 0.21 / 0.28 dB). LYNX's ScFilter uses it with the measured detector (projects saved
   before keep round 147's filter).
 
+## 6. Compressor ← Renaissance Compressor: the reference's ranges [EXEC]
+
+The trial's (Waves, demo mode: mute-masked) parameter texts: Ratio 50.00 → 1.00 → 0.50 (ln-linear: 50 at 0, 1.00 at 0.625,
+0.50 at 1; within 0.9 %), Gain −30 … +30 dB, Attack 0.5 · 1000^v ms (default 16), Release 5 · 1000^v ms (default 160).
+1 kHz stairs −66 … 0 dBFS, threshold −30, Manual (`D:\lynx-work\parity150\rc`): below 1 : 1 RComp expands **upward above
+the threshold** (0.50 : 1: +1.75 / +7.05 / +13.17 dB at −30 / −24 / −18 dBFS, then its 0 dBFS limiter); fitted: threshold
+2.3 dB lower, 4.6 dB knee, 0.90 / 0.40 / 0.18 dB per dB at 0.50 / 0.79 / 0.90 : 1 (rms 0.26 dB).
+
+LYNX (`Compressor`, appended): **Ranges** LYNX | RComp, **RC ratio / gain / attack / release** with the reference's laws
+(the generic panel swaps the controls); the vintage voicing expands with the measured law, the classic one with
+1 / ratio − 1. RComp states set the RComp ranges with their own numbers (her state's sound unchanged). Left: the vintage
+voicing's compression away from her 2.95 : 1 (−8.2 / −13.7 dB at 10.46 : 1 vs −7.0 / −12.0), threshold default, the
+bipolar gain-change meter.
+
 ## 5. Tests
 
 tests/Parity150Tests.inc: the slope laws and the quantisation, the layout (order, gaps, no overlap), Dynamic phase with
 6 dB/oct (edge shelf, bell, 6 / 24 at −20 / −12 / +6 dB, 6 / 12) and 36 dB/oct against the trial's numbers (curve and
 rendered tones), Linear phase at 9 dB/oct, Minimum / Linear phase with a gap, the soft range and the release after a
 step (against the trial), the per-band side-chain input, the narrow free side-chain filter, the Pro-MB translation to
-the free layout. tests/DynamicsTests108.inc: the Pro-MB translation now expects the free layout.
+the free layout; the RComp ranges (texts, expansion, compression, translation). tests/DynamicsTests108.inc: the Pro-MB translation now expects the free layout.
 
 ## Where I stopped
 

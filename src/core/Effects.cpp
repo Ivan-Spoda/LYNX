@@ -95,6 +95,22 @@ float compRatio (float v) { return 1.0f + v * 19.0f; }
 float compAttackMs (float v) { return logRange (v, 0.1f, 100.0f); }
 float compReleaseMs (float v) { return logRange (v, 10.0f, 1000.0f); }
 float compMakeupDb (float v) { return v * 24.0f; }
+// round 150 (REA_rodada150 §6): the Renaissance Compressor's own ranges, read black-box from the trial's parameter
+// texts — ratio 50 … 1 … 0.5 (log-linear: 50 at 0, 1.00 at 0.625, 0.5 at 1; below 1 = expansion), gain −30 … +30 dB,
+// attack 0.5 … 500 ms and release 5 … 5000 ms (0.5 · 1000^v, 5 · 1000^v)
+float rcRatio (float v)
+{
+    const auto x = (double) std::clamp (v, 0.0f, 1.0f);
+    return (float) (x <= 0.625 ? std::exp (std::log (50.0) * (1.0 - x / 0.625)) : std::exp (std::log (0.5) * (x - 0.625) / 0.375));
+}
+float rcRatioValue (double ratio)
+{
+    const auto r = std::clamp (ratio, 0.5, 50.0);
+    return (float) (r >= 1.0 ? 0.625 * (1.0 - std::log (r) / std::log (50.0)) : 0.625 + 0.375 * std::log (r) / std::log (0.5));
+}
+float rcAttackMs (float v) { return logRange (v, 0.5f, 500.0f); }
+float rcReleaseMs (float v) { return logRange (v, 5.0f, 5000.0f); }
+float rcGainDb (float v) { return -30.0f + 60.0f * std::clamp (v, 0.0f, 1.0f); }
 
 // BPM-synced Delay divisions, in beats (quarter notes).
 constexpr std::array<double, 8> delayDivisions { 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0 };
@@ -221,11 +237,12 @@ public:
             for (int i = 0; i < n; ++i)
                 peakIn = std::max (peakIn, std::max (std::abs (l[i]), std::abs (r[i])));
             vmatch::progcomp::Settings v;
+            const bool rc = params[13] >= 0.5f; // round 150: the RComp ranges
             v.thresholdDb = compThresholdDb (params[0]);
-            v.ratio = compRatio (params[1]);
-            v.attackMs = compAttackMs (params[2]);
-            v.releaseMs = compReleaseMs (params[3]);
-            v.gainDb = compMakeupDb (params[4]);
+            v.ratio = rc ? rcRatio (params[14]) : compRatio (params[1]);
+            v.attackMs = rc ? rcAttackMs (params[16]) : compAttackMs (params[2]);
+            v.releaseMs = rc ? rcReleaseMs (params[17]) : compReleaseMs (params[3]);
+            v.gainDb = rc ? rcGainDb (params[15]) : compMakeupDb (params[4]);
             v.mix = std::clamp ((double) params[6], 0.0, 1.0);
             v.trimDb = -18.0 + 36.0 * std::clamp ((double) params[7], 0.0, 1.0);
             v.manual = params[9] >= 0.5f;
@@ -251,11 +268,14 @@ public:
         const auto levelMatch = params[5] >= 0.5f;
         const auto powerCoeff = (float) std::exp (-1.0 / (1.5 * sampleRate));
         const auto gainCoeff = (float) std::exp (-1.0 / (0.05 * sampleRate));
+        const bool rc = params[13] >= 0.5f; // round 150: the RComp ranges (ratio below 1 = upward expansion)
         const auto threshold = compThresholdDb (params[0]);
-        const auto ratio = compRatio (params[1]);
-        const auto attack = (float) std::exp (-1.0 / (compAttackMs (params[2]) * 0.001 * sampleRate));
-        const auto release = (float) std::exp (-1.0 / (compReleaseMs (params[3]) * 0.001 * sampleRate));
-        const auto makeup = dbToGain (compMakeupDb (params[4]));
+        const auto ratio = rc ? rcRatio (params[14]) : compRatio (params[1]);
+        const auto attack = (float) std::exp (-1.0 / ((rc ? rcAttackMs (params[16]) : compAttackMs (params[2])) * 0.001 * sampleRate));
+        const auto release = (float) std::exp (-1.0 / ((rc ? rcReleaseMs (params[17]) : compReleaseMs (params[3])) * 0.001 * sampleRate));
+        const auto makeup = dbToGain (rc ? rcGainDb (params[15]) : compMakeupDb (params[4]));
+        const bool expand = ratio < 1.0f;
+        const auto slope = expand ? 1.0f / ratio - 1.0f : 1.0f - 1.0f / ratio; // dB of change per dB over the threshold
         const auto thresholdGain = dbToGain (threshold);
         const auto sidechain = useSidechain;
         useSidechain = false;
@@ -272,7 +292,7 @@ public:
             // With sidechain, the detector listens to the other track (kick ducking)
             const auto peak = sidechain ? (sideL != nullptr ? std::max (std::abs (sideL[i]), std::abs (sideR[i])) : 0.0f)
                                         : std::max (std::abs (l[i]), std::abs (r[i]));
-            const auto reductionDb = peak > thresholdGain ? (gainToDb (peak) - threshold) * (1.0f - 1.0f / ratio) : 0.0f;
+            const auto reductionDb = peak > thresholdGain ? (gainToDb (peak) - threshold) * slope : 0.0f; // the change (≥ 0)
 
             // the envelope rises with the attack and falls with the release
             const auto coeff = reductionDb > envelopeDb ? attack : release;
@@ -281,7 +301,7 @@ public:
             if (envelopeDb < 1.0e-4f)
                 envelopeDb = 0.0f; // no audible reduction: skip the pow
 
-            auto gain = envelopeDb > 0.0f ? dbToGain (-envelopeDb) * makeup : makeup;
+            auto gain = envelopeDb > 0.0f ? dbToGain (expand ? envelopeDb : -envelopeDb) * makeup : makeup;
 
             if (levelMatch)
             {
@@ -2430,7 +2450,10 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                   { "Mix", 1.0f }, { "Trim", 0.5f }, { "Voicing", 0.0f },
                                                   // round 135w: the RComp role's switches (the vintage voicing's ARC / Electro / Warm
                                                   // by default, as fitted) and its 0 dBFS output limiter (off: older projects unchanged)
-                                                  { "Release mode", 0.0f }, { "Release curve", 0.0f }, { "Character", 0.0f }, { "Limiter", 0.0f } } };
+                                                  { "Release mode", 0.0f }, { "Release curve", 0.0f }, { "Character", 0.0f }, { "Limiter", 0.0f },
+                                                  // round 150: the RComp role's own ranges (off: LYNX's, older projects unchanged) —
+                                                  // ratio 1.00 : 1, gain 0 dB, attack 16 ms, release 160 ms (the reference's defaults)
+                                                  { "Ranges", 0.0f }, { "RC ratio", 0.625f }, { "RC gain", 0.5f }, { "RC attack", 0.5f }, { "RC release", 0.5f } } };
     static const EffectInfo delay { "Delay", { { "Time", 0.3f }, { "Feedback", 0.42f }, { "Mix", 0.3f }, { "Ping-pong", 0.0f }, { "Damping", 0.3f } } };
     static const EffectInfo reverb { "Reverb", { { "Room", 0.6f }, { "Damping", 0.5f }, { "Width", 1.0f }, { "Mix", 0.25f }, { "Dry", 1.0f },
                                                  { "Low cut", 0.0f }, { "High cut", 1.0f }, { "Predelay", 0.0f } } };
@@ -2864,6 +2887,11 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 case 10: return v >= 0.5f ? "opto" : "electro";
                 case 11: return v >= 0.5f ? "smooth" : "warm";
                 case 12: return v >= 0.5f ? "on" : "off";
+                case 13: return v >= 0.5f ? "RComp" : "LYNX";
+                case 14: std::snprintf (text, sizeof (text), "%.2f:1", rcRatio (v)); break;
+                case 15: std::snprintf (text, sizeof (text), "%+.1f dB", rcGainDb (v)); break;
+                case 16: std::snprintf (text, sizeof (text), rcAttackMs (v) < 10.0f ? "%.2f ms" : "%.1f ms", rcAttackMs (v)); break;
+                case 17: std::snprintf (text, sizeof (text), rcReleaseMs (v) < 100.0f ? "%.1f ms" : "%.0f ms", rcReleaseMs (v)); break;
                 default: std::snprintf (text, sizeof (text), "+%.1f dB", compMakeupDb (v)); break;
             }
             return text;
