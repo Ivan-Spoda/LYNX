@@ -300,3 +300,27 @@ TEST (prism_promb_expert_translation_round147)
         CHECK (m::measuredDynamic (slot.params)); // a translated state runs the measured Dynamic phase
     }
 }
+
+TEST (hush_energy_detector_meter_round147)
+{
+    using namespace lynx;
+    // DeEsser's Energy Detector: Hush's second meter slot carries the detector level the threshold is compared with
+    auto slot = makeEffectSlot (EffectKind::hushDeEsser);
+    auto fx = makeEffect (slot);
+    fx->prepare (48000.0);
+    fx->reset();
+    const auto run = [&] (double hz, double amp) {
+        fx->reset();
+        std::vector<float> l (4800), r (4800);
+        for (int i = 0; i < 4800; ++i)
+            l[(std::size_t) i] = r[(std::size_t) i] = (float) (amp * std::sin (2.0 * dyn108::pi * hz * i / 48000.0));
+        for (int off = 0; off < 4800; off += 480)
+            fx->process (l.data() + off, r.data() + off, 480, slot.params, 120.0);
+        return fx->controlOutput (1) * 60.0f - 60.0f;
+    };
+    const auto loudHigh = run (9000.0, 0.5), quietHigh = run (9000.0, 0.05), low = run (200.0, 0.5);
+    std::printf ("  Hush detector meter: 9 kHz at -6 dB %.1f dB, at -26 dB %.1f dB, 200 Hz at -6 dB %.1f dB\n", loudHigh, quietHigh, low);
+    CHECK (loudHigh > -9.0 && loudHigh < 0.5);
+    CHECK (std::abs ((loudHigh - quietHigh) - 20.0) < 2.0); // follows the level
+    CHECK (low < loudHigh - 20.0);                          // the detector hears the sibilance band only
+}

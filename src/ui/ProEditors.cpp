@@ -907,6 +907,14 @@ private:
         const auto m = meters();
         const auto newest = columnBack (0);
         drawMeter (g, m, newest.in, -60.0f, colour::meterLow.withAlpha (0.85f));
+        // round 147: the detector's energy (what the threshold is compared with, DeEsser's Energy Detector) as a
+        // blue bar inside the input meter, against the same scale as the threshold arrow
+        if (const auto det = liveMeter (1); det > 0.0f)
+        {
+            const auto y = juce::jlimit (m.getY(), m.getBottom(), meterY (det * 60.0f - 60.0f));
+            g.setColour (juce::Colour (0xff4aa3df).withAlpha (0.9f));
+            g.fillRect (juce::Rectangle<float> (m.getCentreX() - 3.0f, y, 6.0f, m.getBottom() - y));
+        }
         const auto grR = m.translated (32.0f, 0.0f).withWidth (14.0f);
         g.setColour (colour::bg1);
         g.fillRect (grR);

@@ -96,10 +96,13 @@ public:
     void reset() noexcept;
     void process (float* l, float* r, int n, const Settings& s) noexcept;
     float reductionDb() const noexcept { return last; }
+    // round 147: the block's highest detector energy in the threshold's own scale (DeEsser's Energy Detector meter)
+    float detectorDb() const noexcept { return lastDet; }
 
 private:
     void design (const Settings& s) noexcept;
     double sr = 48000.0, designedHz = -1.0;
+    float lastDet = -120.0f;
     bool designedBp = false;
     Biquad sc1, sc2;
     double lpB = 0.0, lpA = 0.0, lpX[2] {}, lpY[2] {};

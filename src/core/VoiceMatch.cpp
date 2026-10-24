@@ -461,13 +461,14 @@ void DeEsser::process (float* l, float* r, int n, const Settings& s) noexcept
     const double T = std::clamp (s.thresholdDb, -80.0, 0.0);
     const double thr = T + thrOffset + thrSlope * (T + 24.2) + (s.bandPass ? bpOffset : 0.0);
     const double aA = coefMs (attackMs, sr), aR = coefMs (releaseMs, sr), out = dbToGain (s.outputDb);
-    double maxGr = 0.0;
+    double maxGr = 0.0, maxO = -200.0;
     for (int i = 0; i < n; ++i)
     {
         const double a = sc2.process (sc1.process (l[i], 0), 0), b = sc2.process (sc1.process (r[i], 1), 1);
         const double p = 0.5 * (a * a + b * b);
         env += (p > env ? aA : aR) * (p - env);
         const double o = 10.0 * std::log10 (std::max (env, 1e-24)) - thr;
+        maxO = std::max (maxO, o);
         gr = (1.0 - 1.0 / ratio) * (o > 30.0 * knee ? o : knee * std::log1p (std::exp (o / knee)));
         const double g = dbToGain (-gr);
         maxGr = std::max (maxGr, gr);
@@ -494,6 +495,7 @@ void DeEsser::process (float* l, float* r, int n, const Settings& s) noexcept
         r[i] = (float) (x[1] * out);
     }
     last = (float) maxGr;
+    lastDet = (float) (maxO + T); // where the energy sits against the threshold dial: reduction starts at T
 }
 } // namespace deesser
 

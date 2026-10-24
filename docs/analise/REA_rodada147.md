@@ -88,6 +88,16 @@ panel opens its right part (Side chain: Band | Free, Low, High; Stereo link: Lin
 translated when their Expert mode is on (an external side-chain input on any band turns LYNX's side-chain switch to
 external). Tests: tests/Parity147Tests.inc.
 
+## 3. Hush De-esser: DeEsser's Energy Detector meter
+
+DeEsser (Waves, demo here: its window as a user sees it, round 129) shows the side-chain energy beside its threshold
+slider, so a user sees how far the sibilance is above the threshold. Hush's IN meter showed the input peak. Now a
+blue bar inside the IN meter shows the detector's level against the same scale as the threshold arrow (the
+modern engine: the detector envelope; the classic one, round 123's measured DeEsser model: its RMS energy moved into
+the threshold dial's units, so reduction starts where the bar crosses the arrow). Engine: `Meters::setDetector`
+(second meter slot, unused by Hush before). Test: a 9 kHz tone at −6 / −26 dB reads −6.8 / −26.8 dB, a 200 Hz tone
+−54 dB.
+
 ## Where I stopped
 
 - Prism: per-band slopes (Pro-MB: 6 – 48 dB/oct per side, continuous; LYNX: one 12 / 24 / 48 for every crossover —

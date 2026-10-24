@@ -131,6 +131,9 @@ struct Meters
         in.store (inPeak, std::memory_order_relaxed);
         out.store (outPeak, std::memory_order_relaxed);
     }
+    // round 147: a level for the second meter slot when an engine has no second reduction (Hush: the detector's
+    // energy, −60 … 0 dB as 0 … 1)
+    void setDetector (float db) noexcept { gr1.store (std::clamp ((db + 60.0f) / 60.0f, 0.0f, 1.0f), std::memory_order_relaxed); }
 };
 
 // ---- oversampler design ----
@@ -808,6 +811,7 @@ private:
             for (int i = 0; i < n; ++i)
                 delay.process (l[i], r[i]);
             meters.set (classicEngine.reductionDb(), 0.0f, inPeak, Meters::peak (l, r, n));
+            meters.setDetector (classicEngine.detectorDb());
             return;
         }
         const auto f = std::min (hz (p[frequency]), sr * 0.45);
@@ -839,7 +843,7 @@ private:
         const auto attack = coef (ahead ? std::max (delayMs, 0.03) * 0.001 / 3.0 : 0.0005, sr);
         const auto out = (float) dbToGain (lin (p[output], -12.0, 12.0));
         constexpr double knee = 3.0;
-        double maxGr = 0.0;
+        double maxGr = 0.0, maxDet = 0.0;
 
         // gain reduction (dB) wanted for a detected level `s` (and the full-band level in allround mode)
         auto wanted = [&] (double s, double full) {
@@ -895,6 +899,7 @@ private:
             {
                 const auto s = std::max (sA, sB);
                 env = s > env ? s : release * env + (1.0 - release) * s;
+                maxDet = std::max (maxDet, env);
                 const auto want = wanted (env, full);
                 gr = want > gr ? attack * gr + (1.0 - attack) * want : release * gr + (1.0 - release) * want;
                 gA = gB = (float) dbToGain (-gr);
@@ -907,6 +912,7 @@ private:
                 for (int c = 0; c < 2; ++c)
                 {
                     envCh[c] = ss[c] > envCh[c] ? ss[c] : release * envCh[c] + (1.0 - release) * ss[c];
+                    maxDet = std::max (maxDet, envCh[c]);
                     const auto want = wanted (envCh[c], full);
                     grCh[c] = want > grCh[c] ? attack * grCh[c] + (1.0 - attack) * want : release * grCh[c] + (1.0 - release) * want;
                     maxGr = std::max (maxGr, grCh[c]);
@@ -995,6 +1001,7 @@ private:
             }
         }
         meters.set ((float) maxGr, 0.0f, inPeak, Meters::peak (l, r, n));
+        meters.setDetector ((float) gainToDb (maxDet)); // round 147: the energy the threshold is compared with
         scL = scR = nullptr;
     }
 
