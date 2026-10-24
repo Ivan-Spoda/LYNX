@@ -3306,6 +3306,10 @@ void upgradeLoadedEffectParams (EffectSlot& slot, std::size_t savedCount) noexce
     // round 147: Prism Multiband saved before its measured Dynamic phase engine keeps the round-108 construction
     if (slot.kind == EffectKind::prismMultiband && savedCount <= (std::size_t) dyn::prism::dynamicEngine)
         slot.params[(std::size_t) dyn::prism::dynamicEngine] = 0.0f;
+    // round 150: Echoform saved before the voicings' measured stereo behaviour keeps the round-147 voicings
+    if (slot.kind == EffectKind::echoform && savedCount <= (std::size_t) echosuite::echoform::voicingStereo
+        && slot.params.size() > (std::size_t) echosuite::echoform::voicingStereo)
+        slot.params[(std::size_t) echosuite::echoform::voicingStereo] = 0.0f;
 }
 
 std::unique_ptr<Effect> makeParallelEffect (const EffectSlot& slot)

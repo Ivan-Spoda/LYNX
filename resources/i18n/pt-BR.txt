@@ -4104,3 +4104,6 @@ countries: br
 "Slope 5" = "Inclinação 5"
 "Auto make-up" = "Make-up automático"
 "Analog" = "Analógico"
+# round 150 (parity150a): Echoform's voicings — measured stereo behaviour, EchoBoy's L/R offset
+"L/R offset" = "Desvio L/R"
+"Voicing stereo" = "Estéreo da voz"
