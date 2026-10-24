@@ -70,6 +70,12 @@ public:
     // (called on open).
     void scrollToNotes (bool fitPattern = true);
 
+    // FL's parameter menu "Edit events in piano roll" (REA round 146): the bottom lane shows and draws the current
+    // pattern's events of `target` (the lane box lists the pattern's event lanes after the note properties).
+    void showEventLane (const AutomationTarget& target);
+    // The target the bottom lane edits when it shows pattern events.
+    std::optional<AutomationTarget> eventLaneTarget() const;
+
     // For tests/snapshots: selects all of the channel's notes.
     void selectAll();
 
@@ -94,7 +100,7 @@ public:
 
 private:
     enum class Drag { none, move, resize, resizeLeft, erase, keyboard, select, velocity, velocityLine, velocitySet, paint, muting, knife,
-                      zoomRange, listen, pan, keyZoom, keySelect, rulerSelect, drumPaint, stretch };
+                      zoomRange, listen, pan, keyZoom, keySelect, rulerSelect, drumPaint, stretch, eventDraw, eventErase };
 
     // Channel selector: the wheel steps through the channels with notes (Ctrl+wheel: all channels).
     class ChannelBox final : public juce::ComboBox
@@ -218,6 +224,11 @@ private:
     juce::uint32 lastWheelEdit = 0;    // wheel edits within a burst are one undo step
     std::vector<Note> laneOriginals;   // right-drag line / Shift+drag: the pattern's notes when it started
     float laneSetValue = 0.0f;
+    // pattern event lanes in the lane box (ids eventLaneIdBase + k; REA round 146)
+    static constexpr int eventLaneIdBase = 100;
+    std::vector<AutomationTarget> eventTargets;
+    void rebuildLaneBox (std::optional<AutomationTarget> shown = std::nullopt, bool force = false);
+    void drawEvents (int fromX, int toX, int y, bool erase);
     int keyZoomKey = 60, keyZoomStartRow = 14;
 
     // smooth wheel scrolling
