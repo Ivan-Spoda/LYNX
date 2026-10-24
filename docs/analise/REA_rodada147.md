@@ -3,7 +3,7 @@
 2026-10-24. Continues round 144 (`REA_rodada144.md` "Where I stopped"). This round: Prism Multiband's Dynamic phase
 rebuilt on measurements of the Pro-MB trial, Prism's expert panel (side-chain filtering, stereo link per band).
 Sub-rounds: 147a (Echoform ← EchoBoy / PrimalTap: saturation types, echo styles, Multiply — `REA_rodada147a.md`),
-147b (Ember M/S, LYNX Tune keyboard, Ridge auto make-up / ANALOG — `REA_rodada147b.md`).
+147b (Ember M/S, LYNX Tune keyboard, Ridge auto make-up / ANALOG — `REA_rodada147b.md`); summary in §5.
 
 Evidence markers: [EXEC] run here on the official trial, hosted black-box in `tools/fxmeasure` (public VST3 API:
 parameters, value texts, audio in / out, the component state as a DAW stores it); [model] LYNX's own choice. Nothing
@@ -123,7 +123,22 @@ the threshold dial's units, so reduction starts where the bar crosses the arrow)
   holds only the shell's generic controls (bypass, meter display, MIDI CC): ANALOG 50 / 60 Hz cannot be set black-box
   without its window, so Glow's ANALOG row stays ❌.
 
+## 5. Sub-rounds
+
+- 147a (`REA_rodada147a.md`): Echoform ← EchoBoy / PrimalTap — the 31 factory styles measured (first-echo and
+  repeat tone, saturation curve, wobble, diffusion) and given as LYNX-named voicings; a saturation-type menu;
+  PrimalTap's Multiply (the delay ×1 … ×8, the band a brick wall near 12.4 kHz / factor).
+- 147b (`REA_rodada147b.md`): Ember ← Saturn 2 channel mode M/S, drive pan and band pan (measured); LYNX Tune ←
+  Waves Tune Real-Time keyboard (modes, note status, range, octaves, latch); Ridge ← SSL E-Channel ANALOG (white noise
+  at −110.7 dBFS RMS per channel, uncorrelated) and auto make-up.
+
 ## Where I stopped
 
 - Prism: slopes only 12 / 24 / 48 (Pro-MB: 6 – 48 continuous), free band placement with gaps, one side-chain input
   per band, the free side-chain filter's extra boost below one octave, the detector's release shape (§1).
+- Echoform (147a): the chorus / "fat" styles' several voices, Style Edit per voicing, Dual / Ping-Pong per style,
+  PrimalTap's per-tap VCO.
+- Ember (147b): Saturn's global input / output pan, six bands, 28 styles, modulation, linear phase. LYNX Tune: Group
+  Octaves off, Send / Receive, the MIDI reference tone. Ridge: Split / EQ-to-side-chain semantics.
+- Auto-pan ← PanMan Tweak and Glow ← CLA-2A ANALOG: measured / tried only (§4).
+

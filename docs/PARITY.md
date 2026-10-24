@@ -30,6 +30,19 @@ LYNX's style; the transfer-curve and GR-history displays are bars). Her Vocalstr
 model (−60 … −67 dB null on her takes). The other Complete Access plugins (Slate, SSL, LiquidSonics, sonible,
 Harrison) map to LYNX effects by role only.
 
+## Round 147: what changed (config / design, after 144 → after 147)
+
+Round 147 (`docs/analise/REA_rodada147.md`, sub-rounds `REA_rodada147a.md` / `REA_rodada147b.md`).
+
+| LYNX engine | Original | Config 144 → 147 | Design 144 → 147 | Round-147 changes |
+|---|---|---|---|---|
+| Prism Multiband | Pro-MB | 9 → 10 | 8 → 9 | Dynamic phase measured and rebuilt (minimum-phase bands in cascade; older projects keep the classic engine), expert panel: side-chain filtering band / free, stereo link + mid / side-only, each crossover its own slope; translated |
+| Echoform | EchoBoy / PrimalTap | 9 → 10 | 8 → 8 | 31 echo voicings measured from EchoBoy's styles (LYNX names), saturation type menu, PrimalTap's Multiply 1x–8x |
+| Ember Saturator | Saturn 2 | 6 → 7 | 7 → 7 | channel mode L/R \| M/S, each band's drive pan and pan (measured), translated |
+| LYNX Tune | Waves Tune Real-Time | 8 → 9 | 6 → 7 | keyboard strip: Bypass / Remove modes, note status with direction, range bar and presets, octaves, scroll, latch |
+| Ridge Strip | SSL E-Channel | 7 → 8 | 7 → 7 | ANALOG (measured noise floor), auto make-up for Ridge's own compressor, translated |
+| Hush De-esser | DeEsser | 9 → 9 | 7 → 8 | the energy-detector bar beside the threshold arrow |
+
 ## Round 144: what changed (config / design, after 137 → after 144)
 
 Round 144 (`docs/analise/REA_rodada144.md`, sub-rounds `REA_rodada144a.md` / `REA_rodada144b.md`).
