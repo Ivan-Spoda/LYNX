@@ -1847,9 +1847,9 @@ private:
                                        tr ("This project's Dynamic phase runs the engine it was saved with (before round 147). Click to use the measured one (Pro-MB's response).")));
                 y += 24.0f;
             }
-            if (v (detectorLaw) < 0.5f)
+            if (v (detectorLaw) < 0.5f || v (rev152) < 0.5f)
                 out.push_back (button ({ x, y, 62.0f, 20.0f }, idClassicDet, tr ("Old det."), true,
-                                       tr ("This project's bands use the detector they were saved with (before round 150). Click to use the measured one (Pro-MB's attack, release and range).")));
+                                       tr ("This project's bands use the detector they were saved with (before round 152). Click to use the measured one (Pro-MB's attack, release and range).")));
         }
         out.push_back (barValue ({ bar.getRight() - 312.0f, cy - 11.0f, 92.0f, 22.0f }, mix, tr ("Mix")));
         out.push_back (barValue ({ bar.getRight() - 216.0f, cy - 11.0f, 100.0f, 22.0f }, input, tr ("In")));
@@ -1865,7 +1865,7 @@ private:
         else if (c.id == idRange) rangeView = rangeView >= 30.0 ? 3.0 : rangeView >= 12.0 ? 30.0 : rangeView >= 6.0 ? 12.0 : 6.0;
         else if (c.id == idAnalyzer) { showAnalyzerMenu(); return; }
         else if (c.id == idClassic) set ({ { dynamicEngine, 1.0f } });
-        else if (c.id == idClassicDet) set ({ { detectorLaw, 1.0f } });
+        else if (c.id == idClassicDet) set ({ { detectorLaw, 1.0f }, { rev152, 1.0f } });
         else if (c.id == idSplit || c.id == idFree) setLayout (c.id == idFree);
         else if (c.id == idExpert) expert = ! expert;
         else if (c.id >= idSolo0 && c.id < idSolo0 + bands) set ({ { bp (c.id - idSolo0, fSolo), v (bp (c.id - idSolo0, fSolo)) >= 0.5f ? 0.0f : 1.0f } });

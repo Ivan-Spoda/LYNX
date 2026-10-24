@@ -2601,34 +2601,47 @@ Layout atriumLayout()
 
 Layout foilPlateLayout()
 {
-    // Mix / Predelay · big Decay · Size / Width · EQ (2 × 2) · Mod; the plate type below
+    // Mix / Predelay · big Decay · Size / Width · EQ (2 × 2) · Mod; the plate type below. Round 152: a second view,
+    // "Plate" — the one-knob panel of the Little Plate role (the reference's Decay in the middle, Low Cut and Mod beside
+    // it, Mix), chosen by the View switch (the Little Plate substitute opens in it)
     Layout l;
     l.width = 720;
     l.height = 316;
     auto& v = l.items;
-    v.push_back (section (8, 8, 92, 244, nullptr, boxed));
-    v.push_back (dial (54, 50, 40, "Mix", TR_NOOP ("Mix")));
-    v.push_back (dial (54, 164, 40, "Predelay", TR_NOOP ("Predelay")));
-    v.push_back (section (104, 8, 200, 244, nullptr, boxed));
-    v.push_back (dial (204, 100, 120, "Decay", TR_NOOP ("Decay"), big));
-    v.push_back (section (308, 8, 92, 244, nullptr, boxed));
-    v.push_back (dial (354, 50, 40, "Size", TR_NOOP ("Size")));
-    v.push_back (dial (354, 164, 40, "Width", TR_NOOP ("Width")));
-    v.push_back (section (404, 8, 200, 244, TR_NOOP ("EQ")));
-    v.push_back (dial (454, 64, 36, "Low EQ freq", TR_NOOP ("Low freq")));
-    v.push_back (dial (554, 64, 36, "High EQ freq", TR_NOOP ("High freq")));
-    v.push_back (dial (454, 168, 36, "Low EQ gain", TR_NOOP ("Low gain"), bipolar));
-    v.push_back (dial (554, 168, 36, "High EQ gain", TR_NOOP ("High gain"), bipolar));
-    v.push_back (section (608, 8, 104, 244, TR_NOOP ("Mod")));
-    v.push_back (dial (660, 64, 36, "Mod rate", TR_NOOP ("Rate")));
-    v.push_back (dial (660, 168, 36, "Mod depth", TR_NOOP ("Depth")));
+    const auto full = [&] (LayoutItem it) { it.whenParam = "View"; it.whenMin = 0.0f; it.whenMax = 0.5f; v.push_back (it); };
+    const auto plate = [&] (LayoutItem it) { it.whenParam = "View"; it.whenMin = 0.5f; it.whenMax = 1.0f; v.push_back (it); };
+    full (section (8, 8, 92, 244, nullptr, boxed));
+    full (dial (54, 50, 40, "Mix", TR_NOOP ("Mix")));
+    full (dial (54, 164, 40, "Predelay", TR_NOOP ("Predelay")));
+    full (section (104, 8, 200, 244, nullptr, boxed));
+    full (dial (204, 100, 120, "Decay", TR_NOOP ("Decay"), big));
+    full (section (308, 8, 92, 244, nullptr, boxed));
+    full (dial (354, 50, 40, "Size", TR_NOOP ("Size")));
+    full (dial (354, 164, 40, "Width", TR_NOOP ("Width")));
+    full (section (404, 8, 200, 244, TR_NOOP ("EQ")));
+    full (dial (454, 64, 36, "Low EQ freq", TR_NOOP ("Low freq")));
+    full (dial (554, 64, 36, "High EQ freq", TR_NOOP ("High freq")));
+    full (dial (454, 168, 36, "Low EQ gain", TR_NOOP ("Low gain"), bipolar));
+    full (dial (554, 168, 36, "High EQ gain", TR_NOOP ("High gain"), bipolar));
+    full (section (608, 8, 104, 244, TR_NOOP ("Mod")));
+    full (dial (660, 64, 36, "Mod rate", TR_NOOP ("Rate")));
+    full (dial (660, 168, 36, "Mod depth", TR_NOOP ("Depth")));
     // round 135 (the Little Plate role): the decay's ∞ and a low cut
-    v.push_back (toggle (330, 266, 90, 22, "Infinite", TR_NOOP ("Infinite")));
-    v.push_back (dial (470, 274, 22, "Low cut", TR_NOOP ("Low cut")));
+    full (toggle (330, 266, 90, 22, "Infinite", TR_NOOP ("Infinite")));
+    full (dial (470, 274, 22, "Low cut", TR_NOOP ("Low cut")));
     // round 150: the measured plate voicing (the Little Plate role: no plate delay, its decay per band)
-    v.push_back (toggle (560, 266, 150, 22, "Voicing", TR_NOOP ("Measured plate")));
-    v.push_back (label (8, 264, 52, 24, TR_NOOP ("Mode"), alignLeft));
-    v.push_back (choiceMenu (60, 264, 180, 24, "Type", TR_NOOP ("Type"), TR_NOOP ("Silver|Pewter|Nickel|Bronze|Bismuth|Tin|Zinc|Platinum|Tungsten|Iron|Gold|Lead")));
+    full (toggle (560, 266, 150, 22, "Voicing", TR_NOOP ("Measured plate")));
+    full (label (8, 264, 52, 24, TR_NOOP ("Mode"), alignLeft));
+    full (choiceMenu (60, 264, 180, 24, "Type", TR_NOOP ("Type"), TR_NOOP ("Silver|Pewter|Nickel|Bronze|Bismuth|Tin|Zinc|Platinum|Tungsten|Iron|Gold|Lead")));
+    // round 152: the Plate view — Low Cut on the left, the big Decay (its ∞ under it), Mod and Mix on the right
+    plate (section (8, 8, 704, 244, nullptr, boxed));
+    plate (dial (140, 120, 52, "Low cut", TR_NOOP ("Low cut")));
+    plate (dial (360, 112, 132, "Decay", TR_NOOP ("Decay"), big));
+    plate (toggle (315, 228, 90, 20, "Infinite", TR_NOOP ("Infinite")));
+    plate (dial (556, 70, 36, "Mod depth", TR_NOOP ("Mod")));
+    plate (dial (556, 176, 44, "Mix", TR_NOOP ("Mix")));
+    plate (toggle (24, 222, 150, 22, "Voicing", TR_NOOP ("Measured plate")));
+    v.push_back (tabs (530, 264, 182, 24, "View", TR_NOOP ("Full|Plate")));
     return l;
 }
 

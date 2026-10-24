@@ -103,7 +103,48 @@ inline void sixParams (double gDb, double r, int n, double& e, double& k6, doubl
     k6 = v[1];
     kn = v[2];
 }
+
+#include "core/ProMbNarrow.inc"
 } // namespace detail
+
+// round 152 [EXEC] (REA_rodada152 §2): Pro-MB's Dynamic phase makes a middle band with even-order sides wider and
+// moves its gain (narrow / deep cuts most: 1.7 dB at the edges of a 24 dB/oct band 300 – 900 Hz at −30 dB): the
+// band becomes the linear shape 1 + (G − 1)·A at ω_l / k, ω_h · k. k and G from the measured table (trilinear in
+// slope, gain dB and log r; beyond r = 80 the change fades out by r = 320 [model]; mixed slopes use their mean [model])
+inline void narrowAdjust (double& wl, double& wh, int ml, int mh, double& g) noexcept
+{
+    using namespace detail;
+    if (wl <= 0.0 || wh <= 0.0 || ml < 2 || mh < 2 || g <= 0.0)
+        return;
+    const auto slope = std::clamp (3.0 * (ml + mh), 12.0, 48.0);
+    const auto sf = (slope - 12.0) / 12.0;
+    const int si = std::min ((int) sf, narrowSlopes - 2);
+    const auto st = sf - si;
+    const auto gd = std::clamp (20.0 * std::log10 (g), -30.0, 30.0);
+    int gi = 0;
+    while (gi < narrowGains - 2 && gd > narrowGainAxis[gi + 1])
+        ++gi;
+    const auto gt = (gd - narrowGainAxis[gi]) / (narrowGainAxis[gi + 1] - narrowGainAxis[gi]);
+    const auto lr = std::log (std::max (wh / wl, narrowRatioAxis[0]));
+    int ri = 0;
+    while (ri < narrowRatios - 2 && lr > std::log (narrowRatioAxis[ri + 1]))
+        ++ri;
+    const auto rt = std::min (1.0, (lr - std::log (narrowRatioAxis[ri])) / (std::log (narrowRatioAxis[ri + 1]) - std::log (narrowRatioAxis[ri])));
+    const auto fade = 1.0 - std::clamp ((lr - std::log (narrowRatioAxis[narrowRatios - 1])) / std::log (4.0), 0.0, 1.0);
+    const auto look = [&] (const float (&t)[narrowSlopes][narrowGains][narrowRatios]) noexcept {
+        double v = 0.0;
+        for (int a = 0; a < 2; ++a)
+            for (int b = 0; b < 2; ++b)
+                for (int c = 0; c < 2; ++c)
+                    v += (a ? st : 1.0 - st) * (b ? gt : 1.0 - gt) * (c ? rt : 1.0 - rt) * (double) t[si + a][gi + b][ri + c];
+        return v;
+    };
+    const auto k = 1.0 + (look (narrowK) - 1.0) * fade;
+    const auto dg = look (narrowDg) * fade;
+    wl /= k;
+    wh *= k;
+    g *= std::pow (10.0, dg / 20.0);
+}
 
 // the analog model of a band with a 6 dB/oct side (m = 1 on one side or both; the other m = 2n or absent), as poles,
 // zeros and a high-frequency gain; also used for the editor's curve
@@ -223,11 +264,15 @@ struct SixDbModel
 
 // round 150: one band's magnitude for any side codes (m = 1 … 8): the formula above for 2n / 2n, the first-order
 // models for the 6 dB/oct sides
-inline double bandMagnitudeM (double wl, double wh, int ml, int mh, double g, double w) noexcept
+inline double bandMagnitudeM (double wl, double wh, int ml, int mh, double g, double w, bool narrow152 = false) noexcept
 {
     const bool lowSix = wl > 0.0 && ml == 1, highSix = wh > 0.0 && mh == 1;
     if (! lowSix && ! highSix)
+    {
+        if (narrow152)
+            narrowAdjust (wl, wh, ml, mh, g);
         return bandMagnitude (wl, wh, std::max (1, ml / 2), std::max (1, mh / 2), g, w);
+    }
     SixDbModel m;
     m.design (wl, wh, ml, mh, g);
     return m.magnitude (w);
@@ -312,11 +357,13 @@ public:
     }
 
     // round 150: any side codes (m = 1 … 8, dynamicSideCode); 2n / 2n is the round-147 design above, sample for sample
-    void designM (double wl, double wh, int ml, int mh, double g) noexcept
+    void designM (double wl, double wh, int ml, int mh, double g, bool narrow152 = false) noexcept
     {
         const bool lowSix = wl > 0.0 && ml == 1, highSix = wh > 0.0 && mh == 1;
         if (! lowSix && ! highSix)
         {
+            if (narrow152) // round 152: the measured narrow-band law
+                narrowAdjust (wl, wh, ml, mh, g);
             design (wl, wh, std::max (1, ml / 2), std::max (1, mh / 2), g);
             return;
         }

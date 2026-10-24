@@ -193,8 +193,8 @@ lynx = Foil Plate
 names = LittlePlate; Little Plate
 # round 129 (docs/PARITY.md): LYNX's plate reverb plays a plate's role (was Reeverb 2); its state is encoded: a
 # 2 s plate, 100 % wet, at the slot's dry / wet 25 % as before. Round 150: in the measured plate voicing (the
-# trial's onset and decay per band, REA_rodada150a §7)
-preset = Decay=0.3; Mix=1; Voicing=1
+# trial's onset and decay per band, REA_rodada150a §7). Round 152: the editor opens in the one-knob Plate view
+preset = Decay=0.3; Mix=1; Voicing=1; View=1
 mix = 0.25
 
 [waves-reverbs]
@@ -1429,7 +1429,7 @@ int translateWavesCla76 (const std::vector<std::uint8_t>& state, EffectSlot& slo
     const auto at = [&] (std::size_t i, double fallback) { return wavesValue (rw, i).value_or (fallback); };
     const auto inDb = -std::clamp (*in, 0.0, 120.0), outDb = -std::clamp (*out, 0.0, 120.0);
     const auto attackKnob = std::clamp (at (2, 3.0), 1.0, 7.0), releaseKnob = std::clamp (at (3, 4.0), 1.0, 7.0);
-    const auto attackLaw = [] (double k) { return 0.8 * std::pow (0.02 / 0.8, (k - 1.0) / 6.0); };
+    const auto rev152 = [] (double k) { return 0.8 * std::pow (0.02 / 0.8, (k - 1.0) / 6.0); };
     const auto releaseLaw = [] (double k) { return 1100.0 * std::pow (50.0 / 1100.0, (k - 1.0) / 6.0); };
     static constexpr double ratios[5] { 20.0, 12.0, 8.0, 4.0, 7.1 };
     const int ratioIndex = std::clamp ((int) std::lround (at (59, 3.0)), 0, 4);
@@ -1439,7 +1439,7 @@ int translateWavesCla76 (const std::vector<std::uint8_t>& state, EffectSlot& slo
     p[c::ratio] = c::ratioValue (ratios[ratioIndex]);
     p[c::knee] = linNorm (9.3, 0.0, 72.0);
     p[c::range] = linNorm (31.9, 0.0, 60.0);
-    p[c::attack] = c::attackValue (5.91 * attackLaw (attackKnob) / attackLaw (4.3));
+    p[c::attack] = c::attackValue (5.91 * rev152 (attackKnob) / rev152 (4.3));
     p[c::release] = c::releaseValue (97.0 * releaseLaw (releaseKnob) / releaseLaw (4.31));
     p[c::autoRelease] = 0.0f;
     p[c::autoGain] = 0.0f;

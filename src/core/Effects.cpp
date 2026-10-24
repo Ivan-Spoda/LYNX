@@ -3357,6 +3357,9 @@ void upgradeLoadedEffectParams (EffectSlot& slot, std::size_t savedCount) noexce
     // round 150: … and before its measured detector keeps the round-108 detector
     if (slot.kind == EffectKind::prismMultiband && savedCount <= (std::size_t) dyn::prism::detectorLaw)
         slot.params[(std::size_t) dyn::prism::detectorLaw] = 0.0f;
+    // round 152: … and before the gain-stage attack keeps round 150's level-follower attack
+    if (slot.kind == EffectKind::prismMultiband && savedCount <= (std::size_t) dyn::prism::rev152)
+        slot.params[(std::size_t) dyn::prism::rev152] = 0.0f;
     // round 150: Auto-pan saved before the Tweak block keeps the Rhythm voicing's clipped angle
     if (slot.kind == EffectKind::autoPan && savedCount <= (std::size_t) autopan::count + 19)
         slot.params[(std::size_t) autopan::count + 19] = 0.0f;
