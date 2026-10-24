@@ -1921,6 +1921,32 @@ Layout emberLayout()
             }
             v.push_back (k);
         }
+    // round 150 (Saturn 2): bands 5 / 6, the global input / output pan, each band's measured character
+    l.height = 1040;
+    v.push_back (section (4, 870, 512, 166, TR_NOOP ("Bands 5 / 6, pans, characters")));
+    v.push_back (tabs (12, 894, 150, 20, "More bands", TR_NOOP ("Off|5|6"), { 0.0f, 0.5f, 1.0f }));
+    v.push_back (dial (200, 904, 18, "Crossover 4", TR_NOOP ("X-over 4")));
+    v.push_back (dial (250, 904, 18, "Crossover 5", TR_NOOP ("X-over 5")));
+    v.push_back (dial (330, 904, 18, "Input pan", TR_NOOP ("In pan"), bipolar));
+    v.push_back (dial (380, 904, 18, "Output pan", TR_NOOP ("Out pan"), bipolar));
+    static const char* const b56[2][6] { { "B5 style", "B5 drive", "B5 mix", "B5 level", "B5 drive pan", "B5 pan" },
+                                         { "B6 style", "B6 drive", "B6 mix", "B6 level", "B6 drive pan", "B6 pan" } };
+    for (int b = 0; b < 2; ++b)
+    {
+        const auto cy = 950.0f + 30.0f * (float) b;
+        auto name = label (12, cy - 8.0f, 24, 16, b == 0 ? TR_NOOP ("B5") : TR_NOOP ("B6"));
+        name.colour = 4 + b;
+        v.push_back (when (name, "More bands", b == 0 ? 0.25f : 0.75f, 1.01f));
+        for (int c = 0; c < 6; ++c)
+        {
+            auto k = knob (60.0f + 50.0f * (float) c, cy, 18, b56[b][c], nullptr, cy + 9.0f, noCaption | (c >= 3 ? bipolar : 0), c == 0 ? 4 : 0);
+            k.colour = 4 + b;
+            v.push_back (when (k, "More bands", b == 0 ? 0.25f : 0.75f, 1.01f));
+        }
+    }
+    static const char* const chars[] { "B1 character", "B2 character", "B3 character", "B4 character", "B5 character", "B6 character" };
+    for (int b = 0; b < 6; ++b)
+        v.push_back (stepper (360.0f + 76.0f * (float) (b % 2), 940.0f + 30.0f * (float) (b / 2), 72, 22, chars[b], nullptr, 29));
     return l;
 }
 

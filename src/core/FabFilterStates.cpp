@@ -443,7 +443,8 @@ int fromProG (const State& s, EffectSlot& slot)
 // layout (FFBS v1, 951 values): 0 input gain dB, 2 output gain dB, 5 mix %, 6 band count, band b at 7 + 17b:
 // 2 dynamics, 3 style, 4 drive (norm), 6 … 9 bass / mid / treble / presence dB, 10 mix %, 11 level, 13 enabled,
 // 15 crossover (log2 Hz, the band's upper edge), 16 crossover slope (6, 12, 24, 36, 48); round 147: 5 drive pan,
-// 12 band pan (−1 … +1), 695 the channel mode (0 left / right, 1 mid / side)
+// 12 band pan (−1 … +1), 695 the channel mode (0 left / right, 1 mid / side); round 150: 1 / 3 input / output pan
+// (−1 … +1), six bands, the style index → Ember's measured character
 int fromSaturn2 (const State& s, EffectSlot& slot)
 {
     if (slot.kind != EffectKind::ember || s.named || s.count != 951 || ! finiteAll (s, 7 + 17 * 6))
@@ -465,19 +466,25 @@ int fromSaturn2 (const State& s, EffectSlot& slot)
         return Style::transistor;
     };
     const int nb = std::clamp (roundIndex (s.at (6)), 1, 6);
-    const int ours = std::min (nb, maxBands);
-    set (bands, (float) (ours - 1) / 3.0f);
+    const int ours = std::min (nb, maxBands); // round 150: all six
+    {
+        const auto [bv, mv] = bandCountValues (ours);
+        set (bands, bv);
+        set (bandsMore, mv);
+    }
     for (int b = 0; b < ours; ++b)
     {
         const auto base = (std::size_t) (7 + 17 * b);
         set (bandParam (b, 0), (float) (int) ourStyle (roundIndex (s.at (base + 3))) / 3.0f);
+        // round 150: the measured character of their style k (character k + 1, REA_rodada150b)
+        set (characterParam (b), (float) (std::clamp (roundIndex (s.at (base + 3)), 0, characters - 1) + 1) / (float) characters);
         // drive 0 … 100 % → 0 … +30 dB of ours (their 50 % already saturates a −6 dBFS tone hard)
         set (bandParam (b, 1), clamp01 (30.0 * std::clamp ((double) s.at (base + 4), 0.0, 1.0) / 36.0));
         set (bandParam (b, 2), clamp01 (s.at (base + 10) / 100.0));
         const auto enabled = s.at (base + 13) >= 0.5f;
         set (bandParam (b, 3), enabled ? linValue (levelDb (s.at (base + 11)), -18.0, 18.0) : 0.0f);
         if (b < ours - 1)
-            set (xover1 + b, crossoverValue (std::pow (2.0, (double) s.at (base + 15))));
+            set (crossoverParam (b), crossoverValue (std::pow (2.0, (double) s.at (base + 15))));
         // round 128 (Ember's per-band controls): feedback amount (%) and frequency (Hz) at 0 / 1, dynamics at 2, tone
         // bass / mid / treble / presence (dB) at 6 … 9, state (normal, solo, mute, solo-mute) at 14. Offsets 0, 1 and
         // 14 follow the order of the plug-in's own VST3 parameter list (17 per band) [model]; Ember's tone stages are
@@ -506,6 +513,9 @@ int fromSaturn2 (const State& s, EffectSlot& slot)
     set (output, linValue (s.at (2), -18.0, 18.0));
     set (autoGain, 1.0f); // Saturn compensates its level as the drive rises (§4)
     set (channelMode, s.at (695) >= 0.5f ? 1.0f : 0.0f); // round 147: the channel mode (0 left / right, 1 mid / side)
+    // round 150 (read back black-box: the trial's state after setting them): 1 input pan, 3 output pan, −1 … +1
+    set (inputPan, (float) (0.5 + 0.5 * std::clamp ((double) s.at (1), -1.0, 1.0)));
+    set (outputPan, (float) (0.5 + 0.5 * std::clamp ((double) s.at (3), -1.0, 1.0)));
     return n;
 }
 

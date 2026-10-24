@@ -2033,7 +2033,7 @@ public:
     }
 
 private:
-    enum { idRemove = 1, idPrev, idNext, idPower, idSolo, idMute };
+    enum { idRemove = 1, idPrev, idNext, idPower, idSolo, idMute, idBands };
     int selected = 0, dragHandle = -1, dragEdge = -1, hoverHandle = -1;
     int xp (int b, int f) const { return mixsuite::ember::bandExtra (b, f); } // round 128: a band's power, state, tone, feedback, dynamics
     bool powered (int b) const { return v (xp (b, 0)) >= 0.5f; }
@@ -2049,7 +2049,13 @@ private:
         const auto d = disp();
         return { d.getCentreX() - 420.0f, d.getBottom() - 176.0f, 840.0f, 168.0f };
     }
-    int count() const { return mixsuite::ember::bandCount (v (mixsuite::ember::bands)); }
+    int count() const
+    {
+        // round 150: up to six bands (Bands + More bands)
+        const auto more = juce::jlimit (0, 2, juce::roundToInt (v (mixsuite::ember::bandsMore) * 2.0f));
+        return more > 0 ? mixsuite::ember::firstBands + more : mixsuite::ember::bandCount (v (mixsuite::ember::bands));
+    }
+    int chr (int b) const { return mixsuite::ember::characterIndex (v (mixsuite::ember::characterParam (b))); }
     // round 135: the Decapitator-role strip along the top of the display (voice row, PUNISH, THUMP, STEEP, the wide
     // filter ranges) and the in / out meter at its right; the band handles start under it
     static constexpr float handleTop = 64.0f;
@@ -2057,7 +2063,7 @@ private:
     juce::Rectangle<float> vuArea() const { const auto d = disp(); return { d.getRight() - 64.0f, d.getY() + 38.0f, 56.0f, 120.0f }; }
     bool wide() const { return v (mixsuite::ember::wideCuts) >= 0.5f; }
     int fp (int b, int f) const { return mixsuite::ember::bandParam (b, f); }
-    double xoHz (int i) const { return mixsuite::ember::crossoverHz (v (mixsuite::ember::xover1 + i)); }
+    double xoHz (int i) const { return mixsuite::ember::crossoverHz (v (mixsuite::ember::crossoverParam (i))); }
     float edgeX (int i) const
     {
         const auto d = disp();
@@ -2103,7 +2109,13 @@ private:
         out.push_back (button ({ a.getX() + 70.0f, a.getY() + 12.0f, 32.0f, 22.0f }, idPower, tr ("On"), powered (b), tr ("Band on / off: a band switched off passes clean")));
         out.push_back (button ({ a.getX() + 106.0f, a.getY() + 12.0f, 22.0f, 22.0f }, idSolo, "S", state (b) == BandState::solo, tr ("Solo the band")));
         out.push_back (button ({ a.getX() + 130.0f, a.getY() + 12.0f, 22.0f, 22.0f }, idMute, "M", state (b) == BandState::mute, tr ("Mute the band")));
-        add (menu ({ a.getX() + 160.0f, a.getY() + 10.0f, 120.0f, 26.0f }, fp (b, 0), {}, "Tube|Tape|Transistor|Fuzz"));
+        add (menu ({ a.getX() + 160.0f, a.getY() + 10.0f, 92.0f, 26.0f }, fp (b, 0), {}, "Tube|Tape|Transistor|Fuzz"));
+        // round 150: the band's character (the 28 voicings measured on the reference's styles; Off = the Style menu)
+        {
+            juce::String opts = tr ("Off");
+            for (int k = 1; k <= characters; ++k) opts << "|" << tr (characterName (k));
+            add (menu ({ a.getX() + 256.0f, a.getY() + 10.0f, 92.0f, 26.0f }, characterParam (b), {}, opts));
+        }
         add (knob ({ a.getX() + 10.0f, a.getY() + 60.0f, 66.0f, 92.0f }, fp (b, 2), tr ("Mix")));
         add (knob ({ a.getX() + 78.0f, a.getY() + 60.0f, 66.0f, 92.0f }, xp (b, 6), tr ("Feedback")));
         add (knob ({ a.getX() + 146.0f, a.getY() + 60.0f, 66.0f, 92.0f }, xp (b, 7), tr ("Freq")));
@@ -2129,17 +2141,21 @@ private:
         out.push_back (knob ({ a.getRight() - 78.0f, a.getY() + 84.0f, 66.0f, 80.0f }, output, tr ("Output"), 0, true)); // round 135: on the panel
         // round 135: the strip (one click per voicing, the reference's switches)
         const auto s = stripArea();
-        out.push_back (tabs ({ s.getX(), s.getY(), 420.0f, s.getHeight() }, voice, tr ("Style menu|Tape pre|Console|Grit|Triode|Pentode"),
+        out.push_back (tabs ({ s.getX(), s.getY(), 372.0f, s.getHeight() }, voice, tr ("Style menu|Tape pre|Console|Grit|Triode|Pentode"),
                              { 0.0f, 0.2f, 0.4f, 0.6f, 0.8f, 1.0f }));
-        out.push_back (toggle ({ s.getX() + 432.0f, s.getY(), 84.0f, s.getHeight() }, punish, tr ("Punish")));
-        out.push_back (toggle ({ s.getX() + 522.0f, s.getY(), 80.0f, s.getHeight() }, thump, tr ("Thump")));
-        out.push_back (toggle ({ s.getX() + 608.0f, s.getY(), 76.0f, s.getHeight() }, steep, tr ("Steep")));
-        out.push_back (toggle ({ s.getX() + 690.0f, s.getY(), 110.0f, s.getHeight() }, wideCuts, tr ("Wide cuts")));
+        out.push_back (toggle ({ s.getX() + 380.0f, s.getY(), 80.0f, s.getHeight() }, punish, tr ("Punish")));
+        out.push_back (toggle ({ s.getX() + 464.0f, s.getY(), 76.0f, s.getHeight() }, thump, tr ("Thump")));
+        out.push_back (toggle ({ s.getX() + 544.0f, s.getY(), 72.0f, s.getHeight() }, steep, tr ("Steep")));
+        out.push_back (toggle ({ s.getX() + 620.0f, s.getY(), 100.0f, s.getHeight() }, wideCuts, tr ("Wide cuts")));
+        // round 150 (Saturn 2): the whole effect's input / output pan (left / right, or mid / side with Channel M/S)
+        out.push_back (barValue ({ s.getX() + 728.0f, s.getY(), 100.0f, s.getHeight() }, inputPan, tr ("In pan")));
+        out.push_back (barValue ({ s.getX() + 832.0f, s.getY(), 100.0f, s.getHeight() }, outputPan, tr ("Out pan")));
         const auto bar = barArea();
         const auto cy = bar.getCentreY();
         out.push_back (barMenu ({ 10.0f, cy - 11.0f, 150.0f, 22.0f }, xoverSlope, tr ("Crossover"), "12 dB/oct|24 dB/oct|48 dB/oct", { 0.0f, 0.5f, 1.0f }));
         out.push_back (barMenu ({ 166.0f, cy - 11.0f, 130.0f, 22.0f }, quality, tr ("Oversampling"), "2x|4x|8x", { 0.0f, 0.5f, 1.0f }));
-        out.push_back (barMenu ({ 302.0f, cy - 11.0f, 90.0f, 22.0f }, bands, tr ("Bands"), "1|2|3|4"));
+        out.push_back (button ({ 302.0f, cy - 11.0f, 90.0f, 22.0f }, idBands, tr ("Bands") + " " + juce::String (count()), false,
+                               tr ("Number of bands (1 to 6)")));
         out.push_back (barValue ({ 398.0f, cy - 11.0f, 90.0f, 22.0f }, inputGain, tr ("In")));
         out.push_back (barValue ({ 494.0f, cy - 11.0f, 80.0f, 22.0f }, tone, tr ("Tilt")));
         out.push_back (barValue ({ 580.0f, cy - 11.0f, 110.0f, 22.0f }, wide() ? lowCutWide : lowCut, tr ("Low cut")));
@@ -2150,11 +2166,12 @@ private:
 
     // band settings as a block (style, drive, mix, level + round 128's power, state, tone, feedback, dynamics) to move
     // bands around when splitting / removing
-    static constexpr int blockSize = 4 + mixsuite::ember::extraFields + 2; // round 147: + drive pan, pan
+    static constexpr int blockSize = 4 + mixsuite::ember::extraFields + 3; // round 147: + drive pan, pan; round 150: + character
     int blockParam (int b, int k) const
     {
-        if (k == blockSize - 2) return mixsuite::ember::bandDrivePanParam (b);
-        if (k == blockSize - 1) return mixsuite::ember::bandPanParam (b);
+        if (k == blockSize - 3) return mixsuite::ember::bandDrivePanParam (b);
+        if (k == blockSize - 2) return mixsuite::ember::bandPanParam (b);
+        if (k == blockSize - 1) return mixsuite::ember::characterParam (b);
         return k < 4 ? fp (b, k) : xp (b, k - 4);
     }
     std::array<float, blockSize> bandValues (int b) const
@@ -2200,8 +2217,10 @@ private:
         using namespace mixsuite::ember;
         std::vector<std::pair<int, float>> c;
         const auto n = (int) vals.size();
-        c.push_back ({ bands, (float) (n - 1) / 3.0f });
-        for (int i = 0; i < (int) xo.size(); ++i) c.push_back ({ xover1 + i, crossoverValue (xo[(std::size_t) i]) });
+        const auto [bv, mv] = bandCountValues (n);
+        c.push_back ({ bands, bv });
+        c.push_back ({ bandsMore, mv });
+        for (int i = 0; i < (int) xo.size(); ++i) c.push_back ({ crossoverParam (i), crossoverValue (xo[(std::size_t) i]) });
         for (int b = 0; b < n; ++b)
             for (int f = 0; f < blockSize; ++f) c.push_back ({ blockParam (b, f), vals[(std::size_t) b][(std::size_t) f] });
         set (c);
@@ -2216,6 +2235,30 @@ private:
         else if (c.id == idMute) set ({ { xp (selected, 1), state (selected) == BandState::mute ? 0.0f : 1.0f } });
         else if (c.id == idPrev) selected = (selected + count() - 1) % count();
         else if (c.id == idNext) selected = (selected + 1) % count();
+        else if (c.id == idBands) showBandsMenu();
+        repaint();
+    }
+
+    // round 150: 1 … 6 bands; more bands split the top band, fewer remove the top ones
+    void showBandsMenu()
+    {
+        juce::PopupMenu m;
+        for (int k = 1; k <= mixsuite::ember::maxBands; ++k)
+            m.addItem (juce::String (k), true, count() == k, [this, k] { setBandCount (k); });
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+    }
+
+    void setBandCount (int target)
+    {
+        while (count() > target) removeBand (count() - 1);
+        while (count() < target)
+        {
+            const auto n = count();
+            const auto lo = n > 1 ? edgeX (n - 1) : disp().getX();
+            const auto before = n;
+            splitAt (0.5f * (lo + disp().getRight()));
+            if (count() == before) break;
+        }
         repaint();
     }
 
@@ -2254,8 +2297,8 @@ private:
         {
             const auto lo = edgeX (dragEdge - 1) + 14.0f, hi = edgeX (dragEdge + 1) - 14.0f;
             const auto hz = juce::jlimit (30.0, 18000.0, hzForX (juce::jlimit (lo, hi, e.position.x), d));
-            set ({ { xover1 + dragEdge - 1, crossoverValue (hz) } });
-            ui::showValueTip (*this, juce::Rectangle<int> (16, 16).withCentre (e.position.toInt()), tr ("Crossover") + " " + text (xover1 + dragEdge - 1));
+            set ({ { crossoverParam (dragEdge - 1), crossoverValue (hz) } });
+            ui::showValueTip (*this, juce::Rectangle<int> (16, 16).withCentre (e.position.toInt()), tr ("Crossover") + " " + text (crossoverParam (dragEdge - 1)));
         }
     }
 
@@ -2284,7 +2327,7 @@ private:
         if (! disp().contains (p)) return h;
         if (handleAt (p) >= 0) h.text = tr ("Band handle: drag up / down = drive, wheel = drive, Alt-click or double-click = remove the band");
         else if (edgeAt (p) > 0) h.text = tr ("Crossover: drag left or right");
-        else h.text = tr ("Click a band to edit it; double-click to split it in two (up to four bands)");
+        else h.text = tr ("Click a band to edit it; double-click to split it in two (up to six bands)");
         return h;
     }
 
@@ -2315,7 +2358,8 @@ private:
             g.setFont (font (type::caption, true));
             // round 135: band 1 shows the voicing when one is chosen (it replaces the style)
             const auto vk = mixsuite::ember::voiceIndex (v (mixsuite::ember::voice));
-            juce::String tag = caps (b == 0 && vk > 0 && n == 1 ? tr (mixsuite::ember::voiceName (vk)) : text (fp (b, 0))) + "  " + text (fp (b, 1));
+            juce::String tag = caps (chr (b) > 0 ? tr (mixsuite::ember::characterName (chr (b)))
+                                                 : (b == 0 && vk > 0 && n == 1 ? tr (mixsuite::ember::voiceName (vk)) : text (fp (b, 0)))) + "  " + text (fp (b, 1));
             if (! powered (b)) tag = tr ("OFF") + "  " + tag;
             else if (state (b) == mixsuite::ember::BandState::solo) tag = "S  " + tag;
             else if (state (b) == mixsuite::ember::BandState::mute) tag = "M  " + tag;
@@ -2347,7 +2391,7 @@ private:
             g.fillRoundedRectangle (knobR, 3.0f);
             g.setColour (colour::textSecondary);
             g.setFont (font (type::caption));
-            g.drawText (text (xover1 + i - 1), juce::Rectangle<float> (x + 10.0f, d.getY() + 37.0f, 70.0f, 14.0f), juce::Justification::centredLeft, false);
+            g.drawText (text (mixsuite::ember::crossoverParam (i - 1)), juce::Rectangle<float> (x + 10.0f, d.getY() + 37.0f, 70.0f, 14.0f), juce::Justification::centredLeft, false);
         }
         if (selected < n)
         {
