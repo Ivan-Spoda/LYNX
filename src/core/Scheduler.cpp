@@ -55,7 +55,44 @@ void emitOccurrences (double t, std::int64_t loopLength, double start, double en
         out.add (event);
     }
 }
+// FL's Misc › Time (REA round 146b [EXEC]): Shift delays a channel's notes (on and off), Gate cuts the long ones to its
+// length — not the porta notes when Full porta is on.
+struct NoteTiming
+{
+    std::int64_t start = 0, length = 1;
+};
+
+NoteTiming noteTiming (const Note& note, float swing, const ChannelDef* c) noexcept
+{
+    NoteTiming t;
+    t.start = note.start + swingDelay (note.start, swing, c != nullptr ? c->swingMix : 1.0f);
+    t.length = std::max<std::int64_t> (note.length, 1);
+    if (c == nullptr)
+        return t;
+    if (c->misc.shiftBeats > 0.0f)
+        t.start += (std::int64_t) std::llround ((double) c->misc.shiftBeats * ppq);
+    if (c->misc.gateBeats > 0.0f)
+    {
+        const auto porta = (c->instrument == InstrumentKind::synth ? c->synth.porta : c->instrument == InstrumentKind::sampler && c->sampler.porta) != note.porta;
+        if (! (porta && c->misc.fullPorta))
+            t.length = std::min (t.length, std::max<std::int64_t> (1, (std::int64_t) std::llround ((double) c->misc.gateBeats * ppq)));
+    }
+    return t;
+}
+
+const ChannelDef* channelOf (const std::vector<ChannelDef>* channels, int channel) noexcept
+{
+    return channels != nullptr && channel >= 0 && channel < (int) channels->size() ? &(*channels)[(std::size_t) channel] : nullptr;
+}
 } // namespace
+
+std::int64_t maxChannelShift (const std::vector<ChannelDef>& channels) noexcept
+{
+    float beats = 0.0f;
+    for (const auto& c : channels)
+        beats = std::max (beats, c.misc.shiftBeats);
+    return (std::int64_t) std::ceil ((double) beats * ppq);
+}
 
 void schedulePatternLoop (const Pattern& pattern,
                           std::int64_t patternLength,
@@ -84,10 +121,8 @@ void schedulePatternLoop (const Pattern& pattern,
         on.pan = note.pan;
         on.cents = note.finePitch;
         on.porta = note.porta;
-        const auto mix = channels != nullptr && note.channel >= 0 && note.channel < (int) channels->size()
-                             ? (*channels)[(std::size_t) note.channel].swingMix
-                             : 1.0f;
-        const auto start = note.start + swingDelay (note.start, swing, mix);
+        const auto timing = noteTiming (note, swing, channelOf (channels, note.channel));
+        const auto start = timing.start;
 
         if (note.slide)
         {
@@ -102,7 +137,7 @@ void schedulePatternLoop (const Pattern& pattern,
         NoteEvent off = on;
         off.type = NoteEvent::Type::off;
         off.velocity = 0.0f;
-        const auto length = std::max<std::int64_t> (note.length, 1);
+        const auto length = timing.length;
         emitOccurrences ((double) (start + length), patternLength, startTick, endTick, tps, numSamples, off, out);
     }
 
@@ -112,6 +147,7 @@ ScheduleIndex makeScheduleIndex (const Song& song)
 {
     ScheduleIndex index;
     index.songLength = song.songLength();
+    index.maxShift = maxChannelShift (song.channels);
     index.maxNoteLength.reserve (song.patterns.size());
 
     for (const auto& p : song.patterns)
@@ -223,7 +259,7 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
         if (index != nullptr && loopEnd <= (double) loop && (std::size_t) clip.pattern < index->maxNoteLength.size())
         {
             const auto local = (double) (clip.offset - clip.start);
-            const auto from = loopStart + local - (double) (ticksPerStep + index->maxNoteLength[(std::size_t) clip.pattern]) - 1.0;
+            const auto from = loopStart + local - (double) (ticksPerStep + index->maxNoteLength[(std::size_t) clip.pattern] + index->maxShift) - 1.0;
             const auto to = loopEnd + local + 1.0;
             first = std::lower_bound (notes.begin(), notes.end(), from, [] (const Note& n, double t) { return (double) n.start < t; });
             last = std::upper_bound (first, notes.end(), to, [] (double t, const Note& n) { return t < (double) n.start; });
@@ -236,9 +272,9 @@ void scheduleSong (const Song& song, double startTick, int numSamples, double tp
             if (note.muted || note.start < clip.offset || note.start >= clip.offset + clip.length)
                 continue;
 
-            const auto mix = note.channel >= 0 && note.channel < (int) song.channels.size() ? song.channels[(std::size_t) note.channel].swingMix : 1.0f;
-            const auto on = std::min (clip.start + (note.start - clip.offset) + swingDelay (note.start, song.swing, mix), clip.end() - 1);
-            const auto off = std::min (on + std::max<std::int64_t> (note.length, 1), clip.end());
+            const auto timing = noteTiming (note, song.swing, channelOf (&song.channels, note.channel));
+            const auto on = std::min (clip.start + (note.start - clip.offset) + (timing.start - note.start), clip.end() - 1);
+            const auto off = std::min (on + timing.length, clip.end());
 
             NoteEvent e;
             e.type = NoteEvent::Type::on;

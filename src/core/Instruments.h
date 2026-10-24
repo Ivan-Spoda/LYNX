@@ -46,6 +46,9 @@ public:
     // Pan, fine tuning and "porta" (inverts the channel's porta) of the next note (called right before
     // noteOn). Ignored if unsupported.
     virtual void setNextNoteExpression (float /*pan*/, float /*cents*/, bool /*porta*/ = false) noexcept {}
+    // The next note's volume factor (FL's echo delay, REA round 146b); false when the instrument does not scale its
+    // voices (the caller then scales the velocity).
+    virtual bool setNextNoteGain (float /*gain*/) noexcept { return false; }
     // Channel settings (sampler, synth). UI thread, on every snapshot; the instrument stores them
     // so the audio thread can read without waiting.
     virtual void configure (const ChannelDef&, double /*bpm*/) noexcept {}

@@ -1,0 +1,74 @@
+#pragma once
+
+// FL's "Import MIDI data" window as LYNX applies it (REA rounds 143, 146b; FL's TMIDIImportForm): which tracks, which
+// MIDI channels and which controller to import, zero-velocity notes, and the options of File › Import › MIDI file.
+// Platform-neutral: the MIDI file is read by engine/MidiFileIo (JUCE) into the raw events below.
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+#include "core/Song.h"
+
+namespace lynx::midiimport
+{
+struct RawEvent
+{
+    int track = 0;           // the file's track (0-based, every track of the file)
+    std::int64_t tick = 0;   // LYNX ticks
+    std::uint8_t status = 0; // 0x80 note off, 0x90 note on, 0xB0 controller (low nibble = MIDI channel)
+    std::uint8_t data1 = 0, data2 = 0;
+};
+
+struct ParsedMidi
+{
+    std::vector<std::string> trackNames; // per file track ("" = none)
+    std::vector<RawEvent> events;        // in time order per track
+    double bpm = 120.0;
+    int numerator = 0, denominator = 4;  // the first time signature (0 = none)
+};
+
+struct Options
+{
+    bool newProject = false;      // Start new project
+    bool perTrack = true;         // Create one channel per track (else per MIDI channel)
+    bool realign = false;         // Realign events (removes the silence before the first note)
+    bool timeSignatures = true;   // Import time signatures
+    bool mixerTracks = true;      // Set mixer tracks for new channels
+    bool midiOut = false;         // Channel type: MIDI Out (else LYNX's synth)
+    int track = -1;               // Which tracks to import? −1 = all, else the file's track
+    std::uint16_t channels = 0xFFFF; // Which channels to import? bit c = MIDI channel c + 1
+    int controller = -1;          // Which controller to import? −1 = none, else CC 0..127 (7 / 11 volume, 10 pan)
+    bool zeroVelocityNotes = false; // Import zero velocity notes: a note on with velocity 0 is a note, not a note off
+    bool blend = false;           // Blend with existing data (piano roll import: keep the channel's notes)
+
+    bool operator== (const Options&) const = default;
+};
+
+// The tracks that hold notes or the chosen controller, for the "Which tracks" list: file track indices.
+std::vector<int> tracksWithContent (const ParsedMidi& midi);
+
+// The notes of the selection (track, channels, zero velocity), each with `channel` = its group's index; `groups` gets
+// the group names and their first MIDI channel (one per track with notes, or per MIDI channel when ! perTrack).
+struct Group
+{
+    std::string name;
+    int midiChannel = 0;
+    int track = -1;          // per track: the file track; per channel: −1
+    std::vector<Note> notes; // channel = 0
+    std::vector<PatternEvent> controller; // the chosen controller's values (0..1)
+};
+std::vector<Group> groups (const ParsedMidi& midi, const Options& options);
+
+// File › Import › MIDI file: new channels (one per group) and a new pattern that becomes current; with
+// `newProject`, the song is replaced first. False (and `error`) when the selection has no notes.
+bool importInto (Song& song, const ParsedMidi& midi, const Options& options, const std::string& patternName, std::string& error);
+
+// The piano roll's import into `channel` of the current pattern: the selection's notes (all groups merged), the
+// chosen controller into the pattern's event lane of the channel's volume / pan; without `blend`, the channel's
+// notes in the pattern are deleted first. Returns the indices of the imported notes in the pattern.
+std::vector<int> importIntoChannel (Song& song, int channel, const ParsedMidi& midi, const Options& options, std::string& error);
+
+// The automation target for controller `cc` of `channel` (7 / 11 volume, 10 pan); kind none for the others.
+AutomationTarget controllerTarget (int cc, int channel) noexcept;
+} // namespace lynx::midiimport

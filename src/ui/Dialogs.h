@@ -5,15 +5,15 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "core/MidiImport.h"
+
 namespace lynx
 {
-namespace MidiFileIo
-{
-struct ImportOptions;
-}
-// FL's "Import MIDI data" window (File › Import › MIDI file..., REA round 143). `onAccept` gets the chosen options.
-void showMidiImportDialog (const juce::String& fileName, const MidiFileIo::ImportOptions& current,
-                           std::function<void (const MidiFileIo::ImportOptions&)> onAccept);
+// FL's "Import MIDI data" window (File › Import › MIDI file..., REA rounds 143 / 146b): the project options, which
+// tracks / MIDI channels / controller to import, zero-velocity notes; `pianoRoll` (the piano roll's import into a
+// channel) shows "Blend with existing data" instead of the project options. `onAccept` gets the chosen options.
+void showMidiImportDialog (const juce::String& fileName, const midiimport::ParsedMidi& midi, const midiimport::Options& current,
+                           bool pianoRoll, std::function<void (const midiimport::Options&)> onAccept);
 std::unique_ptr<juce::AlertWindow> makeMidiImportDialog();
 
 // "Rename and color" dialog for patterns and channels (docs/WORKFLOW_FL.md, P1 item 4): a name field
