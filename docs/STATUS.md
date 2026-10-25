@@ -106,8 +106,8 @@ out-of-process plugin sandbox. macOS adds Audio Units, Linux LV2; drivers Core A
   their saved settings: Parametric EQ 2 and Parametric EQ (exact engines), Limiter (incl. its compressor and sidechain), Compressor, Reeverb 2 (exact), LuxeVerb (exact), Convolver (exact),
   Delay 2/3, Delay Bank, Multiband Compressor, Maximus, Soundgoodizer, Fast Dist, Fruity Filter / Fast LP / Free Filter (exact), Newtone / Newtime (state kept, pass-through, source sample in slave mode; Newtone edits rendered by LYNX's engine), Flangus, Flanger, Soft Clipper, WaveShaper, Gross Beat, Effector,
   Love Philter (exact), Frequency Splitter, Stereo Shaper, Stereo Enhancer, Transient Processor,
-  Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter and EQUO (exact engines), Hardcore, Distructor and Multiband Delay (exact), Frequency Shifter,
-  Emphasis, Low Lifter, Send, Transporter, Squeeze, Pitcher, Fruity Vocoder (exact); Patcher graphs of any shape run as
+  Spreader, Balance/PanOMatic (exact), Blood Overdrive (exact), Pitch Shifter and EQUO (exact engines), Hardcore, Distructor and Multiband Delay (exact), Frequency Shifter (exact),
+  Emphasis, Low Lifter (exact), Emphasizer (exact), Send, Transporter, Squeeze, Pitcher, Fruity Vocoder (exact); Patcher graphs of any shape run as
   the real graph (round 141: nodes, cables with gains, notes, control cables, delay compensation, editor).
 - Generators: 3x Osc on its engine (REA round 47: the three oscillators on FL's host wave tables, stereo detune and
   phase, random start phases, AM, the custom wave from the channel's sample read from the user's installation, the HQ
@@ -532,7 +532,10 @@ accordingly. Highlights of what is **confirmed and applied**:
   designed at a fixed 44.1 kHz, x87 direct form I, CENTER DC remover; Fruity Filter: the Chamberlin SVF (×2 cascade),
   per-call smoothers, CENTER. Bit-identical to the three DLLs on every installation state (7 Fast LP, 2 + 9 Free
   Filter, 19 + 4 Fruity Filter demo/preset states) plus synthetic ones, at 22.05/44.1/48/96 kHz with automation, for
-  render calls of up to 512 frames. (Low Lifter and Emphasis, planned for the same round, were not ported.)
+  render calls of up to 512 frames. (Low Lifter was ported exactly in round 154; Emphasis is still approximate.)
+- **Emphasizer, Frequency Shifter and Low Lifter:** FL's exact engines (`core/EmphasizerFx`, `core/FreqShifterFl`,
+  `core/LowLifterFl`, REA round 154) imported from the saved state, editable/automatable, with FL's latency (2 ms
+  Emphasizer lookahead, 10 ms Low Lifter lookahead when enabled) reported for delay compensation.
 - **Newtone and Newtime:** imported as mixer effects that keep FL's state (`core/NewtoneFx`, REA round 73). Like FL,
   they pass the insert's input through unchanged (bit-identical to the DLLs); with FL's "slave to host playback"
   switch on (an editable LYNX parameter) they add their source sample from the song time while the song plays —
@@ -629,8 +632,12 @@ accordingly. Highlights of what is **confirmed and applied**:
 - Fruity WaveShaper (REA round 51 §5): every LYNX export is treated as FL's rendering mode (the process-mode value FL
   sends when it exports was not observed); the editor-only toggle stored by layout ≥ 2 is not identified.
 - Fruity Fast LP / Free Filter / Filter (REA round 63 §7): FL's render-call size for mixer effects is not confirmed
-  (LYNX uses calls of at most 512 frames; the glides and end-of-call guards are per call). Low Lifter and Emphasis keep
-  their approximations (parametric EQ without the harmonics generator; limiter) — not ported yet.
+  (LYNX uses calls of at most 512 frames; the glides and end-of-call guards are per call). Emphasis keeps
+  its approximation (limiter) — not ported yet (survey in REA round 154 §3).
+- Emphasizer, Frequency Shifter, Low Lifter (REA round 154): bit-identical to FL's DLLs in the harness; FL renders
+  match 98–99.98 % sample-for-sample once FL's warm-up on silence before rendering is reproduced. That warm-up length
+  varies between FL runs (1536–2304 samples observed), so the Frequency Shifter's shifter mode only nulls against a
+  given render with that run's warm-up; LYNX uses 2304 (Emphasizer) and 1536 (Frequency Shifter).
 - Fruity PanOMatic / Balance (REA round 58 §1.6, §7): FL's host order at project load/export and the size of its render
   calls to mixer effects were not observed; LYNX starts the gains settled (FL's fresh instance fades in over 23 ms /
   2.3 ms) with PanOMatic's LFO at phase 0, and steps the LFO and ramps once per 512-frame call. Blood Overdrive's

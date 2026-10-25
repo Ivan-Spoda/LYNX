@@ -84,6 +84,9 @@
 #include "core/TransistorBass.h"
 #include "core/HarmlessFx.h"
 #include "core/MaximusFx.h"
+#include "core/EmphasizerFx.h"
+#include "core/FreqShifterFl.h"
+#include "core/LowLifterFl.h"
 #include "core/Reeverb2.h"
 #include "core/LuxeVerb.h"
 #include "core/Denormals.h"
@@ -735,15 +738,17 @@ TEST (fl_round15_effects_convert_known_values)
         std::memcpy (b.data(), words.data(), b.size());
         return b;
     };
-    // Frequency Shifter "+800 Hz": frequency 51542 in the 20 kHz range, 100% wet
+    // Frequency Shifter "+800 Hz": frequency 51542 in the 20 kHz range, 100% wet — FL's own engine since round 154
+    // (its controls as (raw − min) / range); unreadable states keep the generic shifter
     const auto fs = lynx::effectFromFl ("Frequency Shifter", blob ({ 4, 10000, 0, 51542, 0, 10000, 10000, 5000, 10000, 0, 5000, 0, 0 }));
-    CHECK (fs && fs->kind == lynx::EffectKind::freqShift);
+    CHECK (fs && fs->kind == lynx::EffectKind::flFrequencyShifter);
     if (fs)
     {
-        const auto x = (fs->params[0] - 0.5) * 2.0;
-        CHECK (std::abs (2000.0 * x * std::abs (x) - 800.0) < 10.0);
-        CHECK (std::abs (fs->params[1] - 1.0f) < 1e-4f);
+        CHECK (std::abs (fs->params[0] - 1.0f) < 1e-6f && fs->params[1] == 0.0f);
+        CHECK (std::abs (fs->params[2] - (51542.0f + 70000.0f) / 140000.0f) < 1e-6f);
     }
+    const auto fsOld = lynx::effectFromFl ("Frequency Shifter", blob ({ 4, 10000, 0 }));
+    CHECK (fsOld && fsOld->kind == lynx::EffectKind::freqShift);
     // Emphasis: input 0.0625 (= +1.5 dB) and ceiling 0.9308 (≈ −1.6 dB) -> limiter
     const auto em = lynx::effectFromFl ("Emphasis", blob ({ 8, 0, 0, 2, 1, 0, 0, 625, 10000, 10000, 9308, 0, 2, 7, 0 }));
     CHECK (em && em->kind == lynx::EffectKind::limiter && em->enabled);
@@ -15827,4 +15832,159 @@ TEST (plugin_layout_options_match_the_engine_values)
 #include "Vox145Tests.inc"
 #include "Vox148Tests.inc"
 #include "Natives142Tests.inc"
+
+TEST (emphasizer_matches_fl_engine)
+{
+    // REA_rodada154: FL's Emphasizer through the import (state → slot → effect) against goldens of the installation's
+    // Emphasizer_x64.dll (rate set before the state, 2304 samples of silence as FL's mixer runs it before a render,
+    // 512-frame calls, 44.1 kHz): FNV-1a of the output's float bits
+    auto signal = [] {
+        std::vector<float> l (24000), r (24000);
+        std::uint32_t s = 12345;
+        const float amps[] { 0.3f, 1.5f, 0.05f, 3.0f, 0.8f, 0.0f, 2.0f, 0.4f };
+        for (int i = 0; i < 24000; ++i)
+        {
+            const float a = amps[(i / 3000) % 8];
+            s = s * 1664525u + 1013904223u;
+            l[(std::size_t) i] = (float) ((s >> 8) / 8388608.0 - 1.0) * a;
+            s = s * 1664525u + 1013904223u;
+            r[(std::size_t) i] = (float) ((s >> 8) / 8388608.0 - 1.0) * a;
+        }
+        return std::pair { l, r };
+    };
+    struct Case { std::array<int, 6> raw; std::uint64_t hash; };
+    const Case cases[] { { { 0, 5013, 0, 0, 0, 10000 }, 0xa009608f060eb32eull }, { { 6000, 9000, 1, 0, 0, 8000 }, 0x6fc7ec82cc9d9c01ull },
+                         { { 8000, 2000, 0, 1, 0, 10000 }, 0xb10a1f3bd998198cull }, { { 3000, 5013, 1, 0, 1, 10000 }, 0x57a8fa4d8b890ac0ull } };
+    for (const auto& c : cases)
+    {
+        std::vector<std::uint8_t> state (4 + 24 + 1, 0);
+        const std::int32_t version = 2;
+        std::memcpy (state.data(), &version, 4);
+        std::memcpy (state.data() + 4, c.raw.data(), 24);
+        state[28] = 1;
+        const auto slot = lynx::effectFromFl ("Emphasizer", state);
+        CHECK (slot && slot->kind == lynx::EffectKind::emphasizer);
+        if (! slot)
+            continue;
+        auto fx = lynx::makeEffect (slot->kind);
+        fx->prepare (44100.0);
+        auto [l, r] = signal();
+        for (int i = 0; i < 24000; i += 512) // the golden's 512-frame engine calls (level matching is per call)
+            fx->process (l.data() + i, r.data() + i, std::min (512, 24000 - i), slot->params, 120.0);
+        std::uint64_t h = 0xcbf29ce484222325ull;
+        for (int i = 0; i < 24000; ++i)
+            for (float v : { l[(std::size_t) i], r[(std::size_t) i] })
+            {
+                std::uint32_t u;
+                std::memcpy (&u, &v, 4);
+                h = (h ^ u) * 0x100000001b3ull;
+            }
+        CHECK (h == c.hash);
+    }
+    // version 1 (no output control) keeps the 0 dB default; texts
+    const std::vector<std::uint8_t> v1 { 1, 0, 0, 0, 0, 0, 0, 0, 0x95, 0x13, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
+    const auto s1 = lynx::emphasizer::parse (v1);
+    CHECK (s1 && s1->raw[1] == 5013 && s1->raw[5] == 10000);
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::emphasizer, 0, 0.5f, 120.0) == "+12.0 dB");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::emphasizer, 5, 1.0f, 120.0) == "0.0 dB");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::emphasizer, 2, 1.0f, 120.0) == "Soft");
+}
+
+TEST (fl_frequency_shifter_matches_fl_engine)
+{
+    // REA_rodada154 §4: FL's Frequency Shifter (import → slot → effect) against goldens of the installation's
+    // Engine_x64.dll driven by its front end (rate before the state, 1536 samples of silence first, transport stopped, 120 BPM): FNV-1a
+    // of the output
+    struct Case { std::array<int, 10> raw; double rate; std::uint64_t hash; };
+    const Case cases[] { { { 10000, 0, -60480, 0, 10000, 10000, 5000, 10000, 1, 5000 }, 44100.0, 0x462af5f13683c90eull },
+                         { { 7000, 2, 40000, 3000, 10000, 10000, 8000, 6000, 0, 2000 }, 44100.0, 0xcd597b95bf1bbb1aull },
+                         { { 6000, 1, -30000, 6000, 3000, 7000, 3000, 4000, 0, 5000 }, 48000.0, 0x5592232115cb3acull },
+                         { { 10000, 0, 51542, 2000, 8000, 10000, 5000, 10000, 0, 5000 }, 48000.0, 0x63d3051ba14bd00full } };
+    for (const auto& c : cases)
+    {
+        std::vector<std::uint8_t> state (4 + 40 + 8, 0);
+        const std::int32_t version = 4;
+        std::memcpy (state.data(), &version, 4);
+        std::memcpy (state.data() + 4, c.raw.data(), 40);
+        const auto slot = lynx::effectFromFl ("Frequency Shifter", state);
+        CHECK (slot && slot->kind == lynx::EffectKind::flFrequencyShifter);
+        if (! slot)
+            continue;
+        auto fx = lynx::makeEffect (slot->kind);
+        fx->prepare (c.rate);
+        std::vector<float> l (24000), r (24000);
+        std::uint32_t s = 12345;
+        const float amps[] { 0.3f, 1.5f, 0.05f, 3.0f, 0.8f, 0.0f, 2.0f, 0.4f };
+        for (int i = 0; i < 24000; ++i)
+        {
+            const float a = amps[(i / 3000) % 8];
+            s = s * 1664525u + 1013904223u;
+            l[(std::size_t) i] = (float) ((s >> 8) / 8388608.0 - 1.0) * a;
+            s = s * 1664525u + 1013904223u;
+            r[(std::size_t) i] = (float) ((s >> 8) / 8388608.0 - 1.0) * a;
+        }
+        for (int i = 0; i < 24000; i += 800)
+            fx->process (l.data() + i, r.data() + i, 800, slot->params, 120.0);
+        std::uint64_t h = 0xcbf29ce484222325ull;
+        for (int i = 0; i < 24000; ++i)
+            for (float v : { l[(std::size_t) i], r[(std::size_t) i] })
+            {
+                std::uint32_t u;
+                std::memcpy (&u, &v, 4);
+                h = (h ^ u) * 0x100000001b3ull;
+            }
+        CHECK (h == c.hash);
+    }
+    // the engine's tanhf against points of the library's
+    CHECK (lynx::fsfl::tanhf_ (0.0f) == 0.0f && lynx::fsfl::tanhf_ (20.0f) == 1.0f && lynx::fsfl::tanhf_ (-20.0f) == -1.0f);
+    CHECK (std::fabs (lynx::fsfl::tanhf_ (0.5f) - 0.462117165f) < 1e-7f && std::fabs (lynx::fsfl::tanhf_ (2.0f) - 0.964027584f) < 1e-7f);
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::flFrequencyShifter, 1, 1.0f, 120.0) == "Ring modulator");
+}
+
+TEST (fl_low_lifter_matches_fl_engine)
+{
+    // REA_rodada154 §5: FL's Low Lifter (import → slot → effect, 512-frame calls) against goldens of the installation's
+    // engine (ildsp_x64.dll's Faust program driven by Low Lifter_x64.dll, rate before the state): FNV-1a of the output
+    struct Case { std::array<int, 15> raw; double rate; std::uint64_t hash; };
+    const Case cases[] { { { 1, 10000, 4999, 7210, 1, 0, 0, 0, 5000, 10000, 7750, 0, 0, 1, 1 }, 44100.0, 0xcbb7eae8f31ca6d9ull },
+                         { { 1, 7506, 5000, 3277, 1, 0, 6757, 5053, 9608, 10000, 7778, 5281, 1, 1, 1 }, 44100.0, 0xdb2d3712d4fb16c5ull },
+                         { { 1, 5095, 6737, 5109, 1, 1, 541, 1479, 5451, 8197, 690, 6833, 1, 1, 1 }, 48000.0, 0x273c262202984447ull } };
+    for (const auto& c : cases)
+    {
+        std::vector<std::uint8_t> state (4 + 60 + 18, 0);
+        const std::int32_t version = 6;
+        std::memcpy (state.data(), &version, 4);
+        std::memcpy (state.data() + 4, c.raw.data(), 60);
+        const auto slot = lynx::effectFromFl ("Low Lifter", state);
+        CHECK (slot && slot->kind == lynx::EffectKind::flLowLifter);
+        if (! slot)
+            continue;
+        auto fx = lynx::makeEffect (slot->kind);
+        fx->prepare (c.rate);
+        std::vector<float> l (24000), r (24000);
+        std::uint32_t s = 12345;
+        const float amps[] { 0.3f, 1.5f, 0.05f, 3.0f, 0.8f, 0.0f, 2.0f, 0.4f };
+        for (int i = 0; i < 24000; ++i)
+        {
+            const float a = amps[(i / 3000) % 8];
+            s = s * 1664525u + 1013904223u;
+            l[(std::size_t) i] = (float) ((s >> 8) / 8388608.0 - 1.0) * a;
+            s = s * 1664525u + 1013904223u;
+            r[(std::size_t) i] = (float) ((s >> 8) / 8388608.0 - 1.0) * a;
+        }
+        for (int i = 0; i < 24000; i += 512)
+            fx->process (l.data() + i, r.data() + i, std::min (512, 24000 - i), slot->params, 120.0);
+        std::uint64_t h = 0xcbf29ce484222325ull;
+        for (int i = 0; i < 24000; ++i)
+            for (float v : { l[(std::size_t) i], r[(std::size_t) i] })
+            {
+                std::uint32_t u;
+                std::memcpy (&u, &v, 4);
+                h = (h ^ u) * 0x100000001b3ull;
+            }
+        CHECK (h == c.hash);
+    }
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::flLowLifter, 10, 0.775f, 120.0) == "80 Hz");
+    CHECK (lynx::formatEffectParam (lynx::EffectKind::flLowLifter, 3, 0.721f, 120.0) == "-6.0 dB");
+}
 #include "Rea153Tests.inc"
