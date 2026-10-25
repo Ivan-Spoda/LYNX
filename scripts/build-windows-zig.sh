@@ -110,6 +110,8 @@ APP_SOURCES+=(src/core/Preferences.cpp src/ui/SettingsPages.cpp src/ui/PluginMan
 APP_SOURCES+=(src/core/WaveAnalysis.cpp src/ui/WaveformView.cpp)
 # FL's Plucked!, Sawer and BeepMap engines (REA round 65)
 APP_SOURCES+=(src/core/Plucked.cpp src/core/BeepMap.cpp src/core/Sawer.cpp)
+# LYNX Soundfont: SF2 / SF3 player with a preset search (round 158, issue #6)
+APP_SOURCES+=(src/core/SoundFont.cpp src/core/SoundFontLoad.cpp src/core/SoundFontIndex.cpp src/ui/SoundFontEditor.cpp)
 # FL's sampler interpolation (REA round 69)
 APP_SOURCES+=(src/core/FlResampler.cpp src/core/FlKeys.cpp)
 # FL's Hardcore (REA round 71)

@@ -10,21 +10,7 @@
 #include <fstream>
 #include <new>
 
-// counts the allocations of the thread that sets sfCountAllocations (the render loop's real-time check)
-static std::atomic<long> sfAllocations { 0 };
-static thread_local bool sfCountAllocations = false;
-
-void* operator new (std::size_t n)
-{
-    if (sfCountAllocations)
-        ++sfAllocations;
-    if (void* p = std::malloc (n != 0 ? n : 1))
-        return p;
-    throw std::bad_alloc();
-}
-void operator delete (void* p) noexcept { std::free (p); }
-void operator delete (void* p, std::size_t) noexcept { std::free (p); }
-
+// the real-time check uses the allocation counter of LynxTuneTests95.inc (operator new replaced there)
 namespace
 {
 namespace sft
@@ -339,8 +325,8 @@ TEST (soundfont158_realtime_render_does_not_allocate)
     rig.set (lynx::sf::pResampling, 3);
     std::vector<float> l (512), r (512);
     rig.inst->render (l.data(), r.data(), 512, 1, 1); // (first block: settings taken)
-    sfAllocations = 0;
-    sfCountAllocations = true;
+    rt95::allocs = 0;
+    rt95::countAllocs = true;
     for (int k = 0; k < 400; ++k)
     {
         if (k % 20 == 0)
@@ -355,8 +341,8 @@ TEST (soundfont158_realtime_render_does_not_allocate)
         rig.inst->setParameter (lynx::sf::pCutoff, 0.5f);
         rig.inst->render (l.data(), r.data(), 512, 1, 1);
     }
-    sfCountAllocations = false;
-    CHECK (sfAllocations.load() == 0);
+    rt95::countAllocs = false;
+    CHECK (rt95::allocs.load() == 0);
 }
 
 TEST (soundfont158_params_roundtrip)
@@ -412,4 +398,152 @@ TEST (soundfont158_preset_search_index)
     again.setCacheFile (dir + "/cache/index.txt");
     CHECK (again.presetCount() == 5);
     CHECK (lynx::sf::PresetIndex::fromText (lynx::sf::PresetIndex::toText (index.fonts())).size() == 2);
+}
+
+namespace
+{
+// FL Soundfont Player state, version 6 (REA_rodada158 §1)
+std::vector<std::uint8_t> flSoundfontState (const std::array<int, 13>& p, const std::string& path, int presetIndex, int resampling,
+                                            int programMode, bool reverbBuiltIn)
+{
+    std::vector<std::uint8_t> s;
+    const auto i32 = [&s] (int v) {
+        for (int b = 0; b < 4; ++b)
+            s.push_back ((std::uint8_t) ((std::uint32_t) v >> (8 * b)));
+    };
+    i32 (6);
+    for (auto v : p)
+        i32 (v);
+    s.push_back ((std::uint8_t) path.size());
+    s.insert (s.end(), path.begin(), path.end());
+    i32 (-1), s.push_back (reverbBuiltIn ? 1 : 0); // reverb: send to, built-in
+    i32 (4), s.push_back (0);                     // chorus: send to insert 5
+    s.push_back (1);
+    s.push_back (1), s.push_back (0);             // fix levels, velocity filter off
+    i32 (resampling), i32 (1), i32 (presetIndex);
+    s.push_back (0);                              // EMU off
+    s.push_back (0), s.push_back (1);             // reverb level box off
+    i32 (programMode);
+    return s;
+}
+} // namespace
+
+TEST (soundfont158_fl_state_import)
+{
+    const auto path = sft::testFont ("fl", { { "Low", 0, 5 }, { "Kit", 128, 0 }, { "High", 0, 2 } }, 1);
+    // P: program 1, bank 0, reverb 128 (×1), chorus 256 (×20), mod 0, A 100 ms, D 250 (= 1 s), S disabled, R 50 (= 200 ms),
+    // DEL disabled, AMT 127 (1000 cents), SPD disabled, CUT 127 (fully open)
+    const std::array<int, 13> p { 1, 0, 128, 256, 0, 100, 250, -1, 50, -1, 127, -1, 127 };
+    const auto state = flSoundfontState (p, path, 1, 6, 1, true); // index 1 of (0:2, 0:5, 128:0) = bank 0 program 5
+
+    lynx::sf::FlPlayerState fl;
+    CHECK (lynx::sf::parseFlPlayerState (state, fl));
+    CHECK (fl.version == 6 && fl.path == path && fl.presetIndex == 1 && fl.resampling == 6 && fl.programMode == 1);
+    CHECK (fl.reverbBuiltIn && ! fl.chorusBuiltIn && fl.chorusTarget == 4 && ! fl.velocityFilter && ! fl.emuEnvelope && ! fl.reverbLevel);
+    // damaged / short / other versions are rejected, never read past the end
+    for (std::size_t n = 0; n < 57; ++n)
+        CHECK (! lynx::sf::parseFlPlayerState (std::vector<std::uint8_t> (state.begin(), state.begin() + (std::ptrdiff_t) n), fl));
+    auto wrongVersion = state;
+    wrongVersion[0] = 9;
+    CHECK (! lynx::sf::parseFlPlayerState (wrongVersion, fl));
+    for (std::size_t n = 57; n < state.size(); ++n)
+        lynx::sf::parseFlPlayerState (std::vector<std::uint8_t> (state.begin(), state.begin() + (std::ptrdiff_t) n), fl);
+
+    // the FLP import: the channel becomes a LYNX Soundfont with the preset and FL's overrides
+    flp::Project project;
+    flp::Channel channel;
+    channel.index = 0;
+    channel.type = flp::ChannelType::native;
+    channel.name = "Strings";
+    channel.pluginName = "Fruity Soundfont Player";
+    channel.pluginState = state;
+    project.channels = { channel };
+    channel.index = 1;
+    channel.pluginName = "SoundFont Player"; // (FL 2026's name), a version 2 state: P0/P1 pick the preset (129 = drum kit 0)
+    channel.pluginState = flSoundfontState ({ 129, 0, 128, 128, 0, -1, -1, -1, -1, -1, -128, -1, -1 }, path, 0, 4, 0, false);
+    channel.pluginState[0] = 2;
+    channel.pluginState.resize (4 + 52 + 1 + path.size() + 11);
+    project.channels.push_back (channel);
+    lynx::FlpImportReport report;
+    lynx::FlpImportOptions options;
+    options.report = &report;
+    const auto song = lynx::importFlp (project, options);
+    CHECK (song.channels.size() == 2);
+    if (song.channels.size() == 2)
+    {
+        const auto& c = song.channels[0];
+        const auto q = lynx::sf::readParams (c.modelParams);
+        CHECK (c.instrument == lynx::InstrumentKind::soundfont && c.samplePath == path && c.name == "Strings");
+        CHECK (q[lynx::sf::pBank] == 0 && q[lynx::sf::pProgram] == 5);
+        CHECK (lynx::sf::displayValue (lynx::sf::pAttack, q[lynx::sf::pAttack]) == "100 ms");
+        CHECK (lynx::sf::displayValue (lynx::sf::pDecay, q[lynx::sf::pDecay]) == "1.00 s");
+        CHECK (lynx::sf::displayValue (lynx::sf::pRelease, q[lynx::sf::pRelease]) == "200 ms");
+        CHECK (q[lynx::sf::pSustain] == 0.0f && q[lynx::sf::pLfoDelay] == 0.0f && q[lynx::sf::pLfoSpeed] == 0.0f);
+        CHECK (lynx::sf::displayValue (lynx::sf::pLfoAmount, q[lynx::sf::pLfoAmount]) == "+1000 cents");
+        CHECK (std::abs (q[lynx::sf::pCutoff] - 1.0f) < 1.0e-6f);
+        CHECK (lynx::sf::displayValue (lynx::sf::pReverbAmount, q[lynx::sf::pReverbAmount]) == "100 %");
+        CHECK (lynx::sf::displayValue (lynx::sf::pChorusAmount, q[lynx::sf::pChorusAmount]) == "2000 %");
+        CHECK (q[lynx::sf::pReverbOverride] == 0.0f && q[lynx::sf::pChorusOverride] == 1.0f);
+        CHECK (q[lynx::sf::pReverbBuiltIn] == 1.0f && q[lynx::sf::pChorusBuiltIn] == 0.0f && q[lynx::sf::pChorusTrack] == 5);
+        CHECK (q[lynx::sf::pResampling] == 2 && q[lynx::sf::pProgramMode] == 1 && q[lynx::sf::pVelocityToCutoff] == 0.0f);
+        const auto& d = song.channels[1];
+        const auto r = lynx::sf::readParams (d.modelParams);
+        CHECK (d.instrument == lynx::InstrumentKind::soundfont && r[lynx::sf::pBank] == 128 && r[lynx::sf::pProgram] == 0);
+        CHECK (r[lynx::sf::pAttack] == 0.0f && r[lynx::sf::pLfoAmount] == 0.0f && r[lynx::sf::pCutoff] == 0.0f && r[lynx::sf::pResampling] == 1);
+        CHECK (report.converted["Fruity Soundfont Player"] == 1 && report.converted["SoundFont Player"] == 1);
+
+        // it plays: the imported channel renders its preset
+        auto font = lynx::sf::FontLibrary::instance().getNow (path);
+        auto inst = lynx::sf::makeInstrument (font);
+        inst->prepare (48000.0);
+        inst->configure (c, 120.0);
+        inst->noteOn (60, 0.8f);
+        std::vector<float> l (4800), rr (4800);
+        for (int at = 0; at < 4800; at += 480)
+            inst->render (l.data() + at, rr.data() + at, 480, 1.0f, 1.0f);
+        float peak = 0;
+        for (auto x : l)
+            peak = std::max (peak, std::abs (x));
+        CHECK (peak > 0.01f);
+    }
+
+    // FL's own states (plugin database, the SoundFont tracks) [DATA]
+    if (! realFlpDir.empty())
+    {
+        lynx::FlPathRoots roots;
+        roots.data = realFlpDir;
+        roots.factoryData = std::filesystem::path (realFlpDir).parent_path().string();
+        int found = 0, read = 0, fonts = 0;
+        for (const char* rel : { "Patches/Plugin database/Generators/Misc/SoundFont Player.fst", "System/SoundFontTrack.fst",
+                                 "System/SoundfontPlayerTrack.fst" })
+        {
+            const auto file = std::filesystem::path (realFlpDir) / rel;
+            if (! std::filesystem::exists (file))
+                continue;
+            ++found;
+            std::ifstream f (file, std::ios::binary);
+            std::vector<std::uint8_t> bytes ((std::istreambuf_iterator<char> (f)), std::istreambuf_iterator<char>());
+            try
+            {
+                const auto preset = flp::parseProject (bytes, true);
+                lynx::sf::FlPlayerState s;
+                if (! preset.channels.empty() && lynx::sf::parseFlPlayerState (preset.channels.front().pluginState, s))
+                {
+                    ++read;
+                    if (! s.path.empty())
+                    {
+                        const auto resolved = lynx::resolveFlPath (s.path, roots);
+                        const auto info = lynx::sf::scanFontFile (resolved);
+                        fonts += info.valid ? 1 : 0;
+                        std::printf ("  %s: v%d, %s -> %s (%d presets)\n", rel, s.version, s.path.c_str(), resolved.c_str(), (int) info.presets.size());
+                    }
+                }
+            }
+            catch (const flp::Error&)
+            {
+            }
+        }
+        std::printf ("  %d FL SoundFont Player states, %d read, %d fonts found\n", found, read, fonts);
+        CHECK (read == found);
+    }
 }

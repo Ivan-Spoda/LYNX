@@ -296,6 +296,7 @@ if(LYNX_BUILD_APP)
         src/ui/ControllerEditors.cpp
         src/ui/NewtoneEditor.cpp
         src/ui/ChannelSettings.cpp
+        src/ui/SoundFontEditor.cpp
         src/ui/BrowserComponent.cpp
         src/ui/Theme.cpp
         src/ui/Icons.cpp

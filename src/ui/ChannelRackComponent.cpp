@@ -21,6 +21,8 @@
 #include "ui/Theme.h"
 #include "ui/AudioEditor.h"
 #include "core/RackOps.h"
+#include "core/SoundFont.h"
+#include "ui/SoundFontEditor.h"
 
 namespace lynx
 {
@@ -73,6 +75,7 @@ juce::String instrumentName (InstrumentKind k)
         case InstrumentKind::directwave: return "DirectWave";
         case InstrumentKind::midiOut: return "MIDI Out";
         case InstrumentKind::patcher: return "Patcher";
+        case InstrumentKind::soundfont: return "LYNX Soundfont";
     }
     return "?";
 }
@@ -2125,6 +2128,11 @@ void ChannelRackComponent::addInstrumentItems (juce::PopupMenu& menu, int insert
         const auto added = add (c);
         PatcherWindows::openChannel (engine, added);
     });
+    // LYNX Soundfont (round 158, issue #6): SF2 / SF3 banks with a preset search; its editor opens to pick a font
+    menu.addItem ("LYNX Soundfont", [this, add] {
+        const auto added = add (sf::makeChannel());
+        openChannelSettings (engine, added);
+    });
     menu.addSeparator();
 
     if (insertAt < 0)
@@ -2268,7 +2276,7 @@ void ChannelRackComponent::sliceChannel (int channel)
 bool ChannelRackComponent::isInterestedInFileDrag (const juce::StringArray& files)
 {
     for (const auto& f : files)
-        if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
+        if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3;sf2;sf3"))
             return true;
 
     return false;
@@ -2284,6 +2292,13 @@ void ChannelRackComponent::filesDropped (const juce::StringArray& files, int x, 
     {
         const juce::File file (f);
 
+        if (file.hasFileExtension ("sf2;sf3"))
+        {
+            // a SoundFont: into the LYNX Soundfont channel it was dropped on, else a new channel
+            openSoundFontFile (engine, file, target);
+            target = -1;
+            continue;
+        }
         if (! file.hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
             continue;
 
@@ -2325,11 +2340,28 @@ void ChannelRackComponent::timerCallback()
 
 bool ChannelRackComponent::isInterestedInDragSource (const SourceDetails& details)
 {
-    return BrowserComponent::isBrowserDrag (details);
+    std::string path;
+    int bank = 0, program = 0;
+    return BrowserComponent::isBrowserDrag (details) || parseSoundFontDrag (details.description.toString(), path, bank, program);
 }
 
 void ChannelRackComponent::itemDropped (const SourceDetails& details)
 {
+    // a preset dragged from a LYNX Soundfont list: onto a LYNX Soundfont channel it loads there, else a new channel
+    std::string path;
+    int bank = 0, program = 0;
+    if (parseSoundFontDrag (details.description.toString(), path, bank, program))
+    {
+        int row = 0;
+        const auto area = areaAt (details.localPosition.x, details.localPosition.y, row);
+        const auto& song = engine.getSong();
+        if (area != Area::none && area != Area::addRow && row >= 0 && row < (int) song.channels.size()
+            && song.channels[(std::size_t) row].instrument == InstrumentKind::soundfont)
+            loadSoundFontInto (engine, row, path, bank, program);
+        else
+            addSoundFontChannel (engine, path, bank, program);
+        return;
+    }
     if (const auto file = BrowserComponent::draggedFile (details); file.existsAsFile())
         filesDropped ({ file.getFullPathName() }, details.localPosition.x, details.localPosition.y);
 }

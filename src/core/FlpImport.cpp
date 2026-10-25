@@ -48,6 +48,7 @@
 #include "core/FlSynths.h"
 #include "core/FlWrapper.h"
 #include "core/FruityDynamics.h"
+#include "core/SoundFont.h"
 #include "core/SynthPresets.h"
 #include "core/NewtoneFx.h"
 
@@ -1548,6 +1549,24 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                     adoptedFromPlugin = true;
                 }
             }
+            else if (name == "fruity soundfont player" || name == "soundfont player")
+            {
+                // FL's SoundFont player → LYNX Soundfont: the font (FL path macros expanded; MissingFiles relocates it
+                // when it moved), its preset and the overrides (REA_rodada158 §1)
+                sf::FlPlayerState fl;
+                if (sf::parseFlPlayerState (c.pluginState, fl))
+                {
+                    const auto resolved = resolveFlPath (fl.path, options.roots);
+                    const auto info = resolved.empty() ? sf::FontInfo {} : sf::scanFontFile (resolved);
+                    const auto name0 = def.name;
+                    def.instrument = InstrumentKind::soundfont;
+                    def.samplePath = resolved.empty() ? fl.path : resolved;
+                    def.modelParams = sf::paramsFromFl (fl, info.presets);
+                    def.pluginState.clear();
+                    def.name = name0;
+                    adoptedFromPlugin = true;
+                }
+            }
             else if (name == "plucked!")
             {
                 // FL's Karplus-Strong engine from the raw state (REA_rodada65 §1); there was no conversion before
@@ -1795,7 +1814,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
                      || def.instrument == InstrumentKind::sawer || def.instrument == InstrumentKind::flkeys
                      || def.instrument == InstrumentKind::granulizer || def.instrument == InstrumentKind::drumaxx
                      || def.instrument == InstrumentKind::slayer || def.instrument == InstrumentKind::fruitydance
-                     || def.instrument == InstrumentKind::directwave)
+                     || def.instrument == InstrumentKind::directwave || def.instrument == InstrumentKind::soundfont)
                 ++r.converted[c.pluginName]; // FL's own engine rebuilt from the plugin state
             else if ((plugin == "harmless" && def.instrument != InstrumentKind::harmless) || (plugin == "harmor" && def.instrument != InstrumentKind::harmor && adoptedFromPlugin) || (plugin == "minisynth" && def.instrument != InstrumentKind::minisynth) || plugin == "fruity dx10" || plugin == "dx10" || (plugin == "fruit kick" && def.instrument != InstrumentKind::fruitkick)
                      || ((plugin == "sytrus" || plugin == "gms" || plugin == "ogun" || plugin == "autogun" || plugin == "sakura" || plugin == "kepler" || plugin == "boobass" || plugin == "drumpad" || plugin == "poizone" || plugin == "bassdrum"

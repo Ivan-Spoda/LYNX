@@ -1708,21 +1708,34 @@ private:
         }
 
         // instruments: the channel window the Channel rack opens (Patcher: its graph window, not here)
-        for (int k = 0; k < (int) lynx::InstrumentKind::patcher; ++k)
+        for (int k = 0; k <= (int) lynx::InstrumentKind::soundfont; ++k)
         {
             const auto kind = (lynx::InstrumentKind) k;
-            if (kind == lynx::InstrumentKind::plugin)
+            if (kind == lynx::InstrumentKind::plugin || kind == lynx::InstrumentKind::patcher)
                 continue;
-            for (const auto* variant : { "default", "old project (saved and read back)" })
+            for (const auto* variant : { "default", "old project (saved and read back)", "odd settings" })
             {
+                if (juce::String (variant) == "odd settings" && kind != lynx::InstrumentKind::soundfont)
+                    continue;
                 const auto label = "instrument " + juce::String (k) + " / " + variant;
-                steps.push_back ({ label + ": open", [test, &engine, kind, label, old = juce::String (variant) != "default"] {
+                steps.push_back ({ label + ": open", [test, &engine, kind, label, variant = juce::String (variant), old = juce::String (variant) != "default"] {
                                       auto song = lynx::Song::makeDefault();
                                       auto channel = lynx::natives::makeChannel (kind, lynx::flStudioAccess());
                                       lynx::ChannelDef def;
                                       def.instrument = kind;
                                       def.name = "Test";
                                       song.channels.push_back (channel ? *channel : def);
+                                      if (kind == lynx::InstrumentKind::soundfont && variant != "default")
+                                      {
+                                          // a real font when FL's is there; NaN / huge / truncated settings
+                                          const auto& roots = lynx::flStudioAccess().roots;
+                                          if (! roots.data.empty())
+                                              song.channels.back().samplePath = (juce::File (juce::String::fromUTF8 (roots.data.c_str()))
+                                                                                     .getChildFile ("Patches/Soundfonts/STR_Ensemble.sf2"))
+                                                                                    .getFullPathName().toStdString();
+                                          if (variant == "odd settings")
+                                              song.channels.back().modelParams = { NAN, 1.0e9f, -1.0e9f, 0.5f, 7.0f };
+                                      }
                                       if (old)
                                       {
                                           juce::String error;

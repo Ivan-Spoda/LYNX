@@ -161,6 +161,27 @@ std::string displayValue (int index, float value);
 // font is loaded)
 ChannelDef makeChannel (const std::string& fontPath = {}, int bank = 0, int program = 0);
 
+// --- FL Studio's Fruity Soundfont Player ------------------------------------------------------------------------------
+
+// Its saved state (FL event 0xD5, versions 2…6; docs/analise/REA_rodada158.md §1)
+struct FlPlayerState
+{
+    int version = 0;
+    std::array<int, 13> p {};       // P0 program 1…256 (> 128: drum bank), P1 bank, P2/P3 reverb / chorus level 0…256,
+                                    // P4 mod wheel, P5…P8 A/D/S/R, P9…P11 LFO DEL/AMT/SPD, P12 CUT (minimum = the preset's)
+    std::string path;               // as saved: FL path macros (%FLStudioFactoryData%…)
+    int reverbTarget = -1, chorusTarget = -1;  // "send to" mixer track (internal: insert − 1), −1 = none
+    bool reverbBuiltIn = false, chorusBuiltIn = false;
+    bool ignoreLinks = true, velocityFilter = true, emuEnvelope = true;
+    int resampling = -1;            // 1 crunchy, 4 standard, 6 HQ, 8 extreme HQ (others: standard)
+    int presetIndex = -1;           // v3+: into the font's preset list sorted by bank, program
+    bool reverbLevel = true, chorusLevel = true; // the LEVEL check boxes (FL reads both from the first byte)
+    int programMode = 0;
+};
+bool parseFlPlayerState (const std::vector<std::uint8_t>& state, FlPlayerState& out);
+// LYNX Soundfont settings from FL's (the bank / program from the preset index when the font's presets are given)
+std::vector<float> paramsFromFl (const FlPlayerState& fl, const std::vector<PresetInfo>& fontPresets);
+
 // --- background loading ---------------------------------------------------------------------------------------------
 
 // One font file being loaded or loaded: the audio thread only reads `font()` (null until ready).

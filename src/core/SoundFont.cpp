@@ -86,12 +86,12 @@ namespace
 const ParamInfo infos[paramCount] = {
     { "bank", "Bank", 0, 128, 0, true },
     { "program", "Patch", 0, 127, 0, true },
-    { "reverbAmount", "Reverb send", 0, 1, 0, false },
-    { "reverbOverride", "Reverb: override preset", 0, 1, 0, true },
+    { "reverbAmount", "Reverb level", 0, 1, 0.5f, false },
+    { "reverbOverride", "Reverb: custom level", 0, 1, 1, true },
     { "reverbBuiltIn", "Reverb: built-in", 0, 1, 1, true },
     { "reverbTrack", "Reverb: send to", -1, 125, -1, true },
-    { "chorusAmount", "Chorus send", 0, 1, 0, false },
-    { "chorusOverride", "Chorus: override preset", 0, 1, 0, true },
+    { "chorusAmount", "Chorus level", 0, 1, 0.5f, false },
+    { "chorusOverride", "Chorus: custom level", 0, 1, 1, true },
     { "chorusBuiltIn", "Chorus: built-in", 0, 1, 1, true },
     { "chorusTrack", "Chorus: send to", -1, 125, -1, true },
     { "attack", "Attack", 0, 1, 0, false },
@@ -119,8 +119,16 @@ const ParamInfo infos[paramCount] = {
 
 // knob 0…1 → seconds for the envelope / LFO overrides (0 = the preset's own): 1 ms … 20 s, exponential
 float knobSeconds (float k) noexcept { return 0.001f * std::pow (20000.0f, std::clamp (k, 0.0f, 1.0f)); }
-// knob → absolute cents for the cut-off override (≈ 55 Hz … 13.5 kHz… open)
-int knobCutoffCents (float k) noexcept { return (int) std::lround (6000.0f + 7500.0f * std::clamp (k, 0.0f, 1.0f)); }
+// knob → absolute cents for the cut-off override: FL's 1500 … 13500 cents (≈ 20 Hz … 19.9 kHz)
+int knobCutoffCents (float k) noexcept { return (int) std::lround (1500.0f + 12000.0f * std::clamp (k, 0.0f, 1.0f)); }
+// pitch LFO depth: centre = 0, the ends = -/+1000 cents (FL: 0..1000), finer near the centre
+float knobLfoCents (float k) noexcept
+{
+    const auto x = (std::clamp (k, 0.0f, 1.0f) - 0.5f) * 2.0f;
+    return (x < 0.0f ? -1000.0f : 1000.0f) * x * x;
+}
+// FL Soundfont Player's send level curve: (19^(2k) - 1) / 18, 1.0 at the centre, 20 at the top
+float levelMultiplier (float k) noexcept { return (std::pow (19.0f, 2.0f * std::clamp (k, 0.0f, 1.0f)) - 1.0f) / 18.0f; }
 // knob → LFO rate (0.1 … 20 Hz)
 float knobLfoHz (float k) noexcept { return 0.1f * std::pow (200.0f, std::clamp (k, 0.0f, 1.0f)); }
 } // namespace
@@ -190,7 +198,7 @@ std::string displayValue (int index, float v)
         case pLfoAmount:
             if (v <= 0.0f)
                 return "Preset";
-            std::snprintf (buf, sizeof (buf), "%+.0f cents", (v - 0.5f) * 2.0f * 100.0f);
+            std::snprintf (buf, sizeof (buf), "%+.0f cents", knobLfoCents (v));
             return buf;
         case pLfoSpeed:
             if (v <= 0.0f)
@@ -202,8 +210,11 @@ std::string displayValue (int index, float v)
                 return "Preset";
             std::snprintf (buf, sizeof (buf), "%.0f Hz", 8.176 * std::pow (2.0, knobCutoffCents (v) / 1200.0));
             return buf;
-        case pCutoffMod: case pResonance: case pReverbAmount: case pChorusAmount:
-            if (v <= 0.0f && index != pReverbAmount && index != pChorusAmount)
+        case pReverbAmount: case pChorusAmount:
+            std::snprintf (buf, sizeof (buf), "%.0f %%", levelMultiplier (v) * 100.0f);
+            return buf;
+        case pCutoffMod: case pResonance:
+            if (v <= 0.0f)
                 return "Preset";
             std::snprintf (buf, sizeof (buf), "%.0f %%", v * 100.0f);
             return buf;
@@ -257,6 +268,127 @@ ChannelDef makeChannel (const std::string& fontPath, int bank, int program)
     c.modelParams[pBank] = (float) std::clamp (bank, 0, 128);
     c.modelParams[pProgram] = (float) std::clamp (program, 0, 127);
     return c;
+}
+
+// --- FL Studio's Fruity Soundfont Player ------------------------------------------------------------------------------
+
+bool parseFlPlayerState (const std::vector<std::uint8_t>& state, FlPlayerState& out)
+{
+    std::size_t at = 0;
+    const auto have = [&] (std::size_t n) { return at + n <= state.size(); };
+    const auto i32 = [&] {
+        std::uint32_t v = 0;
+        for (int b = 0; b < 4; ++b)
+            v |= (std::uint32_t) state[at + (std::size_t) b] << (8 * b);
+        at += 4;
+        return (int) (std::int32_t) v;
+    };
+    const auto u8 = [&] { return state[at++]; };
+    FlPlayerState s;
+    if (! have (4 + 52 + 1))
+        return false;
+    s.version = i32();
+    if (s.version < 2 || s.version > 6)
+        return false;
+    for (auto& v : s.p)
+        v = i32();
+    std::size_t len = u8();
+    if (len == 0xFF)
+    {
+        if (! have (4))
+            return false;
+        len = (std::size_t) (std::uint32_t) i32();
+    }
+    if (! have (len))
+        return false;
+    s.path.assign ((const char*) state.data() + at, len);
+    at += len;
+    while (! s.path.empty() && (unsigned char) s.path.back() < 0x20)
+        s.path.pop_back();
+    if (! have (11))
+        return false;
+    s.reverbTarget = i32();
+    s.reverbBuiltIn = u8() != 0;
+    s.chorusTarget = i32();
+    s.chorusBuiltIn = u8() != 0;
+    u8(); // (a flag with no use found)
+    if (s.version >= 3 && have (18))
+    {
+        s.ignoreLinks = u8() != 0;
+        s.velocityFilter = u8() != 0;
+        s.resampling = i32();
+        i32(); // (an engine argument FL resets to 1)
+        s.presetIndex = i32();
+    }
+    if (s.version >= 4 && have (1))
+        s.emuEnvelope = u8() != 0;
+    if (s.version >= 5 && have (2))
+    {
+        s.reverbLevel = u8() != 0;
+        u8();
+        s.chorusLevel = true; // (FL's loader puts both bytes into the reverb box)
+    }
+    if (s.version >= 6 && have (4))
+    {
+        s.programMode = i32();
+        if (s.programMode < 0 || s.programMode > 2)
+            s.programMode = 0;
+    }
+    out = std::move (s);
+    return true;
+}
+
+std::vector<float> paramsFromFl (const FlPlayerState& fl, const std::vector<PresetInfo>& fontPresets)
+{
+    auto p = defaultParams();
+    const auto& v = fl.p;
+    // the preset: v3+ by index into the presets sorted by bank, program; else (or no font) P1 = bank, P0 = program + 1
+    int bank = std::clamp (v[1], 0, 127), program = std::clamp (v[0], 1, 256) - 1;
+    if (program >= 128)
+        program -= 128, bank = 128;
+    if (fl.version >= 3 && fl.presetIndex >= 0 && fl.presetIndex < (int) fontPresets.size())
+    {
+        auto sorted = fontPresets;
+        std::stable_sort (sorted.begin(), sorted.end(), [] (const PresetInfo& a, const PresetInfo& b) {
+            return a.bank != b.bank ? a.bank < b.bank : a.program < b.program;
+        });
+        bank = sorted[(std::size_t) fl.presetIndex].bank, program = sorted[(std::size_t) fl.presetIndex].program;
+    }
+    p[pBank] = (float) std::clamp (bank, 0, 128);
+    p[pProgram] = (float) std::clamp (program, 0, 127);
+    // sends: the level multiplier (0…256, 128 = ×1) when its box is checked; built-in or a mixer track (else: off)
+    p[pReverbAmount] = (float) std::clamp (v[2], 0, 256) / 256.0f;
+    p[pChorusAmount] = (float) std::clamp (v[3], 0, 256) / 256.0f;
+    p[pReverbOverride] = fl.reverbLevel ? 1.0f : 0.0f;
+    p[pChorusOverride] = fl.chorusLevel ? 1.0f : 0.0f;
+    p[pReverbBuiltIn] = fl.reverbBuiltIn ? 1.0f : 0.0f;
+    p[pChorusBuiltIn] = fl.chorusBuiltIn ? 1.0f : 0.0f;
+    p[pReverbTrack] = (float) std::clamp (fl.reverbTarget >= 0 ? fl.reverbTarget + 1 : -1, -1, 125);
+    p[pChorusTrack] = (float) std::clamp (fl.chorusTarget >= 0 ? fl.chorusTarget + 1 : -1, -1, 125);
+    // envelope / LFO / cut-off overrides: FL's minimum = the preset's (0 here); FL's units → LYNX's knob curves
+    constexpr float tiny = 1.0e-4f;
+    const auto secondsKnob = [] (double s) { return s <= 0.001 ? tiny : (float) std::clamp (std::log (s / 0.001) / std::log (20000.0), 1.0e-4, 1.0); };
+    if (v[5] >= 0) p[pAttack] = secondsKnob (v[5] * 0.001);
+    if (v[6] >= 0) p[pDecay] = secondsKnob (v[6] * 0.004);
+    if (v[7] >= 0) p[pSustain] = std::max (tiny, (float) std::pow (10.0, -(1000.0 - 1000.0 * std::pow (std::min (v[7], 127) / 127.0, 0.2)) / 200.0));
+    if (v[8] >= 0) p[pRelease] = secondsKnob (v[8] * 0.004);
+    if (v[9] >= 0) p[pLfoDelay] = secondsKnob (v[9] * 0.004);
+    if (v[10] > -128) p[pLfoAmount] = 0.5f + 0.5f * (float) std::sqrt (std::min (1000, std::abs (v[10] * 1000 / 127)) / 1000.0);
+    if (v[11] >= 0)
+    {
+        const auto hz = 8.176 * std::pow (2.0, std::clamp (std::round (1200.0 * std::log2 (std::max (1.0e-9, v[11] * 0.0102739726))), -16000.0, 4500.0) / 1200.0);
+        p[pLfoSpeed] = (float) std::clamp (std::log (hz / 0.1) / std::log (200.0), 1.0e-4, 1.0);
+    }
+    if (v[12] >= 0) p[pCutoff] = std::max (tiny, (float) (std::min (v[12], 127) * 12000 / 127) / 12000.0f);
+    // options
+    p[pResampling] = fl.resampling == 1 ? 0.0f : fl.resampling == 6 ? 2.0f : fl.resampling == 8 ? 3.0f : 1.0f;
+    p[pProgramMode] = (float) fl.programMode;
+    p[pVelocityToCutoff] = fl.velocityFilter ? 1.0f : 0.0f;
+    p[pEmuEnvelope] = fl.emuEnvelope ? 1.0f : 0.0f;
+    p[pIgnoreLinks] = fl.ignoreLinks ? 1.0f : 0.0f;
+    p[pPolyphony] = 256.0f; // (FL: 512 voices, the channel's own limit on top)
+    p[pBendRange] = 2.0f;
+    return p;
 }
 
 // --- font library -------------------------------------------------------------------------------------------------------
@@ -1230,10 +1362,10 @@ private:
         const auto quality = (int) param (pResampling);
         const auto bendCents = bend * (rpnBend >= 0 ? rpnBend : param (pBendRange)) * 100.0f;
         const auto master = dbToGain (param (pVolume)) * ccVolume * ccVolume * ccExpression * ccExpression;
-        const auto revAmount = param (pReverbAmount), choAmount = param (pChorusAmount);
+        const auto revMult = levelMultiplier (param (pReverbAmount)), choMult = levelMultiplier (param (pChorusAmount));
         const auto revOverride = param (pReverbOverride) >= 0.5f, choOverride = param (pChorusOverride) >= 0.5f;
         const auto lfoOverride = param (pLfoAmount) > 0.0f;
-        const auto lfoDepth = (param (pLfoAmount) - 0.5f) * 2.0f * 100.0f;
+        const auto lfoDepth = knobLfoCents (param (pLfoAmount));
         const auto cutMod = param (pCutoffMod);
         const auto ccPanL = std::sqrt (std::clamp (1.0f - ccPan, 0.0f, 1.0f)), ccPanR = std::sqrt (std::clamp (1.0f + ccPan, 0.0f, 1.0f));
         std::fill (monoRev.begin(), monoRev.begin() + n, 0.0f);
@@ -1268,9 +1400,10 @@ private:
             const auto g0 = v.lastGain;
             const auto gStep = (target - g0) / (float) n;
             v.lastGain = target;
-            // sends: the preset's own (+ the knob, + CC 91 / 93 as the SF2 default modulators: 20 %), or only the knob
-            const auto revSend = revOverride ? revAmount : std::min (1.0f, v.reverb + revAmount + 0.2f * ccReverb);
-            const auto choSend = choOverride ? choAmount : std::min (1.0f, v.chorus + choAmount + 0.2f * ccChorus);
+            // sends: the preset's own (+ CC 91 / 93 as the SF2 default modulators: 20 %), times FL's level multiplier when
+            // "custom level" is on (FL Soundfont Player: 0 .. 1 at the centre .. 20)
+            const auto revSend = std::min (1.0f, (v.reverb + 0.2f * ccReverb) * (revOverride ? revMult : 1.0f));
+            const auto choSend = std::min (1.0f, (v.chorus + 0.2f * ccChorus) * (choOverride ? choMult : 1.0f));
             anySend = anySend || revSend > 0.0f || choSend > 0.0f;
 
             auto pos = v.pos;

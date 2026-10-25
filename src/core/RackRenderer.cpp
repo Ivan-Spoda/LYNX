@@ -711,6 +711,7 @@ void RackState::buildAutomationTables()
                 if (channelOk && (song.channels[(std::size_t) t.index].instrument == InstrumentKind::plugin
                                   || song.channels[(std::size_t) t.index].instrument == InstrumentKind::patcher // (its published parameters)
                                   || song.channels[(std::size_t) t.index].instrument == InstrumentKind::slayer
+                                  || song.channels[(std::size_t) t.index].instrument == InstrumentKind::soundfont // (LYNX Soundfont's knobs)
                                   || (song.channels[(std::size_t) t.index].instrument == InstrumentKind::midiOut && midictl::isMidiParam (t.param))))
                     pluginParams.push_back ({ a, t.index, 0, 0, t.param });
                 else
