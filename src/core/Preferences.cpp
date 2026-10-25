@@ -177,7 +177,82 @@ DriverKind driverKind (const std::string& typeName)
         return DriverKind::alsa;
     if (typeName == "JACK")
         return DriverKind::jack;
+    if (typeName == "PipeWire")
+        return DriverKind::pipewire;
     return DriverKind::other;
+}
+
+std::string preferredLinuxDriver (const std::vector<std::pair<std::string, bool>>& typesWithDevices)
+{
+    for (const auto* wanted : { "PipeWire", "JACK", "ALSA" })
+        for (const auto& [name, hasDevices] : typesWithDevices)
+            if (name == wanted && hasDevices)
+                return name;
+    for (const auto& [name, hasDevices] : typesWithDevices)
+        if (hasDevices)
+            return name;
+    return {};
+}
+
+std::string pipewireLatency (int frames, int sampleRate)
+{
+    return std::to_string (std::max (1, frames)) + "/" + std::to_string (std::max (1, sampleRate));
+}
+
+std::string pipewireChannelName (const std::string& position, int index)
+{
+    if (position.empty())
+        return "Channel " + std::to_string (index + 1);
+    if (position.rfind ("AUX", 0) == 0 && position.size() > 3
+        && std::all_of (position.begin() + 3, position.end(), [] (char c) { return std::isdigit ((unsigned char) c) != 0; }))
+        return "Aux " + std::to_string (std::stoi (position.substr (3)) + 1);
+    static const std::pair<const char*, const char*> names[] = {
+        { "MONO", "Mono" }, { "FL", "Left" }, { "FR", "Right" }, { "FC", "Center" }, { "LFE", "LFE" },
+        { "SL", "Side left" }, { "SR", "Side right" }, { "RL", "Rear left" }, { "RR", "Rear right" },
+        { "RC", "Rear center" }, { "FLC", "Front left center" }, { "FRC", "Front right center" },
+        { "TFL", "Top front left" }, { "TFR", "Top front right" }, { "TRL", "Top rear left" }, { "TRR", "Top rear right" }
+    };
+    for (const auto& [code, name] : names)
+        if (position == code)
+            return name;
+    return position;
+}
+
+std::string pipewireDefaultName (const std::string& json)
+{
+    // {"name":"value"} as WirePlumber writes it; values are plain node names (no escapes in practice, but \" is kept)
+    const auto key = json.find ("\"name\"");
+    if (key == std::string::npos)
+        return {};
+    auto at = json.find (':', key + 6);
+    if (at == std::string::npos)
+        return {};
+    at = json.find ('"', at);
+    if (at == std::string::npos)
+        return {};
+    std::string out;
+    for (auto i = at + 1; i < json.size(); ++i)
+    {
+        if (json[i] == '\\' && i + 1 < json.size())
+            out += json[++i];
+        else if (json[i] == '"')
+            return out;
+        else
+            out += json[i];
+    }
+    return {};
+}
+
+std::vector<std::string> uniqueDeviceNames (const std::vector<std::string>& descriptions)
+{
+    std::vector<std::string> out;
+    std::map<std::string, int> seen;
+    for (const auto& d : descriptions)
+    {
+        const auto n = ++seen[d];
+        out.push_back (n == 1 ? d : d + " (" + std::to_string (n) + ")");
+    }
+    return out;
 }
 
 std::vector<int> usableBufferSizes (DriverKind kind, const std::vector<int>& offered, int devicePeriod)

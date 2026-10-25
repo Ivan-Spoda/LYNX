@@ -358,6 +358,7 @@ private:
     toolbar::MidiActivityLight midiLight;
     juce::StringArray midiLightInputs; // the open MIDI inputs (refreshed once a second)
     int midiInputTicks = 0;
+    bool realtimeHintChecked = false; // Linux: the real-time priority hint was considered (round 161)
     toolbar::OutputMonitor output { engine };
     int meterTicks = 0;
     juce::String driverTipType; // the device type the ASIO suggestion was worked out for

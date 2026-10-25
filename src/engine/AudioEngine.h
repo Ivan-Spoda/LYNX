@@ -468,6 +468,7 @@ private:
     double estimatedPositionNow() const noexcept;
 
     void buildInitialGraph();
+    void choosePreferredDriver(); // a first start on Linux: PipeWire, then JACK, then ALSA (round 161)
     void chooseSafeBufferSize();
     void updateRealtimeStats(); // timer: unit loads over a window, glitch log
     RtStats rtStats;

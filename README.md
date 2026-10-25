@@ -58,7 +58,7 @@ LYNX ships **native** plugins inspired by the third-party plugins producers use 
 | **Slate Digital** | Fresh Air → **Aether** |
 | **Harrison** | De-Esser → **Hush De-esser** |
 | **Complete Access (role)** | channel strips (SSL 4K G, Harrison 32C / MPC, Slate VCC / Virtual Mix Rack) → **Ridge Strip** · bus / smart compressors (SSL Bus Compressor 2, G3, VBC, sonible smart:comp, pure:comp) → **Crest Compressor** · optical levelers (Slate FG-2A, SD-3A, Custom Opto) → **Glow Leveler** · limiters (Slate FG-X 2, SSL X-Limit, sonible smart:limit, pure:limit) → **Apex Limiter** · EQs (Slate Infinity EQ, FG-73 / FG-N / FG-S / SD-PE1 / CS-EQ, Eiosis AirEQ, SSL X-EQ 2, sonible smart:EQ) → **Facet EQ** · de-essers (SSL DeEss, Slate FG-DS 902, Eiosis E2Deesser, sonible smart:deess) → **Hush De-esser** · gates (SSL X-Gate, Slate Gate Classic / Drums, Harrison Spectral Gate) → **Sentry Gate** · reverbs (LiquidSonics Lustrous Plates / Seventh Heaven / Cinematic Rooms, Slate VerbSuite Classics, SSL FlexVerb / PlateVerb / SpringVerb, sonible smart:reverb) → **Foil Plate** · delays (SSL X-Echo / X-Delay, Slate Stellar Echo SD-201, Harrison 3D Delay) → **Echoform** · saturators (Slate Heatwave / Revival, SSL Fusion Vintage Drive / X-Saturator, Harrison Tape Saturator) → **Ember Saturator** · pitch correction (Slate MetaTune) → **LYNX Tune** · vintage compressor models (Slate FG-116 / FG-76 / FG-401 / FG-A / FG-Dynamics, SSL X-ValveComp) → Compressor (stand-in) |
-| **Image-Line FL Studio** | 66 natives at Exact / Near-exact quality: 3x Osc, FL Keys, Gross Beat, Fruity Limiter, Parametric EQ, Soundgoodizer, Maximus, Fruity Delay 3, Reeverb 2, Fruity Compressor, Epoch Verb, Nebula, Atrium, Foil Plate, Echoform, Crest Compressor, Prism Multiband, Sentry Gate … ([all of them](docs/PLUGINS.md)) |
+| **Image-Line FL Studio** | 69 natives at Exact / Near-exact quality: 3x Osc, FL Keys, Gross Beat, Fruity Limiter, Parametric EQ, Soundgoodizer, Maximus, Fruity Delay 3, Reeverb 2, Fruity Compressor, Epoch Verb, Nebula, Atrium, Foil Plate, Echoform, Crest Compressor, Prism Multiband, Sentry Gate … ([all of them](docs/PLUGINS.md)) |
 
 <sub>Product and company names are trademarks of their respective owners. They are used only to describe compatibility and the role each LYNX engine plays. LYNX is not affiliated with, endorsed or sponsored by any of them and contains none of their code, presets, graphics or audio.</sub>
 <!-- inspired:end -->
@@ -114,7 +114,7 @@ Step sequencer with per-channel volume, pan, mute and solo, swing, multiple patt
 <img src="docs/img/piano-roll.png" alt="Piano Roll">
 
 ### Piano Roll
-Configurable snap, chords and scales, multi-selection, quantize, slide and porta notes, velocity/pan/pitch lane, `.mid` import and export.
+Configurable snap, chords and scales, 16 note colors, note groups, a chord readout, select tools (invert, odd/even, random, overlapping), quantize, slide and porta notes, velocity/pan/pitch lane, `.mid` import and export.
 
 </td>
 </tr>
@@ -160,9 +160,10 @@ Any knob or fader (channel, mixer, effect, plugin parameter) becomes a clip with
 
 #### Instruments
 - 3-oscillator synth with an evolving harmonics oscillator, SVF or 4-pole ladder filter and a vintage chorus
-- Sampler with zones, slices, time-stretch (WSOLA) and disk streaming
+- Sampler with zones, slices, time-stretch (Signalsmith Stretch) and disk streaming
+- **LYNX Soundfont**: SF2/SF3 player with a preset search across all your SoundFonts
 - Built-in drums (kick, snare, hat, clap)
-- VST3 and CLAP plugins on every OS, plus Audio Units on macOS and LV2 on Linux; on Windows and Linux optionally sandboxed in a separate process
+- VST3 and CLAP plugins on every OS, plus Audio Units on macOS and LV2 on Linux; on Windows and Linux optionally sandboxed in a separate process; a searchable plugin picker with favorites
 
 </td>
 <td width="33%" valign="top">
@@ -183,7 +184,9 @@ Any knob or fader (channel, mixer, effect, plugin parameter) becomes a clip with
 - Exports WAV 16/24/32f, FLAC and OGG, song or pattern, with dither
 - Note recording (PC keyboard and MIDI) and audio input recording
 - Undo/redo on every edit
-- Audio drivers: Windows Audio (WASAPI), DirectSound and ASIO on Windows; Core Audio on macOS; ALSA and JACK on Linux
+- Opt-in crash and freeze reports (anonymous), or a prefilled GitHub bug report
+- Audio drivers: Windows Audio (WASAPI), DirectSound and ASIO on Windows; Core Audio on macOS; PipeWire (native), JACK and ALSA on Linux
+- Any insert to any hardware output, including single mono channels
 
 </td>
 </tr>
@@ -270,7 +273,7 @@ xattr -dr com.apple.quarantine /Applications/LYNX.app
 
 macOS asks for microphone access the first time you record.
 
-**Linux.** Needs X11 or XWayland, and audio through ALSA, JACK or PipeWire (through its JACK or ALSA layer). For the
+**Linux.** Needs X11 or XWayland; audio goes through PipeWire directly (or JACK, or ALSA), see [docs/LINUX.md](docs/LINUX.md). For the
 AppImage:
 
 ```
@@ -287,7 +290,7 @@ entry, an icon and the `.lynx` file type (`./install.sh --uninstall` removes it 
 | | Windows | macOS | Linux |
 |---|---|---|---|
 | Plugin formats | VST3, CLAP, VST2 | VST3, CLAP, Audio Units | VST3, CLAP, LV2, VST2 |
-| Audio drivers | Windows Audio (WASAPI), DirectSound, ASIO, built-in LYNX ASIO driver | Core Audio | ALSA, JACK (PipeWire via `pipewire-jack`) |
+| Audio drivers | Windows Audio (WASAPI), DirectSound, ASIO, built-in LYNX ASIO driver | Core Audio | PipeWire (native), JACK, ALSA |
 | Out-of-process plugin sandbox | optional | – | optional |
 | FL Studio integration (factory samples, plugin database) | FL Studio installation | FL Studio app bundle is looked for (untested) | Windows FL Studio under Wine (`~/.wine` or `$WINEPREFIX`) |
 | Settings folder | `%APPDATA%\LYNX` | `~/Library/Application Support/LYNX` | `~/.config/LYNX` (`$XDG_CONFIG_HOME`) |

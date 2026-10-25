@@ -25,6 +25,7 @@
 #include "engine/PluginSandbox.h"
 #include "platform/FileTypes.h"
 #include "platform/CrashGuard.h"
+#include "platform/LinuxRealtime.h"
 
 #include "engine/Text.h"
 
@@ -2582,6 +2583,19 @@ void MainComponent::timerCallback()
                     for (const auto& name : type->getDeviceNames())
                         asio.push_back (name.toStdString());
             perfMeter.setDriverTip (juce::String::fromUTF8 (prefs::suggestedAsioDriver (driverTipType.toStdString(), asio).c_str()));
+        }
+        // Linux: the first dropouts without real-time priority explain how to get it, once per installation (round 161)
+        if (device != nullptr && ! realtimeHintChecked && (rt.overBudget > 0 || device->getXRunCount() > 0)
+            && lynx::rt::status() == lynx::rt::Status::denied)
+        {
+            realtimeHintChecked = true;
+            if (lynx::rt::shouldShowHint (PluginHost::settingsFolder().getChildFile ("realtime-hint-shown")))
+                juce::AlertWindow::showMessageBoxAsync (
+                    juce::MessageBoxIconType::InfoIcon, tr ("Real-time priority"),
+                    tr ("The sound broke up, and Linux runs LYNX's audio thread at normal priority. Real-time priority makes dropouts much rarer:\n\n"
+                        "- install rtkit (package \"rtkit\"; most desktops already have it), or\n"
+                        "- add yourself to the \"audio\" group with an rtprio limit in /etc/security/limits.d (as for JACK),\n\n"
+                        "then log out and in again. LYNX never needs root. Options > Audio settings shows the current state."));
         }
     }
 
