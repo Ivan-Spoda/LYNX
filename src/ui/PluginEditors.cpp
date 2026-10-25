@@ -101,7 +101,7 @@ public:
         const auto& l = activeLayout();
         for (const auto& item : l.items) // live meters and graphs (mixing suite, LYNX Tune's pitch, round 108's dynamics): 30 Hz
             if (item.type == Item::display && item.display != nullptr
-                && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0
+                && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "gcmeter") == 0
                     || std::strcmp (item.display, "pitchgraph") == 0 || std::strcmp (item.display, "panpos") == 0
                     || std::strcmp (item.display, "pitchtrace") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)))
             {
@@ -1138,7 +1138,7 @@ public:
     int tuneRangeDrag = -1;                       // 0 = the low boundary, 1 = the high one
     int tuneSendFlash = 0;                        // round 150: Send lit for a few repaints after a click
     enum TuneButton { tbBypass, tbRemove, tbReset, tbRange0, tbZoomOut = tbRange0 + lynxtune::rangePresets, tbZoomIn, tbLeft, tbRight, tbLatch,
-                      tbSend, tbReceive, tbCount }; // round 150: Send / Receive
+                      tbSend, tbReceive, tbGroup, tbCount }; // round 150: Send / Receive; round 152: Group octaves
     juce::Rectangle<float> tuneKeysStrip (juce::Rectangle<float> r) const { return r.withHeight (22.0f * scale()); }
     juce::Rectangle<float> tuneKeysBed (juce::Rectangle<float> r) const { return r.withTrimmedTop (36.0f * scale()).reduced (2.0f * scale(), 2.0f * scale()); }
     juce::Rectangle<float> tuneRangeBar (juce::Rectangle<float> r) const
@@ -1152,13 +1152,15 @@ public:
         const auto s = scale();
         const auto strip = tuneKeysStrip (r).reduced (2.0f * s, 2.0f * s);
         auto at = [&] (float x, float w) { return juce::Rectangle<float> (strip.getX() + x * s, strip.getY(), w * s, strip.getHeight()); };
-        if (which == tbBypass) return at (0.0f, 62.0f);
-        if (which == tbRemove) return at (66.0f, 62.0f);
-        if (which == tbReset) return at (132.0f, 48.0f);
-        if (which == tbSend) return at (184.0f, 42.0f);    // round 150
-        if (which == tbReceive) return at (230.0f, 52.0f);
-        if (which >= tbRange0 && which < tbZoomOut) return at (288.0f + 47.0f * (float) (which - tbRange0), 45.0f);
-        if (which >= tbZoomOut && which <= tbRight) return at (620.0f + 24.0f * (float) (which - tbZoomOut), 22.0f);
+        // round 152: narrower buttons so Group octaves fits left of LATCH
+        if (which == tbBypass) return at (0.0f, 58.0f);
+        if (which == tbRemove) return at (62.0f, 58.0f);
+        if (which == tbReset) return at (124.0f, 44.0f);
+        if (which == tbSend) return at (172.0f, 40.0f);    // round 150
+        if (which == tbReceive) return at (216.0f, 50.0f);
+        if (which >= tbRange0 && which < tbZoomOut) return at (270.0f + 42.0f * (float) (which - tbRange0), 40.0f);
+        if (which >= tbZoomOut && which <= tbRight) return at (568.0f + 22.0f * (float) (which - tbZoomOut), 20.0f);
+        if (which == tbGroup) return at (658.0f, 46.0f); // round 152
         return strip.withLeft (strip.getRight() - 62.0f * s); // LATCH
     }
     int tuneVisibleWhites() const { return 7 * tuneShownOctaves; }
@@ -1221,6 +1223,7 @@ public:
             else if (b == tbReset) name = tr ("Reset");
             else if (b == tbSend) { lit = tuneSendFlash > 0; name = tr ("Send"); }
             else if (b == tbReceive) { lit = p[lynxtune::receiveScale] >= 0.5f; name = tr ("Receive"); }
+            else if (b == tbGroup) { lit = lynxtune::groupOctavesOn (p.data()); name = tr ("Group"); }
             else if (b >= tbRange0 && b < tbZoomOut)
             {
                 const auto [lo, hi] = lynxtune::rangePresetNotes (b - tbRange0);
@@ -1260,12 +1263,14 @@ public:
         const auto ww = bed.getWidth() / (float) n;
         static const int whitePc[7] { 0, 2, 4, 5, 7, 9, 11 };
         const auto sungNote = pitchHistory.empty() || pitchHistory.back().sung < 0.5f ? -1 : (int) std::lround (pitchHistory.back().target);
-        auto legal = [&] (int pc) { return p[(std::size_t) (lynxtune::noteC + pc)] >= 0.5f && ((inScale >> pc) & 1u) != 0; };
+        // round 152: each key's status in effect (its own when Group octaves is off)
+        const auto mask = tuneMask (p);
+        auto status = [&] (int note) { return lynxtune::noteStatus (p.data(), note, mask); };
+        auto legalNote = [&] (int note) { const auto st = status (note); return st == lynxtune::KeyStatus::legal || st == lynxtune::KeyStatus::bypass; };
         auto keyColour = [&] (int note, bool black) {
-            const auto pc = note % 12;
-            const auto bypassed = p[(std::size_t) (lynxtune::bypassC + pc)] >= 0.5f;
+            const auto bypassed = status (note) == lynxtune::KeyStatus::bypass;
             auto c = black ? juce::Colour (0xff1c1e24) : juce::Colour (0xffd9dbe0);
-            if (! legal (pc))
+            if (! legalNote (note))
                 c = black ? juce::Colour (0xff101114) : juce::Colour (0xff5a5d66); // removed / not in the scale
             else if (bypassed)
                 c = black ? juce::Colour (0xff6b4d16) : juce::Colour (0xffe6be6e);
@@ -1276,14 +1281,22 @@ public:
         auto mark = [&] (juce::Rectangle<float> k, int note) {
             const auto pc = note % 12;
             const auto inRange = note >= lowNote && note <= highNote;
-            if (legal (pc) && fx.enabled && inRange) // a target: the accent line at the key's top
+            const auto st = status (note);
+            const bool own = ! lynxtune::groupOctavesOn (p.data()) && lynxtune::keyOverride (p.data(), note) != lynxtune::KeyStatus::follow;
+            if (legalNote (note) && fx.enabled && inRange) // a target: the accent line at the key's top
             {
-                g.setColour (p[(std::size_t) (lynxtune::bypassC + pc)] >= 0.5f ? juce::Colour (0xffe0a040) : accent);
+                g.setColour (st == lynxtune::KeyStatus::bypass ? juce::Colour (0xffe0a040) : accent);
                 g.fillRect (k.withHeight (3.0f * s));
             }
-            if (! legal (pc))
+            if (own) // round 152: a key with its own status (Group octaves off): an outline
             {
-                const auto dir = lynxtune::noteDir (p[(std::size_t) (lynxtune::noteDirC + pc)]);
+                g.setColour (accent.withAlpha (0.8f));
+                g.drawRoundedRectangle (k.reduced (1.0f * s), 2.0f * s, 1.2f * s);
+            }
+            if (! legalNote (note))
+            {
+                const auto dir = st == lynxtune::KeyStatus::removedUp ? lynxtune::NoteDir::up
+                                 : (st == lynxtune::KeyStatus::removedDown ? lynxtune::NoteDir::down : lynxtune::NoteDir::nearest);
                 const auto x = juce::Rectangle<float> (7.0f * s, 7.0f * s).withCentre ({ k.getCentreX(), k.getY() + 10.0f * s });
                 g.setColour (accent.withAlpha (0.9f));
                 if (dir != lynxtune::NoteDir::nearest) // illegal, pitch up / down: an arrow
@@ -1293,7 +1306,7 @@ public:
                     a.addTriangle (x.getX(), up ? x.getBottom() : x.getY(), x.getRight(), up ? x.getBottom() : x.getY(), x.getCentreX(), up ? x.getY() : x.getBottom());
                     g.fillPath (a);
                 }
-                else if (((inScale >> pc) & 1u) != 0) // removed by hand: a cross
+                else if (((inScale >> pc) & 1u) != 0 || own) // removed by hand: a cross
                 {
                     g.drawLine (x.getX(), x.getY(), x.getRight(), x.getBottom(), 1.5f * s);
                     g.drawLine (x.getRight(), x.getY(), x.getX(), x.getBottom(), 1.5f * s);
@@ -1347,6 +1360,15 @@ public:
         const auto shown = tuneRangeDrag == 0 ? lynxtune::rangeLow : lynxtune::rangeHigh;
         ui::showValueTip (*this, tuneRangeBar (r).toNearestInt(), tr ("Range") + " " + juce::String (lynxtune::paramText (shown, current()->params[(std::size_t) shown])));
     }
+    // round 152: the pitch classes that are targets (the scale on the key, minus the notes switched off)
+    static std::uint16_t tuneMask (const EffectParams& p)
+    {
+        std::uint16_t notes = 0;
+        for (int k = 0; k < 12; ++k)
+            if (p[(std::size_t) (lynxtune::noteC + k)] >= 0.5f) notes = (std::uint16_t) (notes | (1u << k));
+        const auto sc = (vocal::Scale) lynxtune::effectiveScale (p[lynxtune::scale], p[lynxtune::moreScales]);
+        return (std::uint16_t) (vocal::scaleMask (sc, lynxtune::keyIndex (p[lynxtune::key]), notes) & notes);
+    }
     void tuneKeyClick (juce::Rectangle<float> r, juce::Point<float> at)
     {
         const auto* fx = current();
@@ -1374,9 +1396,13 @@ public:
                 }
                 else if (b == tbBypass || b == tbRemove)
                     tuneRemove = b == tbRemove;
+                else if (b == tbGroup) // round 152: Group octaves on / off (the keys' own statuses are kept)
+                    setParams ({ { lynxtune::groupOctaves, lynxtune::groupOctavesOn (fx->params.data()) ? 0.0f : 1.0f } });
                 else if (b == tbReset) // every note of the scale legal again, nothing bypassed, no direction
                 {
                     std::vector<std::pair<int, float>> c;
+                    for (int k = 0; k < lynxtune::keyMapParams; ++k) // round 152: and no key of its own
+                        c.push_back ({ lynxtune::keyMap1 + k, 0.0f });
                     for (int k = 0; k < 12; ++k)
                     {
                         c.push_back ({ lynxtune::noteC + k, 1.0f });
@@ -1412,6 +1438,19 @@ public:
         const auto note = tuneKeyAt (r, at);
         if (note < 0)
             return;
+        if (! lynxtune::groupOctavesOn (fx->params.data())) // round 152: Group octaves off — this key alone
+        {
+            auto copy = fx->params;
+            const auto st = lynxtune::noteStatus (copy.data(), note, tuneMask (copy));
+            const auto next = tuneRemove ? lynxtune::nextRemoveStatus (st)
+                                         : (st == lynxtune::KeyStatus::bypass ? lynxtune::KeyStatus::legal : lynxtune::KeyStatus::bypass);
+            const auto mp = lynxtune::keyMap1 + juce::jlimit (0, lynxtune::keyMapParams - 1, (note - lynxtune::keyMapFirst) / lynxtune::keyMapPerParam);
+            tuneHeldMap = tuneLatch ? -1 : mp;
+            tuneHeldMapValue = copy[(std::size_t) mp];
+            lynxtune::setKeyOverride (copy.data(), note, next);
+            setParams ({ { mp, copy[(std::size_t) mp] } });
+            return;
+        }
         const auto pc = note % 12;
         const auto onP = lynxtune::noteC + pc, byP = lynxtune::bypassC + pc, dirP = lynxtune::noteDirC + pc;
         const auto on = fx->params[(std::size_t) onP] >= 0.5f, by = fx->params[(std::size_t) byP] >= 0.5f;
@@ -1443,6 +1482,11 @@ public:
             tuneRangeDrag = -1;
             ui::hideValueTip();
         }
+        if (tuneHeldMap >= 0) // round 152
+        {
+            setParams ({ { tuneHeldMap, tuneHeldMapValue } });
+            tuneHeldMap = -1;
+        }
         if (tuneHeld < 0)
             return;
         setParams ({ { lynxtune::noteC + tuneHeld, tuneHeldValues.first }, { lynxtune::bypassC + tuneHeld, tuneHeldValues.second },
@@ -1459,6 +1503,7 @@ public:
                 if (b == tbReset) return tr ("Reset scale: every note of the scale legal again, nothing bypassed");
                 if (b == tbSend) return tr ("Send: copy this key, scale and keyboard to every other LYNX Tune whose Receive is on");
                 if (b == tbReceive) return tr ("Receive: take the scale another LYNX Tune sends (switching it on takes the last one sent)");
+                if (b == tbGroup) return tr ("Group octaves: on = a key edits its note in every octave; off = each key keeps its own status");
                 if (b >= tbRange0 && b < tbZoomOut) return tr ("Range preset: notes sung outside the range pass uncorrected (Generic: the whole keyboard)");
                 if (b == tbZoomOut || b == tbZoomIn) return tr ("Keyboard view: show more / fewer octaves");
                 if (b == tbLeft || b == tbRight) return tr ("Keyboard view: scroll down / up an octave");
@@ -1466,6 +1511,8 @@ public:
             }
         if (tuneRangeBar (r).expanded (0.0f, 2.0f * scale()).contains (at))
             return tr ("Range: drag a boundary; notes sung outside it pass uncorrected");
+        if (current() != nullptr && ! lynxtune::groupOctavesOn (current()->params.data())) // round 152
+            return tuneRemove ? tr ("Click a key: change the status of this key only") : tr ("Click a key: bypass / correct this key only");
         return tuneRemove ? tr ("Click a key: change that note's status in every octave") : tr ("Click a key: bypass / correct that note in every octave");
     }
     void paintAutoKey (juce::Graphics& g, juce::Rectangle<float> r)
@@ -2120,6 +2167,48 @@ public:
                 g.drawText (ioMeters[(std::size_t) k].peak > 0.001f ? juce::String (peakDb, 1) : juce::String ("-inf"),
                             column.withY (bottom.getY()).withHeight (readH), juce::Justification::centred, false);
             }
+            return;
+        }
+        else if (id == "gcmeter") // round 152: RComp's bipolar gain-change meter (+6 … 0 … −12, deeper reductions compressed)
+        {
+            // the engine's control output 5 = the block's signed gain change in dB (negative = reduction, positive = the
+            // upward expansion below 1 : 1); the bar grows from the 0 dB line, the read-out holds the largest change
+            const auto change = liveMeter (5);
+            gcLevel = std::abs (change) > std::abs (gcLevel) ? change : gcLevel + 0.25f * (change - gcLevel);
+            if (std::abs (change) > std::abs (gcHold))
+                gcHold = change;
+            static constexpr float dbs[] { 9.0f, 6.0f, 3.0f, 0.0f, -3.0f, -6.0f, -12.0f, -24.0f, -30.0f };
+            static constexpr float fracs[] { 0.0f, 0.08f, 0.20f, 0.38f, 0.53f, 0.66f, 0.80f, 0.94f, 1.0f };
+            const auto fracOf = [] (float db)
+            {
+                db = juce::jlimit (-30.0f, 9.0f, db);
+                for (int k = 0; k + 1 < 9; ++k)
+                    if (db >= dbs[k + 1])
+                        return fracs[k] + (fracs[k + 1] - fracs[k]) * (dbs[k] - db) / (dbs[k] - dbs[k + 1]);
+                return 1.0f;
+            };
+            const auto readH = 14.0f * s;
+            auto area = r.reduced (2.0f * s);
+            const auto bottom = area.removeFromBottom (readH);
+            g.setColour (colour::bg3);
+            g.fillRoundedRectangle (area, radius::sm * s);
+            const auto scaleW = 20.0f * s;
+            const auto well = area.withTrimmedLeft (scaleW).reduced (3.0f * s, 4.0f * s);
+            g.setFont (font (juce::jmax (7.0f, 8.0f * s)));
+            for (const auto db : { 6, 3, 0, -3, -6, -12, -24 })
+            {
+                const auto y = well.getY() + well.getHeight() * fracOf ((float) db);
+                g.setColour (db == 0 ? colour::textSecondary.withAlpha (0.6f) : colour::gridBeat);
+                g.drawHorizontalLine ((int) y, well.getX(), well.getRight());
+                g.setColour (colour::textSecondary);
+                g.drawText (juce::String (db), juce::Rectangle<float> (area.getX(), y - 5.0f * s, scaleW - 2.0f * s, 10.0f * s), juce::Justification::centredRight, false);
+            }
+            const auto y0 = well.getY() + well.getHeight() * fracOf (0.0f), y1 = well.getY() + well.getHeight() * fracOf (gcLevel);
+            g.setColour ((fx.enabled ? accent : colour::textDisabled).withAlpha (gcLevel > 0.0f ? 0.55f : 0.85f));
+            g.fillRoundedRectangle (juce::Rectangle<float> (well.getX() + well.getWidth() * 0.2f, std::min (y0, y1), well.getWidth() * 0.6f, std::abs (y1 - y0)), radius::sm);
+            g.setColour (colour::textPrimary);
+            g.setFont (font (juce::jmax (7.0f, 9.0f * s)));
+            g.drawText (std::abs (gcHold) > 0.05f ? juce::String (gcHold, 1) : juce::String ("0.0"), bottom, juce::Justification::centred, false);
             return;
         }
         else if (id == "limitpill") // round 135w: the output limiter's activity pill (RComp's), lit while it limits
@@ -2861,6 +2950,7 @@ public:
     }
     int geminiHandle = -1;
     float grHold = 0.0f; // round 137: the tall reduction meter's held value
+    float gcLevel = 0.0f, gcHold = 0.0f; // round 152: the bipolar gain-change meter (dB, signed) and its held change
     bool geminiDragging = false;
 
     void xyMouse (const juce::MouseEvent& e, const LayoutItem& item)
@@ -3002,6 +3092,12 @@ public:
         {
             ioMeters = {};
             ioClip = false;
+            repaint();
+            return;
+        }
+        if (item.type == Item::display && juce::String (item.display) == "gcmeter") // round 152: reset the held change
+        {
+            gcHold = 0.0f;
             repaint();
             return;
         }
@@ -3467,6 +3563,8 @@ public:
             return { tr ("Tap tempo: click in time (two taps or more) to set the delay"), tapBpm > 0.0 ? juce::String (tapBpm, 1) + " BPM" : juce::String(), false, false };
         if (item.type == Item::display && juce::String (item.display) == "iometer")
             return { tr ("Input and output level (peak, dBFS); the numbers hold the highest peak; OUT turns red when the output clips; click to reset"), {}, false, false };
+        if (item.type == Item::display && juce::String (item.display) == "gcmeter")
+            return { tr ("Gain change (dB): down = reduction, up = the expansion's boost below 1:1; the number holds the largest change; click to reset"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "limitpill")
             return { tr ("Output limiter: lit while it keeps the output under 0 dBFS"), {}, false, false };
         if (item.type == Item::display && juce::String (item.display) == "outmeter")
@@ -3679,7 +3777,7 @@ private:
                     pitchHistory.erase (pitchHistory.begin(), pitchHistory.begin() + (std::ptrdiff_t) (pitchHistory.size() - pitchHistoryLength));
                 repaint (rectOf (item).getSmallestIntegerContainer());
             }
-            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)) && visible (item))
+            if (item.type == Item::display && item.display != nullptr && (std::strcmp (item.display, "grmeter") == 0 || std::strcmp (item.display, "vumeter") == 0 || std::strcmp (item.display, "iometer") == 0 || std::strcmp (item.display, "outmeter") == 0 || std::strcmp (item.display, "limitpill") == 0 || std::strcmp (item.display, "gcmeter") == 0 || std::strcmp (item.display, "pitchring") == 0 || dynui::isLive (item.display)) && visible (item))
             {
                 history = history || std::strcmp (item.display, "grhistory") == 0;
                 repaint (rectOf (item).getSmallestIntegerContainer());
@@ -3709,6 +3807,8 @@ private:
     std::vector<PitchPoint> pitchHistory;
     // LYNX Tune (round 128): HOLD, the keyboard's mode / latch, AUTO KEY's histogram
     bool tuneHold = false, tuneRemove = true, tuneLatch = true;
+    int tuneHeldMap = -1;          // round 152: the key-map parameter held while the key is down (latch off)
+    float tuneHeldMapValue = 0.0f;
     PitchPoint holdPoint { 0.0f, 0.0f, 0.0f };
     int tuneHeld = -1, autoKeyFlash = 0;
     std::pair<float, float> tuneHeldValues { 1.0f, 0.0f };

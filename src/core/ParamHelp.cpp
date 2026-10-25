@@ -181,6 +181,7 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::foilPlate, "type" }, TR_NOOP ("The plate's metal: each one has its own brightness, density and decay") },
         { { K::foilPlate, "size" }, TR_NOOP ("Size of the plate: larger plates sound deeper") },
         { { K::foilPlate, "width" }, TR_NOOP ("Stereo width of the plate: 0 = mono, above 100 % = wider than the speakers") },
+        { { K::foilPlate, "view" }, TR_NOOP ("Full: every control of the plate; Plate: the one-knob panel of the Little Plate role (Low Cut, Decay, Mod, Mix)") },
         { { K::foilPlate, "infinite" }, TR_NOOP ("Holds the plate's tail for ever (the decay at its top): play into it to layer, switch off to let it fade") },
         // Nebula
         { { K::nebula, "mode" }, TR_NOOP ("The delay network: from clean echoes to huge, slowly building reverbs") },
@@ -304,6 +305,8 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::glowLeveler, "limit" }, TR_NOOP ("Limit instead of compress: a harder ratio") },
         { { K::glowLeveler, "emphasis" }, TR_NOOP ("Makes the detector more sensitive to highs (less reduction on bass)") },
         { { K::glowLeveler, "auto makeup" }, TR_NOOP ("Turns the gain up as the peak reduction rises") },
+        { { K::glowLeveler, "analog" }, TR_NOOP ("The reference's analog hum and noise (50 or 60 Hz mains), added after the gain") },
+        { { K::glowLeveler, "opto law" }, TR_NOOP ("Measured: the reference's Limit and Auto makeup; old: the law of projects saved before round 152") },
         // Hush De-esser
         { { K::hushDeEsser, "frequency" }, TR_NOOP ("Where the sibilance is detected and reduced") },
         { { K::hushDeEsser, "threshold" }, TR_NOOP ("Level of sibilance above which the de-esser works") },
@@ -357,6 +360,7 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::prismMultiband, "low slope" }, TR_NOOP ("Free layout: the steepness of the band's lower edge (6 to 48 dB/oct)") },
         { { K::prismMultiband, "high slope" }, TR_NOOP ("Free layout: the steepness of the band's upper edge (6 to 48 dB/oct)") },
         { { K::prismMultiband, "sc input" }, TR_NOOP ("What this band's detector hears: the plug-in's input or the external side chain (global: the External SC switch)") },
+        { { K::prismMultiband, "revision" }, TR_NOOP ("Round 152: the reference's attack in the gain stage, its narrow Dynamic-phase bands and the 0.8-octave minimum band; round 150: projects saved before") },
         { { K::prismMultiband, "detector" }, TR_NOOP ("Measured: the reference's attack, release and soft range (a range-limited band recovers at once); classic: the detector of projects saved before round 150") },
         // Sentry Gate
         { { K::sentryGate, "style" }, TR_NOOP ("Gate, expander or ducker, and how it opens") },
@@ -401,6 +405,7 @@ const std::map<std::pair<K, std::string>, const char*>& own()
         { { K::compressor, "ratio" }, TR_NOOP ("How strongly the level above the threshold is reduced") },
         { { K::compressor, "attack" }, TR_NOOP ("How fast the compressor reacts to a peak") },
         { { K::compressor, "makeup" }, TR_NOOP ("Gain after the compression") },
+        { { K::compressor, "vintage curve" }, TR_NOOP ("Measured: the reference's static curve at every ratio; old: the curve of projects saved before round 152") },
         // Apex Limiter
         { { K::apexLimiter, "gain" }, TR_NOOP ("Pushes the signal into the limiter: louder, with more limiting") },
         { { K::apexLimiter, "ceiling" }, TR_NOOP ("The output never goes above this level") },

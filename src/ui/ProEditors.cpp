@@ -1851,9 +1851,9 @@ private:
                                        tr ("This project's Dynamic phase runs the engine it was saved with (before round 147). Click to use the measured one (Pro-MB's response).")));
                 y += 24.0f;
             }
-            if (v (detectorLaw) < 0.5f)
+            if (v (detectorLaw) < 0.5f || v (rev152) < 0.5f)
                 out.push_back (button ({ x, y, 62.0f, 20.0f }, idClassicDet, tr ("Old det."), true,
-                                       tr ("This project's bands use the detector they were saved with (before round 150). Click to use the measured one (Pro-MB's attack, release and range).")));
+                                       tr ("This project's bands use the detector they were saved with (before round 152). Click to use the measured one (Pro-MB's attack, release and range).")));
         }
         out.push_back (barValue ({ bar.getRight() - 312.0f, cy - 11.0f, 92.0f, 22.0f }, mix, tr ("Mix")));
         out.push_back (barValue ({ bar.getRight() - 216.0f, cy - 11.0f, 100.0f, 22.0f }, input, tr ("In")));
@@ -1869,7 +1869,7 @@ private:
         else if (c.id == idRange) rangeView = rangeView >= 30.0 ? 3.0 : rangeView >= 12.0 ? 30.0 : rangeView >= 6.0 ? 12.0 : 6.0;
         else if (c.id == idAnalyzer) { showAnalyzerMenu(); return; }
         else if (c.id == idClassic) set ({ { dynamicEngine, 1.0f } });
-        else if (c.id == idClassicDet) set ({ { detectorLaw, 1.0f } });
+        else if (c.id == idClassicDet) set ({ { detectorLaw, 1.0f }, { rev152, 1.0f } });
         else if (c.id == idSplit || c.id == idFree) setLayout (c.id == idFree);
         else if (c.id == idExpert) expert = ! expert;
         else if (c.id >= idSolo0 && c.id < idSolo0 + bands) set ({ { bp (c.id - idSolo0, fSolo), v (bp (c.id - idSolo0, fSolo)) >= 0.5f ? 0.0f : 1.0f } });
@@ -1902,7 +1902,7 @@ private:
             tilt.addItem (juce::String (t, 1) + " dB/oct", true, specTilt == t, [this, t] { specTilt = t; });
         m.addSubMenu (tr ("Tilt"), tilt);
         m.addItem (tr ("Freeze"), true, specFrozen, [this] { specFrozen = ! specFrozen; repaint(); });
-        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+        m.showMenuAsync (juce::PopupMenu::Options().withMousePosition()); // round 152 (checked by hand): at the mouse, not under the window
     }
 
     void showBandMenu (int b)
@@ -1925,7 +1925,7 @@ private:
         if (! isFree())
             m.addItem (tr ("Split the band"), nb() < bands, false, [this, b] { splitBand (b, std::sqrt ((b > 0 ? xoHz (b - 1) : 30.0) * (b < nb() - 1 ? xoHz (b) : 18000.0))); });
         m.addItem (tr ("Remove the band"), nb() > 1, false, [this, b] { removeBand (b); });
-        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+        m.showMenuAsync (juce::PopupMenu::Options().withMousePosition()); // round 152 (checked by hand): at the mouse, not under the window
     }
 
     bool bodyDown (const juce::MouseEvent& e) override
@@ -1960,7 +1960,7 @@ private:
                 const auto hz = hzForX (p.x, plot());
                 juce::PopupMenu m;
                 m.addItem (tr ("New band here"), [this, hz] { addFreeBand (hz); });
-                m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+                m.showMenuAsync (juce::PopupMenu::Options().withMousePosition()); // round 152 (checked by hand): at the mouse, not under the window
                 return false;
             }
             selected = -1;
@@ -2180,7 +2180,10 @@ private:
         if (hoverBand >= 0 && dragCtl == -1)
         {
             const auto n = node (hoverBand);
-            const auto r = juce::Rectangle<float> (n.x - 54.0f, n.y + 14.0f, 108.0f, 48.0f).constrainedWithin (p);
+            auto r = juce::Rectangle<float> (n.x - 54.0f, n.y + 14.0f, 108.0f, 48.0f).constrainedWithin (p);
+            // round 152 (checked by hand): the open band panel hid the read-out under the node; then it goes above
+            if (selected >= 0 && r.intersects (panelArea()))
+                r = juce::Rectangle<float> (n.x - 54.0f, n.y - 62.0f, 108.0f, 48.0f).constrainedWithin (p);
             g.setColour (colour::bg3.withAlpha (0.95f));
             g.fillRoundedRectangle (r, 5.0f);
             g.setColour (colour::textPrimary);
@@ -2234,8 +2237,9 @@ public:
     }
 
 private:
-    enum { idRemove = 1, idPrev, idNext, idPower, idSolo, idMute, idBands };
+    enum { idRemove = 1, idPrev, idNext, idPower, idSolo, idMute, idBands, idMod };
     int selected = 0, dragHandle = -1, dragEdge = -1, hoverHandle = -1;
+    bool showMod = false; // round 152: the panel shows the modulation (LFOs, follower, four slots) instead of the band
     int xp (int b, int f) const { return mixsuite::ember::bandExtra (b, f); } // round 128: a band's power, state, tone, feedback, dynamics
     bool powered (int b) const { return v (xp (b, 0)) >= 0.5f; }
     mixsuite::ember::BandState state (int b) const { return mixsuite::ember::bandState (v (xp (b, 1))); }
@@ -2305,6 +2309,33 @@ private:
         const auto a = panelArea();
         const auto b = selected;
         auto add = [&] (Ctl c) { c.colour = peqview::bandColour (b); out.push_back (c); };
+        // round 152 (Saturn 2's modulation, measured laws): MOD swaps the band panel for the modulation panel
+        out.push_back (button ({ a.getRight() - 146.0f, a.getY() + 10.0f, 66.0f, 20.0f }, idMod, tr ("Mod"), showMod,
+                               tr ("Modulation: two LFOs and an envelope follower moving up to four targets")));
+        if (showMod)
+        {
+            out.push_back (knob ({ a.getX() + 10.0f, a.getY() + 40.0f, 60.0f, 74.0f }, lfo1Rate, tr ("LFO 1")));
+            out.push_back (menu ({ a.getX() + 10.0f, a.getY() + 122.0f, 60.0f, 22.0f }, lfo1Shape, {}, tr ("Sine|Triangle|Square|Ease in|Ease out")));
+            out.push_back (knob ({ a.getX() + 76.0f, a.getY() + 40.0f, 60.0f, 74.0f }, lfo2Rate, tr ("LFO 2")));
+            out.push_back (menu ({ a.getX() + 76.0f, a.getY() + 122.0f, 60.0f, 22.0f }, lfo2Shape, {}, tr ("Sine|Triangle|Square|Ease in|Ease out")));
+            out.push_back (knob ({ a.getX() + 150.0f, a.getY() + 40.0f, 60.0f, 74.0f }, envAttack, tr ("Attack")));
+            out.push_back (knob ({ a.getX() + 214.0f, a.getY() + 40.0f, 60.0f, 74.0f }, envRelease, tr ("Release")));
+            juce::String targets;
+            for (int t = 0; t < modTargets; ++t) targets << (t > 0 ? "|" : "") << tr (modTargetName (t));
+            for (int k = 0; k < modSlots; ++k)
+            {
+                const auto y = a.getY() + 38.0f + 31.0f * (float) k;
+                out.push_back (menu ({ a.getX() + 300.0f, y, 96.0f, 24.0f }, mod1Source + 3 * k, {}, tr ("Off|LFO 1|LFO 2|Envelope")));
+                out.push_back (menu ({ a.getX() + 402.0f, y, 140.0f, 24.0f }, mod1Target + 3 * k, {}, targets));
+                out.push_back (barValue ({ a.getX() + 548.0f, y, 120.0f, 24.0f }, mod1Amount + 3 * k, tr ("Amount")));
+            }
+            return;
+        }
+        // round 152: the band's own crossover slope (its upper edge; Global = the bottom bar's Crossover) and the
+        // processing mode (linear phase: zero-phase bands, 64 ms latency at 48 kHz)
+        if (b < count() - 1)
+            add (menu ({ a.getX() + 10.0f, a.getY() + 36.0f, 60.0f, 20.0f }, crossSlope1 + b, {}, tr ("Global") + "|6|12|24|36|48"));
+        out.push_back (toggle ({ a.getRight() - 146.0f, a.getY() + 32.0f, 136.0f, 18.0f }, processing, tr ("Linear phase")));
         // Saturn's band panel order (round 128): power, solo / mute, style | MIX, FEEDBACK, FREQ, DYNAMICS | DRIVE |
         // the band's TONE (bass, mid, treble, presence) | LEVEL; the whole effect's auto gain and dry / wet on the right
         out.push_back (button ({ a.getX() + 70.0f, a.getY() + 12.0f, 32.0f, 22.0f }, idPower, tr ("On"), powered (b), tr ("Band on / off: a band switched off passes clean")));
@@ -2391,12 +2422,14 @@ private:
         const auto hz = juce::jlimit (30.0, 18000.0, hzForX (x, disp()));
         const auto at = bandAtX (x); // the band split in two: band at + 1 is the new upper half
         std::vector<double> xo;
-        for (int i = 0; i < n - 1; ++i) xo.push_back (xoHz (i));
+        std::vector<float> sl; // round 152: each crossover's own slope moves with it
+        for (int i = 0; i < n - 1; ++i) { xo.push_back (xoHz (i)); sl.push_back (v (crossSlope1 + i)); }
         xo.insert (xo.begin() + at, hz);
+        sl.insert (sl.begin() + at, at < (int) sl.size() ? sl[(std::size_t) at] : 0.0f);
         std::vector<std::array<float, blockSize>> vals;
         for (int b = 0; b < n; ++b) vals.push_back (bandValues (b));
         vals.insert (vals.begin() + at + 1, vals[(std::size_t) at]);
-        apply (xo, vals);
+        apply (xo, vals, sl);
         selected = at + 1;
     }
 
@@ -2405,16 +2438,18 @@ private:
         const auto n = count();
         if (n <= 1) return;
         std::vector<double> xo;
-        for (int i = 0; i < n - 1; ++i) xo.push_back (xoHz (i));
+        std::vector<float> sl;
+        for (int i = 0; i < n - 1; ++i) { xo.push_back (xoHz (i)); sl.push_back (v (mixsuite::ember::crossSlope1 + i)); }
         xo.erase (xo.begin() + juce::jmin (b, n - 2)); // the line on its right (the last band: on its left)
+        sl.erase (sl.begin() + juce::jmin (b, n - 2));
         std::vector<std::array<float, blockSize>> vals;
         for (int k = 0; k < n; ++k)
             if (k != b) vals.push_back (bandValues (k));
-        apply (xo, vals);
+        apply (xo, vals, sl);
         selected = juce::jmin (b, n - 2);
     }
 
-    void apply (const std::vector<double>& xo, const std::vector<std::array<float, blockSize>>& vals)
+    void apply (const std::vector<double>& xo, const std::vector<std::array<float, blockSize>>& vals, const std::vector<float>& slopes = {})
     {
         using namespace mixsuite::ember;
         std::vector<std::pair<int, float>> c;
@@ -2423,6 +2458,7 @@ private:
         c.push_back ({ bands, bv });
         c.push_back ({ bandsMore, mv });
         for (int i = 0; i < (int) xo.size(); ++i) c.push_back ({ crossoverParam (i), crossoverValue (xo[(std::size_t) i]) });
+        for (int i = 0; i < (int) slopes.size() && i < maxBands - 1; ++i) c.push_back ({ crossSlope1 + i, slopes[(std::size_t) i] });
         for (int b = 0; b < n; ++b)
             for (int f = 0; f < blockSize; ++f) c.push_back ({ blockParam (b, f), vals[(std::size_t) b][(std::size_t) f] });
         set (c);
@@ -2438,6 +2474,7 @@ private:
         else if (c.id == idPrev) selected = (selected + count() - 1) % count();
         else if (c.id == idNext) selected = (selected + 1) % count();
         else if (c.id == idBands) showBandsMenu();
+        else if (c.id == idMod) showMod = ! showMod; // round 152
         repaint();
     }
 
@@ -2447,7 +2484,7 @@ private:
         juce::PopupMenu m;
         for (int k = 1; k <= mixsuite::ember::maxBands; ++k)
             m.addItem (juce::String (k), true, count() == k, [this, k] { setBandCount (k); });
-        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+        m.showMenuAsync (juce::PopupMenu::Options().withMousePosition()); // round 152 (checked by hand): at the mouse, not under the window
     }
 
     void setBandCount (int target)
@@ -2604,6 +2641,13 @@ private:
             g.fillRoundedRectangle (juce::Rectangle<float> (a.getX() + 14.0f, a.getY() - 1.0f, 46.0f, 3.0f), 1.5f);
             g.setColour (colour::textSecondary);
             g.setFont (font (type::small, true));
+            if (showMod) // round 152: the modulation panel's captions
+            {
+                g.drawText (tr ("Modulation"), juce::Rectangle<float> (a.getX() + 12.0f, a.getY() + 10.0f, 120.0f, 26.0f), juce::Justification::centredLeft, false);
+                caption (g, { a.getX() + 150.0f, a.getY() + 24.0f, 124.0f, 12.0f }, tr ("Envelope"));
+                caption (g, { a.getX() + 300.0f, a.getY() + 20.0f, 368.0f, 12.0f }, tr ("Source  /  target  /  amount"));
+                return;
+            }
             g.drawText (tr ("Band {0}", { juce::String (selected + 1) }), juce::Rectangle<float> (a.getX() + 12.0f, a.getY() + 10.0f, 58.0f, 26.0f), juce::Justification::centredLeft, false);
             caption (g, { a.getX() + 432.0f, a.getY() + 2.0f, 174.0f, 12.0f }, tr ("Tone"));
             // the curve of the band's style, as a small preview

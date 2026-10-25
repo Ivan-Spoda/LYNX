@@ -30,6 +30,29 @@ LYNX's style; the transfer-curve and GR-history displays are bars). Her Vocalstr
 model (−60 … −67 dB null on her takes). The other Complete Access plugins (Slate, SSL, LiquidSonics, sonible,
 Harrison) map to LYNX effects by role only.
 
+## Round 152: what changed (config / design, after 150 → after 152)
+
+Round 152 (`docs/analise/REA_rodada152.md`, sub-rounds `REA_rodada152a.md` / `152b` / `152c`).
+
+| LYNX engine | Original | Config 150 → 152 | Design 150 → 152 | Round-152 changes |
+|---|---|---|---|---|
+| Prism Multiband | Pro-MB | 10 → 10 | 10 → 10 | the attack in the gain stage (slow attacks now ≤ 0.4 dB off), Dynamic phase's own narrow-band / cut shapes (measured table, ≤ 0.05 dB), 0.8-octave minimum band; editor menus at the mouse, read-out above the band panel (checked by hand) |
+| Compressor (stand-in) | Renaissance Compressor | 9 → 10 | 7 → 8 | bipolar gain-change meter, measured static curve at every ratio, RComp-style factory start (152a) |
+| Glow Leveler | CLA-2A | 7 → 9 | 7 → 8 | the reference's fresh instance, ANALOG 50 / 60 Hz, measured Limit and AUTO MAKEUP; translated (152a) |
+| Auto-pan (stand-in) | PanMan | 8 → 9 | 7 → 8 | trigger sources Ping-pong / Random step (threshold, divider, detector filter, manual trigger), Random steps |
+| Foil Plate | Little Plate | 9 → 9 | 6 → 8 | the one-knob Plate view (the substitute opens in it) |
+| Facet EQ | Pro-Q 4 | 9 → 9 | 8 → 8 | spectral dynamics (Spectral / Density / Tilt per band, measured per-bin law, 5120-sample latency) and EQ match (capture reference + track, Match 25 … 100 %) (152c) |
+| Crest Compressor / Echoform | Pro-C 3 / EchoBoy | — | — | stale ❌ rows re-checked: Host sync / MIDI trigger and audition (round 137), EchoBoy state recognition (round 136), EchoBoy ping-pong start side (round 135w); no ❌ row is left |
+
+### Sub-round 152b
+
+Sub-round 152b (`docs/analise/REA_rodada152b.md`), measured black-box on the official Saturn 2 trial.
+
+| LYNX engine | Original | Config 150 → 152 | Design 150 → 152 | Round-152b changes |
+|---|---|---|---|---|
+| Ember Saturator | Saturn 2 | 8 → 9 | 8 → 8 | each crossover's own slope (6 … 48 dB/oct, exact), linear phase (zero-phase bands, 3072-sample latency), modulation (2 LFOs, envelope follower, 4 slots, the reference's laws), Breakdown's pitch drop on Collapse; translated |
+| LYNX Tune | Waves Tune Real-Time | 9 → 10 | 8 → 8 | Group Octaves off (per-key statuses), MIDI reference tone |
+
 ## Round 150: what changed (config / design, after 147 → after 150)
 
 Round 150 (`docs/analise/REA_rodada150.md`, sub-rounds `REA_rodada150a.md` / `REA_rodada150b.md`).
@@ -193,7 +216,7 @@ range.
 | Band panel: stereo placement (L / R / Stereo / M / S) | ✅ | round 128: placement button in the panel and the band menu, an L / R / M / S tag beside the node; in the natural / linear phase modes a placed band runs minimum phase after the FIR |
 | Dynamic EQ: range, threshold, attack, release | ⚠️ | attack / release are global (original: per band); no "auto" threshold |
 | Dynamic EQ: external side chain per band, side-chain filtering | ⚠️ | one detector switch (input / side chain) for all bands |
-| Spectral dynamics (density, tilt) | ❌ | Pro-Q 4 feature |
+| Spectral dynamics (density, tilt) | ✅ | **round 152c** [EXEC] (Pro-Q 4 trial, black-box: Spectral / Density / Tilt host parameters, partials and pink noise through a dynamic bell): **Spectral** in the band panel (beside Dynamic; right-click: density 0 … 100 %) and **Tilt** — an STFT stage (4096 points, latency 5120 samples = the trial's): each bin's level weighted by the band's shape, a threshold 30.5 dB under the knob and never lower than the band's loudest bin − 11.6 dB, 1.07 dB per dB up to the range × shape^2.18 (0.33 dB rms over 22 measured cases); density blurs the gains (100 %: a pure tone −11.2 dB, as the trial), tilt slopes the threshold 4.5 dB/oct [model] |
 | Solo band (audition) | ✅ | |
 | Hover tooltip next to a node (freq, gain, Q, power, solo) | ✅ | read-out box at the node with power (round 128), solo and remove |
 | Right-click a node: shape, slope, dynamic range, solo, reset, remove | ✅ | |
@@ -207,12 +230,14 @@ range.
 | Analyser: off / pre / post / pre+post | ✅ | |
 | Analyser range, resolution, speed, tilt, freeze, collisions, spectrum grab | ⚠️ | round 128: range 60 / 90 / 120 dB, speed (5 steps), tilt 0 – 6 dB/oct, freeze in the analyser menu (saved with the slot); no resolution, collisions or spectrum grab |
 | Display range 3 / 6 / 12 / 30 dB | ✅ | saved with the slot since round 128 |
-| EQ match (external spectrum) | ❌ | |
+| EQ match (external spectrum) | ⚠️ | **round 152c**: **EQ match** in the bottom bar — capture a reference (played through the slot) and this track from the analyser, then Match 25 … 100 % with up to 2 … 8 bands and 1/12 … 1 octave smoothing: LYNX's own fit (bells, shelves at the ends, in the unused bands; one undo step) [model]; Pro-Q 4's match is not reachable through host parameters, so its rules are not measured; no live side-chain / other-instance reference |
 | Piano display (note names on the frequency axis) | ✅ | piano strip toggle at the bottom left; note name of the mouse position |
 | Output meter with peak hold | ✅ | |
 | Window size | ✅ | resizable |
 
 **After round 144**: configuration 9/10, design 8/10 (the linear-phase resolution row closed; left: 24 bands, spectral dynamics, EQ match, per-band attack / release).
+
+**After round 152c**: configuration 9/10, design 8/10 — spectral dynamics (Spectral / Density / Tilt, measured per-bin law and latency) and LYNX's EQ match close the two ❌ rows; left: 24 bands, per-band attack / release and side chain, brickwall slopes, a live reference for the match.
 
 ## Apex Limiter ← Pro-L 2
 
@@ -272,9 +297,9 @@ lookahead, meter scale, knee display, input meter.
 | Wet / dry pan (mid / side balance) | ✅ | round 135: WET PAN / DRY PAN in the side-chain panel (left / right balance of each path) |
 | SIDE CHAIN panel: listen, level, stereo link, detector EQ with nodes | ✅ | 3 EQ bands (original: 6) |
 | Side chain Internal / External | ✅ | |
-| Side chain Host Sync / MIDI triggering | ❌ | |
+| Side chain Host Sync / MIDI triggering | ✅ | round 137: side-chain trigger Host sync (note, rate, length — measured on the trial) and MIDI (row re-checked in round 152) |
 | Stereo link mode (Mid / Side / M→S / S→M) | ✅ | round 128: "Link mode" in the side-chain panel (Stereo, Mid, Side, Mid > side, Side > mid); translated from Pro-C 3's mid-only link range + mode |
-| Audition triggering | ❌ | |
+| Audition triggering | ✅ | round 137 / re-checked round 152: SC LISTEN plays the trigger key while a Host sync / MIDI trigger drives the detector (the detector's signal is the trigger) |
 | Oversampling (bottom bar) | ⚠️ | up to 8x (original 32x) |
 | Lookahead maximum (bottom bar) | ✅ | |
 | In / out levels (bottom bar) | ✅ | no pan |
@@ -316,6 +341,8 @@ lookahead on, expert mode, display range, analyser options.
 **After round 147** (REA_rodada147 §1–2): configuration 9 → **10**/10, design 8 → **9**/10 — the measured Dynamic phase (the reference's sound when bands work), the expert panel (side-chain filtering, stereo link, the band's own slopes). Left: free band placement with gaps (a band switched off is the gap), a side-chain input per band, slopes only 12 / 24 / 48 (no 6 or in-between values), the free side-chain filter's extra boost on bands narrower than an octave.
 
 **After round 150** (REA_rodada150): configuration **10**/10, design 9 → **10**/10 — the free layout with gaps (bands placed anywhere, as the reference), slopes 6 … 48 dB/oct with the reference's laws per processing mode, a side-chain input per band, the narrow free side-chain filter, and the **measured detector** (the range's 12 dB soft knee, the release after the curve: a range-limited band recovers at once; release trajectories within 0.1 – 0.7 dB of the trial where the old detector was 1 – 4 dB off; projects saved before keep the old one). Left: the slow attacks' tail (50 – 100 %: 0.5 – 1.3 dB rms), narrow even-order bands in Dynamic phase (0.3 dB at their edges), Linear phase on LYNX's prewarped axis (≤ 0.35 dB at high crossovers).
+
+**After round 152** (REA_rodada152 §1–2): configuration **10**/10, design **10**/10 (sound closer) — the attack in the gain stage (slow attacks 50 – 100 % now within 0.4 dB of the reference over the first 400 ms; round 150 was up to 3 dB off), Dynamic phase's own band shapes for narrow bands and cuts (edges moved out, gain moved — the measured table, ≤ 0.05 dB), the 0.8-octave minimum band width in every mode. Left: Linear phase on LYNX's prewarped axis (≤ 0.35 dB at a 3 kHz edge, 6 dB/oct), mixed 6 / n sides beyond the measured table.
 
 ## Sentry Gate ← Pro-G
 
@@ -379,15 +406,15 @@ sources, 50 modulation slots).
 | Drag a band's handle = drive, drag a crossover | ✅ | |
 | Up to 6 bands | ✅ | round 150b: six (the Bands button in the bottom bar: 1 … 6; double-click splits up to six; crossovers 4 / 5 appended); translated from Saturn 2 states with 5 / 6 bands |
 | Floating band panel: power, style button, MIX, FEEDBACK + FREQ, DYNAMICS, big DRIVE, TONE faders, LEVEL | ✅ | round 128: the same order — power / solo / mute, style, MIX, FEEDBACK, FREQ, DYNAMICS, DRIVE, BASS / MID / TREBLE / PRESENCE faders, LEVEL |
-| 28 styles in 6 families | ✅ | round 150b: a per-band **Character** menu with 28 LYNX-named voicings measured black-box on the trial's 28 styles (static curve, its drive law over 0–100 %, level, and the tone: 0–1.2 dB rms on the level curves and 0–1.4 dB rms on the tone for the 23 saturation / amp / transformer styles); the 5 effect styles: Foldback ≈ a sine fold (fit ≤ 1.3 dB to 60 % drive), Smudge / Destroy level-only, Breakdown / Rectify not static in the reference (LYNX: a gentle saturation / a full-wave rectifier); translated per band from Saturn 2 states. The 4-family Style menu stays (Character Off) |
+| 28 styles in 6 families | ✅ | round 152b: Breakdown measured black-box — a pitch drop of 24 semitones × drive at every level and frequency, its level curve refitted (0.02 – 0.37 dB rms over seven levels): LYNX's "Collapse" now pitches down the same way (projects saved before keep the static stand-in); the amps' level "memory" re-measured at 2 ms resolution: it settles within 20 ms (≤ 1.5 dB after 10 ms, none from 50 ms), so nothing to model; Smudge (a smeared, delayed, modulated copy) and Destroy (a level-dependent quantiser) stay static stand-ins. Round 150b: a per-band **Character** menu with 28 LYNX-named voicings measured black-box on the trial's 28 styles (static curve, its drive law over 0–100 %, level, and the tone: 0–1.2 dB rms on the level curves and 0–1.4 dB rms on the tone for the 23 saturation / amp / transformer styles); the 5 effect styles: Foldback ≈ a sine fold (fit ≤ 1.3 dB to 60 % drive), Smudge / Destroy level-only, Breakdown / Rectify not static in the reference (LYNX: a gentle saturation / a full-wave rectifier); translated per band from Saturn 2 states. The 4-family Style menu stays (Character Off) |
 | Per-band tone: Bass / Mid / Treble / Presence | ✅ | round 128: ±18 dB (Saturn ±24) on the band's saturated signal — LYNX's own curves (shelf 120 Hz, bell 800 Hz, shelf 3.5 kHz, bell 6 kHz); the global tilt / cuts stay as LYNX extras in the bottom bar |
 | Per-band power, solo, mute | ✅ | round 128 (panel buttons, tags on the display) |
 | Drive pan (L / R), band pan | ✅ | round 147b: per band DRIVE PAN (beside the drive) and PAN (under the level) [EXEC trial: the far channel's drive × (1 − \|pan\|) on the 0–100 % scale; the band pan's far side 1 − \|pan\|]; translated from Saturn 2 states |
 | Feedback amount / frequency | ✅ | round 128: a band-passed loop around the shaper (10 Hz – 1 kHz, loop gain up to 0.9) |
 | Dynamics (compress / expand the band) | ✅ | round 128: −1 … +1, the band's level follows its input level |
-| Modulation (+ Add Modulation: XLFO, EG, EF, MIDI, XY, slots) | ❌ | |
-| Crossover slope (bottom bar) | ✅ | global (original per band) |
-| Linear phase / minimum phase | ❌ | |
+| Modulation (+ Add Modulation: XLFO, EG, EF, MIDI, XY, slots) | ⚠️ | round 152b: a **Mod** page in the band panel — two LFOs (rate 0.02 – 500 Hz with the reference's knob law; Sine / Triangle / Square / Ease in / Ease out = its two-step XLFO with the four glide functions or none), an envelope follower (attack 1 ms – 1 s, release 50 ms – 5 s, the reference's laws; mean-square follower fitted to 0.018 source units rms) and four slots source → target × amount (27 targets: in / out gain, mix, each band's drive / level / mix, the five crossovers; the reference's level law and target ranges) [EXEC trial]; translated (XLFO 1 / 2, EF 1, the first four usable slots). Not: the 16-step editor, EGs, XY, MIDI sources, 50 slots |
+| Crossover slope (bottom bar) | ✅ | global; round 152b: each crossover its own slope (6 / 12 / 24 / 36 / 48 dB/oct or Global) in the band panel [EXEC trial: minimum phase = the first-order pair, LR2, LR4, LR6, LR8 — within 0.05 dB]; translated per band |
+| Linear phase / minimum phase | ✅ | round 152b: "Linear phase" in the band panel [EXEC trial: zero-phase bands 1 / (1 + (f/fc)^(slope/6)) on the analog axis, the bands sum to the delayed input; latency 3072 samples at 48 kHz] — LYNX's oversampler adds 55 samples; translated (state slot 696) |
 | High Quality mode (oversampling) | ✅ | "Oversampling 2x / 4x / 8x" |
 | Channel mode M/S | ✅ | round 147b: "Channel L/R \| M/S" in the bottom bar [EXEC trial: M = (L + R) / 2, S = (R − L) / 2 through the bands' two channels; drive pan and band pan then balance mid / side]; translated (state slot 695) |
 | In / Out gain + mix | ✅ | round 128: In (±24 dB) in the bottom bar; Out; Dry / wet |
@@ -398,6 +425,8 @@ sources, 50 modulation slots).
 **Round 147b:** configuration 6 → 7 (channel mode M/S, drive pan, band pan, measured on the trial and translated), design 7 → 7. Remaining: 6 bands, 28 styles, modulation, linear phase.
 
 **Round 150b (after 150):** configuration 7 → 8 (six bands, the 28 measured characters, input / output pan, all translated), design 7 → 8 (Character menu in the band panel, Bands 1 … 6, In / Out pan in the strip). Remaining: modulation, linear phase, per-band crossover slopes, the effect styles' time-varying behaviour.
+
+**Round 152b (after 152):** configuration 8 → 9 (each crossover's slope, linear phase, a modulation subset with the reference's laws, Breakdown's pitch drop; all translated), design 8 → 8 (the Mod page and the slope / linear-phase controls in the band panel; Saturn's modulation is drawn as draggable sources and slot cables — LYNX lists them). Remaining: the step-LFO editor (16 steps), EGs / XY / MIDI sources, Smudge / Destroy, the High Quality mode's latencies (Saturn: 0 / 8 / 9 samples; LYNX always oversamples).
 
 ## Aether ← Fresh Air
 
@@ -567,27 +596,29 @@ Trial on this PC: yes (the new parity129 capture is missing; the w119 capture wa
 | Header: Save | bar | none | ✅ | round 129: Save preset… (.lynxpreset) |
 | Header: ≡ menu (help, resize) | bar, right | options menu (Presets, Reset, Bypass); window resizable | ⚠️ | |
 | Bypass | VST param | slot LED / options menu | ✅ | |
-| GAIN knob | 0–100 scale, default **40** (≈ +8 dB below threshold), left of the VU; nonlinear law (20 → −18.5 dB, 40 → +8, 80 → +31.8) | "Gain" 0…+30 dB linear, default **+0.0 dB**, big knob on the left | ⚠️ | right place; different unit (dB, not 0–100), different range (no attenuation below unity), different default (CLA 40 ≈ +8 dB vs 0 dB) |
-| PEAK REDUCTION knob | 0–100, default **46**, right of the VU, nonlinear | "Peak reduction" 0–100 (side chain −20…+40 dB linear), default **0** = off, big knob on the right | ⚠️ | right place and right scale; the default does no levelling, and the taper differs (the translator uses 0.40 + 0.021·(knob − 40)) |
+| GAIN knob | 0–100 scale, default **40** (≈ +8 dB below threshold), left of the VU; nonlinear law (20 → −18.5 dB, 40 → +8, 80 → +31.8) | "Gain" 0…+30 dB linear, default **+0.0 dB**, big knob on the left | ✅ | round 123: the Opto classic voicing reads 0–100 with the measured law; round 152: a new Glow starts there at **40** (the trial's fresh instance: +8.45 dB at −40 dBFS) |
+| PEAK REDUCTION knob | 0–100, default **46**, right of the VU, nonlinear | "Peak reduction" 0–100 (side chain −20…+40 dB linear), default **0** = off, big knob on the right | ✅ | round 123: the classic voicing's measured taper (one to one); round 152: default **46** |
 | COMPRESS / LIMIT switch | toggle, left side under the logo; default Compress | "Compress | Limit" tabs under the VU | ✅ | different place (centre, not left) but easy to find; Limit γ = 9 (~10:1) vs about 100:1 on the hardware |
 | VU meter | analog VU in the centre; −20…+3 scale, red above 0 | analog VU in the centre, same −20…+3 scale | ✅ | good match |
 | VU DISPLAY selector | rotary knob INPUT / **GR** (default) / OUTPUT, top right | hidden: clicking the meter switches GR ↔ Output; no Input | ✅ | no visible selector, and Input is missing; add a 3-position switch beside the VU; round 129: INPUT / GR / OUTPUT selector beside the VU |
 | VU readout text | none (needle only) | "Gain reduction −x.x dB" or "Output x VU" inside the face | ➕ | |
 | VU calibration | 0 VU = −18 dBFS (spec, unverified) | output mode 0 VU = −18 dBFS | ✅ | |
-| HI FREQ (side-chain HF emphasis) | knob 0–100, default **50** (≈ +5–6 dB detector sensitivity at 6 kHz), with a "FLAT" mark; bottom strip | "Emphasis" 0–100 % (+0…+10 dB shelf at 2.5 kHz in the detector), default **0 %**, small knob under the switch | ⚠️ | the function exists; different default (CLA's default is not flat), name and law; not translated (fixed to 0) |
-| ANALOG | 3 buttons 50Hz / 60Hz / OFF, bottom left; default 60 Hz per a 3rd-party summary, Off in her state | none | ❌ | needs DSP (hum + noise); low priority, Off is the common choice |
-| MIX | knob 0–100 %, default 100, bottom strip | "Mix" 0–100 %, default 100 %, small knob | ✅ | |
+| HI FREQ (side-chain HF emphasis) | knob 0–100, default **50** (≈ +5–6 dB detector sensitivity at 6 kHz), with a "FLAT" mark; bottom strip | "Emphasis" 0–100 % (+0…+10 dB shelf at 2.5 kHz in the detector), default **0 %**, small knob under the switch | ✅ | round 123: the classic voicing's measured side-chain emphasis and Hi Freq law, translated (RW 153); round 152: default **50** |
+| ANALOG | 3 buttons 50Hz / 60Hz / OFF, bottom left; default **Off** (the trial's fresh instance) | none | ✅ | round 152 [EXEC]: **Analog Off \| 50 Hz \| 60 Hz** bottom left — the measured hum (mains harmonics, the 2nd strongest at −98.7 dBFS, both channels alike) and noise (−89.5 dBFS RMS, flat per third octave, L / R uncorrelated) in the wet path after the gain (Trim moves it, Mix 0 % removes it); translated (RW 140) |
+| MIX | knob 0–100 %, default 100, bottom strip | "Mix" 0–100 %, default 100 %, small knob | ✅ | round 152: translated (RW 204) |
 | TRIM | knob −18…+18 dB, default 0, bottom right (after the mix) | none (Gain is pre-mix and 0…+30 only) | ✅ | new parameter (output trim ±18 dB); round 129: Trim ±18 dB after the mix |
-| AUTO MAKEUP | toggle under the VU-display knob, right; default Off | none | ✅ | new parameter: makeup tied to peak reduction; round 129: Auto makeup toggle |
+| AUTO MAKEUP | toggle under the VU-display knob, right; default Off | none | ✅ | new parameter: makeup tied to peak reduction; round 129: Auto makeup toggle; round 152 [EXEC]: the classic voicing's measured law (a make-up that follows the Peak reduction dial: −1.5 dB at 0, 0 at 46, +6.8 at 62.6, +11.4 at 80, +16.7 at 100 — not a level follower), translated (RW 207) |
 | Mono / stereo components | separate Mono and Stereo plugins | stereo-linked engine | ⚠️ | no mono variant needed in a DAW slot |
-| Attack / release | fixed (opto cell, program dependent: about 66 ms near the knee to 4 ms deep; two-stage release 60 ms then 0.5–15 s) | fixed: fast cell 10 ms / 50 ms + slow cell 400 ms / 0.4–5 s with memory | ⚠️ | no control in either (correct), but the behaviour differs (spec §6: slow 400 ms attack and a fixed 10 ms) |
-| Static curve | γ ≈ 4.54 (≈ 4.2:1 local, 5.5:1 asymptotic) | γ = 2 (≈ 3:1) | ⚠️ | engine (spec §7) |
-| HF tilt under GR / 2nd harmonic | yes (+1…+6 dB above 6 kHz under GR; ≈ −52 dBc H2) | none | ❌ | engine |
+| Attack / release | fixed (opto cell, program dependent: about 66 ms near the knee to 4 ms deep; two-stage release 60 ms then 0.5–15 s) | fixed: fast cell 10 ms / 50 ms + slow cell 400 ms / 0.4–5 s with memory | ✅ | round 123: the classic voicing's measured log-domain attack (faster as the reduction grows), hyperbolic two-stage release and memory; round 152 check: the recovery after a loud passage is ≈ 1 dB slower than the trial's on 0.5 s stairs |
+| Static curve | γ ≈ 4.54 (≈ 4.2:1 local, 5.5:1 asymptotic) | γ = 2 (≈ 3:1) | ✅ | round 123: the Opto classic voicing's cell law fitted on the trial (γ 2.15 on the side-chain level above its threshold, feedback detection); round 152 [EXEC]: **Limit** measured (a steeper cell, 1.5 % of the input in the side chain — the trial over-compresses at 62.6 — and the cell's deepest reduction, 30.4 dB): 0.34 / 0.52 / 0.50 dB rms at peak reduction 46 / 62.6 / 80 (round 123's Limit 0.37 / 1.00 / 1.32); older projects keep the old Limit (Opto law Old \| Measured) |
+| HF tilt under GR / 2nd harmonic | yes (+1…+6 dB above 6 kHz under GR; ≈ −52 dBc H2) | none | ✅ | round 123: the classic voicing's measured tilt (up to +7 dB at 20 kHz under reduction) and 2nd / 3rd harmonics |
 | Section layout | Gain left, VU centre, Peak Reduction right; Comp/Limit left; VU selector + Auto Makeup right; bottom strip Analog · Hi Freq · Mix · Trim | Gain left, VU centre, Peak reduction right; Comp/Limit under the VU; Emphasis + Mix small at the bottom | ⚠️ | the main row matches; the bottom strip has 2 of its 4 items, and the right column (selector, auto makeup) is missing |
 | Proportions | 659×296 window, big knobs, VU in the middle third | 540×270, same composition | ✅ | |
 | Knob scales | 0–100 printed around Gain and Peak Reduction | arc only; the value appears under the knob | ⚠️ | a CLA user reads Gain as 0–100; LYNX shows dB |
 | Value entry / fine / reset | Waves value handling | right-click entry, Ctrl fine, double-click reset | ✅ | |
-| Saved-state translation | — | Gain (via the measured table), Peak Reduction, Comp/Limit translated; Hi Freq, Analog, Mix, Trim, Auto Makeup and VU ignored | ⚠️ | PLUGIN_FALLBACK row 140 / round 113 §3c |
+| Saved-state translation | — | Gain (via the measured table), Peak Reduction, Comp/Limit translated; Hi Freq, Analog, Mix, Trim, Auto Makeup and VU ignored | ✅ | PLUGIN_FALLBACK row 140 / round 113 §3c; round 123: Hi Freq, Trim; round 152: Mix (RW 204), Auto Makeup (207), Analog (140); the VU selector is the editor's view only |
+
+**After round 152** (REA_rodada152a §2): configuration 7 → **9**/10, design 7 → **8**/10 — the reference's fresh instance (Opto classic, 40 / 46 / 50), ANALOG 50 / 60 Hz (measured hum and noise), the measured Limit and AUTO MAKEUP, Mix / Auto Makeup / Analog translated. Left: the release tail ≈ 1 dB slower than the trial's after loud passages, Auto Makeup's reference point (LYNX: the dial's default 46; the trial: the dial where it was switched on).
 
 **Scores:** configuration 5/10, design 6/10. The main row is correct. A CLA-2A user misses Trim, Auto Makeup,
 Analog, the 3-way VU selector, the 0–100 Gain scale and CLA's defaults (Gain 40 / PR 46 / Hi Freq 50).
@@ -719,7 +750,7 @@ What the trial shows (rcomp.png):
 |---|---|---|---|---|
 | Header: Skins menu | Light / Dark / Legacy | — | ➕/n.a. | not needed |
 | Header: Undo/Redo, A/B, A→B, Load/Save, preset name | WaveSystem bar ("A: Default Preset") | generic header, "(no preset)" | ✅ | round 129's preset bar |
-| Threshold | −60…0 dBFS, default **0**, vertical slider integrated in the input meter | knob −60…0 dB, default **−18** | ⚠️ | range ✅; default and form differ |
+| Threshold | −60…0 dBFS, default **0**, vertical slider integrated in the input meter | knob −60…0 dB, default **−18** | ✅ | range ✅; round 152: the trial's fresh instance read back (threshold 0.0 dB, ratio 1.00, attack 16 ms, release 160 ms, gain 0) is the factory preset **RComp-style start** (vintage voicing, RComp ranges, limiter on); a new Compressor keeps LYNX's −18 dB so it compresses at once (it is also FL's generic compressor) |
 | Ratio | 0.50…50 (below 1 = expansion), default **1.0**, value box inside the GR meter | knob 1…20, default **4:1** | ✅ | round 150: **Ranges = RComp** (LYNX \| RComp tabs): the reference's own ratio control 50 … 1.00 … 0.50 : 1 (its value law, read from the trial), below 1 : 1 the measured upward expansion above the threshold (0.50 / 0.79 / 0.90 : 1 within 0.4 dB); translated states use it |
 | Gain (output) | −30…+30 dB, default 0, vertical fader on the output meter | "Makeup" 0…+24 dB | ✅ | round 150: with the RComp ranges the Gain fader runs −30 … +30 dB |
 | Attack | 0.5…500 ms, default 16 ms, horizontal slider | 0.1…100 ms, default 10.2 ms | ✅ | round 150: RComp ranges 0.5 … 500 ms (default 16 ms) |
@@ -731,8 +762,9 @@ What the trial shows (rcomp.png):
 | Trim | −18…+18 dB, post-limiter, knob | none | ✅ | round 129: Trim ±18 dB |
 | Built-in 0 dBFS output limiter + activity indicator | always on; pill under Gain | none | ✅ | round 135w: Limiter switch (on for translated RComp states) + the activity pill under it |
 | Knee | soft, starts ≈ 6 dB below the threshold (fixed) | hard knee | ✅ | engine; round 123: the vintage voicing (substitutes start there) has the fitted soft knee; Classic stays hard |
+| Static curve per ratio | 1.05 … 50 : 1 (20 and 50 alike), knee from ≈ 12 dB under the threshold, the same at every threshold; Warm = Smooth, ARC = Manual, Electro = Opto statically | round 123's fit at her 2.95 : 1 (0.6 … 1.8 dB rms off elsewhere, up to 3.5 dB at 1.5 : 1, 30 dB over) | ✅ | round 152 [EXEC]: **Vintage curve = Measured** (new instances and translated states; older projects keep the round-150 curve, the Old \| Measured tabs above the meter): the trial's stairs at 11 ratios as a correction table — every ratio within 0.07 dB (holdouts 1.2 / 3.3 / 8 / 14 : 1 within 0.06); her state unchanged (≤ 0.01 dB up to −3 dBFS) |
 | Input meter (stereo) + peak readouts | left | none | ✅ | round 129: input / output meters with peak read-outs |
-| Gain-change meter (bipolar, +6…−12) + readout | centre, the main display | none (no live output) | ⚠️ | round 129: the reduction meter with its read-out (0…−30, not bipolar) |
+| Gain-change meter (bipolar, +6…−12) + readout | centre, the main display | none (no live output) | ✅ | round 129: the reduction meter with its read-out (0…−30, not bipolar); round 152: the **bipolar gain-change meter** — +6 … 0 … −12 dB on the reference's scale (deeper reductions compressed to −24), reduction downwards and the expansion's boost upwards from the 0 dB line, the held largest change under it (click = reset); both voicings |
 | Output meter (stereo) + peak readouts | right | none | ✅ | round 129 |
 | Latency / look-ahead | 64 samples @ 48 kHz | 0 | ✅ | round 123: the vintage voicing has the measured 64-sample delay |
 | Auto gain (power-matched) | — | "Auto gain" toggle | ➕ | |
@@ -742,6 +774,8 @@ What the trial shows (rcomp.png):
 | CLA-76 (same stand-in) | Input/Output −∞…0, Attack/Release 1–7, Ratio 4/8/12/20/All, Meter In/GR/Out, Analog, Bluey/Blacky, Mix | Compressor at a fixed preset, no translation | ✅ | round 127: CLA-76 → Crest Compressor (Bus style) fitted on her state, RealWorld list translated (input / output, attack / release 1–7, ratio buttons, mix) |
 
 **Scores:** configuration 2/10, design 1/10. A plain row of 6 knobs with no meters cannot be read as RComp.
+
+**After round 152** (REA_rodada152a §1): configuration 9 → **10**/10, design 7 → **8**/10 — the bipolar gain-change meter, the measured static curve at every ratio, the reference's fresh instance as a factory start. Left: Warm / Smooth's and Opto's transient differences (statically identical on the trial), the meter's ratio box (the ratio is a knob under it).
 
 **After round 150** (REA_rodada150 §6): configuration 8 → **9**/10, design 7/10 — the reference's own control ranges (ratio 0.5 … 50 with expansion, gain ±30, attack 0.5 … 500, release 5 … 5000 ms), translated. Left: threshold default 0 dB, the bipolar gain-change meter, the vintage voicing's compression away from her 2.95 : 1 (1.2 – 1.7 dB deeper at 10.46 : 1).
 
@@ -989,7 +1023,7 @@ delay display → an echo-train picture (not the note/BPM read-out).
 | Sync MS | button | menu entry "ms" | ✅ | |
 | Central display | note value (e.g. "1/8 D") and tempo "120 BPM" (or ms); click-drag / type to edit | value text under the knob + echo-train picture (echoes on a time axis); round 137: the picture's top right reads the note and its tempo ("1/8 D  120.0 BPM") or the ms | ✅ | echotrain ➕; edited with the knob / sync menu, not by dragging the read-out |
 | Tap pad | big pad far left; last two taps; Host: snaps to a note, BPM: sets BPM, MS: sets ms | — | ✅ | round 129: TAP pad (sets the left time) |
-| Ping Pong | button above the display; Off; start-side value | STYLE = "Ping-pong" (5th of 5) + "Pairs" toggle (alternate / H-Delay pairs) | ⚠️ | no button; start side ❌ |
+| Ping Pong | button above the display; Off; start-side value | STYLE = "Ping-pong" (5th of 5) + "Pairs" toggle (alternate / H-Delay pairs) | ⚠️ | no separate button; start side ✅ (next row, round 135w; stale ❌ re-checked round 152) |
 | Ping-pong start side (L→R / R→L) | value box | — | ✅ | translator ignores RealWorld 45; round 135w: "Start left / Start right" (ping-pong); translated from RealWorld 45 (0 left, 1 right [EXEC] round 119 probe) |
 | Dual (independent L/R times) | button; drag L or R in display | STYLE = "Dual" + Delay R / Sync R | ✅ | |
 | Phase L / Phase R (ØL ØR) | two buttons beside Ping Pong / Dual; Off | — | ✅ | new params; round 129 |
@@ -1073,14 +1107,14 @@ positions against wtune.png once it exists.
 | Range | keyboard span with draggable boundary handles + presets Bass / Baritone / Tenor / Alto / Mezzo / Soprano / Generic; notes outside → **bypassed** | "Input type" menu (Soprano / Alto-Tenor / Low male / Instrument) = detector range | ✅ | round 147b: the range bar over the keys (drag a boundary), seven presets in the keyboard strip (LYNX's spans [model]: classical voice ranges ± a third; they also pick the detector's input type), notes sung outside pass uncorrected |
 | Keyboard | multi-octave piano at the bottom, per-note status area | one octave of on/off key toggles at the bottom ("TARGET NOTES") | ✅ | round 128: four octaves; round 147b: 2–7 octaves shown, scrollable (see navigation) |
 | Note status per key | Legal / Illegal / Illegal-Pitch-Up / Illegal-Pitch-Down / Bypass (click cycles) | on / off | ✅ | round 128: Bypass mode; round 147b: REMOVE mode cycles legal → illegal → illegal up → illegal down (arrows on the key; an illegal note's direction picks the next legal note up / down) |
-| Group Octaves | switch (per-note edits apply to all octaves) | always grouped | ⚠️ | per-octave statuses would need 128 per-key values; LYNX keeps the grouped behaviour (the reference's default) |
+| Group Octaves | switch (per-note edits apply to all octaves) | always grouped | ✅ | round 152b: "Group" (octaves) in the keyboard strip (on by default = as before); off = a click edits that key alone (REMOVE cycles its status, BYPASS toggles it; an outline marks a key with its own status), the correction picks targets per key (MIDI 24 … 119, saved in a packed key map); Reset clears it; Send / Receive carry it [MANUAL S1 p.17] |
 | Reset Scale / Send Scale to All / Receive (key) | buttons | — (key comes from translation / project key) | ✅ | round 147b: RESET SCALE in the keyboard strip; round 150b: SEND (this key, scale, note statuses / bypasses / directions and range to every other LYNX Tune in the project whose RECEIVE is on; one undo step) and RECEIVE (a saved switch, on by default; switching it on takes the scale sent last in this LYNX session) |
 | Keyboard view / navigation buttons | yes | — | ✅ | round 147b: − / + (more / fewer octaves, 2–7) and ◀ / ▶ (scroll by an octave) in the keyboard strip |
 | Central display | target note name + correction amount in cents | `pitchring`: note name, ±100 c ring, sung offset + octave | ✅ | |
 | Scrolling pitch graph | not in WTRT (guide lists none) | `pitchtrace` (input vs corrected, 8 s) | ➕ | Auto-Tune-style; useful |
 | Input / output meters | −28 … 0 dBFS | — | ✅ | round 135w: IN / OUT meters on the "Real-time" page |
 | MIDI Target Pitch | MIDI note forces the target (Speed/NT timing) | "MIDI channel" (held pitch classes become the targets) | ⚠️ | pitch class only, no octave |
-| MIDI Reference Tone + level | tone generator ±18 dB | — | ❌ | |
+| MIDI Reference Tone + level | tone generator ±18 dB | — | ✅ | round 152b: "Ref. tone" + level (±18 dB) on the Real-time page — the notes held on the MIDI channel play as sines at the reference pitch (0 dB = −12 dBFS peak per note [model]) [MANUAL S1 p.21] |
 | Latency | reports 0; real 0–4 ms dynamic | ~25 ms reported + PDC; "Low latency" toggle | ⚠️ | ➕ toggle; different by design |
 | Transpose | — | ±12 st stepper | ➕ | |
 | Tracking | — | knob | ➕ | |
@@ -1093,6 +1127,8 @@ positions against wtune.png once it exists.
 **Round 147b:** configuration 8 → 9, design 6 → 7 (the keyboard: note statuses with directions, the range bar and presets, Reset scale, the view's navigation). Remaining: Group Octaves off, Send / Receive, MIDI reference tone.
 
 **Round 150b (after 150):** configuration 9 → 9, design 7 → 8 (Send / Receive in the keyboard strip). Remaining: Group Octaves off, MIDI reference tone.
+
+**Round 152b (after 152):** configuration 9 → 10 (Group Octaves off with per-key statuses, the MIDI reference tone), design 8 → 8. Remaining: the 44 scale types (13 + Custom here), Reference pitch ±100 c, MIDI Target Pitch with octaves.
 
 **Scores** — configuration: 4/10 (for a Waves Tune RT user: key/scale/formant/time are there, but Speed, Tolerance,
 Vibrato, Correction %, note statuses and range bypass are not), design: 5/10 (note display centre + keyboard at the
@@ -1620,7 +1656,7 @@ Sources: docs/specs/echoboy.md (Pro Tools-era guide pp. 22–54, store page); `[
 | VCO Rate/Depth per tap, phase flip (PrimalTap) | knobs | Mod rate | Rate/Depth (one LFO) | ⚠️ | |
 | Preset menu / user presets / A/B | Soundtoys strip | FL factory list only; no user save, no A/B | "(no preset)" | ✅ | round 129's preset bar (Echoform) |
 | Gestures, value entry, automation | standard | generic editor: full set | full set | ✅ | |
-| Translation of the saved state | encoded | none, FL defaults (ms delay, FB, etc. unrelated) | none | ❌ | state unreadable; default only |
+| Translation of the saved state | encoded | none, FL defaults (ms delay, FB, etc. unrelated) | her states recognised (round 136) | ⚠️ | round 136 / re-checked round 152: the encoded preset is not decoded; her EchoBoy states are recognised by their hash and play Echoform's measured Tape voicing, any other state the Studio reel voicing at 1/4 note, 25 % feedback (`[soundtoys-echoboy]`) |
 
 **Scores**: Fruity Delay 3 as the stand-in: configuration 2/10, design 2/10. Echoform: configuration 5/10, design 5/10. **After round 144** (Echoform): configuration 9/10, design 8/10 (round 137: 8 / 7) — the rhythm editor (patterns, free / grid taps, shapes) and the Style Edit role (input, loop EQ, FB balance, diffusion place, wobble shape / sync); left: the saturation types, the ~30 style voicings, PrimalTap's Multiply. **After round 147a**: configuration 10/10, design 8/10 — the 31 measured voicings, the style-dependent Saturation, six saturation types, PrimalTap's Multiply; left: the reference's per-voicing Style Edit details (per-repeat decay, Mid Res), the chorus styles' multiple modulated voices (one wobble per side here), PrimalTap's per-tap VCO. **After round 150a**: configuration 10/10, design 8/10 (sound closer) — the voicings in Dual / Ping-Pong as measured (ping-pong copy, summed input, pair tone), EchoBoy's L/R offset (a control, measured law), the wobbles' shapes and depths from delay tracks; the "several voices" of the chorus styles do not exist on the trial (one modulated read per side, measured), so nothing is missing there; left: the per-voicing Style Edit details, PrimalTap's per-tap VCO, EchoBoy's offset law at offsets other than 8 ms (not a host parameter).
 
@@ -1651,18 +1687,18 @@ default source.
 | Smoothing | Hard…Soft, default Soft | **Smoothing** (LFO: square → sine; steps: jump → glide over a third of a step) | ✅ | round 135 |
 | Pan law | equal power: centre −3 dB per side, the far side silent at the extremes | **equal-power balance** for the new sources (FL's laws for the FL source) | ✅ | round 135, measured |
 | Rate (free) | 100 s … 10 Hz (0.01 · 1000^v Hz), default 0.25 Hz | **Rate** 0.01–10 Hz, same law and default | ✅ | round 135 |
-| Sources: LFO / Rhythm Step / Rhythm Shape | LFO button; rhythm note + steps (2…8) | **Source**: FL LFO · LFO · Rhythm steps (2–8 steps on 1/1…1/32 notes) | ⚠️ | round 135; no free rhythm-shape editor (her "shape" presets play as 2 steps) |
+| Sources: LFO / Rhythm Step / Rhythm Shape / Random / PingPong / Random Step | LFO button; rhythm note + steps (2…8); the two audio-triggered sources | **Source**: FL LFO · LFO · Rhythm steps (2–8 steps on 1/1…1/32 notes); **round 152** (the Rhythm voicing's Trigger row): **Ping-pong** and **Random step** moved by the input (threshold, divider 1–12, the detector's HP / LP filter, *Trigger now*), **Random steps** (the clock's steps at random places, reproducible) | ⚠️ | round 135; round 152 [MANUAL docs/specs/panman.md; laws model — the sources are not host parameters]; no free rhythm-shape editor (her "shape" presets play as 2 steps) |
 | Direction ◀ / ◀▶ / ▶ | three buttons | **Direction** (right to left, back and forth, left to right) | ✅ | round 135 |
 | Input / Output | −24…+24 dB, LED meters | **Input / Output** ±24 dB + IN / OUT meters | ✅ | round 135 |
 | Analog / Digital | switch (default Analog): asymmetric saturation, H2 −36 dBc at −18 dBFS | **Digital / Analog** (fitted on the measured harmonics) | ✅ | round 135 |
 | Pan position display | L … C … R LED strip | **pan-position strip** (live) | ✅ | round 135 |
 | Feel / Groove | knobs (rhythm modes) | **round 150**: Feel / Groove ±0.25 of a step in the Rhythm voicing (the whole pattern / the odd steps late or early) | ⚠️ | [EXEC] on the trial they do nothing in LFO mode (all host-parameter runs identical); the rhythm modes are not reachable through host parameters, so the law is LYNX's [model] (EchoBoy's measured Groove / Feel shape) |
-| Tweak: envelope / trigger (Rate / Width mod, threshold, divider, manual trigger) | Tweak page | **round 150**: the Rhythm voicing's Tweak row — Rate mod ±3 oct, Offset mod / Width mod ±180°, Threshold, Range | ⚠️ | [EXEC] (OffsetMod +90°, Width 0, 1 kHz stairs −60 … 0 dBFS and steps): the follower hears the input before Input / Output gain; no modulation below −20 dBFS (a sine's peak), linear in amplitude to full at −9 dBFS (0 / 28 / 54 / 90° at −30 / −15 / −12 / −6 dBFS); attack ≈ 21 ms, release ≈ 290 ms (one-pole fit, 2 % rms); Rate mod = octaves × amount, Offset / Width mod = degrees × amount (offset clamped to ±105°). Left: the editor's threshold / sensitivity values other than the default (not host parameters: LYNX's Threshold / Range follow the measured default, other settings scale it [model]), the divider and ManualTrigger (each `process` restarts the trial's LFO from the same phase, so a trigger is not observable) |
+| Tweak: envelope / trigger (Rate / Width mod, threshold, divider, manual trigger) | Tweak page | **round 150**: the Rhythm voicing's Tweak row — Rate mod ±3 oct, Offset mod / Width mod ±180°, Threshold, Range | ✅ | [EXEC] (OffsetMod +90°, Width 0, 1 kHz stairs −60 … 0 dBFS and steps): the follower hears the input before Input / Output gain; no modulation below −20 dBFS (a sine's peak), linear in amplitude to full at −9 dBFS (0 / 28 / 54 / 90° at −30 / −15 / −12 / −6 dBFS); attack ≈ 21 ms, release ≈ 290 ms (one-pole fit, 2 % rms); Rate mod = octaves × amount, Offset / Width mod = degrees × amount (offset clamped to ±105°). Left: the editor's threshold / sensitivity values other than the default (not host parameters: LYNX's Threshold / Range follow the measured default, other settings scale it [model]), the divider and ManualTrigger (each `process` restarts the trial's LFO from the same phase, so a trigger is not observable). Round 152: the divider (1–12) and the manual trigger, with the trigger sources (Trigger row) |
 | Tap tempo / MIDI | in rhythm modes | follows the project tempo | ⚠️ | |
 | Presets | Soundtoys strip | FL presets (Auto-pan is an FL effect) | ⚠️ | |
 | Translation of her saved state | encoded | **her 7 settings translated** (LFO 3.56 Hz / 150° / soft — 52 % of her slots; 5-step and 2-step rhythm presets; analog) | ✅ | round 135: the hidden source / steps / direction read from the trial's window per setting |
 
-**Scores**: configuration 3/10 → **7/10**, design 2/10 → **6/10** (round 135). **After round 150a**: configuration **8/10**, design **7/10** — the Tweak row (envelope → rate / offset / width, measured follower and default threshold), Feel / Groove, the measured "beyond the speakers" fold; left: the divider / manual trigger, the free rhythm-shape editor, tap tempo / MIDI.
+**Scores**: configuration 3/10 → **7/10**, design 2/10 → **6/10** (round 135). **After round 150a**: configuration **8/10**, design **7/10** — the Tweak row (envelope → rate / offset / width, measured follower and default threshold), Feel / Groove, the measured "beyond the speakers" fold; left: the divider / manual trigger, the free rhythm-shape editor, tap tempo / MIDI. **After round 152**: configuration 8 → **9/10**, design 7 → **8/10** — the trigger sources (Ping-pong / Random step by the input's threshold, divider, detector filter, manual trigger) and the Random source in a Trigger row; left: the free rhythm-shape editor, tap tempo / MIDI, the trigger laws measured (not reachable through host parameters).
 
 ---
 
@@ -1677,10 +1713,10 @@ Mod on / off; screenshot); `foilInfo` / `FoilFx` in src/core/LynxVerbs.cpp. The 
 | Mix | 0–100 %, default 100 % | Mix (the substitute: 100 % wet at the slot's 25 %) | ✅ | |
 | Mod | on / off | Mod rate / depth | ✅ | [EXEC] round 150: Mod on leaves the decay per band unchanged (≤ 0.1 s at 3 s); its tail tone is narrower, not wider (spectral spread 5.4 → 2.4 Hz on a 1 kHz tail) — not modelled |
 | Plate character | one EMT-style plate | 12 plate types | ✅ | **round 150**: **Measured plate** switch [EXEC] (impulses at Decay 0.5 / 1 / 2 / 3 / 5 / 10 / 20 s and ∞): the plate speaks after 0.7 ms (Foil's types after 1 … 81 ms), the decay per octave against the label (20 s: 35 s at 125 Hz, 14 s at 1 kHz, 5.5 s at 8 kHz; short labels ring a little longer in the presence band; ∞ ≈ 80 s), fitted through Foil's engine: mid / bass / high RT within 5 % at every label up to 20 s (∞: the highs die sooner than on the trial), the tail's energy within ±0.5 dB; the Little Plate substitute plays it |
-| Extras (predelay, size, width, EQ) | none on the panel | yes | ➕ | a fuller panel than the 3-knob original |
+| Extras (predelay, size, width, EQ) | none on the panel | yes | ➕ | a fuller panel than the 3-knob original; round 152: the **Plate view** shows only the reference's controls (Full \| Plate tabs) |
 | Presets | Soundtoys strip | LYNX preset bar | ✅ | |
 
-**Scores**: configuration 6/10 → **8/10**, design 5/10 → **6/10** (round 135). **After round 150a**: configuration **9/10**, design **6/10** — the measured plate voicing (onset, decay per band, level); left: Mod's narrowing of the tail, the single-knob panel (Foil keeps its fuller layout).
+**Scores**: configuration 6/10 → **8/10**, design 5/10 → **6/10** (round 135). **After round 150a**: configuration **9/10**, design **6/10** — the measured plate voicing (onset, decay per band, level); left: Mod's narrowing of the tail, the single-knob panel (Foil keeps its fuller layout). **After round 152**: configuration **9/10**, design 6 → **8/10** — the **Plate view** (View: Full \| Plate; the Little Plate substitute opens in it): Low Cut · the big Decay with its ∞ · Mod · Mix, the reference's one-knob panel; left: Mod's narrowing of the tail.
 
 ---
 

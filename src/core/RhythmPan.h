@@ -40,6 +40,18 @@ struct Settings
     double envRangeDb = 11.0;      // dB above it where the modulation is full (measured)
     double feel = 0.0, groove = 0.0; // ±0.25 of a step: the whole pattern / the odd steps late (+) or early (−) [model]
     bool beyond = false;           // angles past the speakers fold back with the far side inverted (measured); off = clipped
+    // round 152 (parity152): PanMan's audio-triggered sources and its Random source [MANUAL docs/specs/panman.md; laws
+    // model]: each time the input (through the trigger filter) rises past the threshold — or the manual trigger is
+    // pressed — a counter advances; every `divider` triggers the pan moves: Ping-pong to the other side, Random step to
+    // a random position, gliding over `smoothing` × 250 ms. Random steps: the clock's steps take random positions.
+    int trigger = 0;               // 0: the clock's pattern, 1: ping-pong, 2: random step
+    double trigThresholdDb = -20.0;
+    bool trigAudio = true;         // false: the threshold is fully up (manual trigger only)
+    int divider = 1;               // 1 … 12 triggers per move
+    int trigFilter = 0;            // 0 off, 1 high pass, 2 low pass (the detector only)
+    double trigFreqHz = 1000.0;
+    float manual = 0.0f;           // the manual trigger: each change of this value is one trigger
+    bool randomSteps = false;
     bool operator== (const Settings&) const = default;
 };
 
@@ -79,5 +91,14 @@ private:
     // level) and the phase it adds when it moves the rate
     double envMs = 0.0, env = 0.0, envAmount = 0.0, extraPhase = 0.0;
     double msA = 0.0, envAtt = 0.0, envRel = 0.0;
+    // round 152: the trigger detector (its filter, a peak follower with a re-arm level) and the moves it makes
+    double tfB0 = 1.0, tfB1 = 0.0, tfB2 = 0.0, tfA1 = 0.0, tfA2 = 0.0, tfZ1 = 0.0, tfZ2 = 0.0;
+    double trigEnv = 0.0, trigRel = 0.0;
+    bool armed = true;
+    int trigCount = 0;
+    double trigFrom = 0.0, trigTo = 0.0, trigAge = 1e12, trigValue = 0.0;
+    float lastManual = 0.0f;
+    bool manualSeen = false;
+    unsigned long long rng = 0x9E3779B97F4A7C15ull;
 };
 } // namespace lynx::rhythmpan

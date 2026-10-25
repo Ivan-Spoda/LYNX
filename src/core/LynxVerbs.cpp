@@ -1456,7 +1456,8 @@ const EffectInfo& info (EffectKind kind)
                   { "Mod rate", 0.365345f }, { "Mod depth", 0.0f }, { "Low EQ freq", 0.343434f }, { "Low EQ gain", 0.5f },
                   { "High EQ freq", 0.494949f }, { "High EQ gain", 0.5f }, { "Type", 0.0f }, // EQ at 700 Hz / 10 kHz (round 129)
                   { "Infinite", 0.0f }, { "Low cut", 0.0f }, // round 135 (the Little Plate role)
-                  { "Voicing", 0.0f } }) }; // round 150: the measured plate voicing (off = the plate types as before)
+                  { "Voicing", 0.0f }, // round 150: the measured plate voicing (off = the plate types as before)
+                  { "View", 0.0f } }) }; // round 152: the editor's view (Full | Plate: the one-knob panel of the Little Plate role)
     static const EffectInfo nebulaInfo { "Nebula",
         params ({ { "Mix", 0.5f }, { "Sync", 0.0f }, { "Note", 0.333333f }, { "Delay", 0.5f }, { "Warp", 0.0f },
                   { "Feedback", 0.5f }, { "Density", 0.0f }, { "Width", 1.0f }, { "Low cut", 0.0f }, { "High cut", 1.0f },
@@ -1536,6 +1537,7 @@ std::string paramText (EffectKind kind, int param, float v, double bpm)
                 case 12: return v >= 0.5f ? "on" : "off";
                 case 13: return v <= 0.0f ? "off" : hz (foil::lowCutHz (v));
                 case 14: return v >= 0.5f ? "measured" : "off";
+                case 15: return v >= 0.5f ? "Plate" : "Full"; // round 152: the editor's view
                 default: return pct (v);
             }
         case EffectKind::nebula:

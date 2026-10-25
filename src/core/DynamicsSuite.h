@@ -159,7 +159,8 @@ enum Global { xover1 = legacyBands * fieldsPerBand, xover2, xover3, slope, looka
               bandLayout = xoverSlope0 + bands - 1,
               bandLo0, bandHi0 = bandLo0 + bands, bandLoSlope0 = bandHi0 + bands, bandHiSlope0 = bandLoSlope0 + bands,
               bandScInput0 = bandHiSlope0 + bands, detectorLaw = bandScInput0 + bands,
-              count = detectorLaw + 1 };
+              rev152 = detectorLaw + 1, // round 152: the measured model's revision (gain-stage attack, narrow bands, 0.8-octave minimum band)
+              count = rev152 + 1 };
 inline int param (int band, int field) noexcept
 {
     return band < legacyBands ? band * fieldsPerBand + field : band5 + (band - legacyBands) * fieldsPerBand + field;

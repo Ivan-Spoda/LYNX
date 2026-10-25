@@ -1113,6 +1113,9 @@ Layout lynxTune()
     rt (label (494, 394, 214, 14, TR_NOOP ("Link: the retune speed does it"), alignLeft | dim));
     rt (label (494, 412, 214, 14, TR_NOOP ("Tolerance: how far / how long a note"), alignLeft | dim));
     rt (label (494, 430, 214, 14, TR_NOOP ("may stray before the target changes"), alignLeft | dim));
+    // round 152: the MIDI reference tone (the notes held on the MIDI channel as sines) and its level
+    rt (toggle (494, 452, 104, 18, "Reference tone", TR_NOOP ("Ref. tone")));
+    rt (knob (618, 461, 13, "Tone level", nullptr, 461, noCaption | bipolar));
     {
         auto io = display (712, 366, 80, 106, "iometer");
         io.steps = 3; // LYNX Tune's input / output peaks are its meter outputs 3 and 4
@@ -1685,7 +1688,8 @@ Layout compressorLayout()
     v.push_back (section (4, 4, 412, 292, TR_NOOP ("Compressor")));
     v.push_back (slider (Item::vslider, 16, 30, 34, 172, "Threshold", TR_NOOP ("Threshold")));
     v.push_back (display (58, 26, 112, 180, "iometer"));
-    v.push_back (meter (184, 26, 66, 180, 0, TR_NOOP ("Reduction")));
+    // round 152: RComp's bipolar gain-change meter (reduction down, the expansion's boost up), the held change under it
+    v.push_back (display (184, 26, 66, 180, "gcmeter"));
     // round 150: with the RComp ranges the RC controls take the places of LYNX's (gain −30 … +30, ratio 0.5 … 50 : 1,
     // attack 0.5 … 500 ms, release 5 … 5000 ms)
     v.push_back (when (slider (Item::vslider, 268, 30, 34, 172, "Makeup", TR_NOOP ("Gain")), "Ranges", 0.0f, 0.5f));
@@ -1707,6 +1711,8 @@ Layout compressorLayout()
     v.push_back (when (dial (140, 252, 34, "RC release", TR_NOOP ("Release")), "Ranges", 0.5f, 1.0f));
     v.push_back (when (dial (217, 252, 34, "RC ratio", TR_NOOP ("Ratio")), "Ranges", 0.5f, 1.0f));
     v.push_back (tabs (318, 7, 90, 16, "Ranges", TR_NOOP ("LYNX|RComp")));
+    // round 152: the vintage voicing's static curve — measured at every ratio (new instances) or round 150's (older projects)
+    v.push_back (when (tabs (12, 7, 104, 16, "Vintage curve", TR_NOOP ("Old|Measured")), "Voicing", 0.5f, 1.0f));
     v.push_back (dial (300, 252, 30, "Mix", TR_NOOP ("Mix")));
     v.push_back (dial (370, 252, 30, "Trim", TR_NOOP ("Trim"), bipolar));
     return l;
@@ -1733,6 +1739,11 @@ Layout glowLeveler()
     v.push_back (toggle (404, 206, 120, 20, "Auto makeup", TR_NOOP ("Auto makeup")));
     // round 123: the voicing — Glow's own engine, or the measured classic opto leveler (substitutes start there)
     v.push_back (tabs (12, 206, 160, 22, "Voicing", TR_NOOP ("Modern|Opto classic")));
+    // round 152: the reference's ANALOG buttons (hum and noise, measured) bottom left, and the opto law of the classic
+    // voicing (Old = a project saved before round 152: the round-123 Limit, no auto make-up there)
+    v.push_back (label (12, 236, 120, 12, TR_NOOP ("Analog")));
+    v.push_back (tabs (12, 250, 120, 20, "Analog", TR_NOOP ("Off|50 Hz|60 Hz"), { 0.0f, 0.5f, 1.0f }));
+    v.push_back (when (tabs (12, 26, 130, 18, "Opto law", TR_NOOP ("Old|Measured")), "Voicing", 0.5f, 1.0f));
     v.push_back (dial (170, 254, 28, "Emphasis", TR_NOOP ("HF emphasis")));
     v.push_back (dial (270, 254, 28, "Mix", TR_NOOP ("Mix")));
     v.push_back (dial (370, 254, 28, "Trim", TR_NOOP ("Trim"), bipolar));
@@ -2004,6 +2015,29 @@ Layout emberLayout()
     static const char* const chars[] { "B1 character", "B2 character", "B3 character", "B4 character", "B5 character", "B6 character" };
     for (int b = 0; b < 6; ++b)
         v.push_back (stepper (360.0f + 76.0f * (float) (b % 2), 940.0f + 30.0f * (float) (b / 2), 72, 22, chars[b], nullptr, 29));
+    // round 152 (Saturn 2): each crossover's own slope, the processing mode, the modulation
+    l.height = 1300;
+    v.push_back (section (4, 1110, 512, 186, TR_NOOP ("Slopes, processing, modulation")));
+    static const char* const slopes[] { "Slope 1", "Slope 2", "Slope 3", "Slope 4", "Slope 5" };
+    for (int k = 0; k < 5; ++k)
+        v.push_back (stepper (12.0f + 64.0f * (float) k, 1132, 60, 20, slopes[k], nullptr, 6));
+    v.push_back (tabs (340, 1132, 168, 20, "Processing", TR_NOOP ("Min. phase|Linear"), { 0.0f, 1.0f }));
+    v.push_back (dial (30, 1178, 16, "LFO 1 rate", TR_NOOP ("LFO 1")));
+    v.push_back (stepper (6, 1222, 50, 18, "LFO 1 shape", nullptr, 5));
+    v.push_back (dial (90, 1178, 16, "LFO 2 rate", TR_NOOP ("LFO 2")));
+    v.push_back (stepper (66, 1222, 50, 18, "LFO 2 shape", nullptr, 5));
+    v.push_back (dial (150, 1178, 16, "Env attack", TR_NOOP ("Attack")));
+    v.push_back (dial (200, 1178, 16, "Env release", TR_NOOP ("Release")));
+    static const char* const mods[4][3] { { "Mod 1 source", "Mod 1 target", "Mod 1 amount" }, { "Mod 2 source", "Mod 2 target", "Mod 2 amount" },
+                                          { "Mod 3 source", "Mod 3 target", "Mod 3 amount" }, { "Mod 4 source", "Mod 4 target", "Mod 4 amount" } };
+    for (int k = 0; k < 4; ++k)
+    {
+        const auto y = 1162.0f + 32.0f * (float) k;
+        v.push_back (stepper (232, y, 70, 22, mods[k][0], nullptr, 4));
+        v.push_back (stepper (306, y, 120, 22, mods[k][1], nullptr, 27));
+        v.push_back (knob (466, y + 11.0f, 14, mods[k][2], nullptr, y + 11.0f, noCaption | bipolar));
+    }
+    v.push_back (toggle (6, 1264, 200, 20, "Effect law", TR_NOOP ("Measured effect characters")));
     return l;
 }
 
@@ -2204,7 +2238,10 @@ Layout prismMultiband()
     }
     v.push_back (tabs (16, 696, 140, 22, "Band layout", TR_NOOP ("Split|Free")));
     v.push_back (tabs (700, 696, 180, 22, "Detector", TR_NOOP ("Classic|Measured")));
-    l.height = 738;
+    // round 152: the measured model's revision (gain-stage attack, narrow Dynamic-phase bands, 0.8-octave minimum)
+    v.push_back (label (620, 736, 76, 22, TR_NOOP ("Model")));
+    v.push_back (tabs (700, 736, 180, 22, "Revision", TR_NOOP ("Round 150|Round 152")));
+    l.height = 766;
     return l;
 }
 
@@ -2425,6 +2462,17 @@ Layout withRhythmVoicing (Layout l)
     add (dial (530, 318, 30, "Feel", TR_NOOP ("Feel"), bipolar));
     add (dial (610, 318, 30, "Groove", TR_NOOP ("Groove"), bipolar));
     add (toggle (664, 308, 86, 20, "Beyond speakers", TR_NOOP ("Beyond")));
+    // round 152: PanMan's trigger sources (the input past a threshold, or the manual trigger, moves the pan every
+    // `divider` triggers: to the other side, or to a random place), the detector's filter, and the Random source
+    l.height = 444;
+    add (section (4, 360, 752, 80, TR_NOOP ("Trigger")));
+    add (tabs (14, 390, 230, 22, "Trigger", TR_NOOP ("Clock|Ping-pong|Random step"), { 0.0f, 0.5f, 1.0f }));
+    add (dial (284, 398, 30, "Trig threshold", TR_NOOP ("Thresh.")));
+    add (stepper (318, 390, 84, 22, "Divider", TR_NOOP ("Divider"), 11));
+    add (tabs (412, 390, 132, 22, "Trig filter", TR_NOOP ("Off|HP|LP"), { 0.0f, 0.5f, 1.0f }));
+    add (dial (578, 398, 30, "Trig freq", TR_NOOP ("Freq")));
+    add (toggle (618, 380, 132, 20, "Manual trigger", TR_NOOP ("Trigger now"), plugui::momentary));
+    add (toggle (618, 410, 132, 20, "Random steps", TR_NOOP ("Random steps")));
     return l;
 }
 
@@ -2631,34 +2679,47 @@ Layout atriumLayout()
 
 Layout foilPlateLayout()
 {
-    // Mix / Predelay · big Decay · Size / Width · EQ (2 × 2) · Mod; the plate type below
+    // Mix / Predelay · big Decay · Size / Width · EQ (2 × 2) · Mod; the plate type below. Round 152: a second view,
+    // "Plate" — the one-knob panel of the Little Plate role (the reference's Decay in the middle, Low Cut and Mod beside
+    // it, Mix), chosen by the View switch (the Little Plate substitute opens in it)
     Layout l;
     l.width = 720;
     l.height = 316;
     auto& v = l.items;
-    v.push_back (section (8, 8, 92, 244, nullptr, boxed));
-    v.push_back (dial (54, 50, 40, "Mix", TR_NOOP ("Mix")));
-    v.push_back (dial (54, 164, 40, "Predelay", TR_NOOP ("Predelay")));
-    v.push_back (section (104, 8, 200, 244, nullptr, boxed));
-    v.push_back (dial (204, 100, 120, "Decay", TR_NOOP ("Decay"), big));
-    v.push_back (section (308, 8, 92, 244, nullptr, boxed));
-    v.push_back (dial (354, 50, 40, "Size", TR_NOOP ("Size")));
-    v.push_back (dial (354, 164, 40, "Width", TR_NOOP ("Width")));
-    v.push_back (section (404, 8, 200, 244, TR_NOOP ("EQ")));
-    v.push_back (dial (454, 64, 36, "Low EQ freq", TR_NOOP ("Low freq")));
-    v.push_back (dial (554, 64, 36, "High EQ freq", TR_NOOP ("High freq")));
-    v.push_back (dial (454, 168, 36, "Low EQ gain", TR_NOOP ("Low gain"), bipolar));
-    v.push_back (dial (554, 168, 36, "High EQ gain", TR_NOOP ("High gain"), bipolar));
-    v.push_back (section (608, 8, 104, 244, TR_NOOP ("Mod")));
-    v.push_back (dial (660, 64, 36, "Mod rate", TR_NOOP ("Rate")));
-    v.push_back (dial (660, 168, 36, "Mod depth", TR_NOOP ("Depth")));
+    const auto full = [&] (LayoutItem it) { it.whenParam = "View"; it.whenMin = 0.0f; it.whenMax = 0.5f; v.push_back (it); };
+    const auto plate = [&] (LayoutItem it) { it.whenParam = "View"; it.whenMin = 0.5f; it.whenMax = 1.0f; v.push_back (it); };
+    full (section (8, 8, 92, 244, nullptr, boxed));
+    full (dial (54, 50, 40, "Mix", TR_NOOP ("Mix")));
+    full (dial (54, 164, 40, "Predelay", TR_NOOP ("Predelay")));
+    full (section (104, 8, 200, 244, nullptr, boxed));
+    full (dial (204, 100, 120, "Decay", TR_NOOP ("Decay"), big));
+    full (section (308, 8, 92, 244, nullptr, boxed));
+    full (dial (354, 50, 40, "Size", TR_NOOP ("Size")));
+    full (dial (354, 164, 40, "Width", TR_NOOP ("Width")));
+    full (section (404, 8, 200, 244, TR_NOOP ("EQ")));
+    full (dial (454, 64, 36, "Low EQ freq", TR_NOOP ("Low freq")));
+    full (dial (554, 64, 36, "High EQ freq", TR_NOOP ("High freq")));
+    full (dial (454, 168, 36, "Low EQ gain", TR_NOOP ("Low gain"), bipolar));
+    full (dial (554, 168, 36, "High EQ gain", TR_NOOP ("High gain"), bipolar));
+    full (section (608, 8, 104, 244, TR_NOOP ("Mod")));
+    full (dial (660, 64, 36, "Mod rate", TR_NOOP ("Rate")));
+    full (dial (660, 168, 36, "Mod depth", TR_NOOP ("Depth")));
     // round 135 (the Little Plate role): the decay's ∞ and a low cut
-    v.push_back (toggle (330, 266, 90, 22, "Infinite", TR_NOOP ("Infinite")));
-    v.push_back (dial (470, 274, 22, "Low cut", TR_NOOP ("Low cut")));
+    full (toggle (330, 266, 90, 22, "Infinite", TR_NOOP ("Infinite")));
+    full (dial (470, 274, 22, "Low cut", TR_NOOP ("Low cut")));
     // round 150: the measured plate voicing (the Little Plate role: no plate delay, its decay per band)
-    v.push_back (toggle (560, 266, 150, 22, "Voicing", TR_NOOP ("Measured plate")));
-    v.push_back (label (8, 264, 52, 24, TR_NOOP ("Mode"), alignLeft));
-    v.push_back (choiceMenu (60, 264, 180, 24, "Type", TR_NOOP ("Type"), TR_NOOP ("Silver|Pewter|Nickel|Bronze|Bismuth|Tin|Zinc|Platinum|Tungsten|Iron|Gold|Lead")));
+    full (toggle (560, 266, 150, 22, "Voicing", TR_NOOP ("Measured plate")));
+    full (label (8, 264, 52, 24, TR_NOOP ("Mode"), alignLeft));
+    full (choiceMenu (60, 264, 180, 24, "Type", TR_NOOP ("Type"), TR_NOOP ("Silver|Pewter|Nickel|Bronze|Bismuth|Tin|Zinc|Platinum|Tungsten|Iron|Gold|Lead")));
+    // round 152: the Plate view — Low Cut on the left, the big Decay (its ∞ under it), Mod and Mix on the right
+    plate (section (8, 8, 704, 244, nullptr, boxed));
+    plate (dial (140, 120, 52, "Low cut", TR_NOOP ("Low cut")));
+    plate (dial (360, 112, 132, "Decay", TR_NOOP ("Decay"), big));
+    plate (toggle (315, 228, 90, 20, "Infinite", TR_NOOP ("Infinite")));
+    plate (dial (556, 70, 36, "Mod depth", TR_NOOP ("Mod")));
+    plate (dial (556, 176, 44, "Mix", TR_NOOP ("Mix")));
+    plate (toggle (24, 222, 150, 22, "Voicing", TR_NOOP ("Measured plate")));
+    v.push_back (tabs (560, 292, 150, 20, "View", TR_NOOP ("Full|Plate")));
     return l;
 }
 

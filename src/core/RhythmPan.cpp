@@ -36,6 +36,18 @@ constexpr double envMeanMs = 1.0, envAttackMs = 21.3, envReleaseMs = 291.5;
 double side (double v) noexcept { return v / std::pow (1.0 + std::pow (std::abs (v / satC), satP), 1.0 / satP); }
 const double sideB = side (satB);
 
+// round 152 [model]: the trigger detector's release and re-arm level (6 dB under the threshold), the trigger glide
+constexpr double trigReleaseMs = 30.0, trigRearm = 0.5, trigGlideSec = 0.25;
+// a reproducible random position in −1 … +1 for a step number (the Random source renders the same every time)
+double stepRandom (long long k) noexcept
+{
+    auto z = (unsigned long long) k + 0x9E3779B97F4A7C15ull;
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    z ^= z >> 31;
+    return (double) (z >> 11) * (2.0 / 9007199254740992.0) - 1.0;
+}
+
 constexpr double patternValues[2][maxSteps] { { 1.0, -1.0 }, { -1.0, -0.5, 0.0, 0.5, 1.0, 0.5, 0.0, -0.5 } };
 constexpr int patternSteps[2] { 2, 8 };
 } // namespace
@@ -60,6 +72,12 @@ void Engine::reset() noexcept
         h.fill (0.0f);
     histPos = 0;
     envMs = env = envAmount = extraPhase = 0.0;
+    tfZ1 = tfZ2 = trigEnv = 0.0;
+    armed = true;
+    trigCount = 0;
+    trigFrom = trigTo = trigValue = s.trigger == 1 ? -s.amount : 0.0; // ping-pong starts on the left
+    trigAge = 1e12;
+    rng = 0x9E3779B97F4A7C15ull;
 }
 
 void Engine::set (const Settings& settings) noexcept
@@ -80,6 +98,22 @@ void Engine::set (const Settings& settings) noexcept
     shB0 = lfGain * (k + wz) / (k + wp);
     shB1 = lfGain * (wz - k) / (k + wp);
     shA1 = (wp - k) / (k + wp);
+    // round 152: the trigger filter (12 dB/oct, Q 0.707) and the detector's release
+    trigRel = std::exp (-1.0 / (trigReleaseMs * 0.001 * sr));
+    tfB0 = 1.0; tfB1 = tfB2 = tfA1 = tfA2 = 0.0;
+    if (s.trigFilter != 0)
+    {
+        const double w0 = 2.0 * pi * std::clamp (s.trigFreqHz, 10.0, 0.45 * sr) / sr, al = std::sin (w0) / (2.0 * 0.7071067811865476), c = std::cos (w0);
+        const double a0 = 1.0 + al;
+        if (s.trigFilter == 1) { tfB0 = (1.0 + c) / 2.0 / a0; tfB1 = -(1.0 + c) / a0; tfB2 = tfB0; }
+        else { tfB0 = (1.0 - c) / 2.0 / a0; tfB1 = (1.0 - c) / a0; tfB2 = tfB0; }
+        tfA1 = -2.0 * c / a0;
+        tfA2 = (1.0 - al) / a0;
+    }
+    if (s.trigger == 0)
+        trigFrom = trigTo = trigValue = 0.0;
+    else if (trigAge >= 1e11 && s.trigger == 1)
+        trigFrom = trigTo = trigValue = -s.amount;
 }
 
 float Engine::analogStage (float x, int c) noexcept
@@ -91,6 +125,11 @@ float Engine::analogStage (float x, int c) noexcept
 
 void Engine::process (float* left, float* right, int n, double beatPos, double bpm) noexcept
 {
+    if (! manualSeen) // round 152: the first value the engine plays with is the saved one, not a press
+    {
+        lastManual = s.manual;
+        manualSeen = true;
+    }
     const double bps = std::max (bpm, 1.0) / 60.0;
     // the pattern's phase: free = seconds since the song start × rate; synced = beats / period, both + the start phase
     const double cyclesPerSample = s.sync ? bps / sr / std::max (s.beats, 1e-6) : s.rateHz / sr;
@@ -145,6 +184,40 @@ void Engine::process (float* left, float* right, int n, double beatPos, double b
             fb += fir[j] * hist[1][idx];
         }
         histPos = (histPos + 1) & 31;
+        // round 152: the trigger sources — the input (before the analog stage) through the trigger filter into a peak
+        // follower; a rise past the threshold (re-armed 6 dB under it) or the manual trigger counts once
+        if (s.trigger != 0)
+        {
+            const double x = 0.5 * ((double) (left != nullptr ? left[i] : 0.0f) + (double) (right != nullptr ? right[i] : 0.0f));
+            const double y = tfB0 * x + tfZ1;
+            tfZ1 = tfB1 * x - tfA1 * y + tfZ2;
+            tfZ2 = tfB2 * x - tfA2 * y;
+            trigEnv = std::max (std::abs (y), trigRel * trigEnv);
+            const double thrLin = std::pow (10.0, s.trigThresholdDb / 20.0);
+            bool fire = false;
+            if (s.trigAudio)
+            {
+                if (armed && trigEnv >= thrLin) { fire = true; armed = false; }
+                else if (! armed && trigEnv < thrLin * trigRearm) armed = true;
+            }
+            if (s.manual != lastManual) { fire = true; lastManual = s.manual; }
+            if (fire && ++trigCount >= std::max (1, s.divider))
+            {
+                trigCount = 0;
+                trigFrom = trigValue;
+                if (s.trigger == 1)
+                    trigTo = trigTo < 0.0 ? s.amount : -s.amount;
+                else
+                {
+                    rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+                    trigTo = s.amount * ((double) (rng >> 11) * (2.0 / 9007199254740992.0) - 1.0);
+                }
+                trigAge = 0.0;
+            }
+            const double glideN = std::max (55.0 * sr / 48000.0, s.smoothing * trigGlideSec * sr);
+            trigValue = trigFrom + (trigTo - trigFrom) * std::clamp (trigAge / glideN, 0.0, 1.0);
+            trigAge += 1.0;
+        }
         // the step position with its glide
         const double ph = phase + extraPhase - std::floor (phase + extraPhase);
         double pos = ph * steps;
@@ -156,10 +229,17 @@ void Engine::process (float* left, float* right, int n, double beatPos, double b
         }
         const int k = std::min ((int) pos, steps - 1);
         const double fr = std::clamp ((pos - k) / glide, 0.0, 1.0);
-        const double cur = values[(size_t) k], prev = values[(size_t) ((k + steps - 1) % steps)];
+        double cur = values[(size_t) k], prev = values[(size_t) ((k + steps - 1) % steps)];
+        if (s.randomSteps) // round 152: the Random source — each step of the clock a random position (reproducible)
+        {
+            const auto stepNo = (long long) std::floor (phase + extraPhase) * steps + k; // the step's number since the song start
+            cur = s.amount * stepRandom (stepNo);
+            prev = s.amount * stepRandom (stepNo - 1);
+        }
+        const double v = s.trigger != 0 ? trigValue : prev + (cur - prev) * fr;
         // round 150 [EXEC]: past the speakers (offset + width / 2 beyond ±90°) the angle folds back with the far side's
         // polarity inverted (offset 45° + OffsetMod 90° → the left at tan 7.5° of the right, inverted); else clipped
-        const double angle = 45.0 + 0.5 * offset + 0.25 * width * (prev + (cur - prev) * fr);
+        const double angle = 45.0 + 0.5 * offset + 0.25 * width * v;
         const double theta = (s.beyond ? std::clamp (angle, -52.5, 142.5) : std::clamp (angle, 0.0, 90.0)) * pi / 180.0;
         if (left != nullptr) left[i] = (float) (fa * std::cos (theta) * outGain);
         if (right != nullptr) right[i] = (float) (fb * std::sin (theta) * outGain);
