@@ -1,5 +1,6 @@
 #include "ui/SettingsPages.h"
 #include "platform/Paths.h"
+#include "platform/FileTypes.h"
 
 #include "core/ToolbarLayout.h"
 #include "engine/AudioEngine.h"
@@ -91,7 +92,7 @@ public:
 
         for (auto* c : std::initializer_list<juce::Component*> { &languageTitle, &displayTitle, &startupTitle, &editingTitle, &backupTitle,
                                                                  &pluginsTitle, &languageLabel, &languageBox, &languageNote, &scaleLabel, &scaleBox,
-                                                                 &wavesLabel, &wavesBox, &stereoWaves, &pluginStyleLabel, &pluginStyleBox, &reducedEffects, &gpuRendering, &splash, &startupSound, &scanAtStart,
+                                                                 &wavesLabel, &wavesBox, &stereoWaves, &pluginStyleLabel, &pluginStyleBox, &reducedEffects, &gpuRendering, &splash, &startupSound, &scanAtStart, &menuEntry,
                                                                  &typingPiano, &keepEditors, &rememberSeek, &editInLabel, &editInBox, &undoLabel,
                                                                  &undoBox, &autosaveLabel, &autosaveBox, &keepLabel, &keepBox, &openBackups, &unusedTakes,
                                                                  &sandbox, &sandboxNote, &substitutes, &substitutesNote, &managePlugins, &manageShortcuts, &shortcutsNote,
@@ -144,6 +145,10 @@ public:
         toggle (startupSound, tr ("Play the startup sound"), options.startupSound, [this] (bool on) { options.startupSound = on; });
         toggle (scanAtStart, tr ("Look for new plugins in the background at every start"), options.scanAtStart,
                 [this] (bool on) { options.scanAtStart = on; });
+        // the AppImage on Linux (round 161): its menu entry and the .lynx file type, in the user's ~/.local/share
+        toggle (menuEntry, tr ("Show LYNX in the applications menu and open .lynx files with it"), options.menuEntry,
+                [this] (bool on) { options.menuEntry = on; });
+        menuEntry.setVisible (runningAsAppImage());
 
         toggle (typingPiano, tr ("Typing keyboard as a piano"), options.typingPiano, [this] (bool on) { options.typingPiano = on; });
         toggle (keepEditors, tr ("Keep channel editors open (a channel button click doesn't close the previous editor)"), options.keepEditorsOpen,
@@ -240,6 +245,8 @@ private:
         r.section (startupTitle);
         for (auto* t : { &splash, &startupSound, &scanAtStart })
             t->setBounds (r.full (24));
+        if (menuEntry.isVisible())
+            menuEntry.setBounds (r.full (24));
 
         r.section (editingTitle);
         for (auto* t : { &typingPiano, &keepEditors, &rememberSeek })
@@ -309,7 +316,7 @@ private:
         backupTitle { tr ("Backup") }, pluginsTitle { tr ("Plugins and shortcuts") }, reportsTitle { tr ("Crash reports") };
     juce::Label languageLabel, languageNote, scaleLabel, wavesLabel, pluginStyleLabel, editInLabel, undoLabel, autosaveLabel, keepLabel, sandboxNote, substitutesNote, shortcutsNote, crashLabel, crashNote;
     juce::ComboBox crashBox, languageBox, scaleBox, wavesBox, pluginStyleBox, editInBox, undoBox, autosaveBox, keepBox;
-    juce::ToggleButton stereoWaves, reducedEffects, gpuRendering, splash, startupSound, scanAtStart, typingPiano, keepEditors, rememberSeek, sandbox, substitutes, unusedTakes;
+    juce::ToggleButton stereoWaves, reducedEffects, gpuRendering, splash, startupSound, scanAtStart, menuEntry, typingPiano, keepEditors, rememberSeek, sandbox, substitutes, unusedTakes;
     juce::TextButton openBackups { tr ("Open backup folder") }, managePlugins { tr ("Plugin manager...") }, manageShortcuts { tr ("Manage shortcuts...") };
 };
 

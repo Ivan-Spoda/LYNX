@@ -496,6 +496,15 @@ std::string exceptionBacktrace (void* exceptionPointers)
         std::uintptr_t frames[96] = {};
         const auto n = unwind (*ep->ContextRecord, frames, 96);
         return text + formatFrames (std::vector<std::uintptr_t> (frames, frames + n));
+#elif defined(LYNX_EXECINFO)
+        // macOS / Linux (round 161): JUCE's crash handler passes the signal number; the frames are this thread's, the
+        // signal handler's own first (exceptionBacktrace, onCrash, JUCE's handleCrash, the kernel's signal trampoline)
+        const auto sig = (int) (std::intptr_t) exceptionPointers;
+        const char* name = sig == SIGSEGV ? "segmentation fault" : sig == SIGBUS ? "bus error" : sig == SIGILL ? "illegal instruction"
+                         : sig == SIGFPE ? "floating-point exception" : sig == SIGABRT ? "abort" : "signal";
+        char head[80];
+        std::snprintf (head, sizeof (head), "signal %d (%s)\n", sig, name);
+        return head + moduleBacktrace (1);
 #else
         (void) exceptionPointers;
         return {};

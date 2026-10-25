@@ -73,6 +73,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <mutex>
 #include <thread>
@@ -619,6 +620,20 @@ public:
             // animates (demo signal) — round 122's check that an idle editor burns no CPU
             const auto i = args.indexOf ("--editorcpu");
             runEditorCpu (args[i + 1].unquoted());
+            return;
+        }
+
+        if (args.contains ("--menu-entry"))
+        {
+            // LYNX.AppImage --menu-entry on|off: puts the AppImage in the applications menu (and .lynx files on it) or
+            // takes it out again, without opening a window; the same as the switch in Options › General (round 161)
+            const auto i = args.indexOf ("--menu-entry");
+            const auto on = args[i + 1].unquoted() != "off";
+            const auto ok = lynx::runningAsAppImage() && lynx::setAppImageMenuEntry (on);
+            std::fprintf (ok ? stdout : stderr, "%s\n", ok ? (on ? "LYNX added to the applications menu" : "LYNX removed from the applications menu")
+                                                         : "only the LYNX AppImage on Linux can do this");
+            setApplicationReturnValue (ok ? 0 : 1);
+            quit();
             return;
         }
 

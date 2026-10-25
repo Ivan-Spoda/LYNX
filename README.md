@@ -162,7 +162,7 @@ Any knob or fader (channel, mixer, effect, plugin parameter) becomes a clip with
 - 3-oscillator synth with an evolving harmonics oscillator, SVF or 4-pole ladder filter and a vintage chorus
 - Sampler with zones, slices, time-stretch (WSOLA) and disk streaming
 - Built-in drums (kick, snare, hat, clap)
-- VST3 and CLAP plugins on every OS, plus Audio Units on macOS and LV2 on Linux; on Windows optionally sandboxed in a separate process
+- VST3 and CLAP plugins on every OS, plus Audio Units on macOS and LV2 on Linux; on Windows and Linux optionally sandboxed in a separate process
 
 </td>
 <td width="33%" valign="top">
@@ -288,7 +288,7 @@ entry, an icon and the `.lynx` file type (`./install.sh --uninstall` removes it 
 |---|---|---|---|
 | Plugin formats | VST3, CLAP, VST2 | VST3, CLAP, Audio Units | VST3, CLAP, LV2, VST2 |
 | Audio drivers | Windows Audio (WASAPI), DirectSound, ASIO, built-in LYNX ASIO driver | Core Audio | ALSA, JACK (PipeWire via `pipewire-jack`) |
-| Out-of-process plugin sandbox | optional | – | – |
+| Out-of-process plugin sandbox | optional | – | optional |
 | FL Studio integration (factory samples, plugin database) | FL Studio installation | FL Studio app bundle is looked for (untested) | Windows FL Studio under Wine (`~/.wine` or `$WINEPREFIX`) |
 | Settings folder | `%APPDATA%\LYNX` | `~/Library/Application Support/LYNX` | `~/.config/LYNX` (`$XDG_CONFIG_HOME`) |
 

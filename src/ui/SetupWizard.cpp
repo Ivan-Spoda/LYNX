@@ -7,6 +7,7 @@
 #include "ui/I18n.h"
 #include "ui/Theme.h"
 #include "platform/Paths.h"
+#include "platform/FileTypes.h"
 
 namespace lynx
 {
@@ -60,6 +61,10 @@ public:
                                                                  &flStatus, &foldersLabel, &folders, &addFolder, &removeFolder, &resetFolders,
                                                                  &scanNow, &progressBar, &scanStatus, &scanAtStart })
             body.addAndMakeVisible (c);
+        // the Linux AppImage (round 161): an applications-menu entry and the .lynx file type, on by default
+        body.addChildComponent (menuEntry);
+        menuEntry.setVisible (runningAsAppImage());
+        menuEntry.setToggleState (true, juce::dontSendNotification);
         viewport.setViewedComponent (&body, false);
         viewport.setScrollBarsShown (true, false);
         viewport.setScrollBarThickness (10);
@@ -262,6 +267,8 @@ private:
         r.removeFromTop (4);
         scanStatus.setBounds (r.removeFromTop (textHeight (scanStatus, w, 22)));
         scanAtStart.setBounds (r.removeFromTop (24));
+        if (menuEntry.isVisible())
+            menuEntry.setBounds (r.removeFromTop (24));
         r.removeFromTop (12);
         return r.getY();
     }
@@ -318,6 +325,8 @@ private:
     {
         saveFolders();
         markSetupWizardDone();
+        if (runningAsAppImage())
+            setAppImageMenuEntry (menuEntry.getToggleState());
         if (! scanStarted)
             engine.getPluginHost().startBackgroundScan(); // keeps going after the window closes
         const auto chosen = languageBox.getSelectedId() - 1;
@@ -368,6 +377,7 @@ private:
     double progress = 0.0;
     juce::ProgressBar progressBar { progress };
     juce::ToggleButton scanAtStart { tr ("Look for new plugins in the background at every start") };
+    juce::ToggleButton menuEntry { tr ("Show LYNX in the applications menu and open .lynx files with it") };
     std::unique_ptr<juce::FileChooser> chooser;
     bool scanStarted = false;
 };
