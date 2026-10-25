@@ -1559,6 +1559,16 @@ private:
                             juce::Graphics g (image);
                             c->paintEntireComponent (g, false);
                             ++painted;
+                            // LYNX_OPENTEST_SHOTS=folder: each window as first painted (before the resizes), for a look
+                            if (const auto shots = juce::SystemStats::getEnvironmentVariable ("LYNX_OPENTEST_SHOTS", {}); shots.isNotEmpty() && ! resize)
+                            {
+                                juce::FileOutputStream out (juce::File (shots).getChildFile (juce::String (painted).paddedLeft ('0', 4) + ".png"));
+                                if (out.openedOk())
+                                {
+                                    out.setPosition (0), out.truncate();
+                                    juce::PNGImageFormat().writeImageToStream (c->createComponentSnapshot (c->getLocalBounds()), out);
+                                }
+                            }
                         }
                     }
             }

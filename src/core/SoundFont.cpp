@@ -181,7 +181,7 @@ std::string displayValue (int index, float v)
 {
     char buf[64];
     const auto seconds = [&buf] (float s) {
-        if (s < 1.0f)
+        if (s < 0.9995f) // (1.00 s, not "1000 ms", for a value a hair below 1 s)
             std::snprintf (buf, sizeof (buf), "%.0f ms", s * 1000.0f);
         else
             std::snprintf (buf, sizeof (buf), "%.2f s", s);
