@@ -238,8 +238,12 @@ public:
 
     // (the parent waits core/PluginScanPolicy.h's time for each file; the child first reports a VST3's class count)
 
-    // Adds a specific file (e.g. a .vst3 outside the default folders).
+    // Adds a specific file (e.g. a .vst3 outside the default folders; an .lv2 bundle adds the plugins its manifest lists).
     int addPluginFile (const juce::File& file);
+
+    // Lets the LV2 format find plugins by URI in every LV2 folder LYNX scans (a host that is not `keep` skips this at
+    // construction: the sandbox child calls it before opening an LV2 plugin; round 161).
+    void findLv2Plugins();
 
     std::unique_ptr<juce::PluginDescription> find (const juce::String& id) const;
 

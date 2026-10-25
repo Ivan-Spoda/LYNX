@@ -1170,11 +1170,32 @@ int PluginHost::addPluginFile (const juce::File& file)
     const auto before = known.getNumTypes();
     juce::OwnedArray<juce::PluginDescription> found;
 
-    for (auto* format : formats.getFormats())
-        known.scanAndAddFile (file.getFullPathName(), true, found, *format);
+    if (file.isDirectory() && file.hasFileExtension ("lv2"))
+    {
+        // LV2 plugins are known by URI: the bundle's folder is searched, and the URIs its manifest names are added
+        const auto manifest = file.getChildFile ("manifest.ttl").loadFileAsString();
+        for (auto* format : formats.getFormats())
+            if (format->getName() == "LV2")
+            {
+                format->searchPathsForPlugins (lv2Folders (lv2SearchFolders()), true, false);
+                for (const auto& uri : format->searchPathsForPlugins (juce::FileSearchPath (file.getParentDirectory().getFullPathName()), false, false))
+                    if (manifest.contains ("<" + uri + ">"))
+                        known.scanAndAddFile (uri, true, found, *format);
+            }
+    }
+    else
+        for (auto* format : formats.getFormats())
+            known.scanAndAddFile (file.getFullPathName(), true, found, *format);
 
     save();
     return known.getNumTypes() - before;
+}
+
+void PluginHost::findLv2Plugins()
+{
+    for (auto* format : formats.getFormats())
+        if (format->getName() == "LV2")
+            format->searchPathsForPlugins (lv2Folders (lv2SearchFolders()), true, false);
 }
 
 std::unique_ptr<juce::PluginDescription> PluginHost::find (const juce::String& id) const

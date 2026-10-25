@@ -293,6 +293,15 @@ public:
             return;
         }
 
+        if (args.contains ("--uiperf"))
+        {
+            // LYNX --uiperf project.(flp|lynx) report.txt: the heavy UI cases in the real window, every frame timed (round 161)
+            const auto i = args.indexOf ("--uiperf");
+            juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+            runUiPerf (juce::File (args[i + 1].unquoted()), juce::File (args[i + 2].unquoted()));
+            return;
+        }
+
         if (args.contains ("--selftest"))
         {
             const auto i = args.indexOf ("--selftest");
@@ -2543,6 +2552,21 @@ private:
                 const auto renderMs = juce::Time::getMillisecondCounterHiRes() - start;
                 const auto peak = peakOf();
                 step ("played");
+                if (juce::JUCEApplication::getCommandLineParameters().contains ("--expect-crash"))
+                {
+                    // a plugin that crashes while playing (round 161 test plugin): LYNX notices, mutes it and keeps running
+                    const auto dead = lynx::isSandboxedPluginDead (proxy);
+                    std::fill (l.begin(), l.end(), 0.0f);
+                    std::fill (r.begin(), r.end(), 0.0f);
+                    voice.render (l.data(), r.data(), 4096, 1.0f, 1.0f);
+                    report << "peak=" << peak << " render_1s_ms=" << renderMs << " dead=" << (dead ? 1 : 0) << " peak_after=" << peakOf() << "\n";
+                    ok = dead && peak > 1e-4f && renderMs < 2000.0 && peakOf() == 0.0f;
+                    report << "result=" << (ok ? "OK" : "FAILED") << "\n";
+                    juce::File (reportPath).replaceWithText (report);
+                    setApplicationReturnValue (ok ? 0 : 1);
+                    quit();
+                    return;
+                }
                 report << "parameters=" << proxy.getParameters().size() << " peak=" << peak << " render_1s_ms=" << renderMs << "\n";
 
                 // parameter -> state -> in-process plugin
@@ -2560,8 +2584,28 @@ private:
                     {
                         local->setStateInformation (state.getData(), (int) state.getSize());
                         const auto back = local->getParameters()[0]->getValue();
-                        report << "state_bytes=" << (int) state.getSize() << " target=" << target << " in_process=" << back << "\n";
-                        stateOk = std::abs (back - target) < 0.02f;
+                        // the same steps without the sandbox: some plugins quantise the value or keep it out of their state
+                        auto control = target;
+                        if (auto a = host.getFormats().createPluginInstance (*instrument, 48000.0, 512, error))
+                        {
+                            a->enableAllBuses();
+                            a->prepareToPlay (48000.0, 512);
+                            a->getParameters()[0]->setValue (target);
+                            juce::AudioBuffer<float> block (juce::jmax (2, a->getTotalNumInputChannels(), a->getTotalNumOutputChannels()), 512);
+                            block.clear();
+                            juce::MidiBuffer none;
+                            a->processBlock (block, none);
+                            juce::MemoryBlock direct;
+                            a->getStateInformation (direct);
+                            if (auto b = host.getFormats().createPluginInstance (*instrument, 48000.0, 512, error))
+                            {
+                                b->setStateInformation (direct.getData(), (int) direct.getSize());
+                                control = b->getParameters()[0]->getValue();
+                            }
+                            a->releaseResources();
+                        }
+                        report << "state_bytes=" << (int) state.getSize() << " target=" << target << " in_process=" << back << " in_process_control=" << control << "\n";
+                        stateOk = std::abs (back - control) < 0.02f;
                     }
                 }
 
@@ -2578,9 +2622,35 @@ private:
                 voice.render (l.data(), r.data(), 4096, 1.0f, 1.0f);
                 const auto hangMs = juce::Time::getMillisecondCounterHiRes() - hangStart;
                 const auto dead = lynx::isSandboxedPluginDead (proxy);
-                report << "hung_ms=" << hangMs << " dead=" << (dead ? 1 : 0) << " peak_after=" << peakOf() << "\n";
+                const auto hangPeak = peakOf();
+                report << "hung_ms=" << hangMs << " dead=" << (dead ? 1 : 0) << " peak_after=" << hangPeak << "\n";
 
-                ok = peak > 1e-4f && stateOk && dead && hangMs < 1500.0 && peakOf() == 0.0f;
+                // crashed child (round 161): a second instance aborts; LYNX notices, mutes it and keeps running
+                bool crashOk = false;
+                if (auto second = lynx::createSandboxedPlugin (*instrument, 48000.0, 512, {}, error))
+                {
+                    auto& proxy2 = *second;
+                    lynx::PluginInstrument voice2 (std::move (second), 512);
+                    voice2.noteOn (60, 0.9f);
+                    voice2.render (l.data(), r.data(), 512, 1.0f, 1.0f);
+                    lynx::crashSandboxedPluginForTest (proxy2);
+                    const auto crashStart = juce::Time::getMillisecondCounterHiRes();
+                    while (! lynx::isSandboxedPluginDead (proxy2) && juce::Time::getMillisecondCounterHiRes() - crashStart < 5000.0)
+                    {
+                        voice2.render (l.data(), r.data(), 512, 1.0f, 1.0f);
+                        juce::Thread::sleep (5);
+                    }
+                    const auto crashMs = juce::Time::getMillisecondCounterHiRes() - crashStart;
+                    std::fill (l.begin(), l.end(), 0.0f);
+                    std::fill (r.begin(), r.end(), 0.0f);
+                    voice2.render (l.data(), r.data(), 4096, 1.0f, 1.0f);
+                    const auto crashDead = lynx::isSandboxedPluginDead (proxy2);
+                    report << "crash_ms=" << crashMs << " crash_dead=" << (crashDead ? 1 : 0) << " crash_peak_after=" << peakOf() << "\n";
+                    crashOk = crashDead && crashMs < 3000.0;
+                }
+                step ("crash");
+
+                ok = peak > 1e-4f && stateOk && dead && hangMs < 1500.0 && hangPeak == 0.0f && crashOk;
             }
         }
 
@@ -2588,6 +2658,170 @@ private:
         juce::File (reportPath).replaceWithText (report);
         setApplicationReturnValue (ok ? 0 : 1);
         quit();
+    }
+
+    // --uiperf (round 161): opens the project in the normal window, plays it, and drives the heavy UI cases of round 151
+    // through the window's own event path — the default layout, the Mixer maximised (meters while playing, then
+    // scrolled), the Playlist maximised (scroll down, scroll sideways, zoom in and out) and the Channel rack scrolled.
+    // Every frame is painted right after its event (ComponentPeer::performAnyPendingRepaintsNow) and timed; the report
+    // has, per case, the time to show it and the frames' mean / p95 / max, how many took longer than 16 ms, and the
+    // process CPU. The same on every OS, so Linux (X11, XWayland) and Windows numbers can be put side by side.
+    void runUiPerf (const juce::File& project, const juce::File& report)
+    {
+        startupOptions = lynx::StartupOptions::load();
+        engine = std::make_unique<lynx::AudioEngine>();
+        crashEngine = engine.get();
+        createMainWindow();
+        mainWindow->reveal();
+
+        juce::String error;
+        auto ok = false;
+        const auto loadStart = juce::Time::getMillisecondCounterHiRes();
+        if (project.hasFileExtension ("flp"))
+            ok = engine->importFlpFile (project, error);
+        else if (auto song = lynx::ProjectFile::load (project, error))
+        {
+            engine->setSong (std::move (*song));
+            ok = true;
+        }
+        const auto loadMs = juce::Time::getMillisecondCounterHiRes() - loadStart;
+        if (! ok)
+        {
+            report.replaceWithText ("project: " + project.getFullPathName() + "\nresult=ERROR " + error + "\n");
+            setApplicationReturnValue (1);
+            quit();
+            return;
+        }
+
+        struct Step
+        {
+            juce::String name;
+            std::function<void()> setup;
+            std::function<void (int)> action; // per frame; none: the step watches the window for `frames` ms
+            int frames;
+        };
+
+        struct UiPerf final : juce::Timer
+        {
+            LynxApplication& app;
+            juce::File report;
+            juce::String text;
+            std::vector<Step> steps;
+            std::size_t step = 0;
+            int frame = -1;
+            std::vector<double> times;
+            double setupMs = 0.0, wallStart = 0.0;
+            std::clock_t cpuStart = 0;
+
+            UiPerf (LynxApplication& a, juce::File r) : app (a), report (std::move (r)) {}
+
+            juce::ComponentPeer* peer() const { return app.mainWindow != nullptr ? app.mainWindow->getPeer() : nullptr; }
+
+            double paintNow() const
+            {
+                const auto t0 = juce::Time::getMillisecondCounterHiRes();
+                if (auto* p = peer())
+                    p->performAnyPendingRepaintsNow();
+                return juce::Time::getMillisecondCounterHiRes() - t0;
+            }
+
+            void timerCallback() override
+            {
+                if (step >= steps.size())
+                {
+                    stopTimer();
+                    finish();
+                    return;
+                }
+                auto& s = steps[step];
+                if (frame < 0)
+                {
+                    const auto t0 = juce::Time::getMillisecondCounterHiRes();
+                    if (s.setup)
+                        s.setup();
+                    paintNow();
+                    setupMs = juce::Time::getMillisecondCounterHiRes() - t0;
+                    times.clear();
+                    wallStart = juce::Time::getMillisecondCounterHiRes();
+                    cpuStart = std::clock();
+                    frame = 0;
+                    return;
+                }
+                if (s.action)
+                    s.action (frame);
+                if (const auto ms = paintNow(); ms > 0.25) // (nothing to paint: not a frame)
+                    times.push_back (ms);
+                ++frame;
+                if (s.action ? frame < s.frames : juce::Time::getMillisecondCounterHiRes() - wallStart < (double) s.frames)
+                    return;
+
+                const auto wall = juce::Time::getMillisecondCounterHiRes() - wallStart;
+                const auto cpu = 1000.0 * (double) (std::clock() - cpuStart) / CLOCKS_PER_SEC;
+                auto sorted = times;
+                std::sort (sorted.begin(), sorted.end());
+                const auto at = [&sorted] (double q) { return sorted.empty() ? 0.0 : sorted[(std::size_t) juce::jlimit (0, (int) sorted.size() - 1, (int) (q * (double) sorted.size()))]; };
+                double sum = 0.0;
+                int over = 0;
+                for (auto t : sorted)
+                {
+                    sum += t;
+                    over += t > 16.0 ? 1 : 0;
+                }
+                text << s.name << ": show " << juce::String (setupMs, 1) << " ms, frames " << (int) sorted.size()
+                     << ", mean " << juce::String (sorted.empty() ? 0.0 : sum / (double) sorted.size(), 1) << " ms, p95 " << juce::String (at (0.95), 1)
+                     << " ms, max " << juce::String (sorted.empty() ? 0.0 : sorted.back(), 1) << " ms, >16 ms " << over
+                     << ", CPU " << juce::String (wall > 0.0 ? 100.0 * cpu / wall : 0.0, 0) << "% (process, " << juce::String (wall / 1000.0, 1) << " s)\n";
+                juce::File (report).replaceWithText (text);
+                ++step;
+                frame = -1;
+            }
+
+            void finish()
+            {
+                app.engine->stop();
+                text << "result=OK\n";
+                report.replaceWithText (text);
+                app.setApplicationReturnValue (0);
+                app.quit();
+            }
+        };
+
+        auto* ui = &mainWindow->getContent();
+        auto wheelAt = [this] (juce::Component& target, float dx, float dy, juce::ModifierKeys mods) {
+            auto* peer = mainWindow->getPeer();
+            if (peer == nullptr || ! target.isShowing())
+                return;
+            juce::ModifierKeys::currentModifiers = mods;
+            const auto local = peer->globalToLocal (target.localPointToGlobal (target.getLocalBounds().getCentre()).toFloat());
+            juce::MouseWheelDetails wheel { dx, dy, false, false, false };
+            peer->handleMouseWheel (juce::MouseInputSource::InputSourceType::mouse, local, juce::Time::currentTimeMillis(), wheel);
+            juce::ModifierKeys::currentModifiers = {};
+        };
+
+        auto run = std::make_unique<UiPerf> (*this, report);
+        run->text << "project: " << project.getFullPathName() << "\n"
+                   << "LYNX " << getApplicationVersion() << ", " << juce::SystemStats::getOperatingSystemName() << ", "
+                   << juce::SystemStats::getCpuModel() << ", window " << mainWindow->getWidth() << "x" << mainWindow->getHeight()
+                   << ", scale " << juce::String (juce::Desktop::getInstance().getDisplays().getPrimaryDisplay() != nullptr
+                                                     ? juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->scale : 1.0, 2)
+                   << ", audio device " << (engine->getDeviceManager().getCurrentAudioDevice() != nullptr ? engine->getDeviceManager().getCurrentAudioDevice()->getName() : juce::String ("none")) << "\n"
+                   << "load " << juce::String (loadMs / 1000.0, 2) << " s\n";
+        const auto none = juce::ModifierKeys();
+        run->steps.push_back ({ "desktop, playing", [this, ui] { ui->showDesktopForSnapshot (false); engine->rewind(); engine->play(); }, {}, 3000 });
+        run->steps.push_back ({ "mixer maximised, playing", [ui] { ui->selectTabForSnapshot (3); }, {}, 3000 });
+        run->steps.push_back ({ "mixer scroll", {}, [wheelAt, ui, none] (int f) { wheelAt (ui->getMixerForSnapshot(), 0.0f, f < 30 ? -0.25f : 0.25f, none); }, 60 });
+        run->steps.push_back ({ "playlist maximised, playing", [ui] { ui->selectTabForSnapshot (2); }, {}, 3000 });
+        run->steps.push_back ({ "playlist scroll down/up", [this] { engine->stop(); },
+                                 [wheelAt, ui, none] (int f) { wheelAt (ui->getPlaylistForSnapshot(), 0.0f, f < 40 ? -0.15f : 0.15f, none); }, 80 });
+        run->steps.push_back ({ "playlist scroll sideways", {},
+                                 [wheelAt, ui, none] (int f) { wheelAt (ui->getPlaylistForSnapshot(), f < 40 ? -0.15f : 0.15f, 0.0f, none); }, 80 });
+        run->steps.push_back ({ "playlist zoom in/out", {},
+                                 [wheelAt, ui] (int f) { wheelAt (ui->getPlaylistForSnapshot(), 0.0f, f < 30 ? 0.15f : -0.15f, juce::ModifierKeys (juce::ModifierKeys::ctrlModifier)); }, 60 });
+        run->steps.push_back ({ "channel rack scroll", [ui] { ui->selectTabForSnapshot (0); },
+                                 [wheelAt, ui, none] (int f) { wheelAt (ui->getRackViewportForSnapshot(), 0.0f, f < 30 ? -0.25f : 0.25f, none); }, 60 });
+        // let the window draw the project first
+        perf = std::move (run);
+        juce::Timer::callAfterDelay (1500, [this] { if (perf != nullptr) perf->startTimer (1); });
     }
 
     // --rtstress: opens the project in the normal window with the saved audio device, plays it from the start for
@@ -4751,6 +4985,7 @@ private:
         }
 
         void openFile (const juce::File& file) { content->openFile (file); }
+        lynx::MainComponent& getContent() { return *content; }
         void showSetupWizard() { content->showSetupWizard(); }
         void confirmDiscard (std::function<void()> then) { content->confirmDiscard (std::move (then)); }
 
@@ -4791,6 +5026,7 @@ private:
             engine->restoreAudioDeviceState (savedDeviceState.get());
     }
     std::unique_ptr<MainWindow> mainWindow;
+    std::unique_ptr<juce::Timer> perf; // --uiperf
     std::unique_ptr<lynx::SplashScreen> splash;
     double splashDuration = lynx::SplashScreen::minimumDuration; // seconds of its clock (round 121: from the process start)
     lynx::StartupOptions startupOptions;
