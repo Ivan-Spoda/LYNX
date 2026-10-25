@@ -185,7 +185,7 @@ Any knob or fader (channel, mixer, effect, plugin parameter) becomes a clip with
 - Note recording (PC keyboard and MIDI) and audio input recording
 - Undo/redo on every edit
 - Opt-in crash and freeze reports (anonymous), or a prefilled GitHub bug report
-- Audio drivers: Windows Audio (WASAPI), DirectSound and ASIO on Windows; Core Audio on macOS; ALSA and JACK on Linux
+- Audio drivers: Windows Audio (WASAPI), DirectSound and ASIO on Windows; Core Audio on macOS; PipeWire (native), JACK and ALSA on Linux
 - Any insert to any hardware output, including single mono channels
 
 </td>
@@ -273,7 +273,7 @@ xattr -dr com.apple.quarantine /Applications/LYNX.app
 
 macOS asks for microphone access the first time you record.
 
-**Linux.** Needs X11 or XWayland, and audio through ALSA, JACK or PipeWire (through its JACK or ALSA layer). For the
+**Linux.** Needs X11 or XWayland; audio goes through PipeWire directly (or JACK, or ALSA), see [docs/LINUX.md](docs/LINUX.md). For the
 AppImage:
 
 ```
@@ -290,7 +290,7 @@ entry, an icon and the `.lynx` file type (`./install.sh --uninstall` removes it 
 | | Windows | macOS | Linux |
 |---|---|---|---|
 | Plugin formats | VST3, CLAP, VST2 | VST3, CLAP, Audio Units | VST3, CLAP, LV2, VST2 |
-| Audio drivers | Windows Audio (WASAPI), DirectSound, ASIO, built-in LYNX ASIO driver | Core Audio | ALSA, JACK (PipeWire via `pipewire-jack`) |
+| Audio drivers | Windows Audio (WASAPI), DirectSound, ASIO, built-in LYNX ASIO driver | Core Audio | PipeWire (native), JACK, ALSA |
 | Out-of-process plugin sandbox | optional | – | – |
 | FL Studio integration (factory samples, plugin database) | FL Studio installation | FL Studio app bundle is looked for (untested) | Windows FL Studio under Wine (`~/.wine` or `$WINEPREFIX`) |
 | Settings folder | `%APPDATA%\LYNX` | `~/Library/Application Support/LYNX` | `~/.config/LYNX` (`$XDG_CONFIG_HOME`) |

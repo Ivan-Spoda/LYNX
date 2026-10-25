@@ -16,6 +16,8 @@
 #include "engine/AudioEngine.h"
 #include "engine/AudioLogger.h"
 #include "engine/DllAsioDevice.h"
+#include "engine/PipeWireDevice.h"
+#include "platform/LinuxRealtime.h"
 #include "engine/Exporter.h"
 #include "engine/MidiFileIo.h"
 #include "engine/PluginHost.h"
@@ -388,6 +390,12 @@ public:
             // diagnostics: driver types and output devices JUCE offers (without opening any)
             juce::AudioDeviceManager manager;
             juce::String report;
+            manager.getAvailableDeviceTypes();
+            if (auto pipeWire = lynx::makePipeWireDeviceType()) // Linux: LYNX's own PipeWire client (round 161)
+                manager.addAudioDeviceType (std::move (pipeWire));
+           #if JUCE_LINUX
+            report << lynx::describePipeWire() << "\n";
+           #endif
 
             for (auto* type : manager.getAvailableDeviceTypes())
             {
@@ -407,10 +415,11 @@ public:
 
         if (args.contains ("--devicetest"))
         {
-            // LYNX.exe --devicetest "type" "device" report.txt ["input device"]: opens that output device (and, with the
+            // LYNX.exe --devicetest "type" "device" report.txt ["input device"] [--buffer N] [--roundtrip]: opens that output device (and, with the
             // 4th argument, an input: "*" = the same device / the driver's default input), receives 1 s of callbacks
             // writing silence, closes it and reports rate, block size, latency, callbacks and the input channels with
-            // their peak level (driver check, no sound)
+            // their peak level (driver check, no sound). --roundtrip: clicks out, found again on input 1 through a loopback
+            // cable / PipeWire link: the round-trip latency (3 s)
             const auto i = args.indexOf ("--devicetest");
             const auto typeName = args[i + 1].unquoted(), deviceName = args[i + 2].unquoted();
             auto inputName = args.size() > i + 4 && ! args[i + 4].startsWith ("--") ? args[i + 4].unquoted() : juce::String();
@@ -420,6 +429,9 @@ public:
             auto step = [&] (const juce::String& line) { report << line << "\n"; reportFile.replaceWithText (report); }; // progress survives a driver that ends the process
             step ("step=start");
             juce::AudioDeviceManager manager;
+            manager.getAvailableDeviceTypes();
+            if (auto pipeWire = lynx::makePipeWireDeviceType())
+                manager.addAudioDeviceType (std::move (pipeWire));
             std::unique_ptr<juce::AudioIODevice> device;
             for (auto* type : manager.getAvailableDeviceTypes())
                 if (type->getTypeName() == typeName)
@@ -447,12 +459,38 @@ public:
             {
                 std::atomic<int> calls { 0 }, inputs { 0 };
                 std::array<std::atomic<float>, 64> peaks {};
+                // --roundtrip (round 161): a click every quarter second on the outputs, found again on input 1 through a
+                // loopback; the delays in samples
+                bool roundtrip = false;
+                int period = 12000;
+                std::int64_t position = 0, lastClick = -1;
+                std::vector<int> delays;
                 void audioDeviceIOCallbackWithContext (const float* const* in, int numIn, float* const* out, int channels, int n,
                                                        const juce::AudioIODeviceCallbackContext&) override
                 {
                     for (int c = 0; c < channels; ++c)
                         if (out[c] != nullptr)
                             juce::FloatVectorOperations::clear (out[c], n);
+                    if (roundtrip)
+                    {
+                        for (int i = 0; i < n; ++i)
+                        {
+                            if (numIn > 0 && in[0] != nullptr && lastClick >= 0 && std::abs (in[0][i]) > 0.5f)
+                            {
+                                if (delays.size() < delays.capacity())
+                                    delays.push_back ((int) (position + i - lastClick));
+                                lastClick = -1;
+                            }
+                            if ((position + i) % period == 0 && position + i > 0)
+                            {
+                                for (int c = 0; c < channels; ++c)
+                                    if (out[c] != nullptr)
+                                        out[c][i] = 0.9f;
+                                lastClick = position + i;
+                            }
+                        }
+                        position += n;
+                    }
                     inputs.store (numIn);
                     for (int c = 0; c < juce::jmin (numIn, 64); ++c)
                         if (in[c] != nullptr)
@@ -496,9 +534,21 @@ public:
                 else
                 {
                     step ("step=start_callbacks");
+                    silence.roundtrip = args.contains ("--roundtrip");
+                    silence.period = juce::jmax (1, (int) (rate / 4));
+                    silence.delays.reserve (64);
                     device->start (&silence);
-                    juce::Thread::sleep (1000);
+                    juce::Thread::sleep (silence.roundtrip ? 3000 : 1000);
                     device->stop();
+                    if (silence.roundtrip)
+                    {
+                        auto d = silence.delays;
+                        std::sort (d.begin(), d.end());
+                        report << "roundtrip_clicks=" << (int) d.size() << "\n";
+                        if (! d.empty())
+                            report << "roundtrip_samples=min " << d.front() << " median " << d[d.size() / 2] << " max " << d.back() << "\n"
+                                   << "roundtrip_ms=" << juce::String (1000.0 * d[d.size() / 2] / device->getCurrentSampleRate(), 2) << "\n";
+                    }
                     report << "rate=" << device->getCurrentSampleRate() << "\n"
                            << "block=" << device->getCurrentBufferSizeSamples() << "\n"
                            << "output_latency=" << device->getOutputLatencyInSamples() << "\n"
@@ -2672,6 +2722,7 @@ private:
                 }
                 if (recordTo.isNotEmpty())
                     recording = finishStressTake (juce::File (recordTo), seconds);
+                const auto& cli = juce::JUCEApplication::getCommandLineParameterArray();
                 const auto s = engine->getRtStats().snapshot();
                 juce::String text;
                 text << "project: " << project.getFullPathName() << "\n"
@@ -2689,6 +2740,21 @@ private:
                         text << " " << (int) (b * 10) << (b + 1 == s.histogram.size() ? juce::String ("+") : "-" + juce::String ((int) (b * 10 + 10))) << "%:" << (juce::int64) s.histogram[b];
                 text << "\n";
                 text << recording;
+                // --settingsshot file.png (round 161): Options > Audio settings of this run's device, as a picture
+                if (const auto at = cli.indexOf ("--settingsshot"); at >= 0 && at + 1 < cli.size())
+                {
+                    auto page = lynx::makeSettingsPanel (*engine, lynx::SettingsPage::audio);
+                    juce::Image image (juce::Image::ARGB, page->getWidth(), page->getHeight(), true);
+                    {
+                        juce::Graphics g (image);
+                        g.fillAll (lynx::theme::panel);
+                        page->paintEntireComponent (g, false);
+                    }
+                    const juce::File shot (cli[at + 1].unquoted());
+                    shot.deleteFile();
+                    if (auto out = shot.createOutputStream())
+                        juce::PNGImageFormat().writeImageToStream (image, *out);
+                }
                 text << "result=" << (s.callbacks == 0 ? "ERROR no audio callbacks" : s.overBudget == 0 && s.lateCalls == 0 ? "OK" : "GLITCHES") << "\n";
                 report.replaceWithText (text);
                 restoreSavedDeviceState();

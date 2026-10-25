@@ -22,6 +22,8 @@
 #include "core/Scheduler.h"
 #include "engine/ChannelRackProcessor.h"
 #include "engine/DllAsioDevice.h"
+#include "engine/PipeWireDevice.h"
+#include "platform/LinuxRealtime.h"
 #include "engine/Metronome.h"
 #include "core/NoteTools.h"
 #include "engine/PreviewPlayer.h"
@@ -136,7 +138,8 @@ void raiseAudioThreadPriority()
     // below the usual JACK/PipeWire audio thread priorities. Without the permission the thread stays as it is.
     sched_param param {};
     param.sched_priority = juce::jlimit (sched_get_priority_min (SCHED_FIFO), sched_get_priority_max (SCHED_FIFO), 70);
-    pthread_setschedparam (pthread_self(), SCHED_FIFO, &param);
+    if (pthread_setschedparam (pthread_self(), SCHED_FIFO, &param) != 0)
+        rt::noteAudioThread (false); // RealtimeKit / the portal may grant it (round 161)
    #endif
 }
 
@@ -198,6 +201,12 @@ AudioEngine::AudioEngine (bool openAudioDevice)
             deviceManager.getAvailableDeviceTypes(); // the standard types first
             deviceManager.addAudioDeviceType (std::move (lynxAsio));
         }
+        // LYNX's own PipeWire client on Linux (round 161), listed when a PipeWire daemon answers
+        if (auto pipeWire = makePipeWireDeviceType())
+        {
+            deviceManager.getAvailableDeviceTypes();
+            deviceManager.addAudioDeviceType (std::move (pipeWire));
+        }
 
         // 0 inputs, 2 outputs; the device of the last session (Settings › Audio) if it is still there, else the default.
         const auto saved = juce::XmlDocument::parse (audioDeviceFile());
@@ -208,7 +217,10 @@ AudioEngine::AudioEngine (bool openAudioDevice)
             fresh = true;
         }
         if (fresh)
+        {
+            choosePreferredDriver(); // Linux: PipeWire, then JACK, then ALSA
             chooseSafeBufferSize(); // no saved setup: a buffer with room for heavy projects (Settings › Audio changes it)
+        }
         deviceManager.addAudioCallback (this);
         if (rackProcessor != nullptr)
             rackProcessor->getRenderer().setProfiling (true); // per-unit CPU for the CPU meter and the glitch log
@@ -2396,6 +2408,7 @@ void AudioEngine::timerCallback()
     }
 
     updateRealtimeStats();
+    rt::promotePending(); // Linux: real-time priority for the audio threads seen since the last tick (round 161)
     applyControllers();
     updateRecording();
     rackExchange.collectGarbage();
@@ -2417,6 +2430,25 @@ void AudioEngine::timerCallback()
         ++latencyRepublishes;
         publishSong();
     }
+}
+
+void AudioEngine::choosePreferredDriver()
+{
+   #if JUCE_LINUX || JUCE_BSD
+    std::vector<std::pair<std::string, bool>> types;
+    for (auto* type : deviceManager.getAvailableDeviceTypes())
+    {
+        type->scanForDevices();
+        types.emplace_back (type->getTypeName().toStdString(), ! type->getDeviceNames (false).isEmpty());
+    }
+    const auto best = juce::String (prefs::preferredLinuxDriver (types));
+    if (best.isNotEmpty() && best != deviceManager.getCurrentAudioDeviceType())
+    {
+        deviceManager.setCurrentAudioDeviceType (best, true);
+        if (deviceManager.getCurrentAudioDevice() == nullptr) // it would not open: back to what worked
+            deviceManager.initialise (0, 2, nullptr, true);
+    }
+   #endif
 }
 
 void AudioEngine::chooseSafeBufferSize()
@@ -2525,6 +2557,9 @@ juce::String AudioEngine::describeRealtime (bool withUnits) const
         text << "  device: " << device->getTypeName() << " / " << device->getName() << ", " << (int) rate << " Hz, buffer " << buffer
              << " samples (deadline " << juce::String (prefs::bufferLatencyMs (buffer, rate), 2) << " ms), output latency "
              << device->getOutputLatencyInSamples() << " samples, driver dropouts " << device->getXRunCount() << "\n";
+       #if JUCE_LINUX
+        text << "  audio thread: " << (rt::status() == rt::Status::unknown ? juce::String ("not seen yet") : rt::describe()) << "\n";
+       #endif
     }
     else
         text << "  device: none\n";
@@ -2674,6 +2709,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
     // FTZ/DAZ for the whole callback (round 160): the rack had it, but the metronome, the preview player and the
     // hosted plugins' graph nodes around it ran without
     const ScopedFlushDenormals noDenormals;
+    rt::noteAudioThread(); // Linux: the message thread asks for real-time priority for this thread once
     // real-time health: how long this callback took against its deadline (the buffer's duration)
     const auto callbackStart = juce::Time::getMillisecondCounterHiRes();
     struct Measure
@@ -2831,6 +2867,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
 void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
     rtStats.deviceRestarted();
+    rt::resetForNewDevice();
     transport.sampleRate.store (device->getCurrentSampleRate());
     // FL's fixed size buffers: 2 ms, or the device buffer with "Process maximum size buffers" (REA round 134)
     setFixedPluginBlock (device->getCurrentBufferSizeSamples(), device->getCurrentSampleRate());

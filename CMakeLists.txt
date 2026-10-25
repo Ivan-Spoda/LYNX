@@ -276,6 +276,8 @@ if(LYNX_BUILD_APP)
         src/engine/Exporter.cpp
         src/engine/StreamPrefetcher.cpp
         src/engine/DllAsioDevice.cpp
+        src/engine/PipeWireDevice.cpp
+        src/platform/LinuxRealtime.cpp
         src/engine/ClapFormat.cpp
         src/engine/Vst2Format.cpp
         src/engine/MidiFileIo.cpp
@@ -372,6 +374,9 @@ if(LYNX_BUILD_APP)
     else()
         # ALSA (linked) + JACK (loaded at run time; PipeWire serves JACK clients through pipewire-jack)
         target_compile_definitions(LYNX PRIVATE JUCE_ALSA=1 JUCE_JACK=1 JUCE_PLUGINHOST_LV2=1)
+        # LYNX's own PipeWire driver (round 161): vendored MIT headers, libpipewire-0.3.so.0 loaded at run time
+        target_include_directories(LYNX SYSTEM PRIVATE third_party/pipewire/include/pipewire-0.3 third_party/pipewire/include/spa-0.2)
+        target_link_libraries(LYNX PRIVATE ${CMAKE_DL_LIBS})
     endif()
 
     target_link_libraries(LYNX
