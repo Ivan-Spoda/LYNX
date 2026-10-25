@@ -3436,7 +3436,7 @@ void MainComponent::showMissingFiles (bool afterOpening)
                     auto it = std::find_if (info.plugins.begin(), info.plugins.end(), [&] (const MissingPlugin& p) { return p.name == name; });
                     if (it == info.plugins.end())
                         it = info.plugins.insert (info.plugins.end(),
-                                                  MissingPlugin { name, {}, TR_NOOP ("LYNX substitute: {0} (the original plugin is used again once it is installed)"),
+                                                  MissingPlugin { name, {}, TR_NOOP ("LYNX substitute: {0} (the original plugin is used again once it is installed). FL Studio plays a missing plugin's slot unprocessed: a substitute slot's menu › Bypass all LYNX substitutes of this project does the same"),
                                                                   effectInfo (fx.kind).name });
                     const auto user = song.mixer[t].name.empty() ? (t == 0 ? std::string ("Master") : "Insert " + std::to_string (t)) : song.mixer[t].name;
                     if (std::find (it->usedBy.begin(), it->usedBy.end(), user) == it->usedBy.end())

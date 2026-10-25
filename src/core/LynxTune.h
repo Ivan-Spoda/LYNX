@@ -13,7 +13,7 @@
 // moved with the pitch when formant preserve is off; formant shift moves them on its own.
 //
 // Latency: a constant number of samples set by the voice range and the low-latency switch (two longest periods, or
-// 1.25 in low-latency mode), reported to PDC.
+// 0.5 in low-latency mode), reported to PDC.
 
 #include <array>
 #include <cstdint>

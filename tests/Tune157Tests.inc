@@ -39,3 +39,38 @@ TEST (tune_harmonic_guard_holds_the_fundamental_round157)
         }
     CHECK (worst < 1.0);
 }
+
+TEST (flp_insert_input_imported_round157c)
+{
+    // FL's list on a two-input device (FL Studio 2026, REA_rodada157c): 0 = "In 1 - In 2", 1 = "In 1", 2 = "In 2"
+    auto is = [] (const lynx::InputSource& s, int channel, bool stereo) { return s.channel == channel && s.stereo == stereo; };
+    CHECK (is (lynx::flInputSource (0, 2), 0, true));
+    CHECK (is (lynx::flInputSource (1, 2), 0, false));
+    CHECK (is (lynx::flInputSource (2, 2), 1, false));
+    // eight inputs: four pairs, then the channels alone (her projects' 4 = "In 1" alone on such a device)
+    CHECK (is (lynx::flInputSource (3, 8), 6, true));
+    CHECK (is (lynx::flInputSource (4, 8), 0, false));
+    CHECK (is (lynx::flInputSource (11, 8), 7, false));
+    // past this device's list (FL had more inputs): the first channel alone; none stays none
+    CHECK (is (lynx::flInputSource (4, 2), 0, false));
+    CHECK (lynx::flInputSource (-1, 2).channel == -1);
+    // the .flp: 0x9A follows the insert's 0xEC (before 0x93); Master −1, insert 1 = 4, insert 2 = −1
+    FlpBuilder b;
+    auto insert = [&b] (std::int32_t input) {
+        b.data (0xEC, std::vector<std::uint8_t> (12, 0));
+        b.u8 (0x9A);
+        b.u32 ((std::uint32_t) input);
+        b.u8 (0x93);
+        b.u32 ((std::uint32_t) -1);
+    };
+    insert (-1);
+    insert (4);
+    insert (-1);
+    const auto p = flp::parseProject (b.bytes);
+    CHECK (p.mixer.size() == 3 && p.mixer[0].input == -1 && p.mixer[1].input == 4 && p.mixer[2].input == -1);
+    const auto song = lynx::importFlp (p);
+    CHECK (song.mixer.size() > 2 && song.mixer[1].flInput == 4 && song.mixer[1].monitor == lynx::InputMonitor::on);
+    CHECK (song.mixer.size() > 2 && song.mixer[1].inputChannel == -1); // resolved by the engine on the open device
+    CHECK (song.mixer.size() > 2 && song.mixer[0].flInput == -1 && song.mixer[2].flInput == -1);
+    CHECK (song.mixer.size() > 2 && song.mixer[2].monitor == lynx::InputMonitor::automatic);
+}

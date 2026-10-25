@@ -1392,8 +1392,24 @@ void AudioEngine::setSong (Song newSong)
     for (const auto t : std::vector<int> (armedInserts))
         setInsertArmed (t, false);
     if (prefetcher != nullptr && ! hasAudioInput()
-        && std::any_of (song.mixer.begin(), song.mixer.end(), [] (const MixerTrack& t) { return t.inputChannel >= 0; }))
+        && std::any_of (song.mixer.begin(), song.mixer.end(), [] (const MixerTrack& t) { return t.inputChannel >= 0 || t.flInput >= 0; }))
         openAudioInput();
+    // an FL project's insert inputs (REA round 157c): FL's list index on the device open now
+    if (prefetcher != nullptr && hasAudioInput())
+    {
+        auto* device = deviceManager.getCurrentAudioDevice();
+        const auto channels = device != nullptr ? device->getInputChannelNames().size() : 0;
+        for (auto& t : song.mixer)
+        {
+            if (t.flInput >= 0 && t.inputChannel < 0)
+            {
+                const auto source = flInputSource (t.flInput, channels);
+                t.inputChannel = source.channel;
+                t.inputStereo = source.stereo;
+            }
+            t.flInput = -1;
+        }
+    }
     // hardware output targets: their channels open with the project (the ones the device has)
     if (prefetcher != nullptr)
         openTargetedOutputs();
@@ -1848,7 +1864,7 @@ bool AudioEngine::finishFlpImport (PreparedFlp&& prepared, bool asEdit)
                                         [&] (const MissingPlugin& m) { return m.name == name && ! m.replacementArg.empty(); });
                 if (it == missingPluginDetails.end())
                     it = missingPluginDetails.insert (missingPluginDetails.end(),
-                                                      MissingPlugin { name, {}, TR_NOOP ("LYNX substitute: {0} (the original plugin is used again once it is installed)"),
+                                                      MissingPlugin { name, {}, TR_NOOP ("LYNX substitute: {0} (the original plugin is used again once it is installed). FL Studio plays a missing plugin's slot unprocessed: a substitute slot's menu › Bypass all LYNX substitutes of this project does the same"),
                                                                       effectInfo (fx.kind).name });
                 const auto user = userOf (imported, t);
                 if (std::find (it->usedBy.begin(), it->usedBy.end(), user) == it->usedBy.end())
