@@ -315,6 +315,7 @@ struct MixerInsert
     std::uint32_t colour = 0;    // 0xRRGGBB (0 = no stored colour)
     std::vector<int> routes;      // destination tracks (0 = Master)
     bool hasRoutes = false;
+    int output = -2;              // 0x93 "Audio output target": -1 = none, 0 = the device's first pair; -2 = not in the file
 
     struct Slot
     {
