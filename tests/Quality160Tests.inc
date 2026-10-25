@@ -119,7 +119,7 @@ TEST (q160_stretch_keeps_clicks_sharp_and_on_time)
 TEST (q160_stretch_tonal_purity)
 {
     // a steady 1 kHz tone stretched by 1.25 / 0.8 stays clean (old WSOLA ≈ 148 dB on a pure sine, but the plain
-    // Signalsmith preset gave 57 dB; LYNX's 180 ms / 30 ms configuration ≈ 100 dB)
+    // Signalsmith preset gave 57 dB; LYNX's 120 ms / 20 ms configuration ≈ 100 dB)
     const auto in = q160::sineOf (1000.0, 3.0);
     for (auto method : { lynx::StretchMethod::general, lynx::StretchMethod::mono })
         for (double ratio : { 0.8, 1.25 })
@@ -224,9 +224,9 @@ TEST (q160_event_sort_is_stable_and_allocation_free)
         b.add (e);
     }
     b.sortByOffset();
-    CHECK (b.count == 6);
-    CHECK (b.events[0].sampleOffset == 0 && b.events[1].key == 4 /* off first */ && b.events[2].key == 1 && b.events[3].key == 2);
-    CHECK (b.events[4].sampleOffset == 20 && b.events[5].sampleOffset == 30);
+    CHECK (b.size() == 6);
+    CHECK (b[0].sampleOffset == 0 && b[1].key == 4 /* off first */ && b[2].key == 1 && b[3].key == 2);
+    CHECK (b[4].sampleOffset == 20 && b[5].sampleOffset == 30);
 }
 
 TEST (q160_sampler_uses_render_quality_when_export_starts_after_prepare)
@@ -264,4 +264,42 @@ TEST (q160_asio_suggestion)
     CHECK (suggestedAsioDriver ("Windows Audio", { "ASIO4ALL v2", "LYNX ASIO" }) == "LYNX ASIO");
     CHECK (suggestedAsioDriver ("Windows Audio", { "ASIO4ALL v2" }) == "ASIO4ALL v2");
     CHECK (suggestedAsioDriver ("Windows Audio", {}).empty());
+}
+
+TEST (q160_preview_interpolation_44k1_file_on_48k_device)
+{
+    // the Browser / editor preview reads with FL's 24-point sinc now (it was linear: a 10 kHz tone of a 44.1 kHz file on
+    // a 48 kHz device came out 1.5 dB low with an image at 13.9 kHz only 21 dB down, REA_rodada160 §4)
+    const double fi = 44100.0, fo = 48000.0, f = 10000.0;
+    std::vector<float> x ((std::size_t) fi * 2);
+    for (std::size_t i = 0; i < x.size(); ++i)
+        x[i] = (float) (0.5 * std::sin (2.0 * 3.141592653589793 * f * (double) i / fi));
+    lynx::flrs::Kernel k;
+    k.setQuality (lynx::flrs::liveQuality);
+    k.setSpeed (fi / fo);
+    const auto half = (std::int64_t) k.halfWidth;
+    lynx::SampleData out;
+    out.sampleRate = fo;
+    for (long j = 0; j < (long) fo; ++j)
+    {
+        const auto pos = (double) j * fi / fo + 100.0;
+        const auto whole = lynx::flrs::wholeFrames (pos);
+        float yl = 0.0f, yr = 0.0f;
+        lynx::flrs::interpolate (k, x.data() + (whole - half + 1), x.data() + (whole - half + 1), pos - (double) whole, yl, yr);
+        out.left.push_back (yl);
+    }
+    const auto sinad = q160::sinadDb (out, f);
+    CHECK (sinad > 60.0);
+    // the linear read it replaces, for the record
+    lynx::SampleData lin;
+    lin.sampleRate = fo;
+    for (long j = 0; j < (long) fo; ++j)
+    {
+        const auto pos = (double) j * fi / fo + 100.0;
+        const auto i = (std::size_t) pos;
+        const auto fr = (float) (pos - (double) i);
+        lin.left.push_back (x[i] + fr * (x[i + 1] - x[i]));
+    }
+    CHECK (q160::sinadDb (lin, f) < 30.0);
+    std::printf ("  [q160] preview 10 kHz 44.1->48 kHz SINAD: sinc %.1f dB, linear %.1f dB\n", sinad, q160::sinadDb (lin, f));
 }

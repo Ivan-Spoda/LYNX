@@ -72,7 +72,7 @@ void PreviewPlayer::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     const auto level = gain * (browser ? volume.load (std::memory_order_relaxed) : 1.0f);
 
     // FL's sampler interpolation (24-point sinc, round 160) instead of the linear read it had: a 44.1 kHz file on a
-    // 48 kHz device lost 2.1 dB at 10 kHz and had an image at −21 dBc (13.9 kHz) in the Browser and editor previews
+    // 48 kHz device lost 1.5 dB at 10 kHz and had an image at −21 dBc (13.9 kHz) in the Browser and editor previews
     kernel.setSpeed (rate);
     const auto half = (std::int64_t) kernel.halfWidth;
     const auto lastFrame = (std::int64_t) last;

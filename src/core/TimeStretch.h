@@ -5,7 +5,7 @@
 // with Signalsmith Stretch (MIT, third_party/signalsmith) plus LYNX's own transient handling:
 //  - ratios within 0.1 % of 1 (e.g. FL's recorded takes, whose stretch time is their own length) are resampled with a
 //    windowed sinc instead — at most 1.7 cents of pitch, no stretch artefacts at all;
-//  - otherwise the spectral stretcher runs, and for the general and transient methods the attacks it detects are
+//  - otherwise the spectral stretcher runs, and the attacks it detects are
 //    spliced back unstretched (no smeared or doubled hits, no pre-echo).
 
 #include <memory>
