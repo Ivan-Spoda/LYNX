@@ -3919,6 +3919,50 @@ void explain (const AudioEngine::RecordingNotice& notice)
         juce::AlertWindow::showAsync (options.withButton (tr ("OK")), nullptr);
 }
 
+// Round 157 ([DATA] the 0.1.15 projects of a singer who found that "the effects do nothing" on her voice): her
+// microphone was the input of both Insert 1 (with the effects) and the Master. The Master plays its input straight
+// away, without any insert's effects, so the dry voice covered the processed one. When an input is chosen and the
+// Master plays the same device channel as an insert, LYNX says so and offers to take it off the Master.
+void warnDoubleMonitoring (AudioEngine& engine, int track)
+{
+    const auto& mixer = engine.getSong().mixer;
+    if (mixer.empty() || track < 0 || track >= (int) mixer.size())
+        return;
+    auto channels = [] (const MixerTrack& t) {
+        std::pair<int, int> r { t.inputChannel, t.inputChannel + (t.inputStereo ? 1 : 0) };
+        return r;
+    };
+    auto overlaps = [&] (const MixerTrack& a, const MixerTrack& b) {
+        if (a.inputChannel < 0 || b.inputChannel < 0)
+            return false;
+        const auto [a0, a1] = channels (a);
+        const auto [b0, b1] = channels (b);
+        return a0 <= b1 && b0 <= a1;
+    };
+    const auto& master = mixer[0];
+    if (master.inputChannel < 0 || master.monitor == InputMonitor::off)
+        return;
+    int insert = -1;
+    for (int t = 1; t < (int) mixer.size() && insert < 0; ++t)
+        if ((track == 0 || t == track) && overlaps (master, mixer[(std::size_t) t]))
+            insert = t;
+    if (insert < 0)
+        return;
+    const auto name = juce::String::fromUTF8 (mixer[(std::size_t) insert].name.c_str());
+    auto options = juce::MessageBoxOptions()
+                       .withIconType (juce::MessageBoxIconType::WarningIcon)
+                       .withTitle (tr ("The same input plays twice"))
+                       .withMessage (tr ("This audio input is the input of the Master and of {0}. The Master plays it straight away, without "
+                                         "{0}'s effects, so you hear the dry sound on top of the processed one (the effects seem to do nothing).\n\n"
+                                         "To hear it through {0}'s effects, take it off the Master.", { name.isNotEmpty() ? name : tr ("Insert {0}", { juce::String (insert) }) }))
+                       .withButton (tr ("Take it off the Master"))
+                       .withButton (tr ("Keep both"));
+    juce::AlertWindow::showAsync (options, [&engine] (int result) {
+        if (result == 1)
+            engine.setInsertInput (0, -1, true);
+    });
+}
+
 void showMenu (AudioEngine& engine, int track, juce::Component* target, std::function<void()> chosen)
 {
     if (track < 0 || track >= (int) engine.getSong().mixer.size())
@@ -3950,6 +3994,7 @@ void showMenu (AudioEngine& engine, int track, juce::Component* target, std::fun
         menu.addItem (juce::String::fromUTF8 (source.name.c_str()) + (source.stereo ? "" : "  " + tr ("(mono)")), true, ticked,
                       [&engine, track, source, chosen] {
                           engine.setInsertInput (track, source.channel, source.stereo);
+                          warnDoubleMonitoring (engine, track);
                           if (chosen)
                               chosen();
                       });

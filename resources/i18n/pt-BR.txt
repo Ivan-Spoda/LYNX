@@ -4417,3 +4417,7 @@ countries: br
 # --- round 155: export plugin warm-up
 "Plugin warm-up" = "Aquecimento dos plugins"
 "Before the export starts, third-party plugins process a moment of silence until they have finished loading their settings (bridged plugins, samplers that load in the background), so the file does not start with half-loaded effects" = "Antes de a exportação começar, os plugins de terceiros processam um instante de silêncio até terminarem de carregar as suas configurações (plugins em ponte, samplers que carregam em segundo plano), para o arquivo não começar com efeitos carregados pela metade"
+"The same input plays twice" = "A mesma entrada toca duas vezes"
+"This audio input is the input of the Master and of {0}. The Master plays it straight away, without {0}'s effects, so you hear the dry sound on top of the processed one (the effects seem to do nothing).\n\nTo hear it through {0}'s effects, take it off the Master." = "Esta entrada de áudio é a entrada do Master e de {0}. O Master a toca direto, sem os efeitos de {0}, então você ouve o som seco por cima do processado (parece que os efeitos não fazem nada).\n\nPara ouvir com os efeitos de {0}, tire-a do Master."
+"Take it off the Master" = "Tirar do Master"
+"Keep both" = "Manter as duas"

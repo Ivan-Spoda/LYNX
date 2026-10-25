@@ -14,6 +14,7 @@
 #include "core/SynthPresets.h"
 #include "core/FlWrapper.h"
 #include "engine/AudioEngine.h"
+#include "engine/AudioLogger.h"
 #include "engine/DllAsioDevice.h"
 #include "engine/Exporter.h"
 #include "engine/MidiFileIo.h"
@@ -2131,12 +2132,22 @@ private:
             engine->takeUiPulse();
             if (recordTo.isNotEmpty())
                 engine->setRecording (true);
+            // --log folder: the audio logger records what the Master plays during the run (realtime vs export checks)
+            const auto& cli = juce::JUCEApplication::getCommandLineParameterArray();
+            if (const auto at = cli.indexOf ("--log"); at >= 0 && at + 1 < cli.size())
+                engine->getAudioLogger().start (juce::File (cli[at + 1].unquoted()), engine->getDeviceManager().getCurrentAudioDevice() != nullptr
+                                                                                     ? engine->getDeviceManager().getCurrentAudioDevice()->getCurrentSampleRate() : 44100.0);
             engine->play();
             juce::Timer::callAfterDelay ((int) (seconds * 1000.0), [this, project, report, seconds, loadMs, recordTo] {
                 if (engine == nullptr)
                     return;
                 engine->stop();
                 juce::String recording;
+                if (engine->getAudioLogger().isLogging())
+                {
+                    recording << "  logged: " << engine->getAudioLogger().currentFile().getFullPathName() << "\n";
+                    engine->getAudioLogger().stop();
+                }
                 if (recordTo.isNotEmpty())
                     recording = finishStressTake (juce::File (recordTo), seconds);
                 const auto s = engine->getRtStats().snapshot();
