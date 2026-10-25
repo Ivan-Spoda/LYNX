@@ -8,6 +8,9 @@
 #include "ui/ChannelRackComponent.h"
 #include "ui/Theme.h"
 #include "ui/ToolWindow.h"
+#include "core/SoundFont.h"
+#include "core/SoundFontIndex.h"
+#include "ui/SoundFontEditor.h"
 
 namespace lynx
 {
@@ -133,6 +136,18 @@ public:
                                                 if (auto c = natives::makeChannel (kind, flStudioAccess()))
                                                     targets.addInstrument (*c);
                                             } });
+
+        // LYNX Soundfont (round 158): the empty player, and every indexed SoundFont preset ("piano", "808"...)
+        instruments.all.push_back ({ "LYNX Soundfont", tr ("built-in"), [this] { targets.addInstrument (sf::makeChannel()); } });
+        ensureSoundFontIndex();
+        for (const auto& hit : sf::PresetIndex::shared().search ({}, 5000))
+            instruments.all.push_back ({ juce::String::fromUTF8 (hit.presetName.c_str()),
+                                         tr ("SoundFont preset: {0}", { juce::String::fromUTF8 (hit.fontName.c_str()) }) + " " + juce::String::fromUTF8 (hit.category.c_str()),
+                                         [this, hit] {
+                                             auto c = sf::makeChannel (hit.path, hit.bank, hit.program);
+                                             c.name = hit.presetName;
+                                             targets.addInstrument (c);
+                                         } });
 
         for (auto kind : addableEffects())
             if (addableEffectAvailable (kind)) // (FL engines without the user's FL installation are left out)

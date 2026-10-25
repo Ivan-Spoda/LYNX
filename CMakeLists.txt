@@ -127,6 +127,9 @@ add_library(lynx_core STATIC
     src/core/Patcher.cpp
     src/core/ThreeOsc.cpp
     src/core/Plucked.cpp
+    src/core/SoundFont.cpp
+    src/core/SoundFontLoad.cpp
+    src/core/SoundFontIndex.cpp
     src/core/HardcoreFx.cpp
     src/core/FacetEq.cpp
     src/core/ApexLimiter.cpp
@@ -299,6 +302,7 @@ if(LYNX_BUILD_APP)
         src/ui/ControllerEditors.cpp
         src/ui/NewtoneEditor.cpp
         src/ui/ChannelSettings.cpp
+        src/ui/SoundFontEditor.cpp
         src/ui/BrowserComponent.cpp
         src/ui/Theme.cpp
         src/ui/Icons.cpp
