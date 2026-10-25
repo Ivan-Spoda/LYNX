@@ -1,0 +1,67 @@
+name: Sound / plugin difference
+description: A project sounds different in LYNX than in FL Studio, or a LYNX stand-in doesn't sound like the original plugin.
+labels: ["sound"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        LYNX opens FL Studio projects and replaces missing plugins with its own effects. If something sounds different,
+        a short audio comparison helps more than anything else.
+
+  - type: input
+    id: version
+    attributes:
+      label: LYNX version
+      placeholder: "0.1.16-alpha"
+    validations:
+      required: true
+
+  - type: input
+    id: system
+    attributes:
+      label: Operating system and audio device
+      placeholder: "Windows 11, ASIO / SSL 2 MKII, 48000 Hz"
+    validations:
+      required: true
+
+  - type: input
+    id: plugin
+    attributes:
+      label: Plugin or FL Studio feature
+      description: The original plugin (name, version, format) and, if you know it, the LYNX effect that replaced it.
+      placeholder: "Auto-Tune Pro 11 (VST3) → LYNX Tune"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: installed
+    attributes:
+      label: Is the original plugin installed on this computer?
+      options:
+        - "Yes, LYNX loads the original plugin"
+        - "No, LYNX uses its own stand-in"
+        - "I don't know"
+    validations:
+      required: true
+
+  - type: textarea
+    id: difference
+    attributes:
+      label: What sounds different?
+      description: For example "muffled", "no pitch correction", "clicks", "too loud", "the delay is off time".
+    validations:
+      required: true
+
+  - type: textarea
+    id: audio
+    attributes:
+      label: Audio comparison (very helpful)
+      description: |
+        Export the same part from FL Studio and from LYNX (File › Export › Wave) and attach both (zip them).
+        If you can, also attach the project (.flp or .lynx) or a small project that shows the difference.
+
+  - type: textarea
+    id: settings
+    attributes:
+      label: Plugin settings
+      description: A screenshot of the original plugin's window, or the preset name.
