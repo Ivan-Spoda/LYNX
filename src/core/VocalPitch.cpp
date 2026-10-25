@@ -166,6 +166,7 @@ void PitchDetector::prepare (double sampleRate, double fminHz, double fmaxHz, in
     tauMin = std::max (2, (int) std::floor (fsd / fmax));
     window = tauMax;
     hopDec = std::max (1, (int) std::lround ((double) hop / dec));
+    guardMemory = std::max (1, (int) std::lround (0.06 * sr / (hopDec * dec)));
     centre = (window + tauMax) / 2 * dec;
 
     // 4th-order Butterworth low-pass (two biquads, Q 0.5412 / 1.3066) before decimation; RBJ cookbook form
@@ -195,6 +196,8 @@ void PitchDetector::reset() noexcept
     written = writtenDec = 0;
     phase = hopCount = 0;
     est = {};
+    lastTau = 0.0;
+    sinceVoiced = 1 << 20;
 }
 
 bool PitchDetector::push (float x) noexcept
@@ -258,6 +261,37 @@ void PitchDetector::analyse() noexcept
             break;
         }
     bool found = tau > 0;
+    // Round 157 (setHarmonicGuard): YIN's first dip under the threshold can be a harmonic's — her takes on open vowels
+    // ([EXEC] REA_rodada157c §3: a strong ~870 Hz formant over a 290 Hz note) read 3x, 2x or 1.5x the sung pitch for a
+    // few estimates; the shifter's grains then shrank to a third of a period (a metallic, gritty burst). A dip at 1.5,
+    // 2, 3 or 4 times that lag that is clearly deeper wins when it continues the last voiced period (or, at a phrase's
+    // start, when it is much deeper). Only a real margin counts: on a clean tone every multiple's dip is ~0.
+    if (found && harmonicGuard)
+    {
+        const auto prev = sinceVoiced <= guardMemory ? lastTau : 0.0;
+        const auto first = diff[(std::size_t) tau];
+        int bestTau = tau;
+        float bestV = first;
+        for (const auto m : { 1.5, 2.0, 3.0, 4.0 })
+        {
+            const auto c = (int) std::lround (m * tau);
+            if (c + 3 >= tauMax)
+                break;
+            int t2 = c - 2;
+            for (int t = c - 2; t <= c + 2; ++t)
+                if (diff[(std::size_t) t] < diff[(std::size_t) t2])
+                    t2 = t;
+            const auto v = diff[(std::size_t) t2];
+            const auto continues = prev > 0.0 && std::abs (t2 - prev) < 0.12 * prev && std::abs (t2 - prev) < std::abs (tau - prev);
+            const auto deeper = v < 0.6f * first && first - v >= 0.03f && v < bestV; // margin: a clean tone's multiples dip as deep
+            if (deeper && (continues || (prev <= 0.0 && m >= 2.0 && v < 0.35f * first)))
+            {
+                bestTau = t2;
+                bestV = v;
+            }
+        }
+        tau = bestTau;
+    }
     if (! found)
     {
         tau = tauMin;
@@ -267,6 +301,13 @@ void PitchDetector::analyse() noexcept
     }
     est.clarity = std::clamp (1.0f - diff[(std::size_t) tau], 0.0f, 1.0f);
     est.voiced = found && est.level > gate && tau > tauMin && tau < tauMax - 1;
+    if (est.voiced)
+    {
+        lastTau = tau;
+        sinceVoiced = 0;
+    }
+    else if (sinceVoiced < 1 << 20)
+        ++sinceVoiced;
     if (! est.voiced)
         return; // keep the last period (the shifter keeps its marks' spacing through short gaps)
 

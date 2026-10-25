@@ -88,7 +88,10 @@ int effectiveScale (float scaleValue, float moreScalesValue) noexcept
 int latencyFor (double sampleRate, int range, bool lowLatency) noexcept
 {
     const auto pmax = sampleRate / rangeMinHz (range);
-    return (int) std::ceil ((lowLatency ? 1.25 : 2.0) * pmax) + 4;
+    // Round 157c (REA_rodada157c §5, live singing): low latency was 1.25 periods (15.7 ms for Alto / Tenor); half a
+    // period (6.4 ms) measured on her takes in 128-sample blocks keeps the pitch (4.1 c), the harmonics-to-noise and
+    // the HF clicks of Auto-Tune Pro's Classic mode (5 ms) — the grains then come from the newest complete period
+    return (int) std::ceil ((lowLatency ? 0.5 : 2.0) * pmax) + 4;
 }
 
 const EffectInfo& info()
@@ -749,6 +752,7 @@ private:
         curLow = low;
         detHop = std::max (16, (int) std::lround (128.0 * sr / 44100.0));
         det.prepare (sr, rangeMinHz (rg), rangeMaxHz (rg), detHop);
+        det.setHarmonicGuard (true); // round 157: no harmonic errors on strong formants (VocalPitch.cpp, REA_rodada157c)
         latency = std::min (latencyFor (sr, rg, low), dryRing - 1);
         psola.prepare (sr, sr / rangeMinHz (rg), latency);
         psola.setMarkLag (det.windowCentre());
