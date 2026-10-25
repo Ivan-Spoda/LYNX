@@ -7,8 +7,9 @@
 // Round 160: JUCE's writers turn floats into int32 with (2^31 − 1)·x, rounded, and then drop the low bits (truncation).
 // For a value already on the k/2^(bits−1) grid that lands just below k·2^(32−bits) once |k| passes half scale, and the
 // truncation then writes k − 1: every positive sample above −6 dBFS came out 1 LSB low (an asymmetric error the dither
-// can't hide). The output therefore sits a quarter LSB above the grid point; truncation then gives exactly k for any
-// k (writerBias). The noise-shaping error uses the grid value itself.
+// can't hide). The output therefore sits half an LSB above the grid point; truncation then gives exactly k for any
+// k and either sign (writerBias). Half, not a quarter: at 24 bits a quarter LSB is below a float's resolution near full
+// scale and was rounded away. The noise-shaping error uses the grid value itself.
 
 #include <cmath>
 #include <cstdint>
@@ -18,7 +19,7 @@ namespace lynx
 class Dither
 {
 public:
-    explicit Dither (int bits, bool noiseShaping = true) : scale ((float) (1 << (bits - 1))), shaping (noiseShaping), bias (0.25f / scale) {}
+    explicit Dither (int bits, bool noiseShaping = true) : scale ((float) (1 << (bits - 1))), shaping (noiseShaping), bias (0.5f / scale) {}
 
     // what process() adds to each quantized value so JUCE's float → int conversion keeps it (see above)
     float writerBias() const noexcept { return bias; }

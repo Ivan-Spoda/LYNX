@@ -112,7 +112,7 @@ TEST (q160_stretch_keeps_clicks_sharp_and_on_time)
                 worstPre = std::max (worstPre, 10.0 * std::log10 ((pre + 1e-20) / core));
             }
             CHECK (onTime == 10);
-            CHECK (worstPre < -30.0);
+            CHECK (worstPre < -35.0); // −37…−51 dB with the 15 ms pre-roll (−29…−34 dB with 4 ms)
         }
 }
 
@@ -302,4 +302,126 @@ TEST (q160_preview_interpolation_44k1_file_on_48k_device)
     }
     CHECK (q160::sinadDb (lin, f) < 30.0);
     std::printf ("  [q160] preview 10 kHz 44.1->48 kHz SINAD: sinc %.1f dB, linear %.1f dB\n", sinad, q160::sinadDb (lin, f));
+}
+
+namespace q160
+{
+struct AllocWindow
+{
+    long start = rt95::allocs.load();
+    AllocWindow() { rt95::countAllocs = true; }
+    ~AllocWindow() { rt95::countAllocs = false; }
+    long count() const { return rt95::allocs.load() - start; }
+};
+} // namespace q160
+
+TEST (q160_audio_thread_allocations_and_cost_of_builtin_units)
+{
+    // Real-time audit (REA_rodada160 §6): every built-in effect and instrument, steady state at 48 kHz / 512 frames —
+    // heap allocations inside process()/render() (each is a potential dropout) and the CPU cost per block.
+    using namespace lynx;
+    constexpr int block = 512;
+    constexpr double rate = 48000.0;
+    std::mt19937 rng (160);
+    std::vector<float> l (block), r (block);
+    auto noise = [&] {
+        for (int i = 0; i < block; ++i)
+        {
+            l[(std::size_t) i] = 0.3f * std::uniform_real_distribution<float> (-1.0f, 1.0f) (rng);
+            r[(std::size_t) i] = l[(std::size_t) i];
+        }
+    };
+    struct Row
+    {
+        std::string name;
+        long allocs;
+        double usPerBlock;
+    };
+    std::vector<Row> rows;
+    for (int k = 0; k <= (int) lastEffectKind; ++k)
+    {
+        const auto kind = (EffectKind) k;
+        if (kind == EffectKind::plugin)
+            continue;
+        const auto slot = makeEffectSlot (kind);
+        auto fx = makeEffect (slot);
+        if (fx == nullptr)
+            continue;
+        fx->prepare (rate);
+        for (int b = 0; b < 8; ++b)
+        {
+            noise();
+            fx->process (l.data(), r.data(), block, slot.params, 128.0);
+        }
+        long allocs = 0;
+        const auto t0 = std::chrono::steady_clock::now();
+        {
+            const q160::AllocWindow w;
+            for (int b = 0; b < 100; ++b)
+            {
+                noise();
+                fx->process (l.data(), r.data(), block, slot.params, 128.0);
+            }
+            allocs = w.count();
+        }
+        const auto us = std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - t0).count() / 100.0;
+        rows.push_back ({ std::string ("fx ") + effectInfo (kind).name, allocs, us });
+    }
+    for (int k = 0; k <= (int) InstrumentKind::patcher; ++k)
+    {
+        const auto kind = (InstrumentKind) k;
+        if (kind == InstrumentKind::plugin || kind == InstrumentKind::slayer || kind == InstrumentKind::midiOut || kind == InstrumentKind::audioClip)
+            continue;
+        auto data = std::make_shared<SampleData>();
+        data->sampleRate = 44100.0;
+        for (int i = 0; i < 88200; ++i)
+            data->left.push_back (0.3f * (float) std::sin ((double) i * 0.05));
+        auto inst = makeInstrument (kind, data);
+        if (inst == nullptr)
+            continue;
+        inst->prepare (rate);
+        ChannelDef c;
+        c.instrument = kind;
+        inst->configure (c, 120.0);
+        std::fill (l.begin(), l.end(), 0.0f);
+        std::fill (r.begin(), r.end(), 0.0f);
+        inst->render (l.data(), r.data(), block, 1.0f, 1.0f);
+        long allocs = 0;
+        const auto t0 = std::chrono::steady_clock::now();
+        {
+            const q160::AllocWindow w;
+            for (int b = 0; b < 100; ++b)
+            {
+                if (b % 10 == 0)
+                {
+                    inst->noteOn (48 + (b / 10) % 12, 0.8f);
+                    inst->noteOn (55 + (b / 10) % 12, 0.8f);
+                }
+                if (b % 10 == 7)
+                {
+                    inst->noteOff (48 + (b / 10) % 12);
+                    inst->noteOff (55 + (b / 10) % 12);
+                }
+                std::fill (l.begin(), l.end(), 0.0f);
+                std::fill (r.begin(), r.end(), 0.0f);
+                inst->render (l.data(), r.data(), block, 1.0f, 1.0f);
+            }
+            allocs = w.count();
+        }
+        const auto us = std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - t0).count() / 100.0;
+        rows.push_back ({ "instrument " + std::to_string (k), allocs, us });
+    }
+    int allocating = 0;
+    for (const auto& row : rows)
+        if (row.allocs > 0)
+        {
+            ++allocating;
+            std::printf ("  [q160 rt] ALLOCATES %-28s %ld allocations in 100 blocks\n", row.name.c_str(), row.allocs);
+        }
+    std::sort (rows.begin(), rows.end(), [] (const Row& a, const Row& b) { return a.usPerBlock > b.usPerBlock; });
+    for (std::size_t i = 0; i < std::min<std::size_t> (15, rows.size()); ++i)
+        std::printf ("  [q160 rt] cost %-28s %8.1f us / 512 frames (%.1f %% of the 10.7 ms budget)\n", rows[i].name.c_str(), rows[i].usPerBlock,
+                     rows[i].usPerBlock / 106.67);
+    std::printf ("  [q160 rt] %d of %d units allocate on the audio thread\n", allocating, (int) rows.size());
+    CHECK (rows.size() > 100);
 }

@@ -229,6 +229,10 @@ void spliceAttacks (Planar& out, const Planar& in, double ratio, double sampleRa
     const auto fadeIn = std::max (16L, (long) (sampleRate * 0.002));
     const auto fadeOut = std::max (32L, (long) (sampleRate * 0.008));
     const auto pre = (long) (sampleRate * 0.004);
+    // the original also replaces up to `preRoll` before the attack (when the previous splice leaves room): the spectral
+    // stretcher smears an attack backwards over up to half its block, which a 4 ms pre-roll left audible as pre-echo
+    const auto preRoll = (long) (sampleRate * 0.015);
+    long lastEnd = 0;
     const auto search = (long) (sampleRate * 0.006);
     const auto holdMax = (long) (sampleRate * holdSeconds);
     const auto outMono = monoOf (out);
@@ -262,10 +266,13 @@ void spliceAttacks (Planar& out, const Planar& in, double ratio, double sampleRa
             }
         }
 
-        const auto start = p - pre - fadeIn; // fade-in begins here
-        if (start - shift < 0 || start < 0)
+        // fade-in begins here: as early as the pre-roll allows, never before the previous splice's end
+        const auto latest = p - pre - fadeIn;
+        const auto start = std::max ({ p - preRoll - fadeIn, std::min (lastEnd, latest), shift, 0L });
+        if (start > latest)
             continue;
         const auto end = std::min (bestEnd + fadeOut, std::min (m, n + shift));
+        lastEnd = end;
 
         for (std::size_t c = 0; c < out.ch.size(); ++c)
         {

@@ -5279,7 +5279,7 @@ TEST (dither_quantizes_to_lsb_grid_with_small_error)
     bool onGrid = true;
     for (std::size_t i = 0; i < x.size(); ++i)
     {
-        const auto steps = (y[i] - d.writerBias()) * 32768.0f; // a quarter LSB above the grid point (round 160)
+        const auto steps = (y[i] - d.writerBias()) * 32768.0f; // half an LSB above the grid point (round 160)
         onGrid = onGrid && std::abs (steps - std::round (steps)) < 1e-3f;
         errorSum += std::abs (y[i] - x[i]);
     }

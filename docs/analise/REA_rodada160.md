@@ -19,11 +19,11 @@ synthetic inputs were lost with the crash).
 
 | # | Problem found | Before | After | Status |
 |---|---|---|---|---|
-| 2 | Time-stretch (stretched samples, FL-imported "Stretch" channels, Newtone) was a basic WSOLA | drum onsets off by 20–210 ms (median); recorded takes (ratio 0.99998) rebuilt from windows: null +2.9 dB vs the ideal | Signalsmith Stretch (MIT) + LYNX attack splicing: onsets 0.8–2.9 ms (FL 0.8–4.0); takes resampled: null −77 dB | done |
+| 2 | Time-stretch (stretched samples, FL-imported "Stretch" channels, Newtone) was a basic WSOLA | drum onsets off by 20–210 ms (median); recorded takes (ratio 0.99998) rebuilt from windows: null +2.9 dB vs the ideal | Signalsmith Stretch (MIT) + LYNX attack splicing: onsets 0.6–1.5 ms median, ≤ 2.2 ms worst (FL 0.8–4.0 / up to 400); takes resampled: null −77 dB | done |
 | 3 | Master "soft clip" bent everything above −0.9 dBFS | THD 0.29 % on a −0.3 dBFS sine, 0.65 % at −0.1 dBFS, peaks −0.07…−0.16 dB | bit-exact up to 0 dBFS, overs clamped (NaN → 0) | done |
 | 4 | Browser / editor preview read samples with linear interpolation | 44.1 kHz file on a 48 kHz device: 10 kHz −1.5 dB, image at 13.9 kHz −21 dBc | FL's 24-point sinc (same as the sampler) | done |
 | 4 | Exports used the playback interpolation (24-pt) in most cases | quality chosen in prepare(), before the export switched to offline | render quality (32-pt) read per note | done |
-| 5 | 16/24-bit export: dithered samples above −6 dBFS written 1 LSB low | every positive sample above half scale off by one LSB (asymmetric error) | quarter-LSB writer bias: every grid value written exactly | done |
+| 5 | 16/24-bit export: dithered samples above −6 dBFS written 1 LSB low | 33 % of a full-scale sine's samples off by one LSB | half-LSB writer bias: 0 wrong | done |
 | 6 | Denormals: FTZ/DAZ only around the rack | metronome, preview, plugin graph nodes, sandbox thread unprotected | whole audio callback + sandbox thread | done |
 | 6 | `std::stable_sort` of note events on the audio thread allocates | heap allocation per block with events | in-place insertion sort | done |
 | 7 | Dropouts on Windows shared mode, no hint | — | perf meter hint suggests the interface's own ASIO driver | done |
@@ -54,7 +54,7 @@ Now (`src/core/TimeStretch.*`):
 voices by about a third and tonal noise by 20…40 dB" — that sweep was lost; the tonal-purity part is re-proven by
 [TEST] q160_stretch_tonal_purity.)
 
-### 2.1 Measurements vs FL Studio [MEAS] scratchpad `stretchmeas.py` on `D:\lynx-work\quality160\ab`
+### 2.1 Measurements vs FL Studio [MEAS] `D:\lynx-work\quality160\tools\stretchmeas.py` on `D:\lynx-work\quality160\ab`
 
 Log-spectral distance (dB) between the output and the original's spectrum at the mapped time (lower = closer to an
 ideal stretch; 2048-pt STFT, 60 dB activity gate):
@@ -68,13 +68,17 @@ ideal stretch; 2048-pt STFT, 60 dB activity gate):
 | drum loop 1.25 | 2.67 | **2.53** | 2.60 | 2.65 | 2.67 | 2.69 | 3.17 |
 | drum loop 1.5 | 2.75 | 2.92 | 3.05 | 3.10 | 3.35 | 3.47 | 4.04 |
 
-Drum-loop onset timing (median error of each original attack's mapped position, ms):
+Drum-loop onset timing (error of each original attack's mapped position, ms, median / worst). "WIP" = the code as
+salvaged from the crash; "final" = with the 15 ms pre-roll added after the crash (§2.2):
 
-| ratio | LYNX old | LYNX new general | FL Stretch Pro | FL E3 generic |
-|---|---|---|---|---|
-| 0.8 | 209.5 | 0.8 | 1.2 | 0.9 |
-| 1.25 | 19.8 | 2.0 | 0.8 | 1.3 |
-| 1.5 | 26.5 | 2.9 | 2.4 | 4.0 |
+| ratio | LYNX old | LYNX WIP general | **LYNX final general** | FL Stretch Pro | FL E3 generic | FL E3 mono |
+|---|---|---|---|---|---|---|
+| 0.8 | 209.5 / 602 | 0.8 / 400 | **0.6 / 0.9** | 1.2 / 4.3 | 0.9 / 401 | 1.0 / 400 |
+| 1.25 | 19.8 / 605 | 2.0 / 627 | **0.9 / 1.0** | 0.8 / 2.7 | 1.3 / 3.1 | 0.8 / 2.6 |
+| 1.5 | 26.5 / 778 | 2.9 / 752 | **1.5 / 2.2** | 2.4 / 377 | 4.0 / 378 | 1.8 / 2.2 |
+
+(A "worst" of several hundred ms = one hit not found at all near its place: smeared or doubled.) The final version's
+spectral distance stays within ±0.03 dB of the WIP values in the table above.
 
 All outputs have the exact length (ratio × input). So: the old WSOLA's spectrum was not far off but it **moved the
 hits** (the "drums out of time / flamming" sound); the new stretcher keeps them where FL does, and its spectrum is at
@@ -84,10 +88,24 @@ Near-unity (her recorded vocal take, ratio 0.99998), null against an ideal band-
 LYNX old **+2.9 dB** (i.e. completely different waveform: windows re-assembled), LYNX new **−77.0 dB**, FL Stretch
 Pro +1.4 dB (FL really stretches it). [MEAS]
 
-### 2.2 Tests [TEST]
+### 2.2 Pre-echo before attacks (fixed after the crash) [MEAS][TEST]
+
+The salvaged code failed its own test q160_stretch_keeps_clicks_sharp_and_on_time: the spliced original started only
+4 ms before each attack, but the spectral stretcher smears an attack backwards over up to half its analysis block.
+Energy 1.5–30 ms before each click relative to the click (click train; general / drums):
+
+| ratio | 4 ms pre-roll (WIP) | 15 ms pre-roll (final) |
+|---|---|---|
+| 0.8 | −37 / −34 dB | −47 / −51 dB |
+| 1.5 | −29 / −30 dB | −37 / −41 dB |
+| 2.0 | −33 / −29 dB | −39 / −38 dB |
+
+The pre-roll never reaches back past the previous splice (attacks are ≥ 50 ms apart).
+
+### 2.3 Tests [TEST]
 - q160_stretch_near_unity_is_a_clean_resample: 1 kHz sine at 0.99998, error vs ideal < −80 dB; ratio 1 = copy.
 - q160_stretch_keeps_clicks_sharp_and_on_time: click train × 0.8/1.5/2.0, general and drums: 10/10 clicks within
-  2 samples, peak > 0.7, pre-echo < −30 dB.
+  2 samples, peak > 0.7, pre-echo < −35 dB.
 - q160_stretch_tonal_purity: 1 kHz × 0.8/1.25 SINAD > 75 dB (general, mono), > 45 dB (drums).
 - q160_stretch_short_sounds_and_mapping: 40 ms one-shot stretches to the right length; FL mode mapping; attack
   detection exact on clicks, none on a steady tone.
@@ -119,8 +137,10 @@ q160_master_protection_distortion_before_and_after (old curve changes a −0.3 d
 
 JUCE's writers convert float → int32 with round((2³¹−1)·x) and then drop the low bits (truncation). A value on the
 k/2^(bits−1) grid lands just below k·2^(32−bits) once k passes half scale, and truncation writes k−1: every positive
-dithered sample above −6 dBFS was written 1 LSB low. `Dither` now adds a quarter LSB (`writerBias()`), so truncation
-gives exactly k for any k. [TEST] q160_dither_survives_the_writer_conversion (16 and 24 bit, 20 000 samples at
+dithered sample above −6 dBFS was written 1 LSB low. [MEAS] D:\lynx-work\quality160\tools\d0.cpp, d.cpp (the exact JUCE conversion,
+200 000 samples of a 0.9999 FS sine): 66 743 samples (33 %) wrong at 16 and at 24 bits before; 0 after. `Dither` now
+adds half an LSB (`writerBias()`), so truncation gives exactly k for any k. (The salvaged WIP used a quarter LSB,
+which at 24 bits is below float resolution near full scale and was rounded away — its own test caught it.) [TEST] q160_dither_survives_the_writer_conversion (16 and 24 bit, 20 000 samples at
 0.999 FS: 0 wrong), existing dither tests adjusted.
 
 ## 6. Real-time safety
@@ -132,6 +152,11 @@ gives exactly k for any k. [TEST] q160_dither_survives_the_writer_conversion (16
   q160_event_sort_is_stable_and_allocation_free.
 
 ## 7. WASAPI dropouts
+
+[LOG] Her audio-glitches.log (tmp/gf/logs157): always "Windows Audio" (shared WASAPI) at 48 kHz / 512 frames —
+SSL 2 MKII: 6 driver dropouts; Realtek speakers: 11, 15, 30 — while LYNX's own callbacks were **never over deadline**
+(over deadline 0 in every session; average load 1–8.5 %, one 97.5 % spike in three long sessions). So her dropouts
+come from shared-mode WASAPI scheduling, not from LYNX's CPU use; the interface's ASIO driver avoids that path.
 
 After over-deadline/late callbacks on Windows Audio (shared / low-latency) or DirectSound, the performance meter's
 hint suggests the interface's own ASIO driver (e.g. "SSL ASIO Driver 1"), then LYNX ASIO, wrappers last
