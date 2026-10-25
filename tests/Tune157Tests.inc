@@ -1,7 +1,6 @@
-// Round 157: LYNX Tune on a singer's real takes (docs/analise/REA_rodada157c.md). Two detector faults made audible
-// bursts on held notes: (1) the pitch tracker read 1.5x / 2x / 3x the fundamental where one harmonic sat on a strong
-// formant, so the PSOLA grains shrank for a few frames; (2) 3..35 ms "unvoiced" dropouts in the middle of notes
-// re-seeded the grains. Synthetic vowels from LynxTuneTests95.inc (r95::vowel, r95::measureHz, r95::runTune).
+// Round 157: LYNX Tune on a singer's real takes (docs/analise/REA_rodada157c.md). The pitch tracker read 1.5x / 2x /
+// 3x the fundamental where one harmonic sat on a strong formant, so the PSOLA grains shrank for a few frames (rough
+// bursts on held notes). Synthetic vowels from LynxTuneTests95.inc (r95::vowel, r95::cents).
 
 TEST (tune_harmonic_guard_holds_the_fundamental_round157)
 {
@@ -39,38 +38,4 @@ TEST (tune_harmonic_guard_holds_the_fundamental_round157)
             worst = std::max (worst, std::abs (r95::cents (last, f)));
         }
     CHECK (worst < 1.0);
-}
-
-TEST (tune_short_voicing_dropout_is_bridged_round157)
-{
-    // A held, 40-cent-flat note with a 20 ms rough patch (breath noise mixed in) in the middle. The corrected note
-    // stays on the target right after the patch: the grains keep the last period instead of re-seeding.
-    const double fs = 44100.0, target = 220.0, sung = target * std::pow (2.0, -40.0 / 1200.0);
-    auto x = r95::vowel (fs, (int) (fs * 1.2), [sung] (double) { return sung; });
-    const int g0 = (int) (fs * 0.6), g1 = g0 + (int) (fs * 0.02);
-    unsigned seed = 3;
-    for (int i = g0; i < g1; ++i)
-    {
-        seed = seed * 1664525u + 1013904223u;
-        x[(std::size_t) i] = 0.5f * x[(std::size_t) i] + 0.2f * (float) ((seed >> 8) / 16777216.0 - 0.5);
-    }
-    auto p = r95::tuneDefaults();
-    int latency = 0;
-    const auto y = r95::runTune (x, fs, p, latency);
-    const auto after = g1 + latency + (int) (fs * 0.01);
-    const auto hz = r95::measureHz (y, after, 2048, fs);
-    CHECK (hz > 0.0);
-    CHECK (std::abs (r95::cents (hz, target)) < 10.0);
-    // no burst: the output level around the patch never jumps above the steady level by more than 3 dB
-    auto rms = [&] (int from, int len) {
-        double s = 0.0;
-        for (int i = from; i < from + len; ++i)
-            s += (double) y[(std::size_t) i] * y[(std::size_t) i];
-        return std::sqrt (s / len);
-    };
-    const auto steady = rms (g0 + latency - (int) (fs * 0.2), (int) (fs * 0.1));
-    double peakWin = 0.0;
-    for (int at = g0 + latency - 512; at < g1 + latency + 2048; at += 128)
-        peakWin = std::max (peakWin, rms (at, 256));
-    CHECK (peakWin < steady * 1.41);
 }

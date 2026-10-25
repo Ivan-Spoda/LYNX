@@ -384,8 +384,6 @@ public:
         target = -1;
         noteAge = 0.0;
         unvoicedFor = 1e9;
-        bridgedFor = 0.0;
-        lastPeriod = 0.0;
         sung = -1.0;
         center1 = center2 = 0.0;
         extraWanted = extra = 0.0;
@@ -502,23 +500,8 @@ public:
             {
                 const auto& e = det.estimate();
                 const auto hop = (double) detHop / sr;
-                // Round 157 ([EXEC] her 2026-10-24 takes, REA_rodada157c §3): the detector drops out for 1–12 estimates
-                // (3–35 ms) inside sung notes (a breathy or creaky cycle). Each dropout switched the shifter to plain
-                // overlap-add at the sung pitch and back — a blip back to the uncorrected pitch plus a re-synced grain:
-                // a click / rough burst in the middle of a held note, ~2x as many as the trial's. Such a gap is now
-                // bridged when the window is still clearly periodic (YIN clarity >= 0.7: the dropouts' median is 0.77,
-                // the start of real unvoiced sounds 0.42): the marks keep the last period and the correction holds.
-                const auto bridge = ! (e.voiced && e.hz > 0.0) && lastPeriod > 0.0 && unvoicedFor <= 0.0
-                                    && bridgedFor + hop <= 0.035 && e.clarity >= 0.7f;
-                if (bridge)
+                if (e.voiced && e.hz > 0.0)
                 {
-                    bridgedFor += hop;
-                    psola.setPitch (lastPeriod, true);
-                }
-                else if (e.voiced && e.hz > 0.0)
-                {
-                    bridgedFor = 0.0;
-                    lastPeriod = e.period;
                     psola.setPitch (e.period, true);
                     sung = vocal::hzToNote (e.hz, aRef);
                     const auto newPhrase = unvoicedFor > 0.06;
@@ -623,7 +606,6 @@ public:
                 }
                 else
                 {
-                    bridgedFor = 0.0;
                     psola.setPitch (0.0, false);
                     extraWanted = 0.0;
                     unvoicedFor += hop;
@@ -767,7 +749,7 @@ private:
         curLow = low;
         detHop = std::max (16, (int) std::lround (128.0 * sr / 44100.0));
         det.prepare (sr, rangeMinHz (rg), rangeMaxHz (rg), detHop);
-        det.setHarmonicGuard (true); // round 157: harmonic errors on strong formants (VocalPitch.cpp)
+        det.setHarmonicGuard (true); // round 157: no harmonic errors on strong formants (VocalPitch.cpp, REA_rodada157c)
         latency = std::min (latencyFor (sr, rg, low), dryRing - 1);
         psola.prepare (sr, sr / rangeMinHz (rg), latency);
         psola.setMarkLag (det.windowCentre());
@@ -783,7 +765,6 @@ private:
     std::vector<float> dry;
     std::int64_t dryPos = 0;
     double shift = 0.0, wanted = 0.0, noteAge = 0.0, steadyRef = 0.0, sinceJump = 1.0, unvoicedFor = 1e9, sung = -1.0;
-    double bridgedFor = 0.0, lastPeriod = 0.0; // round 157: short voicing dropouts inside a note (see process)
     double center1 = 0.0, center2 = 0.0, extraWanted = 0.0, extra = 0.0, noteTime = 0.0, lfoPhase = 0.0;
     int target = -1;
     const NoteMask* held = nullptr;

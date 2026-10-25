@@ -265,7 +265,7 @@ void PitchDetector::analyse() noexcept
     // ([EXEC] REA_rodada157c §3: a strong ~870 Hz formant over a 290 Hz note) read 3x, 2x or 1.5x the sung pitch for a
     // few estimates; the shifter's grains then shrank to a third of a period (a metallic, gritty burst). A dip at 1.5,
     // 2, 3 or 4 times that lag that is clearly deeper wins when it continues the last voiced period (or, at a phrase's
-    // start, when it is much deeper).
+    // start, when it is much deeper). Only a real margin counts: on a clean tone every multiple's dip is ~0.
     if (found && harmonicGuard)
     {
         const auto prev = sinceVoiced <= guardMemory ? lastTau : 0.0;
@@ -283,7 +283,7 @@ void PitchDetector::analyse() noexcept
                     t2 = t;
             const auto v = diff[(std::size_t) t2];
             const auto continues = prev > 0.0 && std::abs (t2 - prev) < 0.12 * prev && std::abs (t2 - prev) < std::abs (tau - prev);
-            const auto deeper = v < 0.6f * first && v < bestV;
+            const auto deeper = v < 0.6f * first && first - v >= 0.03f && v < bestV; // margin: a clean tone's multiples dip as deep
             if (deeper && (continues || (prev <= 0.0 && m >= 2.0 && v < 0.35f * first)))
             {
                 bestTau = t2;
