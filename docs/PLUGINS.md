@@ -34,10 +34,10 @@ LYNX ships **native** plugins inspired by the third-party plugins producers use 
 | Waves CLA-2A | **Glow Leveler** | native LYNX engine · auto-opens | Optical leveler with an electro-optical cell model: ~10 ms attack and a release that lengthens after heavy leveling. |
 | Waves CLA-76 | **Crest Compressor** | native LYNX engine · auto-opens | Style compressor fitted to black-box measurements: 11 styles, knee, range, look-ahead, 3-band side-chain EQ, character, oversampling and a live gain-reduction graph. |
 | Waves SSL E-Channel | **Ridge Strip** | native LYNX engine · auto-opens | Console channel strip: high/low-pass, 4-band EQ with two curve families, compressor, gate/expander, EQ/dynamics order. |
-| Waves S1 Imager | **Stereo Shaper** | native LYNX engine · auto-opens | an existing LYNX effect plays its role until a dedicated engine exists |
+| Waves S1 Imager | **Stereo Shaper** | native LYNX engine · auto-opens | Stereo matrix: how much of each input side reaches left and right, the delay and phase between the channels, width from mono to wide. |
 | Waves DeEsser | **Hush De-esser** | native LYNX engine · auto-opens | Split-band or wideband de-esser with band or high-pass detection, listen mode and 2 ms lookahead. |
-| Waves NS1 | **Quell Denoiser** | native LYNX engine · auto-opens | an existing LYNX effect plays its role until a dedicated engine exists |
-| Waves Doubler | **Gemini Doubler** | native LYNX engine · auto-opens | an existing LYNX effect plays its role until a dedicated engine exists |
+| Waves NS1 | **Quell Denoiser** | native LYNX engine · auto-opens | One-knob broadband noise suppressor: six phase-coherent bands, each with a downward expander that follows the Amount knob; Listen plays what is taken away. |
+| Waves Doubler | **Gemini Doubler** | native LYNX engine · auto-opens | Two-voice vocal doubler: each voice with its own delay, detune, pitch drift, pan, gain and feedback, plus an octave-down switch and voice shelves. |
 | Waves Tune Real-Time | **LYNX Tune** | native LYNX engine · auto-opens | Real-time vocal pitch correction: key and scale, retune from natural to the hard robot effect, formant preserve, MIDI target notes. |
 | Waves RVerb, H-Reverb, TrueVerb | **Reeverb 2** | stand-in · auto-opens | an existing LYNX effect plays its role until a dedicated engine exists |
 | Waves SuperTap | **Fruity Delay 3** | stand-in · auto-opens | an existing LYNX effect plays its role until a dedicated engine exists |

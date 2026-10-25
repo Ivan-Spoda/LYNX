@@ -204,12 +204,12 @@ TEST (waves_cla76_translates_onto_crest_round127)
     int n = 0;
     const auto s = makeSubstituteSlot (*e, &id, &n);
     CHECK (n == 11 && c::styleOf (s.params[c::style]) == c::Style::bus);
-    CHECK (std::abs (c::thresholdDb (s.params[c::threshold]) + 43.7) < 0.05 && std::abs (c::ratioOf (s.params[c::ratio]) - 7.1) < 0.1);
-    CHECK (std::abs (c::rangeDb (s.params[c::range]) - 31.9) < 0.05 && std::abs (c::trimDb (s.params[c::output]) - 31.6) < 0.05);
-    CHECK (std::abs (c::attackMs (s.params[c::attack]) - 5.91) < 0.1 && std::abs (c::releaseMs (s.params[c::release]) - 97.0) < 1.0);
+    // round 148 refit on the full (unmuted) trial: −55.4 dB, 2.8:1, knee 24.8, range 31.5, attack 1.56 ms, release 2.5 s
+    CHECK (std::abs (c::thresholdDb (s.params[c::threshold]) + 55.4) < 0.05 && std::abs (c::ratioOf (s.params[c::ratio]) - 2.8) < 0.1);
+    CHECK (std::abs (c::rangeDb (s.params[c::range]) - 31.5) < 0.05 && std::abs (c::trimDb (s.params[c::output]) - 31.5) < 0.05);
+    CHECK (std::abs (c::attackMs (s.params[c::attack]) - 1.56) < 0.05 && std::abs (c::releaseMs (s.params[c::release]) - 2500.0) < 30.0);
     CHECK (std::abs (s.mix - 0.413f) < 1e-5f && s.params[c::mix] == 1.0f && s.params[c::autoGain] == 0.0f);
-    // its static curve (wet path) at her setting, measured on the official trial (1 kHz sine, gain dB): +31.45 below
-    // the knee, about -9.7 dBFS out on the plateau, the 32 dB ceiling at full scale
-    CHECK (std::abs (c::staticGainDb (s.params, -60.0)) < 1e-6);
-    CHECK (c::staticGainDb (s.params, 0.0) >= -31.95 && c::staticGainDb (s.params, 0.0) <= -31.8);
+    // its static curve (wet path): the range's ceiling at full scale, (almost) nothing far below the soft knee
+    CHECK (c::staticGainDb (s.params, -90.0) > -1.0);
+    CHECK (c::staticGainDb (s.params, 0.0) >= -31.6 && c::staticGainDb (s.params, 0.0) <= -31.0);
 }
