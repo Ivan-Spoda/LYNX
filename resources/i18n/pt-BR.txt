@@ -4432,3 +4432,7 @@ countries: br
 "Group the selected notes" = "Agrupar as notas selecionadas"
 "Ungroup the selected notes" = "Desagrupar as notas selecionadas"
 "The clip's pan (left -100% ... right 100%), on top of the channel's" = "O pan do clipe (esquerda -100% ... direita 100%), somado ao do canal"
+
+# --- round 155: export plugin warm-up
+"Plugin warm-up" = "Aquecimento dos plugins"
+"Before the export starts, third-party plugins process a moment of silence until they have finished loading their settings (bridged plugins, samplers that load in the background), so the file does not start with half-loaded effects" = "Antes de a exportação começar, os plugins de terceiros processam um instante de silêncio até terminarem de carregar as suas configurações (plugins em ponte, samplers que carregam em segundo plano), para o arquivo não começar com efeitos carregados pela metade"

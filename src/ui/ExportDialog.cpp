@@ -295,7 +295,7 @@ public:
         combo (ditherLabel, tr ("Dither"), ditherBox, { tr ("Off"), tr ("TPDF"), tr ("TPDF + noise shaping") },
                tr ("Hides the rounding noise of 16 and 24 bit files (noise shaping moves it where the ear is least sensitive)"));
 
-        for (auto* t : { &normalizeToggle, &masterFxToggle, &trimToggle, &hqToggle, &showToggle, &polyToggle })
+        for (auto* t : { &normalizeToggle, &masterFxToggle, &trimToggle, &hqToggle, &showToggle, &polyToggle, &warmUpToggle })
         {
             t->onClick = [this] { readControls(); };
             addAndMakeVisible (t);
@@ -309,6 +309,10 @@ public:
         hqToggle.setButtonText (tr ("HQ for all plugins"));
         showToggle.setButtonText (tr ("Show the file(s) when complete"));
         polyToggle.setButtonText (tr ("Disable maximum polyphony"));
+        warmUpToggle.setButtonText (tr ("Plugin warm-up"));
+        warmUpToggle.setTooltip (tr ("Before the export starts, third-party plugins process a moment of silence until they have "
+                                     "finished loading their settings (bridged plugins, samplers that load in the background), "
+                                     "so the file does not start with half-loaded effects"));
         polyToggle.setTooltip (tr ("The channels' Max polyphony is lifted for the export, so no note is cut by the voice limit"));
         showToggle.setTooltip (tr ("Opens the file manager on the exported file when the export is done"));
         hqToggle.setTooltip (tr ("Plugins with a separate render quality use it, and HQ switches are turned on for the export. "
@@ -329,7 +333,7 @@ public:
         cancelButton.onClick = [this] { close(); };
 
         writeControls();
-        setSize (620, 460);
+        setSize (620, 486);
     }
 
     // --snapshot: the window with this format chosen (0 WAV, 1 MP3, 2 OGG, 3 FLAC) and a few options set
@@ -358,7 +362,7 @@ public:
         warningLabel.setBounds (buttons);
         area.removeFromBottom (8);
 
-        auto mix = area.removeFromBottom (84);
+        auto mix = area.removeFromBottom (110);
         optionsTitle.setBounds (mix.removeFromTop (26));
         mix.removeFromTop (4);
         auto mixRow = mix.removeFromTop (24);
@@ -372,6 +376,8 @@ public:
             polyToggle.setBounds (row2.removeFromLeft (200));
             showToggle.setBounds (row2);
         }
+        mix.removeFromTop (2);
+        warmUpToggle.setBounds (mix.removeFromTop (24).removeFromLeft (200));
         area.removeFromBottom (6);
 
         auto left = area.removeFromLeft ((area.getWidth() - 24) / 2);
@@ -478,6 +484,7 @@ private:
         masterFxToggle.setToggleState (options.masterEffects, n);
         trimToggle.setToggleState (options.trimPdc, n);
         hqToggle.setToggleState (options.hqAllPlugins, n);
+        warmUpToggle.setToggleState (options.pluginWarmUp, n);
         showToggle.setToggleState (options.showWhenDone, n);
         polyToggle.setToggleState (options.disableMaxPolyphony, n);
         for (int i = 0; i < 4; ++i)
@@ -515,6 +522,7 @@ private:
         options.masterEffects = masterFxToggle.getToggleState();
         options.trimPdc = trimToggle.getToggleState();
         options.hqAllPlugins = hqToggle.getToggleState();
+        options.pluginWarmUp = warmUpToggle.getToggleState();
         options.showWhenDone = showToggle.getToggleState();
         options.disableMaxPolyphony = polyToggle.getToggleState();
         options.moreFormats = 0;
@@ -635,7 +643,7 @@ private:
     Segmented formatButtons { { "WAV", "MP3", "OGG", "FLAC" } };
     juce::Label depthLabel, bitrateLabel, compressionLabel, rateLabel, channelsLabel, ditherLabel;
     juce::ComboBox depthBox, mp3Box, oggBox, flacLevelBox, rateBox, channelsBox, ditherBox;
-    juce::ToggleButton normalizeToggle, masterFxToggle, trimToggle, hqToggle, showToggle, polyToggle;
+    juce::ToggleButton normalizeToggle, masterFxToggle, trimToggle, hqToggle, showToggle, polyToggle, warmUpToggle;
     juce::Label alsoLabel;
     std::array<juce::ToggleButton, 4> alsoToggles;
     juce::Label infoLabel, warningLabel;

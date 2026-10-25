@@ -103,8 +103,9 @@ bool ExportJob::run (const std::function<bool (double)>& progress, juce::String&
     render.sampleRate = options.sampleRate;
     render.progress = progress;
     render.tailSeconds = tailSecondsFor (options);
-    render.trimSamples = options.trimPdc ? engine->getLatencySamples() : 0;
+    render.trimPdc = options.trimPdc; // the latency as reported after the plugins' warm-up
     render.hqAllPlugins = options.hqAllPlugins;
+    render.pluginWarmUp = options.pluginWarmUp;
 
     // streaming straight into the file when nothing needs the whole render first (the classic WAV/FLAC/OGG export)
     const auto streaming = options.format != exportopts::Format::mp3 && options.channels == Channels::stereo && ! options.normalize
