@@ -231,10 +231,9 @@ namespace
 // path in a single colour; no RMS layer, no outline, so it reads calmly at any zoom. The envelope is computed
 // per physical pixel and lightly smoothed (a 1-2-1 blend that never goes below the true peak), which removes
 // one-pixel spikes without hiding transients.
-void paintCleanWaveform (juce::Graphics& g, juce::Rectangle<float> body, juce::Rectangle<float> visible, const wave::Summary& summary,
-                         double startFrame, double framesPerPixel, const WaveStyle& style)
+void appendCleanWaveform (juce::Path& wave, float scale, juce::Rectangle<float> body, juce::Rectangle<float> visible, const wave::Summary& summary,
+                          double startFrame, double framesPerPixel, const WaveStyle& style)
 {
-    const auto scale = juce::jlimit (1.0f, 4.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
     const auto columns = (int) std::ceil (visible.getWidth() * scale) + 1;
     const auto framesPerColumn = framesPerPixel / scale;
     const auto firstFrame = startFrame + (double) (visible.getX() - body.getX()) * framesPerPixel;
@@ -280,7 +279,6 @@ void paintCleanWaveform (juce::Graphics& g, juce::Rectangle<float> body, juce::R
         const auto minHalf = 0.5f; // silence still shows as a hairline
 
         // one closed path per run of valid columns: the top edge left to right, the bottom edge back
-        juce::Path wave;
         int x = 0;
         while (x < columns)
         {
@@ -303,12 +301,30 @@ void paintCleanWaveform (juce::Graphics& g, juce::Rectangle<float> body, juce::R
                 wave.lineTo (px (i), centre + std::max (minHalf, smooth[(std::size_t) i] * half));
             wave.closeSubPath();
         }
-
-        g.setColour (style.classic);
-        g.fillPath (wave);
     }
 }
+
+void paintCleanWaveform (juce::Graphics& g, juce::Rectangle<float> body, juce::Rectangle<float> visible, const wave::Summary& summary,
+                         double startFrame, double framesPerPixel, const WaveStyle& style)
+{
+    const auto scale = juce::jlimit (1.0f, 4.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+    juce::Path wave;
+    appendCleanWaveform (wave, scale, body, visible, summary, startFrame, framesPerPixel, style);
+    g.setColour (style.classic);
+    g.fillPath (wave);
+}
 } // namespace
+
+bool appendWaveformPath (juce::Path& out, float scale, juce::Rectangle<float> body, juce::Rectangle<float> clip, const wave::Summary& summary,
+                         double startFrame, double framesPerPixel, const WaveStyle& style)
+{
+    if (style.spectral)
+        return false;
+    const auto visible = body.getIntersection (clip);
+    if (! visible.isEmpty() && ! summary.levels.empty() && framesPerPixel != 0.0 && body.getHeight() >= 2.0f)
+        appendCleanWaveform (out, juce::jlimit (1.0f, 4.0f, scale), body, visible, summary, startFrame, framesPerPixel, style);
+    return true;
+}
 
 void paintWaveform (juce::Graphics& g, juce::Rectangle<float> body, const wave::Summary& summary, double startFrame, double framesPerPixel,
                     const WaveStyle& style)

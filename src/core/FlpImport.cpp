@@ -888,6 +888,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
             if (c.rootNote >= 0 && c.rootNote <= 127)
                 m.rootNote = c.rootNote;
             m.addToKey = c.addToKey;
+            m.fineTune = (float) std::clamp (c.fineTune, -100, 100);
 
             // arpeggiator: FL's directions 1 up, 2 down, 3 up-down bounce, 4 up-down sticky, 5 random
             static constexpr int directions[] = { 0, 1, 2, 3, 5, 4 };

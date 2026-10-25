@@ -40,6 +40,16 @@ float trackedPan (const ChannelMisc& misc, int key, float velocity, float notePa
     return (float) std::clamp (pan, -1.0, 1.0);
 }
 
+std::pair<float, float> trackedModulation (const ChannelMisc& misc, int key, float velocity, float modX, float modY) noexcept
+{
+    // the same key / velocity distances as the pan above, each scaled by its Mod X / Y knob ([model], round 151)
+    const auto keyAmount = (double) (key - (120 - misc.key.mid)) / 48.0;
+    const auto velocityAmount = 0.275 * (velocityVolume (velocity * 128.0) - velocityVolume ((double) misc.velocity.mid));
+    auto x = (double) modX + 0.5 * (keyAmount * misc.key.modX + velocityAmount * misc.velocity.modX);
+    auto y = (double) modY + 0.5 * (keyAmount * misc.key.modY + velocityAmount * misc.velocity.modY);
+    return { (float) std::clamp (x, 0.0, 1.0), (float) std::clamp (y, 0.0, 1.0) };
+}
+
 std::vector<int> chordFromFlMap (const std::string& mapText, int index)
 {
     if (index <= 0)
@@ -153,6 +163,10 @@ void NoteEcho::process (int channel, const NoteEvent* in, int inCount, double st
                         pan = pan <= 2.0 ? pan - 1.0 : 3.0 - pan;
                     }
                     echo.pan = (float) std::clamp (pan, -1.0, 1.0);
+                    // Mod X / Y move k steps too (round 151 [model]: FL's −1..1 knob is the step in FL's ±1 level
+                    // units, half the note's 0..1 range; not mirrored by fat mode, which negates pan and pitch only)
+                    echo.modX = (float) std::clamp ((double) e.modX + 0.5 * s.modX * k, 0.0, 1.0);
+                    echo.modY = (float) std::clamp ((double) e.modY + 0.5 * s.modY * k, 0.0, 1.0);
                     if (count < (int) h.echoKeys.size())
                         h.echoKeys[(std::size_t) count++] = echo.key;
                     schedule ({ tick + k * delay, echo, gain });

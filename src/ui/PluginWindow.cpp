@@ -1,5 +1,6 @@
 #include "ui/WindowOwner.h"
 #include "ui/PluginWindow.h"
+#include "ui/PluginPicker.h"
 
 #include <algorithm>
 #include <map>
@@ -60,6 +61,16 @@ public:
                 box->addItem (juce::String (i), i + 2);
             addChildComponent (box);
         }
+        for (int st = 1; st <= 48; ++st)
+            bendRange.addItem (juce::String (st), st);
+        bendRange.setTooltip (tr ("The pitch bend range sent to the plugin (semitones)"));
+        bendRange.onChange = [this] {
+            engine.editSong ([fn = find, v = bendRange.getSelectedId()] (Song& song) {
+                if (auto* ref = fn (song); ref != nullptr && v > 0)
+                    ref->bendRange = v;
+            });
+        };
+        addChildComponent (bendRange);
         inPort.setTooltip (tr ("MIDI input port number"));
         inPort.onChange = [this] { setPort (inPort.getSelectedId() - 2, false); };
         // FL's Output port: the notes the plugin sends out play the plugins on that input port (instruments in the
@@ -83,7 +94,7 @@ public:
 
     ~WrapperSettingsPage() override { engine.removeChangeListener (this); }
 
-    int preferredHeight() const { return 380; }
+    int preferredHeight() const { return 410; }
 
     void paint (juce::Graphics& g) override
     {
@@ -154,13 +165,26 @@ public:
             label (row.removeFromLeft (110), tr ("Latency"));
             show (latency, row.removeFromLeft (260).reduced (0, 2));
 
-            auto midi = group (area, headerHeight + rowHeight + 8, tr ("MIDI"));
+            int midiRows = 0;
+            for (const auto& o : wrapperOptions())
+                midiRows += juce::String (o.section) == "MIDI" ? 1 : 0;
+            auto midi = group (area, headerHeight + (1 + midiRows) * rowHeight + 8, tr ("MIDI"));
             auto line = midi.removeFromTop (rowHeight);
             label (line.removeFromLeft (80), tr ("Input port"));
             show (inPort, line.removeFromLeft (70).reduced (0, 2));
             line.removeFromLeft (30);
             label (line.removeFromLeft (90), tr ("Output port"));
             show (outPort, line.removeFromLeft (70).reduced (0, 2));
+            // FL's MIDI options (round 151): release velocity, the pitch bend range RPN (with its value), MOD X as
+            // polyphonic aftertouch, All Notes Off on stop
+            for (std::size_t i = 0; i < wrapperOptions().size(); ++i)
+                if (juce::String (wrapperOptions()[i].section) == "MIDI")
+                {
+                    auto row = midi.removeFromTop (rowHeight);
+                    if (wrapperOptions()[i].member == &PluginRef::sendBendRange)
+                        show (bendRange, row.removeFromRight (70).reduced (0, 2));
+                    show (*toggles[(int) i], row);
+                }
         }
         else
         {
@@ -261,6 +285,8 @@ private:
             if (options[i].member == &PluginRef::separateProcess && pluginSandboxEnabled())
                 toggles[(int) i]->setToggleState (true, juce::dontSendNotification), toggles[(int) i]->setEnabled (false);
         inPort.setSelectedId (ref->midiInPort + 2, juce::dontSendNotification);
+        bendRange.setSelectedId (ref->bendRange, juce::dontSendNotification);
+        bendRange.setEnabled (ref->sendBendRange);
         outPort.setSelectedId (ref->midiOutPort + 2, juce::dontSendNotification);
         const auto reported = plugin.getLatencySamples();
         const auto text = ref->latencyOverrideMs >= 0.0f
@@ -282,7 +308,7 @@ private:
     juce::AudioPluginInstance& plugin;
     juce::OwnedArray<juce::TextButton> tabs;
     juce::OwnedArray<juce::ToggleButton> toggles;
-    juce::ComboBox inPort, outPort;
+    juce::ComboBox inPort, outPort, bendRange;
     juce::TextButton latency, locate;
     int tab = 0;
     std::vector<std::pair<juce::Rectangle<int>, juce::String>> groups;
@@ -605,41 +631,41 @@ juce::PopupMenu pluginProcessingMenu (AudioEngine& engine, const PluginRef& curr
     return menu;
 }
 
-void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instruments, std::function<void (PluginRef)> onChosen)
+void addPluginItems (juce::PopupMenu& menu, AudioEngine& engine, bool instruments, std::function<void (PluginRef)> onChosen, juce::Component* owner)
 {
+    // FL's way (round 151): the favourites right here, every other plugin in the picker ("More plugins...", FL's
+    // list of every generator / effect with its categories, search and favourite stars). The old menu listed all
+    // of them: hundreds of items in four columns on a PC with many plugins.
     auto types = engine.getPluginHost().getKnownPlugins().getTypes();
     std::sort (types.begin(), types.end(), [] (const auto& a, const auto& b) { return a.name.compareIgnoreCase (b.name) < 0; });
     const auto& favourites = engine.getPluginHost().favourites();
-    int added = 0;
-
-    // favourites first (Plugin manager), then all of them
-    for (const auto favouritesPass : { true, false })
-    {
-        const auto before = added;
-        for (const auto& type : types)
-        {
-            if (type.isInstrument != instruments)
-                continue;
-
-            PluginRef ref;
-            ref.id = type.createIdentifierString().toStdString();
-            ref.name = type.name.toStdString();
-            if (favouritesPass && favourites.count (ref.id) == 0)
-                continue;
-            menu.addItem ((favouritesPass ? juce::String::fromUTF8 ("\xe2\x98\x85 ") : juce::String()) + type.name + " (" + type.manufacturerName + ")  ["
-                              + type.pluginFormatName + "]",
-                          [ref, onChosen] { onChosen (ref); });
-            ++added;
-        }
-        if (favouritesPass && added > before)
-            menu.addSeparator();
-    }
-    added = 0;
+    int kind = 0;
     for (const auto& type : types)
-        added += type.isInstrument == instruments ? 1 : 0;
+    {
+        if (type.isInstrument != instruments)
+            continue;
+        ++kind;
+        PluginRef ref;
+        ref.id = type.createIdentifierString().toStdString();
+        ref.name = type.name.toStdString();
+        if (favourites.count (ref.id) == 0)
+            continue;
+        menu.addItem (juce::String::fromUTF8 ("\xe2\x98\x85 ") + type.name + " (" + type.manufacturerName + ")  [" + type.pluginFormatName + "]",
+                      [ref, onChosen] { onChosen (ref); });
+    }
+    if (menu.getNumItems() > 0)
+        menu.addSeparator();
 
-    if (added == 0)
+    if (kind == 0)
         menu.addItem (tr ("(no plugins found; use \"Scan for plugins\")"), false, false, [] {});
+    else
+        menu.addItem (instruments ? tr ("More plugins... ({0} instruments)", { juce::String (kind) }) : tr ("More plugins... ({0} effects)", { juce::String (kind) }),
+                      [&engine, instruments, onChosen, safe = juce::Component::SafePointer<juce::Component> (owner), hasOwner = owner != nullptr] {
+                          showPluginPicker (engine, instruments, [onChosen, safe, hasOwner] (PluginRef ref) {
+                              if (! hasOwner || safe != nullptr)
+                                  onChosen (ref);
+                          });
+                      });
 
     menu.addSeparator();
     menu.addItem (tr ("Scan for plugins ({0})...", { platform::pluginFormatNames() }), [&engine] { engine.getPluginHost().startBackgroundScan(); });
