@@ -6,6 +6,7 @@
 #include "core/ProjectContents.h"
 #include "core/FruityVocoder.h"
 #include "core/LiveInput.h"
+#include "core/HardwareOutput.h"
 #include "core/MixerOps.h"
 #include "core/RackOps.h"
 #include "ui/AutomationUi.h"
@@ -659,6 +660,19 @@ void MixerStrips::paint (juce::Graphics& g)
             g.setColour (colour::textSecondary);
             g.setFont (font (type::caption));
             textcache::drawText (g, faderToDb (track.volume) + " dB", x, area.getBottom() + 3, w - 4, readoutHeight - 2, juce::Justification::centred);
+
+            // a hardware output target (REA round 156, optional): a small badge at the fader's top right
+            if (mixeroutput::isCustom (engine, t))
+            {
+                const auto text = mixeroutput::label (engine, t, true);
+                const auto badge = juce::Rectangle<float> ((float) meterArea (t).getRight() + 3.0f, (float) area.getY(),
+                                                           (float) (x + w - 6) - ((float) meterArea (t).getRight() + 3.0f), 12.0f);
+                g.setColour (colour::bg0.withAlpha (0.85f));
+                g.fillRoundedRectangle (badge, 3.0f);
+                g.setColour (text.endsWith ("?") ? colour::textDisabled : colour::info);
+                g.setFont (font (9.0f, true));
+                textcache::drawFittedText (g, text, badge.toNearestInt(), juce::Justification::centred, 1, 0.7f);
+            }
         }
 
         // routing lane: send switch from the selected insert to this one, and its level knob
@@ -2159,39 +2173,164 @@ void EffectsPanel::paintEq (juce::Graphics& g)
 
 juce::String EffectsPanel::outputName() const
 {
-    // Master plays into the device's first output pair; inserts reach it through Master (FL's "(none)")
-    if (track != 0)
-        return tr ("(none)");
-    auto* device = const_cast<AudioEngine&> (engine).getDeviceManager().getCurrentAudioDevice();
-    if (device == nullptr)
+    if (track == 0 && const_cast<AudioEngine&> (engine).getDeviceManager().getCurrentAudioDevice() == nullptr)
         return tr ("(no audio device)");
-    const auto names = device->getOutputChannelNames();
-    const auto active = device->getActiveOutputChannels();
-    juce::StringArray used;
-    for (int i = 0; i < names.size() && used.size() < 2; ++i)
-        if (active[i])
-            used.add (names[i]);
-    return used.isEmpty() ? tr ("(none)") : used.joinIntoString (" - ");
+    return mixeroutput::label (engine, track);
 }
 
 void EffectsPanel::showOutputMenu()
 {
+    mixeroutput::showMenu (engine, track, this, localAreaToGlobal (outputBounds()));
+}
+
+namespace mixeroutput
+{
+namespace
+{
+juce::String modeSuffix (OutputMode mode)
+{
+    switch (mode)
+    {
+        case OutputMode::stereo: return {};
+        case OutputMode::monoSum: return " " + tr ("(mono)");
+        case OutputMode::monoLeft: return " " + tr ("(mono, L)");
+        case OutputMode::monoRight: return " " + tr ("(mono, R)");
+    }
+    return {};
+}
+} // namespace
+
+bool isCustom (const AudioEngine& engine, int track)
+{
+    const auto& mixer = engine.getSong().mixer;
+    if (track < 0 || track >= (int) mixer.size())
+        return false;
+    const auto channel = mixer[(std::size_t) track].outputChannel;
+    return track == 0 ? channel != outputDefault : channel >= 0;
+}
+
+juce::String label (const AudioEngine& engine, int track, bool compact)
+{
+    const auto& mixer = engine.getSong().mixer;
+    if (track < 0 || track >= (int) mixer.size())
+        return {};
+
+    const auto& mt = mixer[(std::size_t) track];
+    auto channel = mt.outputChannel;
+    auto mode = mt.outputMode;
+    if (track == 0 && channel == outputDefault)
+        channel = 0, mode = OutputMode::stereo;
+    if (channel < 0)
+        return tr ("(none)");
+
+    const auto names = engine.getOutputChannelNames();
+    const auto missing = ! outputAvailable (channel, mode, (int) names.size())
+                         || ! engine.isOutputChannelOpen (channel) || (mode == OutputMode::stereo && ! engine.isOutputChannelOpen (channel + 1));
+
+    if (compact) // the strip badge: the channel numbers only
+    {
+        auto text = juce::String::fromUTF8 ("\xe2\x86\x92 ") + juce::String (channel + 1);
+        if (mode == OutputMode::stereo)
+            text << "-" << (channel + 2);
+        else
+            text << (mode == OutputMode::monoLeft ? " L" : mode == OutputMode::monoRight ? " R" : " m");
+        return missing ? text + " ?" : text;
+    }
+
+    auto nameOf = [&] (int c) {
+        return c < (int) names.size() ? juce::String::fromUTF8 (names[(std::size_t) c].c_str()) : tr ("Out {0}", { juce::String (c + 1) });
+    };
+    auto text = mode == OutputMode::stereo ? nameOf (channel) + " - " + nameOf (channel + 1) : nameOf (channel);
+    text += modeSuffix (mode);
+    if (missing)
+        text += " " + tr ("(missing)");
+    return text;
+}
+
+void showMenu (AudioEngine& engine, int track, juce::Component* target, juce::Rectangle<int> screenArea)
+{
+    const auto& mixer = engine.getSong().mixer;
+    if (track < 0 || track >= (int) mixer.size())
+        return;
+
+    const auto& mt = mixer[(std::size_t) track];
+    const auto names = engine.getOutputChannelNames();
+    const auto custom = isCustom (engine, track);
     juce::PopupMenu menu;
     menu.addSectionHeader (tr ("Audio output target"));
-    if (track != 0)
+
+    auto set = [&engine, track] (int channel, OutputMode mode) {
+        return [&engine, track, channel, mode] { engine.setTrackOutput (track, channel, mode); };
+    };
+
+    if (track == 0)
     {
-        menu.addItem (tr ("(none)"), false, true, [] {});
-        menu.addItem (tr ("Inserts reach the audio device through the Master"), false, false, [] {});
+        const auto first = names.size() >= 2 ? juce::String::fromUTF8 (names[0].c_str()) + " - " + juce::String::fromUTF8 (names[1].c_str())
+                                             : tr ("first output pair");
+        menu.addItem (first + "  " + tr ("(default)"), true, mt.outputChannel == outputDefault, set (outputDefault, OutputMode::stereo));
+        menu.addItem (tr ("(none)"), true, mt.outputChannel == outputNone, set (outputNone, OutputMode::stereo));
     }
     else
-        menu.addItem (outputName(), false, true, [] {});
+        menu.addItem (tr ("(none) - through the Master only"), true, ! custom, set (outputDefault, OutputMode::stereo));
+
+    if (custom && (track > 0 || mt.outputChannel >= 0))
+        menu.addItem (label (engine, track), true, true, nullptr); // the current target (also when missing)
+
+    // the optional direct outputs: stereo pairs, then every channel alone
+    juce::PopupMenu direct;
+    direct.addItem (track == 0 ? tr ("Optional: send the Master to other outputs of your audio interface")
+                               : tr ("Optional: also send this insert straight to an output of your audio interface, e.g. a mono output"),
+                    false, false, nullptr);
+    if (names.empty())
+        direct.addItem (tr ("No audio device is open"), false, false, nullptr);
+
+    const auto targets = outputTargets (names);
+    auto pairsHeader = false, monoHeader = false;
+    for (const auto& t : targets)
+    {
+        const auto name = juce::String::fromUTF8 (t.name.c_str());
+        if (t.mode == OutputMode::stereo)
+        {
+            if (! std::exchange (pairsHeader, true))
+                direct.addSectionHeader (tr ("Stereo pair"));
+            direct.addItem (name, true, mt.outputChannel == t.channel && mt.outputMode == OutputMode::stereo, set (t.channel, OutputMode::stereo));
+            continue;
+        }
+
+        if (! std::exchange (monoHeader, true))
+            direct.addSectionHeader (tr ("Mono (one output)"));
+        const auto here = mt.outputChannel == t.channel && mt.outputMode != OutputMode::stereo;
+        juce::PopupMenu modes;
+        modes.addItem (tr ("Sum of L + R (mono)"), true, here && mt.outputMode == OutputMode::monoSum, set (t.channel, OutputMode::monoSum));
+        modes.addItem (tr ("Left side only"), true, here && mt.outputMode == OutputMode::monoLeft, set (t.channel, OutputMode::monoLeft));
+        modes.addItem (tr ("Right side only"), true, here && mt.outputMode == OutputMode::monoRight, set (t.channel, OutputMode::monoRight));
+        direct.addSubMenu (name, modes, true, nullptr, here);
+    }
+
+    if (! names.empty() && names.size() <= 2)
+        direct.addItem (tr ("This audio device has 2 outputs; an interface with more outputs lists all of them here"), false, false, nullptr);
+
+    menu.addSeparator();
+    menu.addSubMenu (track == 0 ? tr ("Hardware output") : tr ("Send to hardware output (optional)"), direct, true, nullptr, custom && mt.outputChannel >= 0);
+    if (custom)
+        menu.addItem (track == 0 ? tr ("Back to the default output") : tr ("Back to Master only"), set (outputDefault, OutputMode::stereo));
+
     menu.addSeparator();
     menu.addItem (tr ("Audio settings..."), [] {
         if (mixerinput::openAudioSettings)
             mixerinput::openAudioSettings();
     });
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (outputBounds())));
+
+    auto options = juce::PopupMenu::Options();
+    if (target != nullptr)
+        options = options.withTargetComponent (target);
+    if (! screenArea.isEmpty())
+        options = options.withTargetScreenArea (screenArea);
+    else if (target != nullptr)
+        options = options.withMousePosition();
+    menu.showMenuAsync (options);
 }
+} // namespace mixeroutput
 
 juce::Rectangle<int> EffectsPanel::slotBounds (int slot) const
 {
@@ -3200,7 +3339,8 @@ ui::Hint EffectsPanel::hintAt (juce::Point<int> p)
     if (outputBounds().contains (p))
     {
         ui::Hint h;
-        h.text = tr ("Audio output target: where this insert's sound leaves LYNX");
+        h.text = track == 0 ? tr ("Audio output target: the outputs of your audio device the Master plays on  [LMB] choose")
+                            : tr ("Audio output target: through the Master by default; optional: also straight to an output of your audio interface (a mono output too)  [LMB] choose");
         h.value = outputName();
         h.hasMenu = true;
         return h;

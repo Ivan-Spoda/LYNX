@@ -569,6 +569,22 @@ void RackState::buildPdc (const RackState* previous)
             sendDelays[t][k] = line (pdc.sendDelay[t][k], old);
         }
     }
+
+    // inserts with a hardware output target: aligned with the Master's output (which waits for the longest path)
+    hwRoutes.clear();
+    for (std::size_t t = 1; t < song.mixer.size() && t < (std::size_t) maxMixerTracks; ++t)
+    {
+        const auto& track = song.mixer[t];
+        if (track.outputChannel < 0 || track.outputChannel >= HardwareOutput::maxChannels)
+            continue;
+        const auto length = t < pdc.outLat.size() ? std::max (0, pdc.total - pdc.outLat[t]) : 0;
+        const std::shared_ptr<DelayLine>* old = nullptr;
+        if (previous != nullptr)
+            for (const auto& r : previous->hwRoutes)
+                if (r.track == (int) t)
+                    old = &r.delay;
+        hwRoutes.push_back ({ (int) t, track.outputChannel, track.outputMode, line (length, old) });
+    }
 }
 
 void RackState::buildMidiRoutes()
@@ -977,6 +993,7 @@ void RackRenderer::prepare (double sr, int maxBlockSize)
     sampleRate = sr;
     blockCapacity = std::max (64, maxBlockSize);
     mixBuffers.assign ((std::size_t) maxMixerTracks * 2 * (std::size_t) blockCapacity, 0.0f);
+    hwScratch.assign (2 * (std::size_t) blockCapacity, 0.0f);
 
     if (lastState != nullptr)
     {
@@ -2139,6 +2156,52 @@ void RackRenderer::processChunk (const RackState& state, bool playing, double st
         meters->accumulate (0, peakOf (left, numSamples), peakOf (right, numSamples));
         meters->capture.push (0, left, right, numSamples);
         meters->logTap.push (0, left, right, numSamples);
+    }
+
+    if (hwOut != nullptr && ! state.hwRoutes.empty() && hwOut->active.load (std::memory_order_relaxed))
+        mixHardwareOutputs (state, numSamples);
+}
+
+// 4) inserts with a hardware output target: their post-fader output (the same signal the Master gets) into the
+//    device-channel buses, delayed like the Master's path
+void RackRenderer::mixHardwareOutputs (const RackState& state, int n) noexcept
+{
+    auto* sl = hwScratch.data();
+    auto* sr = hwScratch.data() + blockCapacity;
+
+    for (const auto& route : state.hwRoutes)
+    {
+        const auto t = route.track;
+        if (t <= 0 || t >= maxMixerTracks)
+            continue;
+
+        const float* l = trackActive[(std::size_t) t] ? trackBuffer (t, 0) : nullptr;
+        const float* r = trackActive[(std::size_t) t] ? trackBuffer (t, 1) : nullptr;
+
+        if (route.delay != nullptr)
+        {
+            if (l != nullptr)
+            {
+                std::copy (l, l + n, sl);
+                std::copy (r, r + n, sr);
+            }
+            else
+            {
+                std::fill (sl, sl + n, 0.0f);
+                std::fill (sr, sr + n, 0.0f);
+            }
+            route.delay->process (sl, sr, n);
+            l = sl;
+            r = sr;
+        }
+
+        if (l == nullptr)
+            continue;
+
+        const auto [first, count] = outputChannelsOf (route.channel, route.mode);
+        auto* a = hwOut->bus (first, liveInputOffset, n);
+        auto* b = count > 1 ? hwOut->bus (first + 1, liveInputOffset, n) : nullptr;
+        addToOutput (l, r, route.mode, a, b, n);
     }
 }
 

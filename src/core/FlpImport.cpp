@@ -1858,6 +1858,11 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         const auto dockBits = insert.flags >> 6 & 3;
         const auto isCurrentTrack = insert.index > 0 && insert.index + 1 == (int) project.mixer.size();
         track.dock = dockBits == 2 ? MixerDock::right : (dockBits == 0 && ! isCurrentTrack) ? MixerDock::left : MixerDock::middle;
+        // 0x93 "Audio output target" (REA round 156): −1 none, 0 the first pair (the only values seen in 1162 .flp files:
+        // every Master 0, one insert 0); other values depend on FL's device list and are not imported, nor a Master
+        // set to none (the project would play silent)
+        if (insert.output == 0 && insert.index > 0)
+            track.outputChannel = 0;
 
         if (insert.index > 0 && insert.hasRoutes)
         {

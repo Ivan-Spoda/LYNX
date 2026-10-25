@@ -14,6 +14,7 @@
 #include "core/Preferences.h"
 #include "core/LiveEventQueue.h"
 #include "core/LiveInput.h"
+#include "core/HardwareOutput.h"
 #include "core/Recorder.h"
 #include "core/WorkerPool.h"
 #include "core/RackRenderer.h"
@@ -205,6 +206,17 @@ public:
     // Sets an insert's input source (undoable; -1 = none) and opens the device input when needed.
     void setInsertInput (int track, int channel, bool stereo);
     void setInsertMonitor (int track, InputMonitor mode);
+
+    // --- hardware output targets (REA round 156) ---
+    // Names of the open device's output channels (all of them, open or not); empty without a device.
+    std::vector<std::string> getOutputChannelNames() const;
+    // Whether device output channel `c` is open (gets sound) right now.
+    bool isOutputChannelOpen (int channel) const;
+    // Sets a track's hardware output target (undoable; outputNone / outputDefault / a device channel) and opens
+    // the device's output channels it needs (no trip to Audio settings). The Master's default is its first pair.
+    void setTrackOutput (int track, int channel, OutputMode mode);
+    // Opens the device output channels the song's targets need (that the device has). UI thread.
+    void openTargetedOutputs();
     // Input level of an insert's source since the last call (0..1, per side). UI thread.
     // (the Mixer's strips take it 30 times a second; other views peek at the last value taken)
     float takeInputPeak (int track, int side) noexcept
@@ -547,6 +559,12 @@ private:
     int takeCount = 0;
     juce::SpinLock takeLock;                       // the audio thread only tries (never waits)
     LiveInput liveInput;
+    HardwareOutput hwOutput;                              // inserts' hardware outputs (renderer -> callback)
+    std::array<int, HardwareOutput::maxChannels> outputSlot {}; // device output channel -> callback output index (-1: closed)
+    std::atomic<int> masterOutChannel { outputDefault };  // the Master's target (UI -> audio)
+    std::atomic<int> masterOutMode { 0 };
+    std::vector<float> masterScratch = std::vector<float> (2 * HardwareOutput::capacity, 0.0f);
+    void routeOutputs (float* const* outputs, int numOutputs, int n) noexcept; // audio thread
     std::array<float, maxMixerTracks * 2> lastInputPeaks {};
     std::array<int, LiveInput::maxChannels> inputSlot {}; // device input channel -> callback input index (-1: closed)
     std::atomic<double> takeStartTick { -1.0 };    // position of the first recorded sample
