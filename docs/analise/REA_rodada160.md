@@ -194,6 +194,6 @@ hint suggests the interface's own ASIO driver (e.g. "SSL ASIO Driver 1"), then L
   salvaged code's own tests caught (event-sort test used private members; stretch pre-echo −29 dB → 15 ms pre-roll;
   dither bias a quarter LSB → half), regenerated I18nData.h, added the preview-interpolation and RT-audit tests,
   rewrote the near-unity resampler (polyphase), merged origin/main (361c6903). Numbers in §2–§7 re-measured.
-- Build-local of the merge: in progress; then a final build-local + Windows build of b9db574c+ and land batch 1
+- Merged origin/main again (r159, d6f3ab68): build-local 1 749 332 checks, 0 failures; Windows build OK. Landing batch 1
   (`land.sh quality160`). Then the "Sound quality" section of notes-0.1.16.md.
 - Next (§8): locks on the engine side of the audio thread; anything else measured goes in a batch 2.
