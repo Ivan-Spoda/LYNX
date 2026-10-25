@@ -190,10 +190,11 @@ hint suggests the interface's own ASIO driver (e.g. "SSL ASIO Driver 1"), then L
 
 ## Where I stopped
 
-- 2026-10-25 (resumed after the BSOD): WIP committed as ab89628b and pushed to origin/wip/quality160. Fixed what the
-  salvaged code's own tests caught (event-sort test used private members; stretch pre-echo −29 dB → 15 ms pre-roll;
-  dither bias a quarter LSB → half), regenerated I18nData.h, added the preview-interpolation and RT-audit tests,
-  rewrote the near-unity resampler (polyphase), merged origin/main (361c6903). Numbers in §2–§7 re-measured.
-- Merged origin/main again (r159, d6f3ab68): build-local 1 749 332 checks, 0 failures; Windows build OK. Landing batch 1
-  (`land.sh quality160`). Then the "Sound quality" section of notes-0.1.16.md.
-- Next (§8): locks on the engine side of the audio thread; anything else measured goes in a batch 2.
+- 2026-10-25 (resumed after the BSOD): WIP committed as ab89628b. Fixed what the salvaged code's own tests caught
+  (event-sort test used private members; stretch pre-echo −29 dB → 15 ms pre-roll; dither bias a quarter LSB → half),
+  regenerated I18nData.h, added the preview-interpolation and RT-audit tests, rewrote the near-unity resampler
+  (polyphase). Numbers in §2–§7 re-measured.
+- **Landed batch 1 on main: 00be4bb2** (build-local 0 failures, Windows build, self-test OK). Batch 2: THIRD_PARTY.md
+  entry for Signalsmith. Release-notes "Sound quality" section written in notes-0.1.16.md.
+- Not done (§8): locks on the JUCE/engine side of the audio thread; FL A/B of the synthetic stretch set (its inputs
+  were lost in the crash — the FL renders in `D:\lynx-work\quality160\fl` can't be compared without them).
