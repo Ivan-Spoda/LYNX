@@ -4436,3 +4436,12 @@ countries: br
 # --- round 155: export plugin warm-up
 "Plugin warm-up" = "Aquecimento dos plugins"
 "Before the export starts, third-party plugins process a moment of silence until they have finished loading their settings (bridged plugins, samplers that load in the background), so the file does not start with half-loaded effects" = "Antes de a exportação começar, os plugins de terceiros processam um instante de silêncio até terminarem de carregar as suas configurações (plugins em ponte, samplers que carregam em segundo plano), para o arquivo não começar com efeitos carregados pela metade"
+
+# --- round 157a: crash and freeze diagnostics, GPU rendering, plugins in a separate process
+"Always run {0} in a separate process" = "Sempre rodar {0} em um processo separado"
+"It happened while the window of {0} was opening{1}. Run {0} in a separate process from now on? If it crashes again, only the plugin stops and LYNX keeps running (Plugin wrapper menu: \"Always run in a separate process\")." = "Aconteceu enquanto a janela do {0} abria{1}. Rodar o {0} em um processo separado daqui em diante? Se ele travar de novo, só o plugin para e o LYNX continua funcionando (menu do wrapper do plugin: \"Sempre rodar em um processo separado\")."
+" (in the graphics driver, {0})" = " (no driver de vídeo, {0})"
+"Run separately" = "Rodar separado"
+"No" = "Não"
+"The crash was in the graphics driver ({0}). LYNX now draws its windows without the GPU; you can turn GPU rendering back on in Options > General settings (after a driver update, for example)." = "A falha foi no driver de vídeo ({0}). Agora o LYNX desenha as janelas sem a GPU; você pode religar a renderização pela GPU em Opções > Configurações gerais (depois de atualizar o driver, por exemplo)."
+"Draw with the GPU (Direct2D). Turn off if LYNX crashes in the graphics driver or the screen flickers" = "Desenhar com a GPU (Direct2D). Desligue se o LYNX travar no driver de vídeo ou a tela piscar"

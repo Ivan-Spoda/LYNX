@@ -21,6 +21,17 @@ void forceForegroundForTest (juce::Component& window);
 // Native window chrome in the LYNX colours (dark title bar on Windows). keepAboveMainWindow calls it.
 void applyWindowChrome (juce::Component& window);
 
+// GPU rendering (round 157a). JUCE 8 draws every Windows window with Direct2D (the GPU driver's D3D11 path); a
+// driver that crashes there (Intel igd10um64xe.dll on a hybrid-graphics laptop) takes LYNX down. Off = every LYNX
+// window draws with GDI (the CPU), as JUCE 7 did. Saved in gpu-rendering.txt ("0" = off; default on). The change
+// applies to open windows at once (a watcher re-applies it to new windows twice a second).
+bool gpuRenderingEnabled();
+void setGpuRenderingEnabled (bool on);
+// starts the watcher (the app calls it once at start, after reading the setting)
+void startRenderingWatch();
+// the window's native peer uses the chosen renderer now (keepAboveMainWindow calls it)
+void applyRenderingChoice (juce::Component& window);
+
 // The LYNX logo (256 px, with transparency).
 juce::Image logoImage();
 
