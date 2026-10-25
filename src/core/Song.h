@@ -1107,7 +1107,7 @@ struct Song
     }
 
     static std::vector<MixerTrack> defaultMixer (int inserts = 16);
-    // First insert that no channel uses (or the last one, if all are taken).
+    // First insert nothing uses (no channel, send, effect, input, Playlist link or custom name); 0 (Master) if none.
     int nextFreeInsert() const;
 
     // End of the last clip, rounded up to a bar (minimum 1 bar; with no clip, the current pattern's length).

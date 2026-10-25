@@ -132,11 +132,29 @@ std::vector<MixerTrack> Song::defaultMixer (int inserts)
 
 int Song::nextFreeInsert() const
 {
+    // free = nothing uses it: no channel plays into it, no insert sends to it, no effects, input or Playlist track
+    // link, the default name and routing. Round 157b: an FL project's effect buses (a vocal reverb/delay insert fed only
+    // by sends) have no channel, and a sample added to the rack was routed into one (her beat through the vocal
+    // H-Delay, reverb and Decapitator: "it sounds terrible").
+    auto used = [this] (int t) {
+        const auto& m = mixer[(std::size_t) t];
+        if (! m.effects.empty() || ! m.toMaster || m.inputChannel >= 0 || ! m.sends.empty()
+            || (! m.name.empty() && m.name != "Insert " + std::to_string (t)))
+            return true;
+        if (std::any_of (channels.begin(), channels.end(), [t] (const ChannelDef& c) { return c.mixerTrack == t; }))
+            return true;
+        if (std::any_of (mixer.begin(), mixer.end(), [t] (const MixerTrack& o) {
+                return std::any_of (o.sends.begin(), o.sends.end(), [t] (const MixerSend& send) { return send.target == t; });
+            }))
+            return true;
+        return std::any_of (playlistTracks.begin(), playlistTracks.end(), [t] (const PlaylistTrack& p) { return p.mixerTrack == t; });
+    };
+
     for (int t = 1; t < (int) mixer.size(); ++t)
-        if (std::none_of (channels.begin(), channels.end(), [t] (const ChannelDef& c) { return c.mixerTrack == t; }))
+        if (! used (t))
             return t;
 
-    return std::max (0, (int) mixer.size() - 1);
+    return 0; // every insert is in use: Master (FL's default for a new channel)
 }
 
 void Song::removeChannel (int index)

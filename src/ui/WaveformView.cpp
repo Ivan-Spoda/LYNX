@@ -5,6 +5,8 @@
 #include <cmath>
 
 #include "core/Sha256.h"
+#include "core/Mp3Decoder.h"
+#include "engine/Mp3Format.h"
 #include "engine/WavPackFormat.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
@@ -20,7 +22,9 @@ constexpr int diskCacheMaxFiles = 600;
 juce::String diskKey (const juce::File& file)
 {
     const auto text = (file.getFullPathName() + "|" + juce::String (file.getSize()) + "|" + juce::String (file.getLastModificationTime().toMilliseconds())
-                       + "|" + juce::String ((int) wave::formatVersion))
+                       + "|" + juce::String ((int) wave::formatVersion)
+                       // MP3s: waveforms drawn from JUCE's decoder (before round 157b) are drawn again
+                       + (file.hasFileExtension ("mp3;mp2;mpga") ? juce::String ("|") + mp3::decoderId : juce::String()))
                           .toStdString();
     return juce::String (sha256Hex (reinterpret_cast<const std::uint8_t*> (text.data()), text.size())).substring (0, 40);
 }
@@ -130,7 +134,7 @@ private:
 
 WaveformCache::WaveformCache()
 {
-    formats.registerBasicFormats();
+    registerAudioFormats (formats); // LYNX's MP3 reader first (round 157b)
     formats.registerFormat (new WavPackAudioFormat(), false);
 }
 

@@ -6,7 +6,9 @@
 #include <set>
 
 #include "core/OggVorbis.h"
+#include "core/Mp3Decoder.h"
 #include "core/TimeStretch.h"
+#include "engine/Mp3Format.h"
 #include "engine/WavPackFormat.h"
 
 namespace lynx
@@ -149,7 +151,7 @@ std::unique_ptr<juce::AudioFormatReader> createFlOggReader (const juce::File& fi
 
 SampleLibrary::SampleLibrary()
 {
-    formats.registerBasicFormats();
+    registerAudioFormats (formats); // LYNX's MP3 reader first (round 157b), then JUCE's
     formats.registerFormat (new WavPackAudioFormat(), false); // .wv files from FL packs
 }
 
@@ -270,7 +272,9 @@ std::shared_ptr<const SampleData> SampleLibrary::loadStreamed (const juce::File&
     const auto frames = reader.lengthInSamples;
     const auto channels = juce::jmin (2, (int) reader.numChannels);
     const auto key = juce::String::toHexString ((file.getFullPathName() + "|" + juce::String (file.getSize()) + "|"
-                                                 + juce::String (file.getLastModificationTime().toMilliseconds()))
+                                                 + juce::String (file.getLastModificationTime().toMilliseconds())
+                                                 // the decoder too: a file read by another one is decoded again
+                                                 + (reader.getFormatName() == Mp3AudioFormat::formatName ? juce::String ("|") + mp3::decoderId : juce::String()))
                                                     .hashCode64());
     const auto leftFile = cacheFolder().getChildFile (key + ".L.pcm");
     const auto rightFile = cacheFolder().getChildFile (key + ".R.pcm");
