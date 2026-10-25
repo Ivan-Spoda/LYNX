@@ -186,6 +186,7 @@ struct Connection
     bool synced = false;
     std::atomic<bool> broken { false };
     std::atomic<std::uint32_t> generation { 0 }; // bumps when sinks / sources / defaults change
+    std::atomic<int> lastBlock { 0 };             // the block size the last device opened with
 
     explicit Connection (Api& a) : api (a) {}
 
@@ -476,30 +477,43 @@ std::uint32_t channelPosition (const std::string& p, std::size_t index)
 }
 
 // --- the device ---------------------------------------------------------------------------------------------------
+class PipeWireDevice;
+
+// The devices a type created and that still exist (message thread), so a restarted daemon can take them back
+struct DeviceRegistry
+{
+    std::vector<PipeWireDevice*> devices;
+};
+
 class PipeWireDevice final : public juce::AudioIODevice
 {
 public:
-    PipeWireDevice (std::shared_ptr<Connection> c, const juce::String& outName, const juce::String& inName, Endpoint out, Endpoint in,
-                    bool hasOutput, bool hasInput)
+    PipeWireDevice (std::shared_ptr<Connection> c, std::shared_ptr<DeviceRegistry> r, const juce::String& outName, const juce::String& inName,
+                    Endpoint out, Endpoint in, bool hasOutput, bool hasInput)
         : juce::AudioIODevice (outName.isNotEmpty() ? outName : inName, pipeWireTypeName),
-          connection (std::move (c)), output (std::move (out)), input (std::move (in)), wantOutput (hasOutput), wantInput (hasInput)
+          connection (std::move (c)), registry (std::move (r)), output (std::move (out)), input (std::move (in)), wantOutput (hasOutput), wantInput (hasInput)
     {
-        juce::ignoreUnused (inName);
+        registry->devices.push_back (this);
     }
 
-    ~PipeWireDevice() override { close(); }
+    ~PipeWireDevice() override
+    {
+        close();
+        std::erase (registry->devices, this);
+    }
 
     juce::StringArray getOutputChannelNames() override { return names (wantOutput ? output.channels : std::vector<std::string>()); }
     juce::StringArray getInputChannelNames() override { return names (wantInput ? input.channels : std::vector<std::string>()); }
     juce::Array<double> getAvailableSampleRates() override { return { 44100.0, 48000.0, 88200.0, 96000.0, 176400.0, 192000.0 }; }
     juce::Array<int> getAvailableBufferSizes() override { return { 32, 64, 128, 256, 512, 1024, 2048 }; }
-    int getDefaultBufferSize() override { return 256; }
+    // the last block size opened (when a chosen device is unplugged, the device manager falls back to "System default"
+    // with the default size: it keeps the user's buffer that way)
+    int getDefaultBufferSize() override { return connection->lastBlock > 0 ? connection->lastBlock.load() : 256; }
 
     juce::String open (const juce::BigInteger& inputChannels, const juce::BigInteger& outputChannels, double sampleRate, int bufferSizeSamples) override
     {
         close();
         lastError.clear();
-        auto& api = connection->api;
         if (connection->broken)
             return lastError = "The PipeWire daemon is not running any more";
 
@@ -509,6 +523,8 @@ public:
         rate = sampleRate > 0 ? (int) sampleRate : (graphRate > 0 ? graphRate : 48000);
         block = bufferSizeSamples > 0 ? bufferSizeSamples : getDefaultBufferSize();
         block = juce::jlimit (16, 8192, block);
+        connection->lastBlock = block;
+        xruns = 0;
 
         activeOut.clear();
         activeIn.clear();
@@ -519,32 +535,7 @@ public:
             if (inputChannels[i])
                 activeIn.setBit (i);
 
-        // scratch for the engine's blocks: silent outputs for inactive channels, the input FIFO, the input block
-        const auto inCount = (std::size_t) activeIn.countNumberOfSetBits();
-        fifo.assign (inCount, std::vector<float> (fifoFrames, 0.0f));
-        inBlock.assign (inCount, std::vector<float> ((std::size_t) maxFrames, 0.0f));
-        fifoWrite = fifoRead = 0;
-        captureStarted = false;
-        xruns = 0;
-
-        connection->lock();
-        if (! activeOut.isZero())
-            makeStream (true);
-        if (! activeIn.isZero())
-            makeStream (false);
-        // wait until PipeWire has accepted the streams (or failed)
-        const auto until = juce::Time::getMillisecondCounter() + 3000;
-        auto pending = [this] { return (playback.stream != nullptr && playback.state == PW_STREAM_STATE_CONNECTING)
-                                       || (capture.stream != nullptr && capture.state == PW_STREAM_STATE_CONNECTING); };
-        while (pending() && ! connection->broken && juce::Time::getMillisecondCounter() < until)
-            api.threadLoopTimedWait (connection->loop, 1);
-        for (auto* s : { &playback, &capture })
-            if (s->stream != nullptr && s->state == PW_STREAM_STATE_ERROR)
-                lastError = "PipeWire: " + s->error;
-        if ((! activeOut.isZero() && playback.stream == nullptr) || (! activeIn.isZero() && capture.stream == nullptr))
-            lastError = "PipeWire: the stream could not be created";
-        connection->unlock();
-
+        lastError = openStreams();
         if (lastError.isNotEmpty())
         {
             close();
@@ -557,24 +548,24 @@ public:
     void close() override
     {
         stop();
-        if (playback.stream == nullptr && capture.stream == nullptr)
-        {
-            isOpenFlag = false;
-            return;
-        }
-        auto& api = connection->api;
-        connection->lock();
-        for (auto* s : { &playback, &capture })
-            if (s->stream != nullptr)
-            {
-                api.streamDisconnect (s->stream);
-                api.streamDestroy (s->stream);
-                s->stream = nullptr;
-                s->position = nullptr;
-            }
-        connection->unlock();
+        destroyStreams();
         isOpenFlag = false;
     }
+
+    // The daemon restarted: the same streams again on the new connection, playing on (message thread)
+    void reconnect (std::shared_ptr<Connection> fresh)
+    {
+        if (! isOpenFlag || fresh == connection)
+            return;
+        destroyStreams(); // the old core is gone: only the client-side objects are freed
+        connection = std::move (fresh);
+        connection->lastBlock = block;
+        lastError = openStreams();
+        if (lastError.isEmpty() && callback != nullptr)
+            setActive (true);
+    }
+
+    bool usesBrokenConnection() const { return isOpenFlag && connection->broken; }
 
     bool isOpen() override { return isOpenFlag; }
 
@@ -639,6 +630,54 @@ private:
         for (std::size_t i = 0; i < channels.size(); ++i)
             out.add (juce::String::fromUTF8 (prefs::pipewireChannelName (channels[i], (int) i).c_str()));
         return out;
+    }
+
+    juce::String openStreams()
+    {
+        auto& api = connection->api;
+        // scratch for the engine's blocks: the input FIFO, the input block
+        const auto inCount = (std::size_t) activeIn.countNumberOfSetBits();
+        fifo.assign (inCount, std::vector<float> (fifoFrames, 0.0f));
+        inBlock.assign (inCount, std::vector<float> ((std::size_t) maxFrames, 0.0f));
+        fifoWrite = fifoRead = 0;
+        captureStarted = false;
+
+        juce::String error;
+        connection->lock();
+        if (! activeOut.isZero())
+            makeStream (true);
+        if (! activeIn.isZero())
+            makeStream (false);
+        // wait until PipeWire has accepted the streams (or failed)
+        const auto until = juce::Time::getMillisecondCounter() + 3000;
+        auto pending = [this] { return (playback.stream != nullptr && playback.state == PW_STREAM_STATE_CONNECTING)
+                                       || (capture.stream != nullptr && capture.state == PW_STREAM_STATE_CONNECTING); };
+        while (pending() && ! connection->broken && juce::Time::getMillisecondCounter() < until)
+            api.threadLoopTimedWait (connection->loop, 1);
+        for (auto* st : { &playback, &capture })
+            if (st->stream != nullptr && st->state == PW_STREAM_STATE_ERROR)
+                error = "PipeWire: " + st->error;
+        if ((! activeOut.isZero() && playback.stream == nullptr) || (! activeIn.isZero() && capture.stream == nullptr))
+            error = "PipeWire: the stream could not be created";
+        connection->unlock();
+        return error;
+    }
+
+    void destroyStreams()
+    {
+        if (playback.stream == nullptr && capture.stream == nullptr)
+            return;
+        auto& api = connection->api;
+        connection->lock();
+        for (auto* st : { &playback, &capture })
+            if (st->stream != nullptr)
+            {
+                api.streamDisconnect (st->stream);
+                api.streamDestroy (st->stream);
+                st->stream = nullptr;
+                st->position = nullptr;
+            }
+        connection->unlock();
     }
 
     // with the loop locked
@@ -891,6 +930,7 @@ private:
     }
 
     std::shared_ptr<Connection> connection;
+    std::shared_ptr<DeviceRegistry> registry;
     Endpoint output, input;
     bool wantOutput, wantInput;
     bool isOpenFlag = false;
@@ -908,6 +948,8 @@ private:
     std::atomic<int> xruns { 0 }, outputDelay { 0 }, inputDelay { 0 };
 };
 
+std::shared_ptr<Connection> connectToDaemon();
+
 // --- the device type ----------------------------------------------------------------------------------------------
 class PipeWireDeviceType final : public juce::AudioIODeviceType,
                                  private juce::Timer
@@ -915,6 +957,7 @@ class PipeWireDeviceType final : public juce::AudioIODeviceType,
 public:
     explicit PipeWireDeviceType (std::shared_ptr<Connection> c) : juce::AudioIODeviceType (pipeWireTypeName), connection (std::move (c))
     {
+        scanForDevices(); // the device manager scans only the types it created itself
         startTimer (500); // hot-plug: sinks and sources that come and go
     }
 
@@ -952,13 +995,27 @@ public:
         const auto* in = DeviceList::find (list.inputs, inputDeviceName);
         if (out == nullptr && in == nullptr)
             return nullptr;
-        return new PipeWireDevice (connection, outputDeviceName, inputDeviceName, out != nullptr ? *out : Endpoint {}, in != nullptr ? *in : Endpoint {},
-                                   out != nullptr, in != nullptr);
+        return new PipeWireDevice (connection, registry, outputDeviceName, inputDeviceName, out != nullptr ? *out : Endpoint {},
+                                   in != nullptr ? *in : Endpoint {}, out != nullptr, in != nullptr);
     }
 
 private:
     void timerCallback() override
     {
+        // the daemon went away (restart, update): reconnect every 2 s and take the open devices along
+        if (connection->broken)
+        {
+            if (++reconnectTicks % 4 != 0)
+                return;
+            auto fresh = connectToDaemon();
+            if (fresh == nullptr)
+                return;
+            connection = std::move (fresh);
+            for (auto* d : registry->devices)
+                if (d->usesBrokenConnection())
+                    d->reconnect (connection);
+            seenGeneration = 0; // the list may have changed meanwhile
+        }
         if (! scanned || connection->generation.load() == seenGeneration)
             return;
         const auto before = std::make_pair (getDeviceNames (false), getDeviceNames (true));
@@ -968,8 +1025,10 @@ private:
     }
 
     std::shared_ptr<Connection> connection;
+    std::shared_ptr<DeviceRegistry> registry = std::make_shared<DeviceRegistry>();
     DeviceList list;
     std::uint32_t seenGeneration = 0;
+    int reconnectTicks = 0;
     bool scanned = false;
 };
 
@@ -987,7 +1046,8 @@ std::shared_ptr<Connection> connectToDaemon()
 
 std::unique_ptr<juce::AudioIODeviceType> makePipeWireDeviceType()
 {
-    if (auto c = connectToDaemon())
+    auto c = connectToDaemon();
+    if (c != nullptr)
         return std::make_unique<PipeWireDeviceType> (std::move (c));
     return nullptr;
 }

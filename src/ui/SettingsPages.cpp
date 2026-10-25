@@ -326,7 +326,7 @@ public:
     {
         for (auto* c : std::initializer_list<juce::Component*> { &deviceTitle, &statusTitle, &recordTitle, &driverLabel, &driverBox, &driverNote, &outputLabel,
                                                                  &outputBox, &inputLabel, &inputBox, &rateLabel, &rateBox, &bufferLabel, &bufferBox,
-                                                                 &bufferNote, &panelButton, &testButton, &status, &load, &realtime, &recordInput, &recordNote, &inputChannels })
+                                                                 &bufferNote, &panelButton, &testButton, &status, &load, &outputChannels, &realtime, &recordInput, &recordNote, &inputChannels })
             add (*c);
 
         styleLabel (driverLabel, tr ("Driver"));
@@ -429,6 +429,7 @@ private:
         r.section (statusTitle);
         status.setBounds (r.full (22));
         load.setBounds (r.full (22));
+        outputChannels.setBounds (r.full (22));
        #if JUCE_LINUX
         realtime.setBounds (r.full (realtimeDenied ? 50 : 22));
        #endif
@@ -530,6 +531,19 @@ private:
                 list.add (juce::String::fromUTF8 (n.c_str()));
             styleNote (inputChannels, names.empty() ? tr ("Input channels: none open. Choose an input device above to record a microphone or an instrument.")
                                                     : tr ("Input channels ({0}): {1}", { juce::String ((int) names.size()), list.joinIntoString (", ") }));
+        }
+        {
+            // the device's outputs by name (PipeWire / JACK / ASIO name their channels)
+            juce::StringArray outs;
+            if (device != nullptr)
+            {
+                const auto names = device->getOutputChannelNames();
+                const auto active = device->getActiveOutputChannels();
+                for (int c = 0; c < names.size(); ++c)
+                    outs.add (names[c] + (active[c] ? juce::String() : " (" + tr ("off") + ")"));
+            }
+            styleNote (outputChannels, outs.isEmpty() ? juce::String()
+                                                      : tr ("Output channels ({0}): {1}", { juce::String (outs.size()), outs.joinIntoString (", ") }));
         }
         updateStatus();
     }
@@ -654,7 +668,7 @@ private:
     bool updating = false;
     juce::String error;
     SectionTitle deviceTitle { tr ("Audio device") }, statusTitle { tr ("Status") }, recordTitle { tr ("Recording") };
-    juce::Label driverLabel, driverNote, outputLabel, inputLabel, rateLabel, bufferLabel, bufferNote, status, load, realtime, recordNote, inputChannels;
+    juce::Label driverLabel, driverNote, outputLabel, inputLabel, rateLabel, bufferLabel, bufferNote, status, load, outputChannels, realtime, recordNote, inputChannels;
     bool realtimeDenied = false;
     juce::ComboBox driverBox, outputBox, inputBox, rateBox, bufferBox;
     juce::TextButton panelButton { tr ("Driver settings...") }, testButton { tr ("Play a test sound") };
