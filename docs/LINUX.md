@@ -97,5 +97,5 @@ on or off later, and LYNX updates the entry when the AppImage file moves. From a
 ## Drawing speed
 
 LYNX draws with JUCE's software renderer on Linux (X11 or XWayland). Since round 161b knobs and rounded panels come from
-cached pre-rendered images, which made the Mixer and Playlist 2–8× cheaper to draw. `LYNX --uiperf project.flp out.txt`
+cached pre-rendered images, which made the Mixer and Playlist several times cheaper to draw (`docs/analise/REA_rodada161b.md`). `LYNX --uiperf project.flp out.txt`
 times the drawing of the main windows on your machine.
