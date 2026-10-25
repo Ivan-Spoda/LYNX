@@ -101,13 +101,17 @@ click to hear, sort by relevance). No name, graphic or text of it is used.
 
 ## 4. Not done / differs from FL
 
-- "Send to" a mixer insert is read and kept but not played (LYNX's built-in reverb / chorus play instead when on).
+- "Send to" a mixer insert plays (after the crash, 2026-10-25): the dry reverb / chorus send bus goes into the chosen
+  insert as an extra instrument output (the Patcher's mechanism, REA_rodada141), as FL does [DECOMPILE
+  Gen_Render@0x765c20][TEST soundfont158_send_to_mixer_insert]. Unlike FL, the built-in effect is not switched off
+  when a target is chosen (both may be on).
 - FL's built-in reverb / chorus were not analysed: LYNX uses its own (Freeverb-style, two-line chorus).
-- FL's MOD knob (P4) is not imported (the mod wheel CC works live).
+- FL's MOD knob (P4) is imported into a new "Mod wheel" knob (the resting mod wheel; CC 1 moves it live).
 - Resampling qualities are LYNX's (Standard = cubic; FL: 8-tap sinc), "Fix unexpected levels" is stored only.
 - No sound comparison with FL renders was made (no FL project with Soundfont Player was found among the test
   projects); the mapping comes from the decompiled code.
-- FL automation clips of the Soundfont Player's parameters are not mapped to LYNX's parameters.
+- FL automation clips and pattern events of the Soundfont Player's parameters P2…P12 map to LYNX's parameters with
+  FL's value scale (normalised over the control's whole range, truncated) [TEST soundfont158_fl_state_import].
 
 ## 5. Tests
 
@@ -120,4 +124,7 @@ saved / reloaded one and one with NaN / huge / truncated settings.
 
 ## Where I stopped
 
-See the end of the round's report (results filled in when landed).
+2026-10-25: the PC blue-screened mid-round; the uncommitted work survived and was committed as is (wip d640b7f6).
+After the crash: MOD knob import + "Mod wheel" knob, FL automation mapping, "send to" a mixer insert (with a selector
+in the editor), tests. Left: FL renders for a sound comparison (no FL project with the player in the test set), FL's
+built-in reverb / chorus, resampling qualities at FL's tap counts.

@@ -241,6 +241,8 @@ std::optional<std::pair<int, int>> flRawRange (flp::ControlId id, const std::str
 
     // plugin parameters: the plugin's own control integer (FL hands it to ProcessParam unscaled)
     const auto k = p - flp::ControlId::pluginParamBase;
+    if ((plugin == "Fruity Soundfont Player" || plugin == "SoundFont Player") && k < 13)
+        return sf::flParamRange (k);
     if (plugin == "Fruity Reeverb 2" && k < reeverb2ParamCount)
         return std::pair { reeverb2::ranges[(std::size_t) k].lo, reeverb2::ranges[(std::size_t) k].hi };
     if (plugin == "Fruity Reeverb" && k < reeverb1ParamCount)
@@ -2681,6 +2683,20 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
     // map (`valueMap` receives the value conversion).
     auto resolveTarget = [&] (flp::ControlId id, std::function<float (float)>& valueMap) {
         auto target = automationTargetFor (id, channelMap, (int) song.mixer.size());
+
+        // FL Soundfont Player → LYNX Soundfont: FL's P index and scale → LYNX's parameter (REA_rodada158 §1)
+        if (target.kind == AutomationTargetKind::channelParam && target.index >= 0 && target.index < (int) song.channels.size()
+            && song.channels[(std::size_t) target.index].instrument == InstrumentKind::soundfont)
+        {
+            const auto flIndex = target.param;
+            if (const auto mapped = sf::automationFromFl (flIndex, 0.0f))
+            {
+                target.param = mapped->first;
+                valueMap = [flIndex] (float v) { const auto m = sf::automationFromFl (flIndex, v); return m ? m->second : 0.0f; };
+            }
+            else
+                target.kind = AutomationTargetKind::none;
+        }
 
         if (target.kind == AutomationTargetKind::effectParam || target.kind == AutomationTargetKind::effectMix)
         {

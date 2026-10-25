@@ -300,6 +300,7 @@ public:
     }
 
     const std::vector<Row>& all() const { return rows; }
+    int rowCount() const { return (int) rows.size(); }
 
 private:
     int getNumRows() override { return (int) rows.size(); }
@@ -350,13 +351,13 @@ private:
             onPreview (rows[(std::size_t) row]);
     }
 
-    void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override
+    void load (int row)
     {
         if (row >= 0 && row < (int) rows.size() && onLoad)
             onLoad (rows[(std::size_t) row]);
     }
-
-    void returnKeyPressed (int row) override { listBoxItemDoubleClicked (row, {}); }
+    void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override { load (row); }
+    void returnKeyPressed (int row) override { load (row); }
 
     juce::var getDragSourceDescription (const juce::SparseSet<int>& selected) override
     {
@@ -427,6 +428,7 @@ public:
         bend = knob (sf::pBendRange, TR_NOOP ("Bend range"));
         poly = knob (sf::pPolyphony, TR_NOOP ("Polyphony"));
         transpose = knob (sf::pTranspose, TR_NOOP ("Transpose"));
+        modWheel = knob (sf::pModWheel, TR_NOOP ("Mod wheel"));
 
         const auto toggle = [this] (int p, const char* caption, const char* tip) {
             toggles.push_back (std::make_unique<SfToggle> (engine, channel, p, tr (caption), tr (tip)));
@@ -447,6 +449,30 @@ public:
             return choices.back().get();
         };
         resampling = choice (sf::pResampling, TR_NOOP ("Resampling"));
+        // "send to" a mixer insert (FL: SEND TO): the dry send into that insert, for a reverb of the user's own
+        const auto sendMenu = [this] (int p) {
+            return [this, p] (std::function<void (int)> pick) {
+                juce::PopupMenu menu;
+                const auto current = (int) paramOf (engine, channel, p);
+                menu.addItem (tr ("None"), true, current < 0, [pick] { pick (-1); });
+                const auto& song = engine.getSong();
+                for (int t = 0; t < juce::jmin (126, (int) song.mixer.size()); ++t)
+                {
+                    const auto name = t == 0 ? tr ("Master")
+                                             : song.mixer[(std::size_t) t].name.empty() ? tr ("Insert {0}", { juce::String (t) })
+                                                                                        : juce::String (t) + ": " + juce::String::fromUTF8 (song.mixer[(std::size_t) t].name.c_str());
+                    menu.addItem (name, true, current == t, [pick, t] { pick (t); });
+                }
+                return menu;
+            };
+        };
+        for (auto [p, slot] : { std::pair { sf::pReverbTrack, &reverbTrack }, std::pair { sf::pChorusTrack, &chorusTrack } })
+        {
+            choices.push_back (std::make_unique<SfChoice> (engine, channel, p, tr ("Send to"), sendMenu (p)));
+            choices.back()->setTooltip (tr ("Also send the effect's input to a mixer insert (put your own reverb or chorus there)"));
+            addAndMakeVisible (*choices.back());
+            *slot = choices.back().get();
+        }
         mode = choice (sf::pProgramMode, TR_NOOP ("Program mode"));
         curve = choice (sf::pVelocityCurve, TR_NOOP ("Velocity curve"));
         resampling->setTooltip (tr ("How transposed samples are interpolated: linear (crunchy) to 16-point sinc (extreme HQ)"));
@@ -471,7 +497,7 @@ public:
             refreshLists();
         };
         search.onReturnKey = [this] {
-            if (list.getNumRows() > 0)
+            if (list.rowCount() > 0)
             {
                 list.selectRow (0);
                 list.grabKeyboardFocus();
@@ -601,24 +627,27 @@ private:
         };
         auto row1 = r.removeFromTop (rowH);
         place (half (row1), tr ("Envelope"), { attack, decay, sustain, release });
-        place (row1, tr ("Pitch LFO"), { lfoDelay, lfoAmount, lfoSpeed });
+        place (row1, tr ("Pitch LFO"), { lfoDelay, lfoAmount, lfoSpeed, modWheel });
         r.removeFromTop (6);
         auto row2 = r.removeFromTop (rowH);
         place (half (row2), tr ("Filter"), { cutoff, cutMod, resonance });
         place (row2, tr ("Voice"), { volume, bend, poly, transpose });
         r.removeFromTop (6);
         auto row3 = r.removeFromTop (rowH);
-        const auto fx = [this] (juce::Rectangle<int> box, const juce::String& title, juce::Component* send, juce::Component* over, juce::Component* builtIn) {
+        const auto fx = [this] (juce::Rectangle<int> box, const juce::String& title, juce::Component* send, juce::Component* over, juce::Component* builtIn, juce::Component* track) {
             sections.push_back ({ box.toFloat(), title });
             auto inner = box.reduced (6, 0).withTrimmedTop (18).withTrimmedBottom (4);
-            send->setBounds (inner.removeFromLeft (juce::jmin (64, inner.getWidth() / 2)));
+            send->setBounds (inner.removeFromLeft (juce::jmin (64, inner.getWidth() / 3)));
             inner.removeFromLeft (4);
-            const auto h = juce::jmin (22, inner.getHeight() / 2);
-            over->setBounds (inner.removeFromTop (h));
-            builtIn->setBounds (inner.removeFromTop (h));
+            auto boxes = inner.removeFromLeft (inner.getWidth() / 2);
+            const auto h = juce::jmin (22, boxes.getHeight() / 2);
+            over->setBounds (boxes.removeFromTop (h));
+            builtIn->setBounds (boxes.removeFromTop (h));
+            inner.removeFromLeft (4);
+            track->setBounds (inner.withSizeKeepingCentre (inner.getWidth(), juce::jmin (34, inner.getHeight())));
         };
-        fx (half (row3), tr ("Reverb"), reverbSend, reverbOverride, reverbBuiltIn);
-        fx (row3, tr ("Chorus"), chorusSend, chorusOverride, chorusBuiltIn);
+        fx (half (row3), tr ("Reverb"), reverbSend, reverbOverride, reverbBuiltIn, reverbTrack);
+        fx (row3, tr ("Chorus"), chorusSend, chorusOverride, chorusBuiltIn, chorusTrack);
         r.removeFromTop (6);
         // options
         sections.push_back ({ r.toFloat(), tr ("Options") });
@@ -816,7 +845,7 @@ private:
         const auto fonts = index.fonts().size();
         status.setText (searchMode ? tr ("{0} presets in {1} SoundFonts", { juce::String ((int) index.presetCount()), juce::String ((int) fonts) })
                                          + (index.busy() ? tr (" (indexing...)") : juce::String()) + "  -  "
-                                         + tr ("{0} shown", { juce::String (list.getNumRows()) })
+                                         + tr ("{0} shown", { juce::String (list.rowCount()) })
                                    : tr ("{0} presets", { juce::String ((int) fontRows.size()) }),
                         juce::dontSendNotification);
     }
@@ -876,7 +905,8 @@ private:
     std::vector<std::unique_ptr<SfToggle>> toggles;
     std::vector<std::unique_ptr<SfChoice>> choices;
     SfKnob *attack {}, *decay {}, *sustain {}, *release {}, *lfoDelay {}, *lfoAmount {}, *lfoSpeed {}, *cutoff {}, *cutMod {}, *resonance {},
-        *reverbSend {}, *chorusSend {}, *volume {}, *bend {}, *poly {}, *transpose {};
+        *reverbSend {}, *chorusSend {}, *volume {}, *bend {}, *poly {}, *transpose {}, *modWheel {};
+    SfChoice *reverbTrack {}, *chorusTrack {};
     SfToggle *reverbOverride {}, *reverbBuiltIn {}, *chorusOverride {}, *chorusBuiltIn {}, *velFilter {}, *emu {}, *loops {};
     SfChoice *resampling {}, *mode {}, *curve {};
     std::vector<std::pair<juce::Rectangle<float>, juce::String>> sections;

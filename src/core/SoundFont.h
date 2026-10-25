@@ -26,6 +26,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -136,6 +137,7 @@ enum Param : int
     pVolume,                                      // output level, dB
     pVelocityCurve,                               // 0 SF2 (concave), 1 linear, 2 soft, 3 hard, 4 fixed
     pTranspose,                                   // semitones
+    pModWheel,                                    // the mod wheel's resting position 0…1 (FL: MOD knob); CC 1 moves it live
     paramCount
 };
 
@@ -181,6 +183,12 @@ struct FlPlayerState
 bool parseFlPlayerState (const std::vector<std::uint8_t>& state, FlPlayerState& out);
 // LYNX Soundfont settings from FL's (the bank / program from the preset index when the font's presets are given)
 std::vector<float> paramsFromFl (const FlPlayerState& fl, const std::vector<PresetInfo>& fontPresets);
+// FL's control range (min, max) of its parameter P0…P12
+std::pair<int, int> flParamRange (int flIndex) noexcept;
+// FL's parameter P2…P12 at a raw value → (LYNX parameter, its value); nothing for P0 / P1 (not automatable in FL)
+std::optional<std::pair<int, float>> paramFromFl (int flIndex, int raw) noexcept;
+// FL automation (P index, FL's 0…1 over the control's whole range) → (LYNX parameter, its 0…1)
+std::optional<std::pair<int, float>> automationFromFl (int flIndex, float flNormalised) noexcept;
 
 // --- background loading ---------------------------------------------------------------------------------------------
 

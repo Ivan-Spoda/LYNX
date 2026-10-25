@@ -4447,6 +4447,8 @@ countries: br
 "Draw with the GPU (Direct2D). Turn off if LYNX crashes in the graphics driver or the screen flickers" = "Desenhar com a GPU (Direct2D). Desligue se o LYNX travar no driver de vídeo ou a tela piscar"
 
 # LYNX Soundfont (round 158, issue #6)
+"Mod wheel" = "Roda de modulação"
+"Also send the effect's input to a mixer insert (put your own reverb or chorus there)" = "Também envia a entrada do efeito para um insert do mixer (coloque lá seu próprio reverb ou chorus)"
 "SoundFont: [LMB] preview its first preset  [2xLMB] new LYNX Soundfont channel (or into the selected one)  drag to the Channel Rack" = "SoundFont: [LMB] pré-ouvir o primeiro preset  [2xLMB] novo canal LYNX Soundfont (ou no selecionado)  arraste para o Channel Rack"
 "Load SoundFont" = "Carregar SoundFont"
 "This file is not a SoundFont LYNX can read." = "Este arquivo não é um SoundFont que o LYNX consiga ler."

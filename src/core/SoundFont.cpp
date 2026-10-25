@@ -115,6 +115,7 @@ const ParamInfo infos[paramCount] = {
     { "volume", "Volume", -48, 12, 0, false },
     { "velocityCurve", "Velocity curve", 0, 4, 0, true },
     { "transpose", "Transpose", -48, 48, 0, true },
+    { "modWheel", "Mod wheel", 0, 1, 0, false },
 };
 
 // knob 0…1 → seconds for the envelope / LFO overrides (0 = the preset's own): 1 ms … 20 s, exponential
@@ -216,6 +217,9 @@ std::string displayValue (int index, float v)
         case pCutoffMod: case pResonance:
             if (v <= 0.0f)
                 return "Preset";
+            std::snprintf (buf, sizeof (buf), "%.0f %%", v * 100.0f);
+            return buf;
+        case pModWheel:
             std::snprintf (buf, sizeof (buf), "%.0f %%", v * 100.0f);
             return buf;
         case pBendRange: case pTranspose:
@@ -338,6 +342,54 @@ bool parseFlPlayerState (const std::vector<std::uint8_t>& state, FlPlayerState& 
     return true;
 }
 
+std::pair<int, int> flParamRange (int flIndex) noexcept
+{
+    static const std::pair<int, int> ranges[13] = { { 1, 256 }, { 0, 127 }, { 0, 256 }, { 0, 256 }, { 0, 127 }, { -1, 5940 }, { -1, 5940 },
+                                                    { -1, 127 }, { -1, 5940 }, { -1, 5900 }, { -128, 127 }, { -1, 127 }, { -1, 127 } };
+    return flIndex >= 0 && flIndex < 13 ? ranges[flIndex] : std::pair<int, int> { 0, 0 };
+}
+
+std::optional<std::pair<int, float>> paramFromFl (int flIndex, int raw) noexcept
+{
+    constexpr float tiny = 1.0e-4f;
+    const auto secondsKnob = [] (double s) { return s <= 0.001 ? tiny : (float) std::clamp (std::log (s / 0.001) / std::log (20000.0), 1.0e-4, 1.0); };
+    switch (flIndex)
+    {
+        case 2: return std::pair { (int) pReverbAmount, (float) std::clamp (raw, 0, 256) / 256.0f };
+        case 3: return std::pair { (int) pChorusAmount, (float) std::clamp (raw, 0, 256) / 256.0f };
+        case 4: return std::pair { (int) pModWheel, (float) std::clamp (raw, 0, 127) / 127.0f };
+        case 5: return std::pair { (int) pAttack, raw < 0 ? 0.0f : secondsKnob (raw * 0.001) };
+        case 6: return std::pair { (int) pDecay, raw < 0 ? 0.0f : secondsKnob (raw * 0.004) };
+        case 7:
+            return std::pair { (int) pSustain, raw < 0 ? 0.0f : std::max (tiny, (float) std::pow (10.0, -(1000.0 - 1000.0 * std::pow (std::min (raw, 127) / 127.0, 0.2)) / 200.0)) };
+        case 8: return std::pair { (int) pRelease, raw < 0 ? 0.0f : secondsKnob (raw * 0.004) };
+        case 9: return std::pair { (int) pLfoDelay, raw < 0 ? 0.0f : secondsKnob (raw * 0.004) };
+        case 10:
+            return std::pair { (int) pLfoAmount, raw <= -128 ? 0.0f : 0.5f + 0.5f * (float) std::sqrt (std::min (1000, std::abs (raw * 1000 / 127)) / 1000.0) };
+        case 11:
+        {
+            if (raw < 0)
+                return std::pair { (int) pLfoSpeed, 0.0f };
+            const auto hz = 8.176 * std::pow (2.0, std::clamp (std::round (1200.0 * std::log2 (std::max (1.0e-9, raw * 0.0102739726))), -16000.0, 4500.0) / 1200.0);
+            return std::pair { (int) pLfoSpeed, (float) std::clamp (std::log (hz / 0.1) / std::log (200.0), 1.0e-4, 1.0) };
+        }
+        case 12: return std::pair { (int) pCutoff, raw < 0 ? 0.0f : std::max (tiny, (float) (std::min (raw, 127) * 12000 / 127) / 12000.0f) };
+        default: return std::nullopt; // P0 / P1 (patch, bank) are not automatable in FL
+    }
+}
+
+std::optional<std::pair<int, float>> automationFromFl (int flIndex, float flNormalised) noexcept
+{
+    const auto [lo, hi] = flParamRange (flIndex);
+    if (hi <= lo || ! std::isfinite (flNormalised))
+        return std::nullopt;
+    const auto raw = lo + (int) (std::clamp (flNormalised, 0.0f, 1.0f) * (float) (hi - lo) + 1.0e-3f); // FL truncates
+    const auto mapped = paramFromFl (flIndex, raw);
+    if (! mapped)
+        return std::nullopt;
+    return std::pair { mapped->first, normalise (mapped->first, mapped->second) };
+}
+
 std::vector<float> paramsFromFl (const FlPlayerState& fl, const std::vector<PresetInfo>& fontPresets)
 {
     auto p = defaultParams();
@@ -365,21 +417,10 @@ std::vector<float> paramsFromFl (const FlPlayerState& fl, const std::vector<Pres
     p[pChorusBuiltIn] = fl.chorusBuiltIn ? 1.0f : 0.0f;
     p[pReverbTrack] = (float) std::clamp (fl.reverbTarget >= 0 ? fl.reverbTarget + 1 : -1, -1, 125);
     p[pChorusTrack] = (float) std::clamp (fl.chorusTarget >= 0 ? fl.chorusTarget + 1 : -1, -1, 125);
-    // envelope / LFO / cut-off overrides: FL's minimum = the preset's (0 here); FL's units → LYNX's knob curves
-    constexpr float tiny = 1.0e-4f;
-    const auto secondsKnob = [] (double s) { return s <= 0.001 ? tiny : (float) std::clamp (std::log (s / 0.001) / std::log (20000.0), 1.0e-4, 1.0); };
-    if (v[5] >= 0) p[pAttack] = secondsKnob (v[5] * 0.001);
-    if (v[6] >= 0) p[pDecay] = secondsKnob (v[6] * 0.004);
-    if (v[7] >= 0) p[pSustain] = std::max (tiny, (float) std::pow (10.0, -(1000.0 - 1000.0 * std::pow (std::min (v[7], 127) / 127.0, 0.2)) / 200.0));
-    if (v[8] >= 0) p[pRelease] = secondsKnob (v[8] * 0.004);
-    if (v[9] >= 0) p[pLfoDelay] = secondsKnob (v[9] * 0.004);
-    if (v[10] > -128) p[pLfoAmount] = 0.5f + 0.5f * (float) std::sqrt (std::min (1000, std::abs (v[10] * 1000 / 127)) / 1000.0);
-    if (v[11] >= 0)
-    {
-        const auto hz = 8.176 * std::pow (2.0, std::clamp (std::round (1200.0 * std::log2 (std::max (1.0e-9, v[11] * 0.0102739726))), -16000.0, 4500.0) / 1200.0);
-        p[pLfoSpeed] = (float) std::clamp (std::log (hz / 0.1) / std::log (200.0), 1.0e-4, 1.0);
-    }
-    if (v[12] >= 0) p[pCutoff] = std::max (tiny, (float) (std::min (v[12], 127) * 12000 / 127) / 12000.0f);
+    // envelope / LFO / cut-off overrides (FL's minimum = the preset's: 0 here), FL's units → LYNX's knob curves
+    for (int k = 4; k <= 12; ++k)
+        if (const auto mapped = paramFromFl (k, v[(std::size_t) k]))
+            p[(std::size_t) mapped->first] = mapped->second;
     // options
     p[pResampling] = fl.resampling == 1 ? 0.0f : fl.resampling == 6 ? 2.0f : fl.resampling == 8 ? 3.0f : 1.0f;
     p[pProgramMode] = (float) fl.programMode;
@@ -945,6 +986,24 @@ public:
         settings.write (s);
         settings.update();
         sendL.resize (4096), sendR.resize (4096), monoRev.resize (4096), monoCho.resize (4096);
+        for (auto& a : aux)
+            for (auto& side : a)
+                side.assign (auxCapacity, 0.0f);
+    }
+
+    // "Send to" a mixer insert (FL: the reverb / chorus send bus, dry, added into that insert): two extra outputs
+    void beginChunk (int n) noexcept override
+    {
+        cursor = 0;
+        for (auto& a : aux)
+            for (auto& side : a)
+                std::fill (side.begin(), side.begin() + std::clamp<std::ptrdiff_t> (n, 0, (std::ptrdiff_t) auxCapacity), 0.0f);
+    }
+    int auxOutputCount() const noexcept override { return 2; }
+    int auxOutputTrack (int k) const noexcept override { return k == 0 || k == 1 ? auxTrack[(std::size_t) k] : -1; }
+    const float* auxOutputData (int k, int side) const noexcept override
+    {
+        return k == 0 || k == 1 ? aux[(std::size_t) k][(std::size_t) (side & 1)].data() : nullptr;
     }
 
     void prepare (double sampleRate) noexcept override
@@ -1383,7 +1442,7 @@ private:
             if (v.slideLeft > 0)
                 v.slideCents += v.slideStep, --v.slideLeft;
             auto cents = v.baseCents + v.slideCents + bendCents + modLevel * (float) r.modEnvToPitch + modLfo * (float) r.modLfoToPitch;
-            cents += vibLfo * ((lfoOverride ? lfoDepth : (float) r.vibLfoToPitch) + (modWheel + pressure) * 50.0f);
+            cents += vibLfo * ((lfoOverride ? lfoDepth : (float) r.vibLfoToPitch) + (std::max (modWheel, param (pModWheel)) + pressure) * 50.0f);
             const auto step = (double) centsToRatio (cents) * (double) r.sampleRate / (double) rate;
             if (v.filter.on)
             {
@@ -1434,6 +1493,23 @@ private:
                 v.active = false;
         }
 
+        // "send to" a mixer insert: the dry send bus into that insert (the channel's gains applied)
+        for (std::size_t k = 0; k < 2; ++k)
+        {
+            const auto track = (int) param (k == 0 ? pReverbTrack : pChorusTrack);
+            auxTrack[k] = track;
+            if (track < 0 || ! anySend)
+                continue;
+            const auto& mono = k == 0 ? monoRev : monoCho;
+            auto& a = aux[k];
+            for (int i = 0; i < n && cursor + i < (int) auxCapacity; ++i)
+            {
+                a[0][(std::size_t) (cursor + i)] += mono[(std::size_t) i] * gainLeft;
+                a[1][(std::size_t) (cursor + i)] += mono[(std::size_t) i] * gainRight;
+            }
+        }
+        cursor += n;
+
         // built-in reverb / chorus (the sends' levels follow the channel's gains)
         if (anySend || tail > 0)
         {
@@ -1482,6 +1558,11 @@ private:
     Chorus chorus;
     std::vector<float> sendL, sendR, monoRev, monoCho;
     int tail = 0;
+    // "send to" outputs: [reverb, chorus][side], from the chunk's start
+    static constexpr std::size_t auxCapacity = 16384;
+    std::array<std::array<std::vector<float>, 2>, 2> aux;
+    std::array<int, 2> auxTrack { -1, -1 };
+    int cursor = 0;
 };
 } // namespace
 

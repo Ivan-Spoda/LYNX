@@ -345,6 +345,34 @@ TEST (soundfont158_realtime_render_does_not_allocate)
     CHECK (rt95::allocs.load() == 0);
 }
 
+TEST (soundfont158_send_to_mixer_insert)
+{
+    // FL's SEND TO: the reverb send (here from CC 91) goes dry into mixer insert 3; the chorus sends nowhere
+    sft::Rig rig (sft::testFont ("send", { { "Low", 0, 0 } }, 1));
+    rig.set (lynx::sf::pReverbTrack, 3);
+    rig.set (lynx::sf::pReverbBuiltIn, 0);
+    const std::uint8_t cc91[] = { 0xB0, 91, 127 };
+    rig.inst->midiMessage (cc91, 3);
+    rig.inst->noteOn (60, 0.8f);
+    std::vector<float> l (1024, 0.0f), r (1024, 0.0f);
+    rig.inst->beginChunk (1024);
+    rig.inst->render (l.data(), r.data(), 512, 1.0f, 1.0f);
+    rig.inst->render (l.data() + 512, r.data() + 512, 512, 0.5f, 0.5f);
+    CHECK (rig.inst->auxOutputCount() == 2 && rig.inst->auxOutputTrack (0) == 3 && rig.inst->auxOutputTrack (1) == -1);
+    const auto* a = rig.inst->auxOutputData (0, 0);
+    CHECK (a != nullptr);
+    if (a != nullptr)
+    {
+        const std::vector<float> send (a, a + 1024);
+        CHECK (sft::peak (send, 0, 512) > 1.0e-3f && sft::peak (send, 512) > 1.0e-3f);
+    }
+    rig.inst->beginChunk (1024); // a new chunk starts from silence
+    CHECK (a == nullptr || a[0] == 0.0f);
+    rig.set (lynx::sf::pReverbTrack, -1);
+    rig.inst->render (l.data(), r.data(), 256, 1.0f, 1.0f);
+    CHECK (rig.inst->auxOutputTrack (0) == -1);
+}
+
 TEST (soundfont158_params_roundtrip)
 {
     const auto d = lynx::sf::defaultParams();
@@ -431,9 +459,9 @@ std::vector<std::uint8_t> flSoundfontState (const std::array<int, 13>& p, const 
 TEST (soundfont158_fl_state_import)
 {
     const auto path = sft::testFont ("fl", { { "Low", 0, 5 }, { "Kit", 128, 0 }, { "High", 0, 2 } }, 1);
-    // P: program 1, bank 0, reverb 128 (×1), chorus 256 (×20), mod 0, A 100 ms, D 250 (= 1 s), S disabled, R 50 (= 200 ms),
+    // P: program 1, bank 0, reverb 128 (×1), chorus 256 (×20), mod 127, A 100 ms, D 250 (= 1 s), S disabled, R 50 (= 200 ms),
     // DEL disabled, AMT 127 (1000 cents), SPD disabled, CUT 127 (fully open)
-    const std::array<int, 13> p { 1, 0, 128, 256, 0, 100, 250, -1, 50, -1, 127, -1, 127 };
+    const std::array<int, 13> p { 1, 0, 128, 256, 127, 100, 250, -1, 50, -1, 127, -1, 127 };
     const auto state = flSoundfontState (p, path, 1, 6, 1, true); // index 1 of (0:2, 0:5, 128:0) = bank 0 program 5
 
     lynx::sf::FlPlayerState fl;
@@ -464,11 +492,35 @@ TEST (soundfont158_fl_state_import)
     channel.pluginState[0] = 2;
     channel.pluginState.resize (4 + 52 + 1 + path.size() + 11);
     project.channels.push_back (channel);
+    // automation clips on the first channel: CUT (P12) from the minimum ("preset") to the top, and the patch (P0: FL
+    // does not automate it)
+    for (const auto& [index, param] : { std::pair { 2, 12 }, std::pair { 3, 0 } })
+    {
+        flp::Channel clip;
+        clip.index = index;
+        clip.type = flp::ChannelType::automationClip;
+        clip.automation = { { 0.0, 0.0 }, { 96.0, 1.0 } };
+        project.channels.push_back (clip);
+        project.automationLinks.push_back ({ index, { (std::uint32_t) (0x8000 + param) } });
+    }
     lynx::FlpImportReport report;
     lynx::FlpImportOptions options;
     options.report = &report;
     const auto song = lynx::importFlp (project, options);
     CHECK (song.channels.size() == 2);
+    CHECK (song.automations.size() == 2);
+    if (song.automations.size() == 2)
+    {
+        const auto& cut = song.automations[0];
+        CHECK (cut.target.kind == lynx::AutomationTargetKind::channelParam && cut.target.index == 0 && cut.target.param == lynx::sf::pCutoff);
+        CHECK (cut.points.size() == 2 && cut.points[0].value == 0.0f && std::abs (cut.points[1].value - 1.0f) < 1.0e-6f);
+        CHECK (song.automations[1].target.kind == lynx::AutomationTargetKind::none);
+    }
+    // FL's scale: half way on A (−1…5940) = 2969 ms
+    if (const auto a = lynx::sf::automationFromFl (5, 0.5f))
+        CHECK (a->first == lynx::sf::pAttack && lynx::sf::displayValue (a->first, lynx::sf::denormalise (a->first, a->second)) == "2.97 s");
+    else
+        CHECK (false);
     if (song.channels.size() == 2)
     {
         const auto& c = song.channels[0];
@@ -486,6 +538,7 @@ TEST (soundfont158_fl_state_import)
         CHECK (q[lynx::sf::pReverbOverride] == 0.0f && q[lynx::sf::pChorusOverride] == 1.0f);
         CHECK (q[lynx::sf::pReverbBuiltIn] == 1.0f && q[lynx::sf::pChorusBuiltIn] == 0.0f && q[lynx::sf::pChorusTrack] == 5);
         CHECK (q[lynx::sf::pResampling] == 2 && q[lynx::sf::pProgramMode] == 1 && q[lynx::sf::pVelocityToCutoff] == 0.0f);
+        CHECK (q[lynx::sf::pModWheel] == 1.0f && lynx::sf::displayValue (lynx::sf::pModWheel, q[lynx::sf::pModWheel]) == "100 %");
         const auto& d = song.channels[1];
         const auto r = lynx::sf::readParams (d.modelParams);
         CHECK (d.instrument == lynx::InstrumentKind::soundfont && r[lynx::sf::pBank] == 128 && r[lynx::sf::pProgram] == 0);
