@@ -19,6 +19,7 @@
 #define MINIMP3_IMPLEMENTATION
 #define MINIMP3_FLOAT_OUTPUT
 #define MINIMP3_NO_STDIO
+#define MINIMP3_NOSKIP_APEV2 // minimp3 removes 32 bytes too many (the size already counts the footer): done below
 #include "../../third_party/minimp3/minimp3_ex.h"
 #if defined(__GNUC__) || defined(__clang__)
  #pragma GCC diagnostic pop
@@ -48,7 +49,7 @@ std::size_t skipId3v2Tags (const std::uint8_t* data, std::size_t size)
     return pos;
 }
 
-// The end of the audio: ID3v1 (and its "TAG+" extension), APEv2 and Lyrics3 v2 tags removed.
+// The end of the audio: ID3v1 (and its "TAG+" extension), APEv2 and Lyrics3 v2 tags removed, in any order.
 std::size_t audioEnd (const std::uint8_t* data, std::size_t begin, std::size_t size)
 {
     auto end = size;
@@ -56,8 +57,19 @@ std::size_t audioEnd (const std::uint8_t* data, std::size_t begin, std::size_t s
     {
         const auto before = end;
         auto rest = end - begin;
-        mp3dec_skip_id3v1 (data + begin, &rest); // ID3v1 then APEv2 (minimp3_ex)
+        mp3dec_skip_id3v1 (data + begin, &rest); // ID3v1 and "TAG+" (minimp3_ex)
         end = begin + rest;
+        // APEv2 footer: its size counts the items and the footer, plus a 32-byte header when flag bit 31 says there is one
+        if (end - begin > 32 && std::memcmp (data + end - 32, "APETAGEX", 8) == 0)
+        {
+            const auto* f = data + end - 32;
+            const auto le32 = [f] (int at) {
+                return (std::size_t) f[at] | ((std::size_t) f[at + 1] << 8) | ((std::size_t) f[at + 2] << 16) | ((std::size_t) f[at + 3] << 24);
+            };
+            const auto tagBytes = le32 (12) + ((le32 (20) & (1u << 31)) != 0 ? 32u : 0u);
+            if (tagBytes >= 32 && tagBytes <= end - begin)
+                end -= tagBytes;
+        }
         // Lyrics3 v2: "...LYRICS200" with a 6-digit size before it
         if (end - begin > 15 && std::memcmp (data + end - 9, "LYRICS200", 9) == 0)
         {
