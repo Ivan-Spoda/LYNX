@@ -88,6 +88,31 @@ plugins too" is the **Auto-Tune Pro editor crashing in the Intel OpenGL driver**
 - windows off-screen unless `--visible`; a watchdog thread ends the test with `HANG at <step>` after 15 s without
   progress, and any crash ends the process (no `result=` line).
 
+## 5. Results
+
+- [RUN] `--opentest` on the Windows build: 553 windows opened (every effect × default / 0 / 1 / random / old-project
+  states, every instrument fresh and read back), 2212 window paints, resizes small and large: **result=OK**; the
+  hang-watch self-check found the spinning message thread (frames named with `--symbolize` and the build's PDB:
+  `OpenTest::timerCallback → Timer::callTimers → InternalMessageQueue::dispatchMessages → JUCEApplicationBase::main`).
+- [RUN] The same test in a Linux build with AddressSanitizer + UndefinedBehaviorSanitizer: result=OK, **no sanitizer
+  report** (no out-of-bounds read/write, no UB) for any editor / state, including the old-project states (90 / 114 /
+  128 of Facet's params, half lists for every engine). The parameter-count growth suspects are clean: the project
+  reader starts every slot from the engine's defaults and `EffectParams` is a fixed 160-entry array.
+- [RUN] v0.1.15 GUI, pt-BR: Facet EQ (fresh slot) opens and draws; Parametric EQ freezes (reproduced). Fixed build:
+  the Parametric EQ window opens from the effects panel's "Abrir EQ paramétrico" (C:\Users\kauan\lynx-test\crash157\n4.png).
+- [RUN] `--selftest` OK on the fixed build.
+- CI (release.yml): new "Editor windows test" step on Windows and Linux; the build's LYNX.pdb is kept as the
+  "LYNX-symbols" artifact (90 days) so a user's crash / hang file can be named with `LYNX.exe --symbolize`.
+
 ## Where I stopped
 
-(filled in at the end of the round)
+- Landed: the Parametric EQ freeze fix, the hang watch, module+offset crash frames, plugin windows on GDI, the GPU
+  rendering option with automatic fallback, the "run this plugin in a separate process" offer / wrapper item,
+  `--opentest`, `--symbolize`.
+- Not verified on her laptop: whether GDI plugin windows stop the Intel OpenGL crash in Auto-Tune Pro's editor (not
+  reproducible here: this PC has no Intel iGPU). If it still crashes, the start-up offer moves Auto-Tune Pro to its
+  own process, where only the plugin goes down.
+- Not done: `--opentest` does not drive third-party plugin editors (needs the plugins); `--opentest` is not part of
+  `--selftest` (it needs the message loop) — land.sh runs only the self-test, CI runs both.
+- To ask the user's girlfriend if anything still crashes or freezes on 0.1.16: the newest
+  `%APPDATA%\LYNX\autosave\crash *.txt` / `hang *.txt` and `crash-history.log` (they now carry module+offset frames).
