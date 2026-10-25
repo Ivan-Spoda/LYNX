@@ -70,8 +70,11 @@
 #include "ui/ToolWindow.h"
 #include "platform/CrashGuard.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <mutex>
+#include <thread>
 
 namespace
 {
@@ -103,12 +106,15 @@ struct StartupTrace
 StartupTrace startupTrace;
 
 // Crashed: try to save the project and write the backtrace (like FL's "emergency save").
-void onCrash (void*)
+void onCrash (void* exceptionPointers)
 {
     const auto folder = lynx::platform::settingsFile ("autosave");
     folder.createDirectory();
     const auto stamp = juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S");
-    folder.getChildFile ("crash " + stamp + ".txt").replaceWithText (juce::SystemStats::getStackBacktrace());
+    // JUCE's backtrace (named frames only), then every frame of the faulting thread as module+offset (round 157a: a
+    // release LYNX.exe has no symbols, so its own frames were missing from the file)
+    folder.getChildFile ("crash " + stamp + ".txt").replaceWithText (juce::SystemStats::getStackBacktrace() + "\n--- frames (module+offset)\n"
+                                                                    + juce::String::fromUTF8 (lynx::crashguard::exceptionBacktrace (exceptionPointers).c_str()));
     lynx::crashguard::note (("crashed: backtrace in autosave\\crash " + stamp + ".txt").toStdString());
 
     if (crashEngine != nullptr)
@@ -124,6 +130,62 @@ juce::File sessionsFolder()
 
 // Sessions of earlier runs whose process is gone without closing (a fail-fast, a crash, a forced end): each is appended
 // to %APPDATA%\LYNX\crash-history.log and its file removed. Returns the last step of the newest one ("" when none).
+juce::StringArray uncleanSteps; // the newest unclean session's steps (without their times)
+
+// What the newest unclean session tells (round 157a): the plugin whose editor was opening / shown when it ended, and
+// whether its crash file blames a graphics driver
+struct UncleanCause
+{
+    juce::String editorPlugin; // the last steps were that plugin's editor
+    bool gpuDriver = false;    // the crash file's top frames are in a GPU driver / Direct3D / Direct2D module
+    juce::String driverModule;
+};
+
+UncleanCause uncleanCause()
+{
+    UncleanCause cause;
+    juce::File crashFile;
+    for (int i = uncleanSteps.size(); --i >= 0 && i >= uncleanSteps.size() - 4;)
+    {
+        const auto& step = uncleanSteps[i];
+        if (step.startsWith ("crashed: backtrace in "))
+            crashFile = lynx::platform::settingsFolder().getChildFile (step.fromFirstOccurrenceOf ("backtrace in ", false, false).replaceCharacter ('\\', '/'));
+        for (const auto* prefix : { "opening the editor of ", "editor open: ", "editor shown: " })
+            if (cause.editorPlugin.isEmpty() && step.startsWith (prefix))
+                cause.editorPlugin = step.fromFirstOccurrenceOf (prefix, false, false).trim();
+        if (step.startsWith ("closing the editor of ") || step.startsWith ("loaded plugin") || step.startsWith ("opening project"))
+            break; // older steps than these did not end the session
+    }
+    if (crashFile.existsAsFile())
+    {
+        // the first frames after the crash handler's own (the "--- frames" part lists the faulting thread)
+        auto text = crashFile.loadFileAsString();
+        if (text.contains ("--- frames"))
+            text = text.fromFirstOccurrenceOf ("--- frames", false, false);
+        auto lines = juce::StringArray::fromLines (text);
+        int looked = 0;
+        for (const auto& line : lines)
+        {
+            const auto module = line.fromFirstOccurrenceOf (": ", false, false).upToFirstOccurrenceOf ("+", false, false).trim().toLowerCase();
+            if (module.isEmpty() || ! module.endsWith (".dll"))
+                continue;
+            if (++looked > 12)
+                break;
+            for (const auto* driver : { "igd", "ig9icd", "ig7icd", "igxelp", "nvwgf2um", "nvoglv", "nvd3dum", "atidxx", "atio6axx", "amdxx", "aticfx",
+                                        "d3d11.dll", "d3d10warp", "dxgi.dll", "d2d1.dll", "opengl32.dll", "dcomp.dll" })
+                if (module.startsWith (driver))
+                {
+                    cause.gpuDriver = true;
+                    cause.driverModule = module;
+                    break;
+                }
+            if (cause.gpuDriver)
+                break;
+        }
+    }
+    return cause;
+}
+
 juce::String collectUncleanSessions()
 {
     juce::String lastStep;
@@ -153,6 +215,9 @@ juce::String collectUncleanSessions()
         {
             newest = modified;
             lastStep = steps.isEmpty() ? juce::String ("start-up") : steps[steps.size() - 1].fromFirstOccurrenceOf (" ", false, false);
+            uncleanSteps.clear();
+            for (const auto& step : steps)
+                uncleanSteps.add (step.fromFirstOccurrenceOf (" ", false, false));
         }
     }
     return lastStep;
@@ -545,6 +610,30 @@ public:
             return;
         }
 
+        if (args.contains ("--symbolize"))
+        {
+            // LYNX.exe --symbolize "crash … .txt" out.txt: names the LYNX.exe+offset frames of a user's crash / hang file
+            // (needs this build's LYNX.pdb next to LYNX.exe — the release's "LYNX-symbols" CI artifact; round 157a)
+            const auto i = args.indexOf ("--symbolize");
+            const auto text = juce::File (args[i + 1].unquoted()).loadFileAsString();
+            juce::File (args[i + 2].unquoted()).replaceWithText (juce::String::fromUTF8 (lynx::crashguard::symbolizeOwnFrames (text.toStdString()).c_str()));
+            quit();
+            return;
+        }
+
+        if (args.contains ("--opentest"))
+        {
+            // LYNX.exe --opentest report.txt [--visible]: every built-in effect and instrument window opened as the mixer /
+            // Channel rack open them, with default, extreme, random and old-project states; a watchdog fails the test on
+            // a hang (round 157a: opening the Parametric EQ froze LYNX). Windows stay off-screen without --visible.
+            const auto i = args.indexOf ("--opentest");
+            runOpenTest (args[i + 1].unquoted(), args.contains ("--visible"), [this] (bool ok) {
+                setApplicationReturnValue (ok ? 0 : 1);
+                quit();
+            });
+            return;
+        }
+
         if (args.contains ("--fxfuzz"))
         {
             // LYNX.exe --fxfuzz report.txt [rounds] [--drags]: every built-in effect in its editor, parameters swept (and
@@ -650,6 +739,7 @@ public:
             ("LYNX session\nversion=" + getApplicationVersion() + "\npid=" + juce::String (lynx::crashguard::processId())
              + "\nstart=" + juce::String ((juce::int64) lynx::crashguard::processStartTime())
              + "\nstarted=" + juce::Time::getCurrentTime().toISO8601 (true) + "\n").toStdString());
+        startHangWatch();
 
         startupTrace.mark ("initialise (normal start)");
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
@@ -747,6 +837,8 @@ public:
     {
         mainWindow = std::make_unique<MainWindow> (getApplicationName(), *engine);
         lynx::setMainWindowForOwnership (mainWindow.get());
+        lynx::applyRenderingChoice (*mainWindow); // (GPU rendering off: GDI; round 157a)
+        lynx::startRenderingWatch();
         startupTrace.mark ("main window built");
     }
 
@@ -755,12 +847,43 @@ public:
     {
         if (uncleanLastStep.isEmpty())
             return;
-        juce::AlertWindow::showMessageBoxAsync (
-            juce::MessageBoxIconType::InfoIcon, lynx::tr ("LYNX closed unexpectedly"),
-            lynx::tr ("The last session ended without closing normally. Last step: {0}. Backup copies of your project are in "
-                      "LYNX's autosave folder; details in crash-history.log.",
-                      { uncleanLastStep }));
+        const auto message = lynx::tr ("The last session ended without closing normally. Last step: {0}. Backup copies of your project are in "
+                                       "LYNX's autosave folder; details in crash-history.log.",
+                                       { uncleanLastStep });
         uncleanLastStep.clear();
+        const auto cause = uncleanCause();
+        // round 157a: a plugin's editor was opening — it crashed (often in the graphics driver, inside the plugin's own
+        // OpenGL window): offer to keep that plugin in its own process, where a crash takes only the plugin down
+        if (cause.editorPlugin.isNotEmpty() && ! lynx::pluginSandboxEnabled() && ! lynx::pluginAlwaysSeparate (cause.editorPlugin))
+        {
+            const auto plugin = cause.editorPlugin;
+            juce::AlertWindow::showOkCancelBox (
+                juce::MessageBoxIconType::WarningIcon, lynx::tr ("LYNX closed unexpectedly"),
+                message + "\n\n"
+                    + lynx::tr ("It happened while the window of {0} was opening{1}. Run {0} in a separate process from now on? If it "
+                                "crashes again, only the plugin stops and LYNX keeps running (Plugin wrapper menu: \"Always run in a "
+                                "separate process\").",
+                                { plugin, cause.gpuDriver ? lynx::tr (" (in the graphics driver, {0})", { cause.driverModule }) : juce::String() }),
+                lynx::tr ("Run separately"), lynx::tr ("No"), nullptr,
+                juce::ModalCallbackFunction::create ([plugin] (int result) {
+                    if (result != 0)
+                        lynx::setPluginAlwaysSeparate (plugin, true);
+                }));
+            return;
+        }
+        // LYNX's own drawing crashed in the graphics driver (Direct2D / Direct3D): draw with the CPU from now on
+        if (cause.gpuDriver && lynx::gpuRenderingEnabled())
+        {
+            lynx::setGpuRenderingEnabled (false);
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon, lynx::tr ("LYNX closed unexpectedly"),
+                message + "\n\n"
+                    + lynx::tr ("The crash was in the graphics driver ({0}). LYNX now draws its windows without the GPU; you can turn GPU "
+                                "rendering back on in Options > General settings (after a driver update, for example).",
+                                { cause.driverModule }));
+            return;
+        }
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, lynx::tr ("LYNX closed unexpectedly"), message);
     }
 
     void openStartupFile()
@@ -781,6 +904,8 @@ public:
         crashEngine = nullptr;
         engine = nullptr;
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+        heartbeat.stopTimer();
+        lynx::crashguard::stopHangWatch();
         lynx::crashguard::endSession(); // a clean exit: no breadcrumb left behind
 
         // everything is saved and closed: a process that loaded third-party plugins ends here, before the DLLs' own
@@ -798,6 +923,26 @@ public:
     }
 
 private:
+    // round 157a: a frozen UI (Windows' "not responding") writes the message thread's stack to autosave\hang <time>.txt
+    // and a session step, so a freeze can be told apart from a crash and located. The timer is the heartbeat.
+    struct Heartbeat final : juce::Timer
+    {
+        void timerCallback() override { lynx::crashguard::heartbeat(); }
+    } heartbeat;
+
+    void startHangWatch()
+    {
+        const auto folder = lynx::platform::settingsFile ("autosave");
+        folder.createDirectory();
+        // keep the newest hang files only
+        auto old = folder.findChildFiles (juce::File::findFiles, false, "hang *.txt");
+        std::sort (old.begin(), old.end(), [] (const juce::File& a, const juce::File& b) { return a.getLastModificationTime() > b.getLastModificationTime(); });
+        for (int i = 20; i < old.size(); ++i)
+            old.getReference (i).deleteFile();
+        lynx::crashguard::startHangWatch (folder.getFullPathName().replaceCharacter ('\\', '/').toStdString());
+        heartbeat.startTimerHz (5);
+    }
+
     bool sandboxChild = false;
     bool relaunched = false; // relaunchFromAsciiPath ran LYNX from its short path: this process only waited
     juce::String uncleanLastStep; // last step of a previous run that ended without closing
@@ -1331,6 +1476,281 @@ private:
         if (reportPath.isNotEmpty())
             juce::File (reportPath).replaceWithText (report);
         return allFinite;
+    }
+
+    // --opentest (round 157a): see the command line. Runs on the message loop (the editors' timers, animations and
+    // native windows are real); one step per timer tick.
+    void runOpenTest (const juce::String& reportPath, bool visible, std::function<void (bool)> done)
+    {
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+
+        struct OpenTest final : juce::Timer
+        {
+            juce::String reportPath, report;
+            bool visible = false, ok = true;
+            std::function<void (bool)> done;
+            std::unique_ptr<lynx::AudioEngine> engine;
+            std::vector<std::pair<juce::String, std::function<void()>>> steps;
+            std::size_t next = 0;
+            std::atomic<std::int64_t> lastStep { 0 };
+            std::atomic<bool> finished { false };
+            std::thread watchdog;
+            juce::String current;
+            std::mutex currentLock;
+            int opened = 0, painted = 0;
+            // LYNX_OPENTEST_TIMEOUT (seconds): longer for sanitizer builds
+            const std::int64_t timeoutMs = 1000 * juce::jmax (5, juce::SystemStats::getEnvironmentVariable ("LYNX_OPENTEST_TIMEOUT", "20").getIntValue());
+
+            static std::int64_t now() { return (std::int64_t) juce::Time::getMillisecondCounter(); }
+
+            void write (const juce::String& tail = {}) { juce::File (reportPath).replaceWithText (report + tail); }
+
+            ~OpenTest() override
+            {
+                finished = true;
+                if (watchdog.joinable())
+                    watchdog.join();
+            }
+
+            void start()
+            {
+                lastStep = now();
+                // the UI hang watch runs during the whole test (5 s): a slow step leaves its stack next to the report
+                const auto folder = juce::File (reportPath).getParentDirectory().getChildFile ("opentest-hang");
+                folder.deleteRecursively();
+                folder.createDirectory();
+                lynx::crashguard::startHangWatch (folder.getFullPathName().replaceCharacter ('\\', '/').toStdString(), 5000);
+                watchdog = std::thread ([this] {
+                    while (! finished)
+                    {
+                        std::this_thread::sleep_for (std::chrono::milliseconds (200));
+                        if (now() - lastStep.load() > timeoutMs)
+                        {
+                            juce::String at;
+                            {
+                                const std::lock_guard<std::mutex> l (currentLock);
+                                at = current;
+                            }
+                            juce::File (reportPath).replaceWithText (report + "HANG at " + at + " (no progress for " + juce::String (timeoutMs / 1000) + " s; stack in opentest-hang)\nresult=HANG\n");
+                            lynx::crashguard::exitNow (3);
+                        }
+                    }
+                });
+                startTimer (30);
+            }
+
+            // every LYNX window but none of the main one (there is none here): moved off-screen, painted once into an image
+            void touchWindows (bool resize, bool large)
+            {
+                auto& desktop = juce::Desktop::getInstance();
+                for (int i = desktop.getNumComponents(); --i >= 0;)
+                    if (auto* c = desktop.getComponent (i); c != nullptr && c->isVisible())
+                    {
+                        if (! visible && c->getScreenX() > -3000)
+                            c->setTopLeftPosition (-6000, -6000);
+                        if (resize)
+                            if (auto* w = dynamic_cast<juce::ResizableWindow*> (c))
+                            {
+                                const auto b = w->getBounds();
+                                w->setSize (large ? b.getWidth() * 2 : juce::jmax (40, b.getWidth() / 3), large ? b.getHeight() * 2 : juce::jmax (40, b.getHeight() / 3));
+                            }
+                        if (c->getWidth() > 0 && c->getHeight() > 0 && c->getWidth() < 8000 && c->getHeight() < 8000)
+                        {
+                            juce::Image image (juce::Image::ARGB, c->getWidth(), c->getHeight(), true);
+                            juce::Graphics g (image);
+                            c->paintEntireComponent (g, false);
+                            ++painted;
+                        }
+                    }
+            }
+
+            void timerCallback() override
+            {
+                if (next >= steps.size())
+                {
+                    stopTimer();
+                    lynx::NativeEffectWindows::closeAll();
+                    lynx::closeChannelSettings();
+                    // the UI hang watch itself: the message thread spins past the stall time; the watcher must write the stack
+                    {
+                        const auto before = lynx::crashguard::lastHangFile();
+                        for (const auto until = now() + 7000; now() < until;)
+                            lastStep = now(); // (busy: no heartbeat; the test's own watchdog stays quiet)
+                        for (const auto until = now() + 1500; now() < until && lynx::crashguard::lastHangFile() == before;)
+                            std::this_thread::sleep_for (std::chrono::milliseconds (20));
+                        lynx::crashguard::stopHangWatch();
+                        const juce::File hang (juce::String::fromUTF8 (lynx::crashguard::lastHangFile().c_str()));
+                        const auto text = hang.loadFileAsString();
+                        const auto frames = juce::StringArray::fromLines (text).size() - 2;
+                       #if JUCE_WINDOWS
+                        const auto hangOk = lynx::crashguard::lastHangFile() != before && hang.existsAsFile() && text.contains ("LYNX.exe+0x") && frames >= 3;
+                       #else
+                        const auto hangOk = lynx::crashguard::lastHangFile() != before && hang.existsAsFile() && frames >= 3;
+                       #endif
+                        report << "hang watch: " << (hangOk ? "OK" : "FAIL") << " (" << hang.getFileName() << ", " << frames << " lines"
+                               << (before.empty() ? juce::String() : "; a step stalled > 5 s earlier: " + juce::String::fromUTF8 (before.c_str())) << ")\n";
+                        ok = ok && hangOk;
+                    }
+                    report << "windows opened: " << opened << ", paints: " << painted << "\nresult=" << (ok ? "OK" : "FAIL") << "\n";
+                    write();
+                    finished = true;
+                    if (done)
+                        done (ok);
+                    return;
+                }
+                auto& [label, fn] = steps[next++];
+                {
+                    const std::lock_guard<std::mutex> l (currentLock);
+                    current = label;
+                }
+                fn();
+                lastStep = now();
+                lynx::crashguard::heartbeat();
+            }
+        };
+
+        auto* test = new OpenTest();
+        test->reportPath = reportPath;
+        test->visible = visible;
+        test->engine = std::make_unique<lynx::AudioEngine> (false);
+        test->done = [test, done] (bool ok) {
+            juce::MessageManager::callAsync ([test, done, ok] {
+                delete test;
+                juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+                done (ok);
+            });
+        };
+        auto& engine = *test->engine;
+        lynx::setNativeEditorDemo (true); // live displays animate without an audio device
+
+        const auto songWith = [] (const lynx::EffectSlot& fx) {
+            auto song = lynx::Song::makeDefault();
+            song.mixer.resize (2);
+            song.mixer[0].name = "Master";
+            song.mixer[1].name = "Insert 1";
+            song.mixer[1].effects.assign (1, fx);
+            for (auto& channel : song.channels)
+                channel.mixerTrack = 1;
+            return song;
+        };
+        // an older project's slot: its parameter list cut to `count` and read back by the project reader (the
+        // parameters a newer LYNX added after them take their defaults)
+        const auto oldState = [songWith] (const lynx::EffectSlot& fx, std::size_t count) -> std::optional<lynx::Song> {
+            auto json = juce::JSON::parse (lynx::ProjectFile::toJson (songWith (fx)));
+            if (auto* mixer = json["mixer"].getArray(); mixer != nullptr && mixer->size() > 1)
+                if (auto* effects = (*mixer)[1]["effects"].getArray(); effects != nullptr && ! effects->isEmpty())
+                    if (auto* params = (*effects)[0]["params"].getArray())
+                        params->removeRange ((int) count, params->size());
+            juce::String error;
+            return lynx::ProjectFile::fromJson (juce::JSON::toString (json), error);
+        };
+
+        auto& steps = test->steps;
+        juce::Random random (157);
+        for (int k = 0; k <= (int) lynx::lastEffectKind; ++k)
+        {
+            const auto kind = (lynx::EffectKind) k;
+            if (! lynx::NativeEffectWindows::canOpen (kind) || kind == lynx::EffectKind::patcher)
+                continue;
+            const auto& info = lynx::effectInfo (kind);
+            const auto base = lynx::natives::newEffect (kind, lynx::flStudioAccess()).value_or (lynx::makeEffectSlot (kind));
+            const auto n = info.params.size();
+            std::vector<std::pair<juce::String, std::function<std::optional<lynx::Song>()>>> variants;
+            variants.push_back ({ "default", [=] { return std::optional<lynx::Song> (songWith (base)); } });
+            for (const auto value : { 0.0f, 1.0f })
+                variants.push_back ({ value == 0.0f ? "all 0" : "all 1", [=] {
+                                         auto fx = base;
+                                         for (std::size_t p = 0; p < n; ++p) fx.params[p] = value;
+                                         return std::optional<lynx::Song> (songWith (fx));
+                                     } });
+            const auto seed = random.nextInt64();
+            variants.push_back ({ "random", [=] {
+                                     juce::Random r (seed);
+                                     auto fx = base;
+                                     for (std::size_t p = 0; p < n; ++p) fx.params[p] = r.nextFloat();
+                                     return std::optional<lynx::Song> (songWith (fx));
+                                 } });
+            std::vector<std::size_t> cuts { n / 2 };
+            for (const auto c : { (std::size_t) 90, (std::size_t) 114, (std::size_t) 128 }) // (Facet's 90 → 114 params; the 128 → 160 slot)
+                if (c < n) cuts.push_back (c);
+            for (const auto c : cuts)
+                variants.push_back ({ "old project (" + juce::String ((int) c) + " of " + juce::String ((int) n) + " params)", [=] { return oldState (base, c); } });
+
+            for (const auto& [variant, makeSong] : variants)
+            {
+                const auto label = juce::String::fromUTF8 (info.name) + " / " + variant;
+                steps.push_back ({ label + ": open", [test, &engine, label, makeSong = makeSong] {
+                                      auto song = makeSong();
+                                      if (! song)
+                                      {
+                                          test->report << "FAIL " << label << ": project reader refused the state\n";
+                                          test->ok = false;
+                                          return;
+                                      }
+                                      engine.setSong (std::move (*song));
+                                      engine.dispatchPendingMessages();
+                                      lynx::NativeEffectWindows::open (engine, 1, 0);
+                                      ++test->opened;
+                                      test->touchWindows (false, false);
+                                  } });
+                steps.push_back ({ label + ": run", [test, &engine] {
+                                      for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+                                          engine.renderOffline (0.03, rate);
+                                      test->touchWindows (false, false);
+                                  } });
+                steps.push_back ({ label + ": small", [test] { test->touchWindows (true, false); } });
+                steps.push_back ({ label + ": large", [test] { test->touchWindows (true, true); } });
+                steps.push_back ({ label + ": close", [test, label] {
+                                      lynx::NativeEffectWindows::closeAll();
+                                      test->report << label << ": OK\n";
+                                      test->write ("(running)\n");
+                                  } });
+            }
+        }
+
+        // instruments: the channel window the Channel rack opens (Patcher: its graph window, not here)
+        for (int k = 0; k < (int) lynx::InstrumentKind::patcher; ++k)
+        {
+            const auto kind = (lynx::InstrumentKind) k;
+            if (kind == lynx::InstrumentKind::plugin)
+                continue;
+            for (const auto* variant : { "default", "old project (saved and read back)" })
+            {
+                const auto label = "instrument " + juce::String (k) + " / " + variant;
+                steps.push_back ({ label + ": open", [test, &engine, kind, label, old = juce::String (variant) != "default"] {
+                                      auto song = lynx::Song::makeDefault();
+                                      auto channel = lynx::natives::makeChannel (kind, lynx::flStudioAccess());
+                                      lynx::ChannelDef def;
+                                      def.instrument = kind;
+                                      def.name = "Test";
+                                      song.channels.push_back (channel ? *channel : def);
+                                      if (old)
+                                      {
+                                          juce::String error;
+                                          if (auto again = lynx::ProjectFile::fromJson (lynx::ProjectFile::toJson (song), error))
+                                              song = std::move (*again);
+                                      }
+                                      const auto index = (int) song.channels.size() - 1;
+                                      engine.setSong (std::move (song));
+                                      engine.dispatchPendingMessages();
+                                      lynx::openChannelSettings (engine, index);
+                                      ++test->opened;
+                                      test->touchWindows (false, false);
+                                  } });
+                steps.push_back ({ label + ": run", [test, &engine] {
+                                      engine.renderOffline (0.03, 48000.0);
+                                      test->touchWindows (false, false);
+                                  } });
+                steps.push_back ({ label + ": small", [test] { test->touchWindows (true, false); } });
+                steps.push_back ({ label + ": large", [test] { test->touchWindows (true, true); } });
+                steps.push_back ({ label + ": close", [test, label] {
+                                      lynx::closeChannelSettings();
+                                      test->report << label << ": OK\n";
+                                      test->write ("(running)\n");
+                                  } });
+            }
+        }
+        test->start();
     }
 
     void runEditorTest (const juce::String& pluginPath, const juce::String& reportPath, const juce::String& only)

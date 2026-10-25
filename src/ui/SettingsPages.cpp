@@ -91,7 +91,7 @@ public:
 
         for (auto* c : std::initializer_list<juce::Component*> { &languageTitle, &displayTitle, &startupTitle, &editingTitle, &backupTitle,
                                                                  &pluginsTitle, &languageLabel, &languageBox, &languageNote, &scaleLabel, &scaleBox,
-                                                                 &wavesLabel, &wavesBox, &stereoWaves, &pluginStyleLabel, &pluginStyleBox, &reducedEffects, &splash, &startupSound, &scanAtStart,
+                                                                 &wavesLabel, &wavesBox, &stereoWaves, &pluginStyleLabel, &pluginStyleBox, &reducedEffects, &gpuRendering, &splash, &startupSound, &scanAtStart,
                                                                  &typingPiano, &keepEditors, &rememberSeek, &editInLabel, &editInBox, &undoLabel,
                                                                  &undoBox, &autosaveLabel, &autosaveBox, &keepLabel, &keepBox, &openBackups, &unusedTakes,
                                                                  &sandbox, &sandboxNote, &substitutes, &substitutesNote, &managePlugins, &manageShortcuts, &shortcutsNote })
@@ -133,6 +133,11 @@ public:
         pluginStyleBox.onChange = [this] { change ([&] { options.pluginStyle = pluginStyleBox.getSelectedId() - 2; }); };
         toggle (reducedEffects, tr ("Reduced effects in plugin editors (no glows or animations, for slower graphics cards)"), options.reducedEffects,
                 [this] (bool on) { options.reducedEffects = on; });
+        toggle (gpuRendering, tr ("Draw with the GPU (Direct2D). Turn off if LYNX crashes in the graphics driver or the screen flickers"),
+                options.gpuRendering, [this] (bool on) { options.gpuRendering = on; });
+       #if ! JUCE_WINDOWS
+        gpuRendering.setVisible (false);
+       #endif
 
         toggle (splash, tr ("Show the splash screen at startup"), options.splash, [this] (bool on) { options.splash = on; });
         toggle (startupSound, tr ("Play the startup sound"), options.startupSound, [this] (bool on) { options.startupSound = on; });
@@ -217,6 +222,9 @@ private:
         stereoWaves.setBounds (r.indented (24));
         pluginStyleBox.setBounds (r.row (pluginStyleLabel, 300));
         reducedEffects.setBounds (r.full (24));
+       #if JUCE_WINDOWS
+        gpuRendering.setBounds (r.full (24));
+       #endif
 
         r.section (startupTitle);
         for (auto* t : { &splash, &startupSound, &scanAtStart })
@@ -286,7 +294,7 @@ private:
         backupTitle { tr ("Backup") }, pluginsTitle { tr ("Plugins and shortcuts") };
     juce::Label languageLabel, languageNote, scaleLabel, wavesLabel, pluginStyleLabel, editInLabel, undoLabel, autosaveLabel, keepLabel, sandboxNote, substitutesNote, shortcutsNote;
     juce::ComboBox languageBox, scaleBox, wavesBox, pluginStyleBox, editInBox, undoBox, autosaveBox, keepBox;
-    juce::ToggleButton stereoWaves, reducedEffects, splash, startupSound, scanAtStart, typingPiano, keepEditors, rememberSeek, sandbox, substitutes, unusedTakes;
+    juce::ToggleButton stereoWaves, reducedEffects, gpuRendering, splash, startupSound, scanAtStart, typingPiano, keepEditors, rememberSeek, sandbox, substitutes, unusedTakes;
     juce::TextButton openBackups { tr ("Open backup folder") }, managePlugins { tr ("Plugin manager...") }, manageShortcuts { tr ("Manage shortcuts...") };
 };
 

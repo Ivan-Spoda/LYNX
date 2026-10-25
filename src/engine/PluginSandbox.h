@@ -18,6 +18,12 @@ constexpr const char* pluginSandboxId = "lynx-plugin-host";
 bool pluginSandboxEnabled();
 void setPluginSandboxEnabled (bool enabled);
 
+// Plugins that always run in a separate process, by name (round 157a): e.g. one whose editor crashed LYNX (a GPU
+// driver failing inside the plugin's OpenGL window takes the host down with it; in its own process only the plugin
+// goes). File separate-process.txt in the settings folder, one name per line.
+bool pluginAlwaysSeparate (const juce::String& name);
+void setPluginAlwaysSeparate (const juce::String& name, bool on);
+
 // Opens the plugin in a child process, already prepared (rate, block, base64 state). nullptr + `error` on
 // failure (child didn't start, plugin didn't load, timeout).
 std::unique_ptr<juce::AudioPluginInstance> createSandboxedPlugin (const juce::PluginDescription& description, double sampleRate,

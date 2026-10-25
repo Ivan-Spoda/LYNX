@@ -4440,3 +4440,12 @@ countries: br
 "This audio input is the input of the Master and of {0}. The Master plays it straight away, without {0}'s effects, so you hear the dry sound on top of the processed one (the effects seem to do nothing).\n\nTo hear it through {0}'s effects, take it off the Master." = "Esta entrada de áudio é a entrada do Master e de {0}. O Master a toca direto, sem os efeitos de {0}, então você ouve o som seco por cima do processado (parece que os efeitos não fazem nada).\n\nPara ouvir com os efeitos de {0}, tire-a do Master."
 "Take it off the Master" = "Tirar do Master"
 "Keep both" = "Manter as duas"
+
+# --- round 157a: crash and freeze diagnostics, GPU rendering, plugins in a separate process
+"Always run {0} in a separate process" = "Sempre rodar {0} em um processo separado"
+"It happened while the window of {0} was opening{1}. Run {0} in a separate process from now on? If it crashes again, only the plugin stops and LYNX keeps running (Plugin wrapper menu: \"Always run in a separate process\")." = "Aconteceu enquanto a janela do {0} abria{1}. Rodar o {0} em um processo separado daqui em diante? Se ele travar de novo, só o plugin para e o LYNX continua funcionando (menu do wrapper do plugin: \"Sempre rodar em um processo separado\")."
+" (in the graphics driver, {0})" = " (no driver de vídeo, {0})"
+"Run separately" = "Rodar separado"
+"No" = "Não"
+"The crash was in the graphics driver ({0}). LYNX now draws its windows without the GPU; you can turn GPU rendering back on in Options > General settings (after a driver update, for example)." = "A falha foi no driver de vídeo ({0}). Agora o LYNX desenha as janelas sem a GPU; você pode religar a renderização pela GPU em Opções > Configurações gerais (depois de atualizar o driver, por exemplo)."
+"Draw with the GPU (Direct2D). Turn off if LYNX crashes in the graphics driver or the screen flickers" = "Desenhar com a GPU (Direct2D). Desligue se o LYNX travar no driver de vídeo ou a tela piscar"

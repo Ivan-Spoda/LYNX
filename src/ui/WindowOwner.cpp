@@ -2,6 +2,7 @@
 
 #include "ui/LogoData.h"
 #include "ui/Theme.h"
+#include "platform/Paths.h"
 
 #include <cstdint>
 #include <map>
@@ -179,8 +180,75 @@ void forceForegroundForTest (juce::Component& window)
    #endif
 }
 
+namespace
+{
+int gpuSetting = -1; // −1 not read yet
+
+void applyToPeer (juce::ComponentPeer& peer, bool gpu)
+{
+   #if JUCE_WINDOWS
+    const auto engines = peer.getAvailableRenderingEngines();
+    if (engines.size() < 2)
+        return;
+    const auto wanted = gpu ? engines.size() - 1 : 0; // JUCE 8: 0 = GDI ("Software Renderer"), last = Direct2D
+    if (peer.getCurrentRenderingEngine() != wanted)
+        peer.setCurrentRenderingEngine (wanted);
+   #else
+    (void) peer;
+    (void) gpu;
+   #endif
+}
+
+struct RenderingWatch final : juce::Timer
+{
+    void timerCallback() override
+    {
+        if (gpuRenderingEnabled())
+            return; // (JUCE's default: nothing to change)
+        for (int i = juce::ComponentPeer::getNumPeers(); --i >= 0;)
+            if (auto* peer = juce::ComponentPeer::getPeer (i))
+                applyToPeer (*peer, false);
+    }
+};
+} // namespace
+
+bool gpuRenderingEnabled()
+{
+    if (gpuSetting < 0)
+        gpuSetting = platform::settingsFile ("gpu-rendering.txt").loadFileAsString().trim() == "0" ? 0 : 1;
+    return gpuSetting != 0;
+}
+
+void setGpuRenderingEnabled (bool on)
+{
+    gpuSetting = on ? 1 : 0;
+    platform::settingsFile ("gpu-rendering.txt").replaceWithText (on ? "1" : "0");
+    for (int i = juce::ComponentPeer::getNumPeers(); --i >= 0;)
+        if (auto* peer = juce::ComponentPeer::getPeer (i))
+        {
+            applyToPeer (*peer, on && ! peer->getComponent().getProperties()["lynxGdi"]); // (plugin windows stay on GDI)
+            peer->getComponent().repaint();
+        }
+}
+
+void startRenderingWatch()
+{
+   #if JUCE_WINDOWS
+    static RenderingWatch watch;
+    watch.startTimer (500);
+   #endif
+}
+
+void applyRenderingChoice (juce::Component& window)
+{
+    if (! gpuRenderingEnabled())
+        if (auto* peer = window.getPeer())
+            applyToPeer (*peer, false);
+}
+
 void keepAboveMainWindow (juce::Component& window)
 {
+    applyRenderingChoice (window);
     auto& all = keepers();
     auto& keeper = all[&window];
     if (keeper == nullptr)
