@@ -2497,6 +2497,7 @@ private:
                 kinds.push_back (own);
             kinds.push_back (lynx::EffectKind::apexLimiter); // round 114: display-first editor
             kinds.push_back (lynx::EffectKind::ridgeStrip); // round 145: the second pass shows the Vocal strip voicing
+            kinds.push_back (lynx::EffectKind::compressor); // round 152: the RComp role's panel (vintage voicing, RComp ranges)
             const auto database = juce::File (juce::String::fromUTF8 (roots.data.c_str())).getChildFile ("Patches/Plugin database/Effects");
 
             auto maximusPasses = 0; // Maximus has its own page (first pass); the second pass shows Soundgoodizer
@@ -2557,6 +2558,13 @@ private:
                     for (const auto& [param, value] : { std::pair<const char*, float> { "HPF", 0.3f }, { "LMF gain", 0.35f }, { "HF gain", 0.7f },
                                                         { "Ratio", 0.3f }, { "Comp. threshold", 0.55f } })
                         fx.params[(std::size_t) lynx::plugui::paramIndex (kind, param)] = value;
+                if (kind == lynx::EffectKind::compressor) // round 152: the vintage voicing with the reference's ranges and meter
+                {
+                    for (const auto& [param, value] : { std::pair<const char*, float> { "Voicing", 1.0f }, { "Ranges", 1.0f }, { "Limiter", 1.0f },
+                                                        { "Threshold", 0.6f }, { "RC ratio", 0.4f } })
+                        fx.params[(std::size_t) lynx::plugui::paramIndex (kind, param)] = value;
+                    name = "Compressor (RComp role)";
+                }
                 if (kind == lynx::EffectKind::apexLimiter) // round 114: gain into the ceiling, so the display shows reduction
                     fx.params[0] = 0.33f;
                 if (kind == lynx::EffectKind::ember)
@@ -2693,6 +2701,32 @@ private:
                     editor->paintEntireComponent (g, false);
                 }
                 const auto file = out.getChildFile ("Auto-pan-tweak.png");
+                file.deleteFile();
+                juce::PNGImageFormat png;
+                if (auto stream = file.createOutputStream())
+                    png.writeImageToStream (image, *stream);
+            }
+
+            // round 152: Foil Plate's one-knob Plate view (the Little Plate role)
+            {
+                auto fx = lynx::makeEffectSlot (lynx::EffectKind::foilPlate);
+                fx.params[14] = 1.0f; // the measured plate voicing
+                fx.params[15] = 1.0f; // View = Plate
+                lynx::Song song;
+                song.mixer.resize (2);
+                song.mixer[0].name = "Master";
+                song.mixer[1].name = "Insert 1";
+                song.mixer[1].effects.push_back (fx);
+                offline.setSong (std::move (song));
+                offline.dispatchPendingMessages();
+                auto editor = lynx::makeNativeEffectEditor (offline, 1, 0, 1.0f, 0);
+                juce::Image image (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
+                {
+                    juce::Graphics g (image);
+                    g.fillAll (lynx::theme::panel);
+                    editor->paintEntireComponent (g, false);
+                }
+                const auto file = out.getChildFile ("Foil Plate-plate.png");
                 file.deleteFile();
                 juce::PNGImageFormat png;
                 if (auto stream = file.createOutputStream())

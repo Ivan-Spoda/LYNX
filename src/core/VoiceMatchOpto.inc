@@ -12,6 +12,15 @@ constexpr double scHz = 8560.034, scQ = 0.3806853, scDb = 8.317298;      // side
 constexpr double memGain = 2.321769, memUpMs = 162.5647, memDownMs = 1.0;
 constexpr double limitGamma = 12.0, limitShiftDb = 0.88;               // Limit: a much steeper cell law [model: only her
                                                                         // peak reduction measured]
+// round 152 [EXEC] (REA_rodada152a §2): Limit fitted on the trial's up / down 1 kHz stairs at peak reduction 46 / 62.6 / 80
+// (rms 0.34 / 0.52 / 0.50 dB, round 123's Limit 0.37 / 1.00 / 1.32): the cell's exponent, the level shift, the share of
+// the input added to the side chain (so loud passages can be turned down below the threshold: the trial's
+// over-compression at 62.6) and the cell's deepest reduction (the trial stops at 30.4 dB)
+constexpr double limitGamma152 = 10.6297, limitShiftDb152 = 0.8281, limitFeedForward = 0.015, limitFloorDb = 30.44;
+// AUTO MAKEUP [EXEC]: the trial's gain change below the threshold with Auto Makeup on, per peak reduction dial (dB,
+// relative to the dial's default 46, where it was switched on; a −40 dBFS tone, fresh instances)
+constexpr double amKnob[] = { 0, 10, 20, 30, 40, 46, 50, 55, 60, 62.6, 65, 70, 75, 80, 85, 90, 95, 100 };
+constexpr double amGain[] = { -1.48, -1.32, -1.17, -1.01, -0.86, 0.0, 2.85, 3.55, 6.07, 6.78, 7.42, 8.73, 10.05, 11.37, 12.69, 14.01, 15.33, 16.65 };
 // the unit's idle response at 48 kHz (3rd order: a 4 Hz high-pass and the ~0.7 dB dip around 12 kHz), measured
 constexpr double idleB[4] = { 0.94821, -1.13885, 0.19868, -0.00757 }, idleA[4] = { 1.0, -1.21822, 0.20333, 0.0158 };
 constexpr double idleMakeupDb = 16.014902 - 15.98; // the idle filter's mid-band loss, folded into the make-up
@@ -38,6 +47,7 @@ double table (const double* xs, const double* ys, int n, double x) noexcept
 }
 } // namespace
 
+double autoMakeupDb (double peakReduction) noexcept { return table (amKnob, amGain, (int) std::size (amKnob), std::clamp (peakReduction, 0.0, 100.0)); }
 double makeupDb (double gainKnob_) noexcept { return table (gainKnob, gainLevel, (int) std::size (gainKnob), std::clamp (gainKnob_, 0.0, 100.0)); }
 double sensitivityDb (double peakReduction, double hiFreq) noexcept
 {

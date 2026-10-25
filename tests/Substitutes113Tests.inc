@@ -229,11 +229,11 @@ TEST (waves_vocal_states_translated_round113)
     {
         std::string values;
         for (int i = 0; i < 208; ++i)
-            values += i == 38 ? "48.96 " : i == 74 ? "62.6 " : "0 ";
+            values += i == 38 ? "48.96 " : i == 74 ? "62.6 " : i == 204 ? "100 " : i == 140 ? "2 " : "0 ";
         int n = 0;
         const auto s = slotFor ("CLA-2A", values.c_str(), n);
         namespace g = mixsuite::glow;
-        CHECK (n == 5 && s.kind == EffectKind::glowLeveler && s.params[g::voicing] == 1.0f && s.params[g::mode] == 0.0f);
+        CHECK (n == 8 && s.kind == EffectKind::glowLeveler && s.params[g::voicing] == 1.0f && s.params[g::mode] == 0.0f);
     }
 }
 

@@ -1010,8 +1010,8 @@ Layout layoutOf (const EffectParams& p) noexcept
         if (cursor > 0.0)
             lo = std::max (lo, cursor);
         const bool hasHi = hi < 29500.0;
-        if (hasHi && lo > 0.0)
-            hi = std::max (hi, lo * 1.05);
+        if (hasHi && lo > 0.0) // round 152 [EXEC]: Pro-MB keeps a band at least 0.8 octave wide (its upper edge moves)
+            hi = std::max (hi, lo * (on (p[rev152]) ? 1.7411011265922482 : 1.05));
         if (lo > 0.0 && (seg == 0 || lo > cursor * 1.0001))
         {
             L.bandOf[(std::size_t) seg++] = -1; // the gap below the band
@@ -1093,6 +1093,22 @@ double measuredLaw (const double* table, float v) noexcept
     return std::exp (std::log (table[k]) + (std::log (table[k + 1]) - std::log (table[k])) * t);
 }
 constexpr double measuredAttack[7] { 0.065, 0.081, 0.166, 1.22, 8.35, 35.2, 99.4 };
+// round 152 [EXEC] (REA_rodada152 §1, the same renders refitted): the reference's attack lives in the gain stage — a
+// fast level follower (τ below), then the growing gain change smoothed with its own τ (`measuredGainAttack`) in the
+// domain 10^(k·|gain| / 20) (k = `measuredGainAttackK`; 0 = dB). Worst error over the first 400 ms after a step:
+// 0.03 – 0.41 dB at every attack 0 … 100 % (the level-follower attack of round 150: up to 3 dB from 50 %)
+constexpr double measuredAttackLevel[7] { 0.012, 0.012, 0.022, 0.092, 0.418, 0.539, 1.302 };
+constexpr double measuredGainAttack[7] { 0.134, 0.166, 0.695, 6.95, 30.3, 115.6, 271.3 };
+constexpr double measuredGainAttackK[7] { 0.0, 0.0, 0.0, 0.66, 0.84, 0.36, 0.0 };
+double measuredLinear (const double* table, float v) noexcept
+{
+    static constexpr double at[7] { 0.0, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0 };
+    const auto x = (double) std::clamp (v, 0.0f, 1.0f);
+    int k = 0;
+    while (k < 5 && x > at[k + 1])
+        ++k;
+    return table[k] + (table[k + 1] - table[k]) * (x - at[k]) / (at[k + 1] - at[k]);
+}
 constexpr double measuredRelease1[7] { 8.5, 9.2, 56.0, 123.0, 172.0, 298.0, 905.0 };
 constexpr double measuredRelease2[7] { 103.0, 104.0, 125.0, 176.0, 243.0, 681.0, 2449.0 };
 
@@ -1208,7 +1224,7 @@ double responseDb (const EffectParams& p, const double* bandGainDb, double sampl
                 continue;
             m *= minphase::bandMagnitudeM (wOf (L.loHz[(std::size_t) b]), wOf (L.hiHz[(std::size_t) b]),
                                            minphase::dynamicSideCode (L.loSlope[(std::size_t) b]), minphase::dynamicSideCode (L.hiSlope[(std::size_t) b]),
-                                           dbToGain (bandGainDb[b]), om);
+                                           dbToGain (bandGainDb[b]), om, on (p[rev152]));
         }
         return gainToDb (std::abs (m)) + trimDb (p[output]);
     }
@@ -1503,7 +1519,8 @@ private:
         const bool msPan = on (p[panMode]);
         const bool measuredDet = measuredDetector (p);
 
-        std::array<double, bands> aA {}, aR {}, aR2 {}, level {};
+        std::array<double, bands> aA {}, aR {}, aR2 {}, aG {}, kG {}, level {};
+        const bool gainAttack = measuredDet && on (p[rev152]);
         std::array<bool, bands> enabled {}, soloed {}, growsWithLevel {};
         std::array<float, bands> panL {}, panR {};
         bool anySolo = false;
@@ -1514,7 +1531,9 @@ private:
             panR[(std::size_t) b] = pan < 0.0f ? 1.0f + pan : 1.0f;
             if (measuredDet) // round 150: the measured detector's three time constants
             {
-                aA[(std::size_t) b] = coef (measuredLaw (measuredAttack, p[(std::size_t) param (b, fAttack)]), sr);
+                aA[(std::size_t) b] = coef (measuredLaw (gainAttack ? measuredAttackLevel : measuredAttack, p[(std::size_t) param (b, fAttack)]), sr);
+                aG[(std::size_t) b] = gainAttack ? coef (measuredLaw (measuredGainAttack, p[(std::size_t) param (b, fAttack)]), sr) : 0.0;
+                kG[(std::size_t) b] = gainAttack ? measuredLinear (measuredGainAttackK, p[(std::size_t) param (b, fAttack)]) * 0.11512925464970229 : 0.0;
                 aR[(std::size_t) b] = coef (measuredLaw (measuredRelease1, p[(std::size_t) param (b, fRelease)]), sr);
                 aR2[(std::size_t) b] = coef (measuredLaw (measuredRelease2, p[(std::size_t) param (b, fRelease)]), sr);
             }
@@ -1665,7 +1684,14 @@ private:
                             // immediate recovery); what a rising level does goes through at once (a compressor's
                             // growing reduction, an expander's opening)
                             if (growsWithLevel[(std::size_t) b] ? std::abs (gdb) >= std::abs (hold) : std::abs (gdb) <= std::abs (hold))
-                                hold = gdb;
+                            {
+                                // round 152: the attack (instant before), in the 10^(k·|gain| / 20) domain
+                                const auto a = aG[(std::size_t) b], k = kG[(std::size_t) b];
+                                if (k > 1e-6)
+                                    hold = std::copysign (std::log (a * std::exp (k * std::abs (hold)) + (1.0 - a) * std::exp (k * std::abs (gdb))) / k, gdb);
+                                else
+                                    hold = a * hold + (1.0 - a) * gdb;
+                            }
                             else
                                 hold = aR2[(std::size_t) b] * hold + (1.0 - aR2[(std::size_t) b]) * gdb;
                             gdb = hold;
@@ -1757,6 +1783,7 @@ private:
                 codeL[(std::size_t) b] = minphase::dynamicSideCode (L.loSlope[(std::size_t) b]);
                 codeH[(std::size_t) b] = minphase::dynamicSideCode (L.hiSlope[(std::size_t) b]);
             }
+            const bool narrow152 = on (p[rev152]); // round 152: the measured narrow-band law
             const auto run = [&] (int len, double rate, int every, const float* d0, const float* d1, auto&& gainAt, float* o0, float* o1) noexcept {
                 std::array<double, bands> wl {}, wh {};
                 for (int b = 0; b < nb; ++b)
@@ -1779,7 +1806,7 @@ private:
                                 {
                                     dynGain[(std::size_t) b][(std::size_t) c] = gc[c];
                                     dynBand[(std::size_t) b][(std::size_t) c].designM (wl[(std::size_t) b], wh[(std::size_t) b],
-                                                                                       codeL[(std::size_t) b], codeH[(std::size_t) b], std::max (gc[c], 1e-6));
+                                                                                       codeL[(std::size_t) b], codeH[(std::size_t) b], std::max (gc[c], 1e-6), narrow152);
                                 }
                         }
                     const double xl = d0[i], xr = d1[i];
@@ -2552,6 +2579,7 @@ const EffectInfo& prismInfo()
                 i.params.push_back ({ scN[b], 0.0f });
         }
         i.params.push_back ({ "Detector", 1.0f });
+        i.params.push_back ({ "Revision", 1.0f }); // round 152: gain-stage attack, narrow bands, minimum width (projects saved before keep round 150's)
         return i;
     }();
     return info;
@@ -2712,6 +2740,7 @@ std::string paramText (EffectKind kind, int param, float v)
             case slope: return std::to_string (slopeDbOct (v)) + " dB/oct";
             case bandLayout: return on (v) ? "free" : "split";
             case detectorLaw: return on (v) ? "measured" : "classic";
+            case rev152: return on (v) ? "round 152" : "round 150";
             case lookahead: return v <= 0.0f ? "off" : msText (lookaheadMs (v));
             case mix: return fmt ("%.0f%%", v * 100.0);
             case input: case output: return db (trimDb (v));

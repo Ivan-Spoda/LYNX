@@ -146,12 +146,105 @@ const EffectInfo& info()
         e.params.push_back ({ "Range low", 0.0f });
         e.params.push_back ({ "Range high", 1.0f });
         e.params.push_back ({ "Receive", 1.0f }); // round 150
+        e.params.push_back ({ "Group octaves", 1.0f }); // round 152
+        static const char* const mapNames[keyMapParams] { "Key map 1", "Key map 2", "Key map 3", "Key map 4", "Key map 5", "Key map 6",
+                                                          "Key map 7", "Key map 8", "Key map 9", "Key map 10", "Key map 11", "Key map 12" };
+        for (const auto* nm : mapNames)
+            e.params.push_back ({ nm, 0.0f });
+        e.params.push_back ({ "Reference tone", 0.0f });
+        e.params.push_back ({ "Tone level", 0.5f });
         return e;
     }();
     return i;
 }
 
 NoteDir noteDir (float v) noexcept { return (NoteDir) stepped (v, 3); }
+
+// ---- round 152: Group Octaves off — the key map (8 keys per value, base 6, an exact integer / 2^24 in the float) ----
+namespace
+{
+constexpr double keyMapScale = 16777216.0; // 2^24: every packed value (< 6^8 = 1 679 616) is exact in a float
+std::uint32_t keyMapWord (const float* p, int i) noexcept
+{
+    return (std::uint32_t) std::clamp (std::lround ((double) p[keyMap1 + i] * keyMapScale), 0L, 1679615L);
+}
+} // namespace
+bool groupOctavesOn (const float* p) noexcept { return p[groupOctaves] >= 0.5f; }
+double referenceToneDb (float v) noexcept { return -18.0 + 36.0 * (double) std::clamp (v, 0.0f, 1.0f); }
+KeyStatus keyOverride (const float* p, int note) noexcept
+{
+    const auto k = note - keyMapFirst;
+    if (k < 0 || k >= keyMapKeys) return KeyStatus::follow;
+    auto w = keyMapWord (p, k / keyMapPerParam);
+    for (int j = 0; j < k % keyMapPerParam; ++j) w /= keyStatuses;
+    return (KeyStatus) (w % keyStatuses);
+}
+void setKeyOverride (float* p, int note, KeyStatus st) noexcept
+{
+    const auto k = note - keyMapFirst;
+    if (k < 0 || k >= keyMapKeys) return;
+    const auto i = k / keyMapPerParam;
+    std::uint32_t digits[keyMapPerParam] {};
+    auto w = keyMapWord (p, i);
+    for (auto& d : digits) { d = w % keyStatuses; w /= keyStatuses; }
+    digits[k % keyMapPerParam] = (std::uint32_t) st;
+    std::uint32_t out = 0;
+    for (int j = keyMapPerParam - 1; j >= 0; --j) out = out * keyStatuses + digits[j];
+    p[keyMap1 + i] = (float) ((double) out / keyMapScale);
+}
+bool anyKeyOverride (const float* p) noexcept
+{
+    for (int i = 0; i < keyMapParams; ++i)
+        if (keyMapWord (p, i) != 0) return true;
+    return false;
+}
+void clearKeyOverrides (float* p) noexcept
+{
+    for (int i = 0; i < keyMapParams; ++i) p[keyMap1 + i] = 0.0f;
+}
+KeyStatus noteStatus (const float* p, int note, std::uint16_t mask) noexcept
+{
+    if (! groupOctavesOn (p))
+        if (const auto o = keyOverride (p, note); o != KeyStatus::follow) return o;
+    const auto pc = ((note % 12) + 12) % 12;
+    if (((mask >> pc) & 1u) == 0)
+    {
+        const auto d = noteDir (p[noteDirC + pc]);
+        return d == NoteDir::up ? KeyStatus::removedUp : (d == NoteDir::down ? KeyStatus::removedDown : KeyStatus::removed);
+    }
+    return p[bypassC + pc] >= 0.5f ? KeyStatus::bypass : KeyStatus::legal;
+}
+int targetNoteKeys (double sung, const float* p, std::uint16_t mask, int previous, double hysteresis) noexcept
+{
+    auto allowed = [&] (int n) { const auto st = noteStatus (p, n, mask); return st == KeyStatus::legal || st == KeyStatus::bypass; };
+    if (previous >= 0 && allowed (previous) && std::abs (sung - previous) < 0.5 + hysteresis)
+        return previous;
+    const auto base = (int) std::lround (sung);
+    // an illegal sung key with a direction goes that way to the next allowed key
+    const auto own = noteStatus (p, base, mask);
+    if (own == KeyStatus::removedUp || own == KeyStatus::removedDown)
+        for (int k = 1; k <= 24; ++k)
+            if (const auto n = base + (own == KeyStatus::removedUp ? k : -k); allowed (n)) return n;
+    int best = -1;
+    double bestD = 1e9;
+    for (int d = -12; d <= 12; ++d)
+        if (const auto n = base + d; allowed (n) && std::abs (sung - n) < bestD - 1e-12)
+        {
+            bestD = std::abs (sung - n);
+            best = n;
+        }
+    return best >= 0 ? best : base;
+}
+KeyStatus nextRemoveStatus (KeyStatus c) noexcept
+{
+    switch (c)
+    {
+        case KeyStatus::legal: case KeyStatus::bypass: case KeyStatus::follow: return KeyStatus::removed;
+        case KeyStatus::removed: return KeyStatus::removedUp;
+        case KeyStatus::removedUp: return KeyStatus::removedDown;
+        default: return KeyStatus::legal;
+    }
+}
 int rangeNote (float v) noexcept { return std::clamp ((int) std::lround (std::clamp (v, 0.0f, 1.0f) * 127.0f), 0, 127); }
 float rangeNoteValue (int note) noexcept { return (float) std::clamp (note, 0, 127) / 127.0f; }
 const char* rangePresetName (int k) noexcept
@@ -243,8 +336,18 @@ std::string paramText (int param, float v)
         static const char* const n[3] { "Nearest", "Up", "Down" };
         return n[(int) noteDir (v)];
     }
-    if (param == receiveScale)
+    if (param == receiveScale || param == groupOctaves || param == referenceTone) // round 152: Group Octaves, reference tone
         return onOff();
+    if (param == referenceToneLevel)
+    {
+        std::snprintf (t, sizeof t, "%+.1f dB", referenceToneDb (v));
+        return t;
+    }
+    if (param >= keyMap1 && param < keyMap1 + keyMapParams) // round 152: the key map (packed, edited on the keyboard)
+    {
+        std::snprintf (t, sizeof t, "keys %d-%d", keyMapFirst + keyMapPerParam * (param - keyMap1), keyMapFirst + keyMapPerParam * (param - keyMap1 + 1) - 1);
+        return t;
+    }
     if (param == rangeLow || param == rangeHigh)
     {
         static const char* const names[12] { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
@@ -350,6 +453,8 @@ public:
         }
         const auto lowNote = rangeNote (p[rangeLow]), highNote = rangeNote (p[rangeHigh]);
         const bool ranged = lowNote > 0 || highNote < 127;
+        // round 152: Group Octaves off with keys of their own — the per-key selection
+        const bool keyed = ! groupOctavesOn (p.data()) && anyKeyOverride (p.data());
 
         // MIDI targets: the pitch classes held on the source channel (none held: the scale)
         const auto ch = midiChannelIndex (p[midiChannel]);
@@ -447,7 +552,8 @@ public:
                         // the first notes of the next one, by up to half a semitone the wrong way)
                         shift = 0.0;
                     }
-                    const auto t = anyDir ? targetNote (ignoreVib ? center2 : sung, mask, target, hysteresis, dirs.data())
+                    const auto t = keyed ? targetNoteKeys (ignoreVib ? center2 : sung, p.data(), mask, target, hysteresis) // round 152
+                                   : anyDir ? targetNote (ignoreVib ? center2 : sung, mask, target, hysteresis, dirs.data())
                                           : vocal::nearestNote (ignoreVib ? center2 : sung, mask, target, hysteresis);
                     // round 135w: Tolerance time — a new note must last that long before the target moves to it
                     if (t != target && holdTime > 0.0 && target >= 0)
@@ -477,7 +583,7 @@ public:
                     if (newPhrase)
                         noteTime = 0.0;
                     wanted = (double) target - heard;
-                    if (((bypass >> (((target % 12) + 12) % 12)) & 1u) != 0)
+                    if (keyed ? noteStatus (p.data(), target, mask) == KeyStatus::bypass : ((bypass >> (((target % 12) + 12) % 12)) & 1u) != 0)
                         wanted = 0.0; // a bypassed note passes as sung
                     if (ranged && (sung < (double) lowNote - 0.5 || sung > (double) highNote + 0.5))
                         wanted = 0.0; // round 147: outside the keyboard's range: passes as sung
@@ -583,6 +689,32 @@ public:
             peakIn = std::max (peakIn, std::max (std::abs (xin[0]), std::abs (xin[1])));
             peakOut = std::max (peakOut, std::max (std::abs (l[i]), stereo ? std::abs (r[i]) : 0.0f));
         }
+        // round 152: the MIDI reference tone (the reference's tone generator): the notes held on the MIDI channel as
+        // sines at the reference pitch, 5 ms fades, mixed in after the correction
+        if (p[referenceTone] >= 0.5f || toneActive)
+        {
+            const auto amp = p[referenceTone] >= 0.5f ? 0.25 * std::pow (10.0, referenceToneDb (p[referenceToneLevel]) / 20.0) : 0.0;
+            const auto fade = 1.0 / (0.005 * sr);
+            toneActive = false;
+            for (int k = 0; k < 128; ++k)
+            {
+                const bool on = amp > 0.0 && ch >= 0 && held != nullptr && ch < heldCount && ((held[ch][(std::size_t) (k >> 6)] >> (k & 63)) & 1u);
+                auto& g = toneGain[(std::size_t) k];
+                if (! on && g <= 0.0) continue;
+                const auto inc = aRef * std::exp2 ((k - 69) / 12.0) / sr;
+                auto& ph = tonePhase[(std::size_t) k];
+                for (int i = 0; i < n; ++i)
+                {
+                    g = on ? std::min (1.0, g + fade) : std::max (0.0, g - fade);
+                    const auto v = (float) (amp * g * std::sin (2.0 * 3.14159265358979323846 * ph));
+                    ph += inc;
+                    ph -= std::floor (ph);
+                    l[i] += v;
+                    if (stereo) r[i] += v;
+                }
+                toneActive = toneActive || g > 0.0;
+            }
+        }
         meterIn.store (std::min (peakIn, 1.0f), std::memory_order_relaxed);
         meterOut.store (std::min (peakOut, 1.0f), std::memory_order_relaxed);
 
@@ -636,6 +768,8 @@ private:
     int target = -1;
     const NoteMask* held = nullptr;
     int heldCount = 0;
+    std::array<double, 128> tonePhase {}, toneGain {}; // round 152: the reference tone
+    bool toneActive = false;
     std::atomic<int> latencyNow { 1200 };
     std::atomic<float> meterSung { -1.0f }, meterTarget { -1.0f }, meterShift { 0.0f }, meterHeld { 0.0f };
     std::atomic<float> meterIn { 0.0f }, meterOut { 0.0f };
@@ -666,6 +800,8 @@ const std::array<int, sharedScaleParams>& sharedScaleList() noexcept
         for (int k = 0; k < 12; ++k) l[(std::size_t) n++] = noteDirC + k;
         l[(std::size_t) n++] = rangeLow;
         l[(std::size_t) n++] = rangeHigh;
+        l[(std::size_t) n++] = groupOctaves; // round 152
+        for (int k = 0; k < keyMapParams; ++k) l[(std::size_t) n++] = keyMap1 + k;
         return l;
     }();
     return list;

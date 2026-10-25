@@ -260,9 +260,11 @@ TEST (rcomp_switches_and_limiter_round135w)
     p[12] = 1.0f;
     const auto limited = run (p, 0.8f);
     CHECK (open.first > 1.5f && limited.first <= 1.0001f && limited.second > 0.0f);
-    // vintage voicing: Smooth reduces less than Warm (ratio as shown), Manual differs from ARC
+    // vintage voicing: Smooth reduces less than Warm (ratio as shown), Manual differs from ARC — the round-150 curve (round
+    // 152 measured Smooth = Warm statically: Parity152aTests)
     p[12] = 0.0f;
     p[8] = 1.0f;
+    p[18] = 0.0f;
     p[0] = 0.5f; // −30 dB
     p[4] = 0.0f;
     const auto warm = run (p, 0.5f).first;
@@ -284,7 +286,7 @@ TEST (layouts_round135w)
             ++onReal;
             CHECK (plugui::paramIndex (EffectKind::lynxTune, item.param) >= lynxtune::speedLink);
         }
-    CHECK (onReal == 7);
+    CHECK (onReal == 9); // round 152b: + the reference tone and its level
     const auto& gemini = plugui::layoutFor (EffectKind::geminiDoubler);
     CHECK (gemini.pages.size() == 2);
     for (const auto& item : gemini.items)

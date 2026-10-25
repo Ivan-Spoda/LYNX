@@ -230,7 +230,7 @@ TEST (autopan_tweak_params_round150a)
     using namespace lynx;
     constexpr int rb = autopan::count;
     const auto& info = effectInfo (EffectKind::autoPan);
-    CHECK ((int) info.params.size() == rb + 20);
+    CHECK ((int) info.params.size() == rb + 27);
     auto slot = makeEffectSlot (EffectKind::autoPan);
     CHECK (slot.params[rb + 12] == 0.5f && slot.params[rb + 13] == 0.5f && slot.params[rb + 14] == 0.5f); // no modulation
     CHECK (formatEffectParam (EffectKind::autoPan, rb + 15, slot.params[rb + 15], 120.0) == "-20.0 dB");  // measured threshold

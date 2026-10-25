@@ -439,6 +439,251 @@ void regionFilter (Biquad& f, const EffectParams& p, int b, double sr) noexcept
     f.a2 = (1.0 - alpha) / a0;
 }
 
+
+// --- round 152: the spectral dynamics stage (REA_rodada152c) ----------------------------------------------------------
+// [EXEC] fitted on the Pro-Q 4 trial (partials and pink noise through a dynamic bell with Spectral on): the bin's weighted
+// level W = L + 0.18 · 20 log10 S (S = the band's shape, 0 … 1), the threshold T = max (threshold − 30.5 dB, the loudest W
+// − 11.6 dB), the gain 1.066 dB per dB over T, at most the range × S^2.18 (0.33 dB rms over 22 cases); the latency is the
+// trial's 5120 samples at 48 kHz. Tilt: the threshold sloped by 4.5 dB/oct around the band frequency [model, direction
+// from the pink-noise renders]; density: a blur of the gains across bins [model].
+constexpr double specWeightExp = 0.181, specOffsetDb = -30.47, specRelativeDb = 11.58, specSlope = 1.066, specCapExp = 2.18;
+constexpr double specTiltDbOct = 4.5;
+constexpr double densityBlend = 0.15; // [model] density 100 %: a pure tone cut 0.8 dB less (the trial: −11.2 instead of −12)
+
+// the band's shape at f as a share 0 … 1 of its range (the band with its gain set to the range)
+double spectralShare (const EffectParams& p, int b, double f, double refDb) noexcept
+{
+    if (std::abs (refDb) < 1e-6) return 0.0;
+    return std::clamp (analogDb (p, b, f) / refDb, 0.0, 1.0);
+}
+EffectParams shareParams (const EffectParams& p, int b, double& refDb) noexcept
+{
+    auto q = p;
+    const double range = rangeDb (p[(std::size_t) (rangeParam0 + b)]);
+    q[(std::size_t) param (b, 2)] = gainValue (std::clamp (range, -30.0, 30.0));
+    q[(std::size_t) scaleParam] = 0.5f; // 100 %
+    const double f0 = hz (p[(std::size_t) param (b, 1)]);
+    refDb = 0.0;
+    for (const double f : { f0, 20.0, 20000.0 }) // a bell's centre, a shelf's far side
+    {
+        const double v = analogDb (q, b, f);
+        if (std::abs (v) > std::abs (refDb)) refDb = v;
+    }
+    return q;
+}
+// the law for one band over n bins / partials: W (weighted levels, dB), S (shares) -> gains (dB, signed)
+void spectralLaw (const double* W, const double* S, int n, double thresholdDb, double range, double* g) noexcept
+{
+    double wmax = -400.0;
+    for (int i = 0; i < n; ++i)
+        if (S[i] > 0.02) wmax = std::max (wmax, W[i]);
+    const double T = std::max (thresholdDb + specOffsetDb, wmax - specRelativeDb);
+    const double depth = std::abs (range);
+    for (int i = 0; i < n; ++i)
+    {
+        const double over = S[i] > 1e-4 ? std::max (0.0, specSlope * (W[i] - T)) : 0.0;
+        const double v = std::min (depth * std::pow (S[i], specCapExp), over);
+        g[i] = range < 0.0 ? -v : v;
+    }
+}
+
+class SpectralStage
+{
+public:
+    void prepare (double sr)
+    {
+        sampleRate = sr;
+        fct = rateFactor (sr);
+        N = 4096 * fct;
+        H = N / 4;
+        R = 2 * N;
+        D = N + H;
+        bins = N / 2 + 1;
+        fft.init (N);
+        win.resize ((std::size_t) N);
+        for (int i = 0; i < N; ++i) win[(std::size_t) i] = 0.5 - 0.5 * std::cos (2.0 * pi * i / N);
+        for (auto* v : { &inL, &inR, &inD }) v->assign ((std::size_t) R, 0.0f);
+        accL.assign ((std::size_t) R, 0.0);
+        accR.assign ((std::size_t) R, 0.0);
+        z.assign ((std::size_t) N, {});
+        zd.assign ((std::size_t) N, {});
+        level.assign ((std::size_t) bins, -150.0);
+        gainDb.assign ((std::size_t) bins, 0.0);
+        tmpW.assign ((std::size_t) bins, 0.0);
+        tmpG.assign ((std::size_t) bins, 0.0);
+        tmpB.assign ((std::size_t) bins, 0.0);
+        for (auto& b : bandsData) { b.share.assign ((std::size_t) bins, 0.0); b.weight.assign ((std::size_t) bins, 0.0); }
+        reset();
+    }
+
+    void reset() noexcept
+    {
+        for (auto* v : { &inL, &inR, &inD }) std::fill (v->begin(), v->end(), 0.0f);
+        std::fill (accL.begin(), accL.end(), 0.0);
+        std::fill (accR.begin(), accR.end(), 0.0);
+        std::fill (level.begin(), level.end(), -150.0);
+        t = 0;
+        tDet = 0;
+        for (auto& b : bandsData) b.extreme = 0.0;
+    }
+
+    int latency() const noexcept { return D; }
+    bool active() const noexcept { return anyBand; }
+
+    void configure (const EffectParams& p, double attackMsV, double releaseMsV)
+    {
+        anyBand = false;
+        for (int b = 0; b < bands; ++b)
+        {
+            auto& d = bandsData[(std::size_t) b];
+            d.on = isSpectral (p, b);
+            if (! d.on) { d.extreme = 0.0; continue; }
+            anyBand = true;
+            d.threshold = thresholdDb (p[(std::size_t) (thresholdParam0 + b)]);
+            d.range = rangeDb (p[(std::size_t) (rangeParam0 + b)]);
+            d.density = density (p[(std::size_t) (densityParam0 + b)]);
+            const bool tilt = p[(std::size_t) (spectralTiltParam0 + b)] >= 0.5f;
+            const double f0 = hz (p[(std::size_t) param (b, 1)]);
+            double ref = 0.0;
+            const auto q = shareParams (p, b, ref);
+            for (int k = 0; k < bins; ++k)
+            {
+                const double f = std::max (1.0, (double) k * sampleRate / N);
+                const double sh = spectralShare (q, b, f, ref);
+                d.share[(std::size_t) k] = sh;
+                d.weight[(std::size_t) k] = specWeightExp * 20.0 * std::log10 (std::max (sh, 1e-4)) + (tilt ? specTiltDbOct * std::log2 (f / f0) : 0.0);
+            }
+        }
+        const double frame = (double) H / sampleRate;
+        attackA = 1.0 - std::exp (-frame / std::max (1e-4, attackMsV * 0.001));
+        releaseA = 1.0 - std::exp (-frame / std::max (1e-4, releaseMsV * 0.001));
+    }
+
+    // the detector's samples (before the EQ) for the next n samples of `process`
+    void pushDetector (const float* dl, const float* dr, int n) noexcept
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            double x = 0.0;
+            if (dl != nullptr) x = 0.5 * ((double) dl[i] + (double) (dr != nullptr ? dr[i] : dl[i]));
+            if (! std::isfinite (x)) x = 0.0;
+            inD[(std::size_t) ((tDet + i) % R)] = (float) x;
+        }
+        tDet += n;
+    }
+
+    void process (float* left, float* right, int n) noexcept
+    {
+        for (int i = 0; i < n; ++i, ++t)
+        {
+            const auto w = (std::size_t) (t % R);
+            inL[w] = std::isfinite (left[i]) ? left[i] : 0.0f;
+            inR[w] = std::isfinite (right[i]) ? right[i] : 0.0f;
+            const auto rd = (std::size_t) (((t - D) % R + R) % R);
+            left[i] = (float) accL[rd];
+            right[i] = (float) accR[rd];
+            accL[rd] = accR[rd] = 0.0;
+            if ((t + 1) % H == 0)
+                frame();
+        }
+    }
+
+    double extreme (int b) const noexcept { return bandsData[(std::size_t) b].extreme; }
+
+private:
+    struct Band
+    {
+        bool on = false;
+        double threshold = -20.0, range = 0.0, density = 0.5, extreme = 0.0;
+        std::vector<double> share, weight;
+    };
+
+    void frame() noexcept
+    {
+        const long long start = t - N + 1;
+        for (int i = 0; i < N; ++i)
+        {
+            const auto idx = (std::size_t) (((start + i) % R + R) % R);
+            z[(std::size_t) i] = cd (inL[idx] * win[(std::size_t) i], inR[idx] * win[(std::size_t) i]);
+            zd[(std::size_t) i] = cd (inD[idx] * win[(std::size_t) i], 0.0);
+        }
+        fft.run (zd.data(), false);
+        fft.run (z.data(), false);
+        // the detector's level per bin (a sine's peak: |X| · 4 / N for the Hann window), smoothed in time
+        for (int k = 0; k < bins; ++k)
+        {
+            const double l = std::max (-150.0, 20.0 * std::log10 (std::abs (zd[(std::size_t) k]) * 4.0 / N + 1e-12));
+            auto& s = level[(std::size_t) k];
+            s += (l > s ? attackA : releaseA) * (l - s);
+        }
+        std::fill (gainDb.begin(), gainDb.end(), 0.0);
+        for (auto& d : bandsData)
+        {
+            if (! d.on) continue;
+            // a partial's whole window lobe (±2 bins) takes its peak's level, so the lobe moves as one
+            for (int k = 0; k < bins; ++k)
+            {
+                double lv = level[(std::size_t) k];
+                for (int j = std::max (0, k - 2 * fct); j <= std::min (bins - 1, k + 2 * fct); ++j) lv = std::max (lv, level[(std::size_t) j]);
+                tmpW[(std::size_t) k] = lv + d.weight[(std::size_t) k];
+            }
+            spectralLaw (tmpW.data(), d.share.data(), bins, d.threshold, d.range, tmpG.data());
+            // density: the gains blurred across bins (a triangle of 1 … 5 bins each side), blended in as density^4
+            const double a = densityBlend * std::pow (d.density, 3.0);
+            if (a > 1e-4)
+            {
+                const int hw = (2 + (int) std::lround (6.0 * d.density)) * fct;
+                for (int k = 0; k < bins; ++k)
+                {
+                    double acc = 0.0, wsum = 0.0;
+                    for (int j = -hw; j <= hw; ++j)
+                    {
+                        const int kk = std::clamp (k + j, 0, bins - 1);
+                        const double wt = (double) (hw + 1 - std::abs (j));
+                        acc += wt * tmpG[(std::size_t) kk];
+                        wsum += wt;
+                    }
+                    tmpB[(std::size_t) k] = tmpG[(std::size_t) k] + a * (acc / wsum - tmpG[(std::size_t) k]);
+                }
+                std::copy (tmpB.begin(), tmpB.end(), tmpG.begin());
+            }
+            double ex = 0.0;
+            for (int k = 0; k < bins; ++k)
+            {
+                gainDb[(std::size_t) k] += tmpG[(std::size_t) k];
+                if (std::abs (tmpG[(std::size_t) k]) > std::abs (ex)) ex = tmpG[(std::size_t) k];
+            }
+            d.extreme = ex;
+        }
+        // one real gain per bin on both halves of the spectrum (left + j·right stays separable)
+        for (int k = 0; k < bins; ++k)
+        {
+            const double g = std::pow (10.0, gainDb[(std::size_t) k] / 20.0);
+            z[(std::size_t) k] *= g;
+            if (k > 0 && k < N / 2) z[(std::size_t) (N - k)] *= g;
+        }
+        fft.run (z.data(), true);
+        const double scale = 1.0 / (N * 1.5); // the inverse's n, Hann² at 75 % overlap sums to 1.5
+        for (int i = 0; i < N; ++i)
+        {
+            const auto idx = (std::size_t) (((start + i) % R + R) % R);
+            const double w = win[(std::size_t) i] * scale;
+            accL[idx] += z[(std::size_t) i].real() * w;
+            accR[idx] += z[(std::size_t) i].imag() * w;
+        }
+    }
+
+    double sampleRate = 48000.0, attackA = 1.0, releaseA = 0.1;
+    int fct = 1, N = 4096, H = 1024, R = 8192, D = 5120, bins = 2049;
+    long long t = 0, tDet = 0;
+    bool anyBand = false;
+    Fft fft;
+    std::vector<double> win, accL, accR, level, gainDb, tmpW, tmpG, tmpB;
+    std::vector<float> inL, inR, inD;
+    std::vector<cd> z, zd;
+    std::array<Band, bands> bandsData {};
+};
+
 class FacetEqEffect final : public Effect
 {
 public:
@@ -448,6 +693,8 @@ public:
         {
             mode = phase ((*initial)[(std::size_t) phaseParam]);
             allocRes = resolution ((*initial)[(std::size_t) resolutionParam]);
+            initialParams = *initial;
+            haveInitial = true;
         }
     }
 
@@ -472,6 +719,12 @@ public:
         delay[0].assign ((std::size_t) delayLen, 0.0f);
         delay[1].assign ((std::size_t) delayLen, 0.0f);
         cached.fill (-1.0f);
+        spectral.prepare (sr); // round 152 (with the slot's parameters, so PDC knows its latency from the start)
+        if (seenParams || haveInitial)
+        {
+            const auto& q = seenParams ? current : initialParams;
+            spectral.configure (q, attackMs (q[(std::size_t) attackParam]), releaseMs (q[(std::size_t) releaseParam]));
+        }
         configureMode (mode);
         reset();
     }
@@ -488,6 +741,7 @@ public:
         for (auto& d : delay) std::fill (d.begin(), d.end(), 0.0f);
         delayPos = 0;
         dynUsed.fill (0.0);
+        spectral.reset();
         for (auto& m : meters) m.store (0.0f, std::memory_order_relaxed);
     }
 
@@ -519,6 +773,10 @@ public:
         const float* dr = useSide ? (sideR != nullptr ? sideR : sideL) : right;
         sideGiven = false;
         sideL = sideR = nullptr;
+        // round 152: the spectral stage hears the detector before the EQ changes the buffers
+        const bool spectralNow = spectral.active();
+        if (spectralNow)
+            spectral.pushDetector (dl, dr, n);
 
         constexpr int chunk = 32;
         for (int off = 0; off < n; off += chunk)
@@ -553,6 +811,9 @@ public:
             }
         }
 
+        if (spectralNow)
+            spectral.process (left, right, n);
+
         if (outMidSide)
             for (int i = 0; i < n; ++i)
             {
@@ -570,7 +831,8 @@ public:
                 left[i] = characterSample (characterNow, left[i]);
                 right[i] = characterSample (characterNow, right[i]);
             }
-        for (int b = 0; b < bands; ++b) meters[(std::size_t) b].store ((float) det[(std::size_t) b].gain, std::memory_order_relaxed);
+        for (int b = 0; b < bands; ++b)
+            meters[(std::size_t) b].store ((float) (spectralNow && isSpectral (current, b) ? spectral.extreme (b) : det[(std::size_t) b].gain), std::memory_order_relaxed);
     }
 
 private:
@@ -592,7 +854,13 @@ private:
         // a long FIR is redesigned less often (its design is an FFT of its length)
         updateEvery = std::max ({ 1024 * fct, p == Phase::linear ? linearBlock * fct : naturalBlock * fct, taps / 16 });
         firLoaded = false;
-        latencyNow.store (latencyFor (p, sampleRate, allocRes), std::memory_order_relaxed);
+        storeLatency();
+    }
+
+    // round 152: the phase mode's latency plus the spectral stage's when a band is spectral
+    void storeLatency() noexcept
+    {
+        latencyNow.store (latencyFor (mode, sampleRate, allocRes) + (spectral.active() ? spectral.latency() : 0), std::memory_order_relaxed);
     }
 
     void update (const EffectParams& params) noexcept
@@ -612,7 +880,7 @@ private:
         {
             auto& d = det[(std::size_t) b];
             const bool was = d.on;
-            d.on = isDynamic (params, b);
+            d.on = isDynamic (params, b) && ! isSpectral (params, b); // round 152: a spectral band moves in the STFT stage
             d.threshold = thresholdDb (params[(std::size_t) (thresholdParam0 + b)]);
             d.range = rangeDb (params[(std::size_t) (rangeParam0 + b)]);
             if (d.on)
@@ -633,6 +901,15 @@ private:
             if (counts[(std::size_t) b] != before) // the structure changed: start this band clean
                 for (auto& st : state[(std::size_t) b]) st = {};
             dynUsed[(std::size_t) b] = d.gain;
+        }
+        {
+            const bool wasSpectral = spectral.active();
+            spectral.configure (params, attackMs (params[(std::size_t) attackParam]), releaseMs (params[(std::size_t) releaseParam]));
+            if (spectral.active() != wasSpectral)
+            {
+                spectral.reset();
+                storeLatency();
+            }
         }
         attackCoef = 1.0 - std::exp (-1.0 / (attackMs (params[(std::size_t) attackParam]) * 0.001 * sampleRate));
         releaseCoef = 1.0 - std::exp (-1.0 / (releaseMs (params[(std::size_t) releaseParam]) * 0.001 * sampleRate));
@@ -910,6 +1187,9 @@ private:
     std::vector<float> delay[2];
     int delayLen = 1, delayPos = 0;
     std::atomic<int> latencyNow { 0 };
+    SpectralStage spectral;
+    EffectParams initialParams {};
+    bool haveInitial = false;
 };
 } // namespace
 
@@ -1015,6 +1295,14 @@ const EffectInfo& info()
         e.params.push_back ({ "Display Range", displayRangeValue (12.0) });
         e.params.push_back ({ "Character", 0.0f }); // round 135
         e.params.push_back ({ "Resolution", 0.25f }); // round 144: Medium (the old FIR length)
+        // round 152: spectral dynamics per band (off = the old dynamic band), density, tilt
+        static std::array<std::array<char, 24>, bands * 3> specNames {};
+        for (int k = 0; k < bands * 3; ++k)
+        {
+            auto& n = specNames[(std::size_t) k];
+            std::snprintf (n.data(), n.size(), k < bands ? "%d Spectral" : k < 2 * bands ? "%d Density" : "%d Spectral Tilt", k % bands + 1);
+            e.params.push_back ({ n.data(), k >= bands && k < 2 * bands ? 0.5f : 0.0f });
+        }
         return e;
     }();
     return i;
@@ -1051,6 +1339,9 @@ std::string paramText (int p, float v)
     if (p == displayRangeParam) { std::snprintf (t, sizeof (t), "%.0f dB", displayRangeDb (v)); return t; }
     if (p == characterParam) { static const char* a[] = { "Clean", "Subtle", "Warm" }; return a[character (v)]; }
     if (p == resolutionParam) return resolutionName (resolution (v));
+    if (p >= spectralParam0 && p < spectralParam0 + bands) return v >= 0.5f ? "Spectral" : "Off";
+    if (p >= densityParam0 && p < densityParam0 + bands) { std::snprintf (t, sizeof (t), "%.0f%%", density (v) * 100.0); return t; }
+    if (p >= spectralTiltParam0 && p < spectralTiltParam0 + bands) return v >= 0.5f ? "On" : "Off";
     switch (p % fieldsPerBand)
     {
         case 0: return shapeName (shape (v));
@@ -1154,6 +1445,127 @@ const char* phaseName (Phase p) noexcept
 bool isDynamic (const EffectParams& p, int b) noexcept
 {
     return hasGain (shape (p[(std::size_t) param (b, 0)])) && bandPower (p, b) && std::abs (rangeDb (p[(std::size_t) (rangeParam0 + b)])) > 0.01;
+}
+
+bool isSpectral (const EffectParams& p, int b) noexcept
+{
+    return isDynamic (p, b) && p[(std::size_t) (spectralParam0 + b)] >= 0.5f;
+}
+double density (float v) noexcept { return std::clamp ((double) v, 0.0, 1.0); }
+int spectralLatency (double sampleRate) noexcept { return 5120 * rateFactor (sampleRate); }
+
+void spectralGainsDb (const EffectParams& p, int b, double sampleRate, const double* f, const double* levelDb, int n, double* out) noexcept
+{
+    (void) sampleRate;
+    std::vector<double> W ((std::size_t) n), S ((std::size_t) n);
+    double ref = 0.0;
+    const auto q = shareParams (p, b, ref);
+    const double f0 = hz (p[(std::size_t) param (b, 1)]);
+    const bool tilt = p[(std::size_t) (spectralTiltParam0 + b)] >= 0.5f;
+    for (int i = 0; i < n; ++i)
+    {
+        S[(std::size_t) i] = spectralShare (q, b, f[i], ref);
+        W[(std::size_t) i] = levelDb[i] + specWeightExp * 20.0 * std::log10 (std::max (S[(std::size_t) i], 1e-4)) + (tilt ? specTiltDbOct * std::log2 (f[i] / f0) : 0.0);
+    }
+    spectralLaw (W.data(), S.data(), n, thresholdDb (p[(std::size_t) (thresholdParam0 + b)]), rangeDb (p[(std::size_t) (rangeParam0 + b)]), out);
+}
+
+int matchEq (const EffectParams& params, const double* f, const double* cur, const double* ref, int n, double amount, int maxBands,
+             double smoothingOct, std::vector<std::pair<int, float>>& changes)
+{
+    changes.clear();
+    if (n < 8) return 0;
+    // the target: reference − current, without its mean level (100 Hz … 10 kHz), smoothed in log frequency
+    std::vector<double> d ((std::size_t) n), t ((std::size_t) n), lf ((std::size_t) n);
+    double mean = 0.0;
+    int cnt = 0;
+    for (int i = 0; i < n; ++i)
+    {
+        d[(std::size_t) i] = ref[i] - cur[i];
+        lf[(std::size_t) i] = std::log2 (std::max (1.0, f[i]));
+        if (f[i] >= 100.0 && f[i] <= 10000.0) { mean += d[(std::size_t) i]; ++cnt; }
+    }
+    mean = cnt > 0 ? mean / cnt : 0.0;
+    const double sg = std::max (0.02, smoothingOct);
+    for (int i = 0; i < n; ++i)
+    {
+        double acc = 0.0, w = 0.0;
+        for (int j = 0; j < n; ++j)
+        {
+            const double u = (lf[(std::size_t) j] - lf[(std::size_t) i]) / sg;
+            if (std::abs (u) > 3.0) continue;
+            const double k = std::exp (-0.5 * u * u);
+            acc += k * (d[(std::size_t) j] - mean);
+            w += k;
+        }
+        t[(std::size_t) i] = std::clamp (amount * acc / std::max (w, 1e-12), -18.0, 18.0);
+    }
+    // the free bands (shape off)
+    std::vector<int> freeBands;
+    for (int b = 0; b < bands; ++b)
+        if (shape (params[(std::size_t) param (b, 0)]) == Shape::off) freeBands.push_back (b);
+    auto work = params;
+    std::vector<double> r = t;
+    std::vector<int> used;
+    const auto bandAt = [&] (int b, std::vector<double>& out) {
+        for (int i = 0; i < n; ++i) out[(std::size_t) i] = analogDb (work, b, f[i]);
+    };
+    std::vector<double> resp ((std::size_t) n);
+    for (const int b : freeBands)
+    {
+        if ((int) used.size() >= maxBands) break;
+        int peak = -1;
+        double best = 0.0;
+        for (int i = 0; i < n; ++i)
+            if (f[i] >= 25.0 && f[i] <= 18000.0 && std::abs (r[(std::size_t) i]) > best) { best = std::abs (r[(std::size_t) i]); peak = i; }
+        if (peak < 0 || best < 0.5) break;
+        const double g = r[(std::size_t) peak];
+        // the half-gain width around the peak
+        int lo = peak, hi = peak;
+        while (lo > 0 && r[(std::size_t) (lo - 1)] * g > 0.0 && std::abs (r[(std::size_t) (lo - 1)]) > 0.5 * std::abs (g)) --lo;
+        while (hi < n - 1 && r[(std::size_t) (hi + 1)] * g > 0.0 && std::abs (r[(std::size_t) (hi + 1)]) > 0.5 * std::abs (g)) ++hi;
+        Shape sh = Shape::bell;
+        double fc = f[peak], qv = 1.0;
+        if (lo == 0 && f[peak] < 120.0) { sh = Shape::lowShelf; fc = f[hi]; qv = 0.7; }
+        else if (hi == n - 1 && f[peak] > 6000.0) { sh = Shape::highShelf; fc = f[lo]; qv = 0.7; }
+        else
+        {
+            const double bw = std::max (0.1, lf[(std::size_t) hi] - lf[(std::size_t) lo]);
+            qv = std::clamp (1.0 / (2.0 * std::sinh (std::log (2.0) / 2.0 * bw)), 0.3, 8.0);
+        }
+        work[(std::size_t) param (b, 0)] = shapeValue (sh);
+        work[(std::size_t) param (b, 1)] = hzValue (std::clamp (fc, 20.0, 20000.0));
+        work[(std::size_t) param (b, 2)] = gainValue (g);
+        work[(std::size_t) param (b, 3)] = qValue (qv);
+        work[(std::size_t) param (b, 4)] = slopeValue (12);
+        work[(std::size_t) (rangeParam0 + b)] = 0.5f;
+        work[(std::size_t) (powerParam0 + b)] = 0.0f;
+        bandAt (b, resp);
+        for (int i = 0; i < n; ++i) r[(std::size_t) i] -= resp[(std::size_t) i];
+        used.push_back (b);
+    }
+    // two refinement passes: each band's gain takes the residual at its frequency
+    for (int pass = 0; pass < 3; ++pass)
+        for (const int b : used)
+        {
+            const double fb = hz (work[(std::size_t) param (b, 1)]);
+            int k = 0;
+            for (int i = 1; i < n; ++i) if (std::abs (f[i] - fb) < std::abs (f[k] - fb)) k = i;
+            bandAt (b, resp);
+            for (int i = 0; i < n; ++i) r[(std::size_t) i] += resp[(std::size_t) i];
+            const auto sh = shape (work[(std::size_t) param (b, 0)]);
+            const double target = sh == Shape::lowShelf ? r[0] : sh == Shape::highShelf ? r[(std::size_t) (n - 1)] : r[(std::size_t) k];
+            const double now = gainDb (work[(std::size_t) param (b, 2)]);
+            const double ref0 = sh == Shape::bell ? resp[(std::size_t) k] : (sh == Shape::lowShelf ? resp[0] : resp[(std::size_t) (n - 1)]);
+            const double gnew = std::clamp (now + 0.8 * (target - ref0), -30.0, 30.0);
+            work[(std::size_t) param (b, 2)] = gainValue (gnew);
+            bandAt (b, resp);
+            for (int i = 0; i < n; ++i) r[(std::size_t) i] -= resp[(std::size_t) i];
+        }
+    for (const int b : used)
+        for (const int prm : { param (b, 0), param (b, 1), param (b, 2), param (b, 3), param (b, 4), rangeParam0 + b, powerParam0 + b })
+            changes.push_back ({ prm, work[(std::size_t) prm] });
+    return (int) used.size();
 }
 
 double dynamicGainDb (double level, double threshold, double range) noexcept

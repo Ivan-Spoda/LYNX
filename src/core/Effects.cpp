@@ -209,7 +209,8 @@ public:
     float controlOutput (int k) const noexcept override
     {
         return k == 0 ? meterGr.load (std::memory_order_relaxed) : k == 2 ? meterIn.load (std::memory_order_relaxed)
-             : k == 3 ? meterOut.load (std::memory_order_relaxed) : k == 4 ? meterLimit.load (std::memory_order_relaxed) : 0.0f;
+             : k == 3 ? meterOut.load (std::memory_order_relaxed) : k == 4 ? meterLimit.load (std::memory_order_relaxed)
+             : k == 5 ? meterChange.load (std::memory_order_relaxed) : 0.0f; // round 152: 5 = the signed gain change in dB
     }
 
     // round 135w: the reference's built-in 0 dBFS output limiter — the gain drops at once to keep every sample at or
@@ -251,6 +252,7 @@ public:
             v.manual = params[9] >= 0.5f;
             v.opto = params[10] >= 0.5f;
             v.smooth = params[11] >= 0.5f;
+            v.measuredStatic = params[18] >= 0.5f; // round 152
             vintage.process (l, r, n, v);
             if (params[12] >= 0.5f)
                 outputLimit (l, r, n);
@@ -260,6 +262,7 @@ public:
                 peakOut = std::max (peakOut, std::max (std::abs (l[i]), std::abs (r[i])));
             useSidechain = false;
             meterGr.store (std::clamp (vintage.reductionDb() / 30.0f, 0.0f, 1.0f), std::memory_order_relaxed);
+            meterChange.store (vintage.changeDb(), std::memory_order_relaxed);
             meterIn.store (std::min (peakIn, 1.0f), std::memory_order_relaxed);
             meterOut.store (std::min (peakOut, 1.0f), std::memory_order_relaxed);
             return;
@@ -328,7 +331,8 @@ public:
             meterLimit.store (0.0f, std::memory_order_relaxed);
         for (int i = 0; i < n; ++i)
             peakOut = std::max (peakOut, std::max (std::abs (l[i]), std::abs (r[i])));
-        meterGr.store (std::clamp (maxGr / 30.0f, 0.0f, 1.0f), std::memory_order_relaxed);
+        meterGr.store (std::clamp ((expand ? 0.0f : maxGr) / 30.0f, 0.0f, 1.0f), std::memory_order_relaxed);
+        meterChange.store (expand ? maxGr : -maxGr, std::memory_order_relaxed); // round 152: signed (the expansion's boost > 0)
         meterIn.store (std::min (peakIn, 1.0f), std::memory_order_relaxed);
         meterOut.store (std::min (peakOut, 1.0f), std::memory_order_relaxed);
     }
@@ -341,7 +345,7 @@ public:
     }
 
 private:
-    std::atomic<float> meterGr { 0.0f }, meterIn { 0.0f }, meterOut { 0.0f }, meterLimit { 0.0f };
+    std::atomic<float> meterGr { 0.0f }, meterIn { 0.0f }, meterOut { 0.0f }, meterLimit { 0.0f }, meterChange { 0.0f };
     float limitGain = 1.0f;
     std::atomic<int> latency { 0 };
     vmatch::progcomp::Compressor vintage;
@@ -1632,6 +1636,17 @@ public:
             s.feel = -0.25 + 0.5 * std::clamp ((double) p[rb + 17], 0.0, 1.0);
             s.groove = -0.25 + 0.5 * std::clamp ((double) p[rb + 18], 0.0, 1.0);
             s.beyond = p[rb + 19] >= 0.5f;
+            if (p.size() > rb + 26) // round 152: the trigger sources and the Random source (appended)
+            {
+                s.trigger = p[rb + 20] < 0.25f ? 0 : (p[rb + 20] < 0.75f ? 1 : 2);
+                s.trigAudio = p[rb + 21] < 0.999f; // fully up = no audio trigger (the manual one still works)
+                s.trigThresholdDb = -60.0 + 60.0 * std::clamp ((double) p[rb + 21], 0.0, 1.0);
+                s.divider = 1 + (int) std::lround (11.0 * std::clamp ((double) p[rb + 22], 0.0, 1.0));
+                s.trigFilter = p[rb + 23] < 0.25f ? 0 : (p[rb + 23] < 0.75f ? 1 : 2);
+                s.trigFreqHz = 20.0 * std::pow (1000.0, std::clamp ((double) p[rb + 24], 0.0, 1.0));
+                s.manual = p[rb + 25];
+                s.randomSteps = p[rb + 26] >= 0.5f;
+            }
             if (! (s == rhythmSet))
             {
                 rhythm.set (s);
@@ -2465,7 +2480,10 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                   { "Release mode", 0.0f }, { "Release curve", 0.0f }, { "Character", 0.0f }, { "Limiter", 0.0f },
                                                   // round 150: the RComp role's own ranges (off: LYNX's, older projects unchanged) —
                                                   // ratio 1.00 : 1, gain 0 dB, attack 16 ms, release 160 ms (the reference's defaults)
-                                                  { "Ranges", 0.0f }, { "RC ratio", 0.625f }, { "RC gain", 0.5f }, { "RC attack", 0.5f }, { "RC release", 0.5f } } };
+                                                  { "Ranges", 0.0f }, { "RC ratio", 0.625f }, { "RC gain", 0.5f }, { "RC attack", 0.5f }, { "RC release", 0.5f },
+                                                  // round 152: the vintage voicing's static curve measured at every ratio (on for new
+                                                  // instances; projects saved before keep the round-150 curve: upgradeLoadedEffectParams)
+                                                  { "Vintage curve", 1.0f } } };
     static const EffectInfo delay { "Delay", { { "Time", 0.3f }, { "Feedback", 0.42f }, { "Mix", 0.3f }, { "Ping-pong", 0.0f }, { "Damping", 0.3f } } };
     static const EffectInfo reverb { "Reverb", { { "Room", 0.6f }, { "Damping", 0.5f }, { "Width", 1.0f }, { "Mix", 0.25f }, { "Dry", 1.0f },
                                                  { "Low cut", 0.0f }, { "High cut", 1.0f }, { "Predelay", 0.0f } } };
@@ -2521,7 +2539,12 @@ const EffectInfo& effectInfo (EffectKind kind)
                                                         // a project saved before round 150 keeps the clipped angle)
                                                         { "Rate mod", 0.5f }, { "Offset mod", 0.5f }, { "Width mod", 0.5f },
                                                         { "Env threshold", 40.0f / 60.0f }, { "Env range", 10.0f / 39.0f },
-                                                        { "Feel", 0.5f }, { "Groove", 0.5f }, { "Beyond speakers", 1.0f } } };
+                                                        { "Feel", 0.5f }, { "Groove", 0.5f }, { "Beyond speakers", 1.0f },
+                                                        // round 152: the trigger sources (Ping-pong / Random step), their
+                                                        // threshold, divider, filter and manual trigger; the Random source
+                                                        { "Trigger", 0.0f }, { "Trig threshold", 40.0f / 60.0f }, { "Divider", 0.0f },
+                                                        { "Trig filter", 0.0f }, { "Trig freq", 0.5f }, { "Manual trigger", 0.0f },
+                                                        { "Random steps", 0.0f } } };
     static const EffectInfo vocoderInfo { "Vocoder", { { "Bands", 0.4f }, { "Order", 0.5f }, { "Listen", 1.0f }, { "Swap L/R", 0.0f },
                                                        { "Min freq.", 0.0f }, { "Max freq.", 1.0f }, { "Scale", 0.5f }, { "Invert", 0.0f },
                                                        { "Formant", 0.5f }, { "Width", 45.0f / 195.0f }, { "Attack", 10.0f / 990.0f },
@@ -2919,7 +2942,7 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
         case EffectKind::compressor:
             switch (param)
             {
-                case 0: std::snprintf (text, sizeof (text), "%.1f dB", compThresholdDb (v)); break;
+                case 0: std::snprintf (text, sizeof (text), "%.1f dB", std::abs (compThresholdDb (v)) < 0.05f ? 0.0f : compThresholdDb (v)); break;
                 case 1: std::snprintf (text, sizeof (text), "%.1f:1", compRatio (v)); break;
                 case 2: std::snprintf (text, sizeof (text), "%.1f ms", compAttackMs (v)); break;
                 case 3: std::snprintf (text, sizeof (text), "%.0f ms", compReleaseMs (v)); break;
@@ -2936,6 +2959,7 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                 case 15: std::snprintf (text, sizeof (text), "%+.1f dB", rcGainDb (v)); break;
                 case 16: std::snprintf (text, sizeof (text), rcAttackMs (v) < 10.0f ? "%.2f ms" : "%.1f ms", rcAttackMs (v)); break;
                 case 17: std::snprintf (text, sizeof (text), rcReleaseMs (v) < 100.0f ? "%.1f ms" : "%.0f ms", rcReleaseMs (v)); break;
+                case 18: return v >= 0.5f ? "measured" : "round 150";
                 default: std::snprintf (text, sizeof (text), "+%.1f dB", compMakeupDb (v)); break;
             }
             return text;
@@ -3195,6 +3219,14 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
                     case 23: std::snprintf (text, sizeof (text), "%.1f dB", 1.0f + 39.0f * v); break;
                     case 24: case 25: std::snprintf (text, sizeof (text), "%+.3f", -0.25f + 0.5f * v); break;
                     case 26: return v >= 0.5f ? "fold" : "clip";
+                    case 27: return v < 0.25f ? "off (clock)" : (v < 0.75f ? "ping-pong" : "random step");
+                    case 28: if (v >= 0.999f) return "off (manual only)";
+                             std::snprintf (text, sizeof (text), "%.1f dB", -60.0f + 60.0f * v); break;
+                    case 29: std::snprintf (text, sizeof (text), "%d", 1 + (int) std::lround (11.0f * v)); break;
+                    case 30: return v < 0.25f ? "off" : (v < 0.75f ? "high pass" : "low pass");
+                    case 31: std::snprintf (text, sizeof (text), "%.0f Hz", 20.0 * std::pow (1000.0, (double) v)); break;
+                    case 32: return "Trigger";
+                    case 33: return v >= 0.5f ? "on" : "off";
                     default: std::snprintf (text, sizeof (text), "%.0f%%", v * 100.0f); break;
                 }
             }
@@ -3393,13 +3425,25 @@ void upgradeLoadedEffectParams (EffectSlot& slot, std::size_t savedCount) noexce
     // round 150: … and before its measured detector keeps the round-108 detector
     if (slot.kind == EffectKind::prismMultiband && savedCount <= (std::size_t) dyn::prism::detectorLaw)
         slot.params[(std::size_t) dyn::prism::detectorLaw] = 0.0f;
+    // round 152: … and before the gain-stage attack keeps round 150's level-follower attack
+    if (slot.kind == EffectKind::prismMultiband && savedCount <= (std::size_t) dyn::prism::rev152)
+        slot.params[(std::size_t) dyn::prism::rev152] = 0.0f;
     // round 150: Auto-pan saved before the Tweak block keeps the Rhythm voicing's clipped angle
     if (slot.kind == EffectKind::autoPan && savedCount <= (std::size_t) autopan::count + 19)
         slot.params[(std::size_t) autopan::count + 19] = 0.0f;
     // round 150: Echoform saved before the voicings' measured stereo behaviour keeps the round-147 voicings
+    // round 152: Ember saved before the effect characters' measured law keeps the static stand-ins
+    if (slot.kind == EffectKind::ember && savedCount <= (std::size_t) mixsuite::ember::effectLaw)
+        slot.params[(std::size_t) mixsuite::ember::effectLaw] = 0.0f;
     if (slot.kind == EffectKind::echoform && savedCount <= (std::size_t) echosuite::echoform::voicingStereo
         && slot.params.size() > (std::size_t) echosuite::echoform::voicingStereo)
         slot.params[(std::size_t) echosuite::echoform::voicingStereo] = 0.0f;
+    // round 152: a Glow Leveler saved before the measured opto law keeps the round-123 Limit and no classic auto make-up
+    if (slot.kind == EffectKind::glowLeveler && savedCount <= (std::size_t) mixsuite::glow::optoLaw)
+        slot.params[(std::size_t) mixsuite::glow::optoLaw] = 0.0f;
+    // round 152: a Compressor saved before the measured vintage curve keeps the round-150 curve
+    if (slot.kind == EffectKind::compressor && savedCount <= 18 && slot.params.size() > 18)
+        slot.params[18] = 0.0f;
 }
 
 std::unique_ptr<Effect> makeParallelEffect (const EffectSlot& slot)
@@ -3443,6 +3487,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return mixsuite::makeHush (&slot.params);
     if (slot.kind == EffectKind::facetEq) // its phase mode (latency) known before the first block
         return facet::make (&slot.params);
+    if (slot.kind == EffectKind::ember) // round 152: its processing mode (linear phase: latency) known before the first block
+        return mixsuite::makeEmber (&slot.params);
     if (dyn::isDynKind (slot.kind)) // their look-ahead / oversampling latency known before the first block
         return dyn::make (slot.kind, &slot.params);
     if (slot.kind == EffectKind::apexLimiter) // round 135: the oversampling latency known before the first block
