@@ -1,0 +1,6 @@
+minimp3 — MPEG-1/2/2.5 Layer I/II/III decoder by lieff (https://github.com/lieff/minimp3)
+Upstream commit ea99364f61c14656440e8d77e9c233ccf3124633 (master, fetched 2026-10-25), files minimp3.h and
+minimp3_ex.h. minimp3_ex.h is unmodified; minimp3.h has one LYNX change, marked "LYNX": a Layer III granule whose
+big values read past its part2_3_length (a damaged frame) is decoded as silence instead of a loud burst, as ffmpeg
+and mpg123 conceal it (L3_huffman returns that, L3_decode clears the granule). Licence: CC0 1.0 Universal (public domain dedication, LICENSE), compatible with LYNX's AGPL.
+Used by src/core/Mp3Decoder.cpp (decoding of .mp3 samples and audio clips; round 157b).
