@@ -16,6 +16,8 @@
 #include "engine/AudioEngine.h"
 #include "engine/AudioLogger.h"
 #include "engine/DllAsioDevice.h"
+#include "engine/PipeWireDevice.h"
+#include "platform/LinuxRealtime.h"
 #include "engine/Exporter.h"
 #include "engine/MidiFileIo.h"
 #include "engine/PluginHost.h"
@@ -388,6 +390,12 @@ public:
             // diagnostics: driver types and output devices JUCE offers (without opening any)
             juce::AudioDeviceManager manager;
             juce::String report;
+            manager.getAvailableDeviceTypes();
+            if (auto pipeWire = lynx::makePipeWireDeviceType()) // Linux: LYNX's own PipeWire client (round 161)
+                manager.addAudioDeviceType (std::move (pipeWire));
+           #if JUCE_LINUX
+            report << lynx::describePipeWire() << "\n";
+           #endif
 
             for (auto* type : manager.getAvailableDeviceTypes())
             {
@@ -420,6 +428,9 @@ public:
             auto step = [&] (const juce::String& line) { report << line << "\n"; reportFile.replaceWithText (report); }; // progress survives a driver that ends the process
             step ("step=start");
             juce::AudioDeviceManager manager;
+            manager.getAvailableDeviceTypes();
+            if (auto pipeWire = lynx::makePipeWireDeviceType())
+                manager.addAudioDeviceType (std::move (pipeWire));
             std::unique_ptr<juce::AudioIODevice> device;
             for (auto* type : manager.getAvailableDeviceTypes())
                 if (type->getTypeName() == typeName)

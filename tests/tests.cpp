@@ -7881,6 +7881,33 @@ TEST (safe_default_buffer_size)
     CHECK (lynx::prefs::safeBufferSize ({}, 0, 44100.0) == 0);
 }
 
+TEST (linux_audio_driver_choice_and_pipewire_helpers)
+{
+    // round 161: a first start on Linux opens PipeWire, then JACK, then ALSA
+    using lynx::prefs::DriverKind;
+    CHECK (lynx::prefs::driverKind ("PipeWire") == DriverKind::pipewire);
+    CHECK (lynx::prefs::preferredLinuxDriver ({ { "ALSA", true }, { "JACK", false }, { "PipeWire", true } }) == "PipeWire");
+    CHECK (lynx::prefs::preferredLinuxDriver ({ { "ALSA", true }, { "JACK", true } }) == "JACK");
+    CHECK (lynx::prefs::preferredLinuxDriver ({ { "ALSA", true }, { "JACK", false }, { "PipeWire", false } }) == "ALSA");
+    CHECK (lynx::prefs::preferredLinuxDriver ({ { "ALSA", false }, { "Bela", true } }) == "Bela");
+    CHECK (lynx::prefs::preferredLinuxDriver ({ { "ALSA", false } }).empty());
+    CHECK (lynx::prefs::pipewireLatency (256, 48000) == "256/48000");
+    CHECK (lynx::prefs::pipewireLatency (0, 0) == "1/1");
+    CHECK (lynx::prefs::pipewireChannelName ("FL", 0) == "Left");
+    CHECK (lynx::prefs::pipewireChannelName ("FR", 1) == "Right");
+    CHECK (lynx::prefs::pipewireChannelName ("MONO", 0) == "Mono");
+    CHECK (lynx::prefs::pipewireChannelName ("AUX0", 0) == "Aux 1");
+    CHECK (lynx::prefs::pipewireChannelName ("AUX15", 15) == "Aux 16");
+    CHECK (lynx::prefs::pipewireChannelName ("AUXX", 2) == "AUXX");
+    CHECK (lynx::prefs::pipewireChannelName ("", 2) == "Channel 3");
+    CHECK (lynx::prefs::pipewireDefaultName (R"({"name":"alsa_output.pci-0000_00_1f.3.analog-stereo"})") == "alsa_output.pci-0000_00_1f.3.analog-stereo");
+    CHECK (lynx::prefs::pipewireDefaultName (R"({ "name" : "a\"b" })") == "a\"b");
+    CHECK (lynx::prefs::pipewireDefaultName ("{}").empty());
+    CHECK (lynx::prefs::pipewireDefaultName (R"({"name":"unterminated)").empty());
+    CHECK ((lynx::prefs::uniqueDeviceNames ({ "USB Audio", "HDMI", "USB Audio", "USB Audio" })
+            == std::vector<std::string> { "USB Audio", "HDMI", "USB Audio (2)", "USB Audio (3)" }));
+}
+
 TEST (driver_kind_and_shared_mode_buffer_sizes)
 {
     // REA round 97: classic shared WASAPI mixes in whole engine periods, so sizes below it are not offered

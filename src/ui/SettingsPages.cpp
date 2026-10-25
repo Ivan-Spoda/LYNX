@@ -4,6 +4,7 @@
 #include "core/ToolbarLayout.h"
 #include "engine/AudioEngine.h"
 #include "engine/PluginHost.h"
+#include "platform/LinuxRealtime.h"
 #include "ui/AutomationUi.h"
 #include "ui/I18n.h"
 #include "ui/PluginSkin.h"
@@ -325,7 +326,7 @@ public:
     {
         for (auto* c : std::initializer_list<juce::Component*> { &deviceTitle, &statusTitle, &recordTitle, &driverLabel, &driverBox, &driverNote, &outputLabel,
                                                                  &outputBox, &inputLabel, &inputBox, &rateLabel, &rateBox, &bufferLabel, &bufferBox,
-                                                                 &bufferNote, &panelButton, &testButton, &status, &load, &recordInput, &recordNote, &inputChannels })
+                                                                 &bufferNote, &panelButton, &testButton, &status, &load, &realtime, &recordInput, &recordNote, &inputChannels })
             add (*c);
 
         styleLabel (driverLabel, tr ("Driver"));
@@ -335,6 +336,7 @@ public:
         styleLabel (bufferLabel, tr ("Buffer size"));
         styleNote (driverNote, {});
         styleNote (bufferNote, tr ("Smaller buffers answer faster when you play; larger ones give the CPU more room (fewer clicks)."));
+        styleNote (realtime, {});
         for (auto* l : { &status, &load })
         {
             styleLabel (*l, {}, false);
@@ -427,6 +429,9 @@ private:
         r.section (statusTitle);
         status.setBounds (r.full (22));
         load.setBounds (r.full (22));
+       #if JUCE_LINUX
+        realtime.setBounds (r.full (realtimeDenied ? 50 : 22));
+       #endif
         r.section (recordTitle);
         inputChannels.setBounds (r.full (34));
         recordInput.setBounds (r.full (24));
@@ -554,6 +559,31 @@ private:
                                                : juce::String()),
                       juce::dontSendNotification);
         load.setColour (juce::Label::textColourId, xruns > 0 || rt.overBudget > 0 ? theme::colour::warning : theme::colour::textSecondary);
+       #if JUCE_LINUX
+        updateRealtime();
+       #endif
+    }
+
+    // Linux: whether the audio thread got real-time priority (round 161), and how to get it when it did not
+    void updateRealtime()
+    {
+        const auto state = lynx::rt::status();
+        const auto denied = state == lynx::rt::Status::denied;
+        if (state == lynx::rt::Status::unknown)
+            realtime.setText ({}, juce::dontSendNotification);
+        else if (denied)
+            realtime.setText (tr ("Audio thread: normal priority, so the sound breaks up more easily under load. To allow real-time priority, "
+                                  "install rtkit (most desktops have it) or add yourself to the \"audio\" group with an rtprio limit "
+                                  "(/etc/security/limits.d), then log in again. LYNX never needs root."),
+                              juce::dontSendNotification);
+        else
+            realtime.setText (tr ("Audio thread: real-time priority ({0})", { lynx::rt::describe() }), juce::dontSendNotification);
+        realtime.setColour (juce::Label::textColourId, denied ? theme::colour::warning : theme::colour::textSecondary);
+        if (denied != realtimeDenied)
+        {
+            realtimeDenied = denied;
+            resized();
+        }
     }
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
@@ -573,6 +603,7 @@ private:
             case prefs::DriverKind::coreAudio:        return "Core Audio";
             case prefs::DriverKind::alsa:             return "ALSA";
             case prefs::DriverKind::jack:             return tr ("JACK / PipeWire");
+            case prefs::DriverKind::pipewire:         return tr ("PipeWire (native)");
             case prefs::DriverKind::other:            break;
         }
         return typeName;
@@ -609,6 +640,9 @@ private:
                 return tr ("Talks to the sound card directly. Choose \"default\" or \"pipewire\" to share the device with other programs; a \"hw:\" device gives the lowest latency but takes the card for LYNX alone.");
             case prefs::DriverKind::jack:
                 return tr ("Low latency, shared with other programs and routable. On current distributions PipeWire answers as JACK (package pipewire-jack); otherwise start a JACK server first.");
+            case prefs::DriverKind::pipewire:
+                return tr ("LYNX talks to PipeWire directly: low latency, shared with other programs. \"System default\" follows the output chosen in "
+                           "the system's sound settings (also when a device is plugged in or removed); LYNX appears as \"LYNX\" in pw-link, qpwgraph or Helvum.");
             case prefs::DriverKind::other:
                 break;
         }
@@ -620,7 +654,8 @@ private:
     bool updating = false;
     juce::String error;
     SectionTitle deviceTitle { tr ("Audio device") }, statusTitle { tr ("Status") }, recordTitle { tr ("Recording") };
-    juce::Label driverLabel, driverNote, outputLabel, inputLabel, rateLabel, bufferLabel, bufferNote, status, load, recordNote, inputChannels;
+    juce::Label driverLabel, driverNote, outputLabel, inputLabel, rateLabel, bufferLabel, bufferNote, status, load, realtime, recordNote, inputChannels;
+    bool realtimeDenied = false;
     juce::ComboBox driverBox, outputBox, inputBox, rateBox, bufferBox;
     juce::TextButton panelButton { tr ("Driver settings...") }, testButton { tr ("Play a test sound") };
     juce::ToggleButton recordInput;

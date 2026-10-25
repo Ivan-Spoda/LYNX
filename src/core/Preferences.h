@@ -62,6 +62,7 @@ enum class DriverKind
     coreAudio, // macOS
     alsa,      // Linux
     jack,      // Linux (JACK, or PipeWire through pipewire-jack)
+    pipewire,  // Linux: LYNX's native PipeWire client (round 161)
     other
 };
 DriverKind driverKind (const std::string& typeName);
@@ -76,6 +77,25 @@ std::vector<int> usableBufferSizes (DriverKind kind, const std::vector<int>& off
 // wrappers (ASIO4ALL, FL Studio ASIO, Generic Low Latency) only when nothing else is there. Empty when the current
 // type already is ASIO / exclusive / not Windows, or no ASIO driver exists.
 std::string suggestedAsioDriver (const std::string& currentTypeName, const std::vector<std::string>& asioDevices);
+
+// --- Linux audio (round 161) ------------------------------------------------------------------------------------
+// The driver type a first start opens on Linux, from the types with whether they found devices: PipeWire (LYNX's own
+// client), then JACK (a running server), then ALSA, then whatever has devices. Empty when nothing has devices.
+std::string preferredLinuxDriver (const std::vector<std::pair<std::string, bool>>& typesWithDevices);
+
+// PipeWire's node.latency request for a buffer: "256/48000".
+std::string pipewireLatency (int frames, int sampleRate);
+
+// A readable channel name for a PipeWire audio position: "FL" -> "Left", "FR" -> "Right", "MONO" -> "Mono",
+// "AUX3" -> "Aux 4", "RL" -> "Rear left"...; unknown positions stay as they are; empty -> "Channel <index + 1>".
+std::string pipewireChannelName (const std::string& position, int index);
+
+// The node name in a "default.audio.sink"-style metadata value ({"name":"alsa_output.pci-0000_00_1f.3.analog-stereo"}).
+// Empty when there is none.
+std::string pipewireDefaultName (const std::string& json);
+
+// Device names as the device list shows them: each description once; a repeated one gets " (2)", " (3)"...
+std::vector<std::string> uniqueDeviceNames (const std::vector<std::string>& descriptions);
 
 // --- MIDI (MIDI page) -------------------------------------------------------------------------------------------
 // How a played note's velocity reaches the instrument.
