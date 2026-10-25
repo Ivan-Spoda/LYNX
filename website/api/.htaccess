@@ -1,0 +1,10 @@
+# LYNX crash-report API. Only the two endpoints are reachable; the shared code and the fallback storage are not.
+Options -Indexes
+<FilesMatch "^_">
+    Require all denied
+</FilesMatch>
+RedirectMatch 404 ^/api/_storage(/|$)
+# hosts that strip the Authorization header from PHP: pass it on
+RewriteEngine On
+RewriteCond %{HTTP:Authorization} .
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
