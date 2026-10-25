@@ -1,4 +1,4 @@
-# LYNX on Linux: audio
+# LYNX on Linux
 
 LYNX plays through **PipeWire** directly when it runs (Ubuntu 22.10+, Fedora 34+, Debian 12, current Arch / Manjaro
 and most other current distributions), else through **JACK** (a running JACK server) or **ALSA**. Nothing extra has to
@@ -72,3 +72,30 @@ loopback for `--roundtrip`:
 Measured in round 161 (`docs/analise/REA_rodada161a.md`): through a PipeWire loopback the round trip is exactly one
 quantum (64 samples = 1.33 ms at 48 kHz, 128 = 2.67 ms, 256 = 5.33 ms); the demo project at 32/64/128/256 samples ran
 without a missed deadline or dropout (4–10 % of one CPU core).
+
+## Plugins
+
+VST3, CLAP, LV2 and VST2 (`.so`) plugins are scanned from the standard folders (`~/.vst3`, `/usr/lib/vst3`, `~/.lv2`,
+`/usr/lib/lv2`, `~/.clap`, ...) and any folder added in *Options › Plugins*. **Run plugins in a separate process**
+(*Options › Plugins*) works on Linux too: a crashing or frozen plugin is muted and LYNX keeps running (round 161b,
+`docs/analise/REA_rodada161b.md`). Windows plugins work through [yabridge](https://github.com/robbert-vdh/yabridge) +
+Wine (checked with yabridge 5.1.1 and Wine 10.0, also in the separate process); see `docs/PLATFORMS.md`.
+
+```
+LYNX --sandboxtest plugin.vst3 out.txt [--editor]   # a plugin in the separate process, incl. a hang and a crash
+```
+
+## AppImage
+
+The AppImage runs from anywhere, offline, and can update itself with
+[AppImageUpdate](https://github.com/AppImageCommunity/AppImageUpdate) (`appimageupdatetool LYNX-*.AppImage`). On the
+first start the setup wizard offers to add LYNX to the applications menu and to open `.lynx` files with it (it writes
+`~/.local/share/applications/com.lynx_share.LYNX.desktop`, the icon and the MIME type); *Options › General* turns it
+on or off later, and LYNX updates the entry when the AppImage file moves. From a terminal:
+`./LYNX-*.AppImage --menu-entry on` (or `off`).
+
+## Drawing speed
+
+LYNX draws with JUCE's software renderer on Linux (X11 or XWayland). Since round 161b knobs and rounded panels come from
+cached pre-rendered images, which made the Mixer and Playlist several times cheaper to draw (`docs/analise/REA_rodada161b.md`). `LYNX --uiperf project.flp out.txt`
+times the drawing of the main windows on your machine.

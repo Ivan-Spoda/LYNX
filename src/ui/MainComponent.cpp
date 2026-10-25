@@ -23,6 +23,7 @@
 #include "ui/WindowOwner.h"
 
 #include "engine/PluginSandbox.h"
+#include "platform/FileTypes.h"
 #include "platform/CrashGuard.h"
 #include "platform/LinuxRealtime.h"
 
@@ -3336,6 +3337,7 @@ void MainComponent::openSettings (int page)
         o.autosaveKeep = safe->autosaveKeep;
         o.askUnusedRecordings = safe->askUnusedRecordings;
         o.pluginSandbox = pluginSandboxEnabled();
+        o.menuEntry = appImageMenuEntryInstalled();
         o.pluginSubstitutes = pluginSubstitutesEnabled();
         o.crashReports = (int) crashreporter::consent();
         return o;
@@ -3371,6 +3373,8 @@ void MainComponent::openSettings (int page)
             setBackgroundScanAtStart (o.scanAtStart);
         if (o.pluginSandbox != pluginSandboxEnabled())
             setPluginSandboxEnabled (o.pluginSandbox);
+        if (runningAsAppImage() && o.menuEntry != appImageMenuEntryInstalled())
+            setAppImageMenuEntry (o.menuEntry);
         if (o.pluginSubstitutes != pluginSubstitutesEnabled())
             setPluginSubstitutesEnabled (o.pluginSubstitutes);
         if (o.crashReports != (int) crashreporter::consent())

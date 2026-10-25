@@ -20,6 +20,7 @@ struct GeneralOptions
     int uiScale = 100;          // percent
     bool waveSpectral = false, waveStereo = false;
     bool splash = true, startupSound = true, scanAtStart = true;
+    bool menuEntry = false;     // Linux AppImage: LYNX in the applications menu + the .lynx file type (round 161)
     bool typingPiano = false, keepEditorsOpen = false, rememberSeek = false;
     int editPatternsIn = 0;     // 0 = Piano Roll when it has notes, 1 = Channel Rack, 2 = Piano Roll
     int undoLevels = prefs::defaultUndoLevels;

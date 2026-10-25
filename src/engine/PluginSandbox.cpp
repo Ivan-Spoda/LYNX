@@ -15,6 +15,20 @@
 
 #if JUCE_WINDOWS
  #include <windows.h>
+#elif JUCE_LINUX || JUCE_BSD
+ #include <cerrno>
+ #include <ctime>
+ #include <fcntl.h>
+ #include <semaphore.h>
+ #include <sys/mman.h>
+ #include <unistd.h>
+ #if JUCE_LINUX
+  #include <poll.h>
+  #include <sys/eventfd.h>
+  #include <sys/syscall.h>
+  #include <thread>
+ #endif
+ #define LYNX_POSIX_SANDBOX 1
 #endif
 
 namespace lynx
@@ -80,7 +94,7 @@ void setPluginSandboxAlerts (bool show)
     showAlerts = show;
 }
 
-#if JUCE_WINDOWS
+#if JUCE_WINDOWS || LYNX_POSIX_SANDBOX
 namespace
 {
 // Block shared between LYNX and the child. The parent writes the input and signals `request`; the child
@@ -108,15 +122,170 @@ struct SharedBlock
     float audio[maxChannels][maxFrames];
 };
 
-juce::String objectName (const juce::String& base, const char* suffix)
+// The shared block plus the two "doorbells" (request: parent -> child, response: child -> parent).
+// Windows: a named file mapping and two auto-reset events. Linux/BSD (round 161): a POSIX shared-memory object
+// (/dev/shm) holding the block and two process-shared semaphores.
+class SandboxChannel
 {
-    return "Local\\" + base + suffix;
-}
+public:
+    SandboxChannel() = default;
+    SandboxChannel (const SandboxChannel&) = delete;
+    SandboxChannel& operator= (const SandboxChannel&) = delete;
+    ~SandboxChannel() { close(); }
 
-std::wstring wide (const juce::String& s)
-{
-    return std::wstring (s.toWideCharPointer());
-}
+    // parent: creates the objects under `base`
+    bool create (const juce::String& base)
+    {
+        name = base;
+       #if JUCE_WINDOWS
+        mapping = CreateFileMappingW (INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, (DWORD) sizeof (SharedBlock),
+                                      wide (objectName ("-mem")).c_str());
+        if (mapping != nullptr)
+            shared = static_cast<SharedBlock*> (MapViewOfFile (mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof (SharedBlock)));
+        request = CreateEventW (nullptr, FALSE, FALSE, wide (objectName ("-req")).c_str());
+        response = CreateEventW (nullptr, FALSE, FALSE, wide (objectName ("-resp")).c_str());
+        if (shared == nullptr || request == nullptr || response == nullptr)
+            return false;
+        std::memset (shared, 0, sizeof (SharedBlock));
+       #else
+        const auto path = shmPath();
+        ::shm_unlink (path.toRawUTF8()); // a leftover of a crashed LYNX with the same pid
+        const int fd = ::shm_open (path.toRawUTF8(), O_RDWR | O_CREAT | O_EXCL, 0600);
+        if (fd < 0)
+            return false;
+        owner = true;
+        const bool sized = ::ftruncate (fd, (off_t) sizeof (Posix)) == 0;
+        void* p = sized ? ::mmap (nullptr, sizeof (Posix), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0) : MAP_FAILED;
+        ::close (fd);
+        if (p == MAP_FAILED)
+            return false;
+        posix = static_cast<Posix*> (p);
+        std::memset (&posix->block, 0, sizeof (SharedBlock));
+        if (::sem_init (&posix->request, 1, 0) != 0 || ::sem_init (&posix->response, 1, 0) != 0)
+            return false;
+        semaphores = true;
+        shared = &posix->block;
+       #endif
+        shared->magic = SharedBlock::magicValue;
+        return true;
+    }
+
+    // child: opens the parent's objects
+    bool open (const juce::String& base)
+    {
+        name = base;
+       #if JUCE_WINDOWS
+        mapping = OpenFileMappingW (FILE_MAP_ALL_ACCESS, FALSE, wide (objectName ("-mem")).c_str());
+        if (mapping != nullptr)
+            shared = static_cast<SharedBlock*> (MapViewOfFile (mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof (SharedBlock)));
+        request = OpenEventW (SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE, wide (objectName ("-req")).c_str());
+        response = OpenEventW (SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE, wide (objectName ("-resp")).c_str());
+        if (request == nullptr || response == nullptr)
+            return false;
+       #else
+        const int fd = ::shm_open (shmPath().toRawUTF8(), O_RDWR, 0600);
+        if (fd < 0)
+            return false;
+        void* p = ::mmap (nullptr, sizeof (Posix), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        ::close (fd);
+        if (p == MAP_FAILED)
+            return false;
+        posix = static_cast<Posix*> (p);
+        shared = &posix->block;
+       #endif
+        return shared != nullptr && shared->magic == SharedBlock::magicValue;
+    }
+
+    // parent, once the child has mapped the block: the name is no longer needed (nothing left in /dev/shm if LYNX dies)
+    void unlinkName()
+    {
+       #if LYNX_POSIX_SANDBOX
+        if (owner && ! unlinked)
+            unlinked = ::shm_unlink (shmPath().toRawUTF8()) == 0 || errno == ENOENT;
+       #endif
+    }
+
+    SharedBlock* block() const noexcept { return shared; }
+
+    void signalRequest() noexcept { post (true); }
+    void signalResponse() noexcept { post (false); }
+    bool waitRequest (int timeoutMs) noexcept { return wait (true, timeoutMs); }
+    bool waitResponse (int timeoutMs) noexcept { return wait (false, timeoutMs); }
+
+private:
+   #if JUCE_WINDOWS
+    juce::String objectName (const char* suffix) const { return "Local\\" + name + suffix; }
+    static std::wstring wide (const juce::String& s) { return std::wstring (s.toWideCharPointer()); }
+
+    void post (bool req) noexcept { SetEvent (req ? request : response); }
+    bool wait (bool req, int timeoutMs) noexcept { return WaitForSingleObject (req ? request : response, (DWORD) timeoutMs) == WAIT_OBJECT_0; }
+
+    void close()
+    {
+        if (shared != nullptr)
+            UnmapViewOfFile (shared);
+        for (auto* h : { mapping, request, response })
+            if (h != nullptr)
+                CloseHandle (h);
+        shared = nullptr;
+        mapping = request = response = nullptr;
+    }
+
+    HANDLE mapping = nullptr, request = nullptr, response = nullptr;
+   #else
+    struct Posix
+    {
+        sem_t request, response;
+        SharedBlock block;
+    };
+
+    juce::String shmPath() const { return "/" + name; }
+
+    void post (bool req) noexcept { ::sem_post (req ? &posix->request : &posix->response); }
+
+    bool wait (bool req, int timeoutMs) noexcept
+    {
+        auto* sem = req ? &posix->request : &posix->response;
+        timespec until {};
+        ::clock_gettime (CLOCK_MONOTONIC, &until);
+        until.tv_sec += timeoutMs / 1000;
+        until.tv_nsec += (long) (timeoutMs % 1000) * 1000000L;
+        if (until.tv_nsec >= 1000000000L)
+        {
+            ++until.tv_sec;
+            until.tv_nsec -= 1000000000L;
+        }
+        for (;;)
+        {
+            if (::sem_clockwait (sem, CLOCK_MONOTONIC, &until) == 0)
+                return true;
+            if (errno != EINTR)
+                return false;
+        }
+    }
+
+    void close()
+    {
+        if (posix != nullptr)
+        {
+            if (semaphores)
+            {
+                ::sem_destroy (&posix->request);
+                ::sem_destroy (&posix->response);
+            }
+            ::munmap (posix, sizeof (Posix));
+        }
+        unlinkName();
+        posix = nullptr;
+        shared = nullptr;
+    }
+
+    Posix* posix = nullptr;
+    bool owner = false, unlinked = false, semaphores = false;
+   #endif
+    juce::String name;
+    SharedBlock* shared = nullptr;
+};
 
 juce::MemoryBlock encode (const juce::ValueTree& message)
 {
@@ -161,34 +330,58 @@ public:
     SandboxSession()
     {
         static std::atomic<int> counter { 0 };
-        baseName = "LYNX-sandbox-" + juce::String ((int) GetCurrentProcessId()) + "-" + juce::String (++counter);
-        mapping = CreateFileMappingW (INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, (DWORD) sizeof (SharedBlock),
-                                      wide (objectName (baseName, "-mem")).c_str());
-        if (mapping != nullptr)
-            shared = static_cast<SharedBlock*> (MapViewOfFile (mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof (SharedBlock)));
-        request = CreateEventW (nullptr, FALSE, FALSE, wide (objectName (baseName, "-req")).c_str());
-        response = CreateEventW (nullptr, FALSE, FALSE, wide (objectName (baseName, "-resp")).c_str());
-        if (shared != nullptr)
-        {
-            std::memset (shared, 0, sizeof (SharedBlock));
-            shared->magic = SharedBlock::magicValue;
-        }
+       #if JUCE_WINDOWS
+        const auto pid = (int) GetCurrentProcessId();
+       #else
+        const auto pid = (int) ::getpid();
+       #endif
+        baseName = "LYNX-sandbox-" + juce::String (pid) + "-" + juce::String (++counter);
+        created = channel.create (baseName);
     }
 
     ~SandboxSession() override
     {
         closing = true;
+        stopWatching();
         killWorkerProcess();
-        if (shared != nullptr)
-            UnmapViewOfFile (shared);
-        for (auto* h : { mapping, request, response })
-            if (h != nullptr)
-                CloseHandle (h);
+    }
+
+    // Linux (round 161): the moment the child process ends (a crash, abort, kill), the plugin is marked dead; before,
+    // a crash was noticed only by the audio block's 0.5 s timeout or the connection's own ping
+    void watchChild (int pid)
+    {
+       #if JUCE_LINUX && defined(SYS_pidfd_open)
+        if (pid <= 0 || watcher.joinable())
+            return;
+        const int fd = (int) ::syscall (SYS_pidfd_open, (pid_t) pid, 0);
+        if (fd < 0)
+            return;
+        stopFd = ::eventfd (0, EFD_CLOEXEC);
+        if (stopFd < 0)
+        {
+            ::close (fd);
+            return;
+        }
+        watcher = std::thread ([this, fd] {
+            pollfd fds[2] = { { fd, POLLIN, 0 }, { stopFd, POLLIN, 0 } };
+            while (::poll (fds, 2, -1) < 0 && errno == EINTR)
+            {
+            }
+            if ((fds[0].revents & POLLIN) != 0)
+            {
+                trace ("parent: child process ended");
+                markDead();
+            }
+            ::close (fd);
+        });
+       #else
+        juce::ignoreUnused (pid);
+       #endif
     }
 
     bool start()
     {
-        if (shared == nullptr || request == nullptr || response == nullptr)
+        if (! created)
             return false;
         const auto launched = launchWorkerProcess (juce::File::getSpecialLocation (juce::File::currentExecutableFile), pluginSandboxId, 10000);
         trace ("parent: child launched " + juce::String ((int) launched));
@@ -196,7 +389,8 @@ public:
     }
 
     const juce::String& name() const noexcept { return baseName; }
-    SharedBlock* block() noexcept { return shared; }
+    SharedBlock* block() noexcept { return channel.block(); }
+    void childAttached() { channel.unlinkName(); }
     bool isDead() const noexcept { return dead.load(); }
 
     void markDead()
@@ -204,6 +398,7 @@ public:
         if (dead.exchange (true))
             return;
         replyReady.signal();
+        channel.signalResponse(); // an audio thread waiting for a block that will never come returns now (round 161)
         if (closing || ! showAlerts)
             return;
         juce::MessageManager::callAsync ([title = pluginName] {
@@ -248,13 +443,13 @@ public:
     {
         if (dead)
             return false;
-        SetEvent (request);
-        if (WaitForSingleObject (response, (DWORD) timeoutMs) != WAIT_OBJECT_0)
+        channel.signalRequest();
+        if (! channel.waitResponse (timeoutMs))
         {
             markDead();
             return false;
         }
-        return true;
+        return ! dead; // woken by markDead (the child crashed or the connection was lost)
     }
 
 private:
@@ -274,9 +469,28 @@ private:
         markDead();
     }
 
+    void stopWatching()
+    {
+       #if JUCE_LINUX
+        if (watcher.joinable())
+        {
+            const std::uint64_t one = 1;
+            juce::ignoreUnused (::write (stopFd, &one, sizeof (one)));
+            watcher.join();
+        }
+        if (stopFd >= 0)
+            ::close (stopFd);
+        stopFd = -1;
+       #endif
+    }
+
     juce::String baseName, pluginName;
-    HANDLE mapping = nullptr, request = nullptr, response = nullptr;
-    SharedBlock* shared = nullptr;
+    SandboxChannel channel;
+    bool created = false;
+   #if JUCE_LINUX
+    std::thread watcher;
+    int stopFd = -1;
+   #endif
     std::atomic<bool> dead { false }, closing { false };
     std::mutex askMutex, replyMutex;
     juce::ValueTree reply;
@@ -379,6 +593,7 @@ public:
 
     bool dead() const noexcept { return session->isDead(); }
     void hangForTest() { session->tell (juce::ValueTree ("hang")); }
+    void crashForTest() { session->tell (juce::ValueTree ("crash")); }
 
     void queueParameter (int index, float value) noexcept { pending.push (index, value); }
 
@@ -522,11 +737,6 @@ public:
             for (auto* p : plugin->getParameters())
                 p->removeListener (this);
         plugin.reset();
-        if (shared != nullptr)
-            UnmapViewOfFile (shared);
-        for (auto* h : { mapping, request, response })
-            if (h != nullptr)
-                CloseHandle (h);
     }
 
     void handleMessageFromCoordinator (const juce::MemoryBlock& data) override
@@ -568,6 +778,8 @@ private:
         }
         else if (message.hasType ("hang"))
             hang = true;
+        else if (message.hasType ("crash")) // only in the crash-isolation test
+            std::abort();
         else if (message.hasType ("showEditor") && plugin != nullptr && plugin->hasEditor())
         {
             if (window == nullptr)
@@ -591,13 +803,9 @@ private:
         };
 
         const auto base = message["shm"].toString();
-        mapping = OpenFileMappingW (FILE_MAP_ALL_ACCESS, FALSE, wide (objectName (base, "-mem")).c_str());
-        if (mapping != nullptr)
-            shared = static_cast<SharedBlock*> (MapViewOfFile (mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof (SharedBlock)));
-        request = OpenEventW (SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE, wide (objectName (base, "-req")).c_str());
-        response = OpenEventW (SYNCHRONIZE | EVENT_MODIFY_STATE, FALSE, wide (objectName (base, "-resp")).c_str());
-        if (shared == nullptr || request == nullptr || response == nullptr || shared->magic != SharedBlock::magicValue)
+        if (! channel.open (base))
             return fail ("shared memory unavailable");
+        shared = channel.block();
 
         juce::PluginDescription description;
         const auto xml = juce::parseXML (message["description"].toString());
@@ -607,6 +815,8 @@ private:
         const auto sampleRate = (double) message["sampleRate"];
         blockSize = juce::jlimit (16, SharedBlock::maxFrames, (int) message["blockSize"]);
         PluginHost host (false);
+        if (description.pluginFormatName == "LV2")
+            host.findLv2Plugins(); // (an LV2 URI from a folder outside JUCE's two default ones; round 161)
         juce::String error;
         plugin = createRightInstance (host.getFormats(), description, sampleRate, blockSize, error);
         if (plugin == nullptr)
@@ -627,6 +837,9 @@ private:
         reply.setProperty ("editor", plugin->hasEditor(), nullptr);
         reply.setProperty ("tail", plugin->getTailLengthSeconds(), nullptr);
         reply.setProperty ("latency", plugin->getLatencySamples(), nullptr);
+       #if LYNX_POSIX_SANDBOX
+        reply.setProperty ("pid", (int) ::getpid(), nullptr);
+       #endif
         reply.setProperty ("state", juce::String (capturePluginState (*plugin)), nullptr);
 
         juce::ValueTree params ("params");
@@ -663,10 +876,10 @@ private:
         const lynx::ScopedFlushDenormals noDenormals;
         while (! threadShouldExit())
         {
-            if (WaitForSingleObject (request, 100) != WAIT_OBJECT_0)
+            if (! channel.waitRequest (100))
                 continue;
             process();
-            SetEvent (response);
+            channel.signalResponse();
         }
     }
 
@@ -710,7 +923,7 @@ private:
 
     std::unique_ptr<juce::AudioPluginInstance> plugin;
     std::unique_ptr<SandboxWindow> window;
-    HANDLE mapping = nullptr, request = nullptr, response = nullptr;
+    SandboxChannel channel;
     SharedBlock* shared = nullptr;
     int blockSize = 512, channels = 2;
     std::atomic<bool> hang { false };
@@ -746,6 +959,9 @@ std::unique_ptr<juce::AudioPluginInstance> createSandboxedPlugin (const juce::Pl
 
     trace ("parent: open");
     const auto info = session->ask (open, 30000);
+    session->childAttached();
+    if (info.isValid())
+        session->watchChild ((int) info["pid"]);
     trace ("parent: reply " + juce::String ((int) info.isValid()));
     if (! info.isValid() || ! (bool) info["ok"])
     {
@@ -769,6 +985,12 @@ void hangSandboxedPluginForTest (juce::AudioPluginInstance& plugin)
         remote->hangForTest();
 }
 
+void crashSandboxedPluginForTest (juce::AudioPluginInstance& plugin)
+{
+    if (auto* remote = dynamic_cast<RemotePlugin*> (&plugin))
+        remote->crashForTest();
+}
+
 bool runPluginSandboxWorker (const juce::String& commandLine)
 {
     if (! commandLine.contains (pluginSandboxId))
@@ -788,16 +1010,17 @@ void shutdownPluginSandboxWorker()
     worker().reset();
 }
 
-#else // ! JUCE_WINDOWS
+#else // macOS: not yet
 
 std::unique_ptr<juce::AudioPluginInstance> createSandboxedPlugin (const juce::PluginDescription&, double, int, const std::string&, juce::String& error)
 {
-    error = juce::String::fromUTF8 ("out-of-process plugins: Windows only");
+    error = juce::String::fromUTF8 ("out-of-process plugins: Windows and Linux only");
     return nullptr;
 }
 
 bool isSandboxedPluginDead (const juce::AudioPluginInstance&) { return false; }
 void hangSandboxedPluginForTest (juce::AudioPluginInstance&) {}
+void crashSandboxedPluginForTest (juce::AudioPluginInstance&) {}
 bool runPluginSandboxWorker (const juce::String&) { return false; }
 void shutdownPluginSandboxWorker() {}
 

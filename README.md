@@ -163,7 +163,7 @@ Any knob or fader (channel, mixer, effect, plugin parameter) becomes a clip with
 - Sampler with zones, slices, time-stretch (Signalsmith Stretch) and disk streaming
 - **LYNX Soundfont**: SF2/SF3 player with a preset search across all your SoundFonts
 - Built-in drums (kick, snare, hat, clap)
-- VST3 and CLAP plugins on every OS, plus Audio Units on macOS and LV2 on Linux; on Windows optionally sandboxed in a separate process; a searchable plugin picker with favorites
+- VST3 and CLAP plugins on every OS, plus Audio Units on macOS and LV2 on Linux; on Windows and Linux optionally sandboxed in a separate process; a searchable plugin picker with favorites
 
 </td>
 <td width="33%" valign="top">
@@ -291,7 +291,7 @@ entry, an icon and the `.lynx` file type (`./install.sh --uninstall` removes it 
 |---|---|---|---|
 | Plugin formats | VST3, CLAP, VST2 | VST3, CLAP, Audio Units | VST3, CLAP, LV2, VST2 |
 | Audio drivers | Windows Audio (WASAPI), DirectSound, ASIO, built-in LYNX ASIO driver | Core Audio | PipeWire (native), JACK, ALSA |
-| Out-of-process plugin sandbox | optional | – | – |
+| Out-of-process plugin sandbox | optional | – | optional |
 | FL Studio integration (factory samples, plugin database) | FL Studio installation | FL Studio app bundle is looked for (untested) | Windows FL Studio under Wine (`~/.wine` or `$WINEPREFIX`) |
 | Settings folder | `%APPDATA%\LYNX` | `~/Library/Application Support/LYNX` | `~/.config/LYNX` (`$XDG_CONFIG_HOME`) |
 
@@ -322,6 +322,8 @@ LYNX.exe --scantest folder rep.txt             scan a folder for plugins (separa
 LYNX.exe --fldb rep.txt [project.flp] [--scan] FL Studio found here, its plugin database, a project's plugin matches
 LYNX.exe --devices rep.txt                     list audio drivers and outputs
 LYNX.exe --devicetest "ASIO" "driver" rep.txt  open a driver for 1 s of silence and report it
+LYNX --uiperf project.flp rep.txt             time the UI drawing: Mixer, Playlist, Channel Rack, playing and scrolling
+LYNX.AppImage --menu-entry on|off             Linux AppImage: add to / remove from the applications menu
 ```
 
 ## Shortcuts

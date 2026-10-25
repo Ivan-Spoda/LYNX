@@ -428,7 +428,7 @@ void MixerStrips::paint (juce::Graphics& g)
         g.setColour (colour::borderStrong);
         for (auto [lx, d] : separatorLines)
             if (d == dock)
-                g.fillRoundedRectangle ((float) (lx + shift), 8.0f, 2.0f, (float) laneTop() - 14.0f, 1.0f);
+                theme::fillRoundRect (g, { (float) (lx + shift), 8.0f, 2.0f, (float) laneTop() - 14.0f }, 1.0f, colour::borderStrong);
         g.setColour (colour::bg0);
         for (auto [gx, d] : dockGaps)
             if (d == dock)
@@ -444,8 +444,7 @@ void MixerStrips::paint (juce::Graphics& g)
         {
             const auto add = juce::Rectangle<int> (stripX (tracks), 2, stripWidth - 4, 60).toFloat();
             const auto addHovered = hoverPart == Part::add;
-            g.setColour (addHovered ? colour::bg4 : colour::bg2);
-            g.fillRoundedRectangle (add, radius::md);
+            theme::fillRoundRect (g, add, radius::md, addHovered ? colour::bg4 : colour::bg2);
             g.setColour (addHovered ? colour::borderStrong : colour::border);
             g.drawRoundedRectangle (add.reduced (0.5f), radius::md, 1.0f);
             icons::draw (g, Icon::plus, add.withSizeKeepingCentre (22.0f, 22.0f), addHovered ? colour::textPrimary : colour::textSecondary);
@@ -484,13 +483,11 @@ void MixerStrips::paint (juce::Graphics& g)
         auto plate = isSelected || inSelection ? colour::bg4 : (t == 0 ? colour::bg3 : stripHovered ? colour::bg3 : colour::bg2);
         if (track.colour != 0)
             plate = plate.interpolatedWith (tame (juce::Colour (track.colour)), isSelected ? 0.26f : 0.2f);
-        g.setColour (plate);
-        g.fillRoundedRectangle (strip.toFloat(), radius::md);
+        theme::fillRoundRect (g, strip.toFloat(), radius::md, plate);
 
         if (track.colour != 0) // thin colour band at the top
         {
-            g.setColour (tame (juce::Colour (track.colour)));
-            g.fillRoundedRectangle (strip.toFloat().withHeight (3.0f).reduced (6.0f, 0.0f), 1.5f);
+            theme::fillRoundRect (g, strip.toFloat().withHeight (3.0f).reduced (6.0f, 0.0f), 1.5f, tame (juce::Colour (track.colour)));
         }
 
         if (inSelection && ! isSelected)
@@ -503,8 +500,7 @@ void MixerStrips::paint (juce::Graphics& g)
         {
             g.setColour (colour::accent.withAlpha (0.55f));
             g.drawRoundedRectangle (strip.toFloat().reduced (0.5f), radius::md, 1.0f);
-            g.setColour (colour::accent);
-            g.fillRoundedRectangle (strip.toFloat().withHeight (3.0f).reduced (6.0f, 0.0f), 1.5f);
+            theme::fillRoundRect (g, strip.toFloat().withHeight (3.0f).reduced (6.0f, 0.0f), 1.5f, colour::accent);
         }
 
         if (headerDragged && headerDragTrack == t)
@@ -527,12 +523,10 @@ void MixerStrips::paint (juce::Graphics& g)
             if (track.inputChannel >= 0 && (std::size_t) t < inputLevels.size())
             {
                 const auto bar = inputArea (t).toFloat();
-                g.setColour (colour::bg0);
-                g.fillRoundedRectangle (bar, 1.0f);
+                theme::fillRoundRect (g, bar, 1.0f, colour::bg0);
                 const auto level = inputLevels[(std::size_t) t];
                 const auto fill = juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (level, -60.0f) + 60.0f) / 60.0f);
-                g.setColour (level >= 0.99f ? colour::record : colour::meterLow);
-                g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * fill), 1.0f);
+                theme::fillRoundRect (g, bar.withWidth (bar.getWidth() * fill), 1.0f, level >= 0.99f ? colour::record : colour::meterLow);
             }
         }
 
@@ -583,8 +577,7 @@ void MixerStrips::paint (juce::Graphics& g)
             if (t > 0)
             {
                 const auto s = soloArea (t).toFloat().reduced (2.0f);
-                g.setColour (track.solo ? colour::accent : hovered (Part::solo) ? colour::bg5 : colour::bg0);
-                g.fillRoundedRectangle (s, radius::sm);
+                theme::fillRoundRect (g, s, radius::sm, track.solo ? colour::accent : hovered (Part::solo) ? colour::bg5 : colour::bg0);
                 g.setColour (track.solo ? colour::onAccent : hovered (Part::solo) ? colour::textPrimary : colour::textSecondary);
                 g.setFont (font (type::caption, true));
                 textcache::drawText (g, "S", s.toNearestInt(), juce::Justification::centred);
@@ -600,8 +593,7 @@ void MixerStrips::paint (juce::Graphics& g)
             for (int ch = 0; ch < 2; ++ch)
             {
                 const auto bar = juce::Rectangle<int> (meters.getX() + ch * (meterWidth + 2), meters.getY(), meterWidth, meters.getHeight());
-                g.setColour (colour::bg0);
-                g.fillRoundedRectangle (bar.toFloat(), 1.5f);
+                theme::fillRoundRect (g, bar.toFloat(), 1.5f, colour::bg0);
 
                 const auto index = (std::size_t) t * 2 + (std::size_t) ch;
                 const auto meter = index < levels.size() ? levels[index] : meters::PeakHold {};
@@ -638,10 +630,8 @@ void MixerStrips::paint (juce::Graphics& g)
             // fader track and 0 dB mark
             const auto railX = (float) fader.getCentreX();
             const auto capY = (float) fader.getBottom() - track.volume * (float) fader.getHeight();
-            g.setColour (colour::bg0);
-            g.fillRoundedRectangle (railX - 2.0f, (float) fader.getY(), 4.0f, (float) fader.getHeight(), 2.0f);
-            g.setColour (colour::bg6.brighter (0.15f).withAlpha (track.muted ? 0.4f : 1.0f));
-            g.fillRoundedRectangle (railX - 2.0f, capY, 4.0f, juce::jmax (0.0f, (float) fader.getBottom() - capY), 2.0f);
+            theme::fillRoundRect (g, { railX - 2.0f, (float) fader.getY(), 4.0f, (float) fader.getHeight() }, 2.0f, colour::bg0);
+            theme::fillRoundRect (g, { railX - 2.0f, capY, 4.0f, juce::jmax (0.0f, (float) fader.getBottom() - capY) }, 2.0f, colour::bg6.brighter (0.15f).withAlpha (track.muted ? 0.4f : 1.0f));
             const auto unityY = (float) fader.getBottom() - unityFader * (float) fader.getHeight();
             g.setColour (colour::textDisabled);
             g.drawHorizontalLine ((int) unityY, (float) fader.getX(), railX - 5.0f);
@@ -650,10 +640,9 @@ void MixerStrips::paint (juce::Graphics& g)
             const auto capActive = hovered (Part::fader) || dragging (Part::fader);
             const auto capWidth = juce::jmin ((float) fader.getWidth() + 2.0f, 26.0f);
             const auto cap = juce::Rectangle<float> (capWidth, 12.0f).withCentre ({ railX, capY });
-            g.setColour (juce::Colours::black.withAlpha (0.35f));
-            g.fillRoundedRectangle (cap.translated (0.0f, 1.5f), radius::sm);
-            g.setColour (capActive ? juce::Colour (0xffffffff) : juce::Colour (0xffd4d7dd)); // same cap as the LookAndFeel's linear faders
-            g.fillRoundedRectangle (cap, radius::sm);
+            theme::fillRoundRect (g, cap.translated (0.0f, 1.5f), radius::sm, juce::Colours::black.withAlpha (0.35f));
+            // same cap as the LookAndFeel's linear faders
+            theme::fillRoundRect (g, cap, radius::sm, capActive ? juce::Colour (0xffffffff) : juce::Colour (0xffd4d7dd));
             g.setColour ((dragging (Part::fader) ? colour::accent : colour::bg0).withAlpha (0.8f));
             g.fillRect (cap.withSizeKeepingCentre (capWidth - 8.0f, 1.5f));
 
@@ -667,8 +656,7 @@ void MixerStrips::paint (juce::Graphics& g)
                 const auto text = mixeroutput::label (engine, t, true);
                 const auto badge = juce::Rectangle<float> ((float) meterArea (t).getRight() + 3.0f, (float) area.getY(),
                                                            (float) (x + w - 6) - ((float) meterArea (t).getRight() + 3.0f), 12.0f);
-                g.setColour (colour::bg0.withAlpha (0.85f));
-                g.fillRoundedRectangle (badge, 3.0f);
+                theme::fillRoundRect (g, badge, 3.0f, colour::bg0.withAlpha (0.85f));
                 g.setColour (text.endsWith ("?") ? colour::textDisabled : colour::info);
                 g.setFont (font (9.0f, true));
                 textcache::drawFittedText (g, text, badge.toNearestInt(), juce::Justification::centred, 1, 0.7f);
@@ -685,8 +673,7 @@ void MixerStrips::paint (juce::Graphics& g)
 
             if (possible)
             {
-                g.setColour (on ? colour::accent : hovered (Part::route) ? colour::bg5 : colour::bg0);
-                g.fillRoundedRectangle (r, radius::sm);
+                theme::fillRoundRect (g, r, radius::sm, on ? colour::accent : hovered (Part::route) ? colour::bg5 : colour::bg0);
                 if (hovered (Part::route))
                 {
                     g.setColour (on ? colour::accentHover : colour::textSecondary);
@@ -704,8 +691,7 @@ void MixerStrips::paint (juce::Graphics& g)
             }
             else if (feedsSelected) // this insert sends into the selected one
             {
-                g.setColour (colour::info.withAlpha (0.18f));
-                g.fillRoundedRectangle (r, radius::sm);
+                theme::fillRoundRect (g, r, radius::sm, colour::info.withAlpha (0.18f));
                 g.setColour (colour::info);
                 g.setFont (font (10.0f, true));
                 textcache::drawText (g, juce::String::fromUTF8 ("\xe2\x86\x92 ") + juce::String (selected), r.toNearestInt(), juce::Justification::centred);
@@ -2087,8 +2073,7 @@ void EffectsPanel::paintEq (juce::Graphics& g)
 
     // the response graph: frequency (log) across, ±18 dB up and down
     const auto graph = eqGraphBounds().toFloat();
-    g.setColour (colour::bg1);
-    g.fillRoundedRectangle (graph, radius::sm);
+    theme::fillRoundRect (g, graph, radius::sm, colour::bg1);
     g.setColour (colour::border);
     g.drawRoundedRectangle (graph.reduced (0.5f), radius::sm, 1.0f);
     const auto inner = graph.reduced (4.0f);
@@ -2128,14 +2113,12 @@ void EffectsPanel::paintEq (juce::Graphics& g)
     {
         const auto fader = eqFaderBounds (b).toFloat();
         const auto hot = hoverEq == eqParamBase - b * 3 || dragParam == eqParamBase - b * 3;
-        g.setColour (colour::bg0);
-        g.fillRoundedRectangle (fader.withSizeKeepingCentre (3.0f, fader.getHeight() - 6.0f), 1.5f);
+        theme::fillRoundRect (g, fader.withSizeKeepingCentre (3.0f, fader.getHeight() - 6.0f), 1.5f, colour::bg0);
         g.setColour (colour::border);
         g.drawHorizontalLine ((int) fader.getCentreY(), fader.getX() + 2.0f, fader.getRight() - 2.0f);
         const auto v = eqToValue (eq, b, 0);
         const auto y = fader.getBottom() - 6.0f - v * (fader.getHeight() - 12.0f);
-        g.setColour (hot ? colour::textPrimary : colour::textSecondary);
-        g.fillRoundedRectangle (juce::Rectangle<float> (fader.getWidth() - 2.0f, 7.0f).withCentre ({ fader.getCentreX(), y }), 2.0f);
+        theme::fillRoundRect (g, juce::Rectangle<float> (fader.getWidth() - 2.0f, 7.0f).withCentre ({ fader.getCentreX(), y }), 2.0f, hot ? colour::textPrimary : colour::textSecondary);
         g.setColour (eqBandColour (b));
         g.fillRect (juce::Rectangle<float> (fader.getWidth() - 6.0f, 1.5f).withCentre ({ fader.getCentreX(), y }));
 
@@ -2161,8 +2144,7 @@ void EffectsPanel::paintEq (juce::Graphics& g)
     g.fillRect (8, (int) box.getY() - 5, getWidth() - 16, 1);
     icons::draw (g, Icon::exportAudio, juce::Rectangle<float> (10.0f, box.getY(), 18.0f, box.getHeight()).withSizeKeepingCentre (16.0f, 16.0f),
                  colour::textSecondary);
-    g.setColour (hoverOutput ? colour::bg4 : colour::bg3);
-    g.fillRoundedRectangle (box, radius::sm);
+    theme::fillRoundRect (g, box, radius::sm, hoverOutput ? colour::bg4 : colour::bg3);
     g.setColour (hoverOutput ? colour::borderStrong : colour::border);
     g.drawRoundedRectangle (box.reduced (0.5f), radius::sm, 1.0f);
     g.setColour (track == 0 ? colour::textPrimary : colour::textSecondary);
@@ -2596,8 +2578,7 @@ void EffectsPanel::paint (juce::Graphics& g)
         {
             const auto armed = engine.isInsertArmed (track);
             const auto a = armBounds().toFloat();
-            g.setColour (armed ? colour::record.withAlpha (0.25f) : hoverInput == 1 ? colour::bg5 : colour::bg3);
-            g.fillRoundedRectangle (a, radius::sm);
+            theme::fillRoundRect (g, a, radius::sm, armed ? colour::record.withAlpha (0.25f) : hoverInput == 1 ? colour::bg5 : colour::bg3);
             const auto dot = a.withSizeKeepingCentre (11.0f, 11.0f);
             g.setColour (armed ? colour::record : colour::bg0);
             g.fillEllipse (dot);
@@ -2606,8 +2587,7 @@ void EffectsPanel::paint (juce::Graphics& g)
         }
 
         auto box = inputBoxBounds().toFloat();
-        g.setColour (hoverInput == 2 ? colour::bg4 : colour::bg3);
-        g.fillRoundedRectangle (box, radius::sm);
+        theme::fillRoundRect (g, box, radius::sm, hoverInput == 2 ? colour::bg4 : colour::bg3);
         g.setColour (hoverInput == 2 ? colour::borderStrong : colour::border);
         g.drawRoundedRectangle (box.reduced (0.5f), radius::sm, 1.0f);
 
@@ -2641,8 +2621,7 @@ void EffectsPanel::paint (juce::Graphics& g)
     {
         const auto on = mixerops::anyEffectEnabled (song, track);
         const auto r = fxSwitchBounds().toFloat();
-        g.setColour (on ? colour::bg5 : colour::bg0);
-        g.fillRoundedRectangle (r, radius::sm);
+        theme::fillRoundRect (g, r, radius::sm, on ? colour::bg5 : colour::bg0);
         g.setColour (muteLed (! on));
         g.fillEllipse (r.withWidth (r.getHeight()).reduced (6.0f).translated (3.0f, 0.0f));
         g.setColour (on ? colour::textPrimary : colour::textDisabled);
@@ -2659,15 +2638,13 @@ void EffectsPanel::paint (juce::Graphics& g)
         const auto filled = i < (int) s->size();
         const auto isSelected = i == selectedSlot && filled;
         const auto slotHovered = i == hoverSlot && dragSlot < 0;
-        g.setColour (isSelected ? colour::bg5 : filled ? (slotHovered ? colour::bg4 : colour::bg3) : (slotHovered ? colour::bg3 : colour::bg2.brighter (0.03f)));
-        g.fillRoundedRectangle (r.toFloat(), radius::sm);
+        theme::fillRoundRect (g, r.toFloat(), radius::sm, isSelected ? colour::bg5 : filled ? (slotHovered ? colour::bg4 : colour::bg3) : (slotHovered ? colour::bg3 : colour::bg2.brighter (0.03f)));
         g.setColour (slotHovered ? colour::borderStrong : colour::border);
         g.drawRoundedRectangle (r.toFloat().reduced (0.5f), radius::sm, 1.0f);
 
         if (isSelected)
         {
-            g.setColour (colour::accent);
-            g.fillRoundedRectangle (r.toFloat().withWidth (3.0f).reduced (0.0f, 3.0f), 1.5f);
+            theme::fillRoundRect (g, r.toFloat().withWidth (3.0f).reduced (0.0f, 3.0f), 1.5f, colour::accent);
         }
 
         {
@@ -2704,8 +2681,7 @@ void EffectsPanel::paint (juce::Graphics& g)
             {
                 const auto badge = text.removeFromRight (34).withSizeKeepingCentre (32, 14).toFloat();
                 const auto playing = engine.getSong().slotActive (slot); // off while the project's substitutes are bypassed
-                g.setColour (colour::info.withAlpha (playing ? 0.25f : 0.12f));
-                g.fillRoundedRectangle (badge, 3.0f);
+                theme::fillRoundRect (g, badge, 3.0f, colour::info.withAlpha (playing ? 0.25f : 0.12f));
                 g.setColour (playing ? colour::info : colour::textDisabled);
                 const auto keep = g.getCurrentFont();
                 g.setFont (font (type::caption, true));
@@ -2750,8 +2726,7 @@ void EffectsPanel::paint (juce::Graphics& g)
     const auto& slot = (*s)[(std::size_t) selectedSlot];
 
     auto drawButton = [&g] (juce::Rectangle<int> button, const juce::String& text, Icon icon) {
-        g.setColour (colour::bg4);
-        g.fillRoundedRectangle (button.toFloat(), radius::md);
+        theme::fillRoundRect (g, button.toFloat(), radius::md, colour::bg4);
         const auto f = juce::Font (font (type::body));
         const auto textWidth = juce::GlyphArrangement::getStringWidth (f, text);
         auto content = button.toFloat().withSizeKeepingCentre (juce::jmin ((float) button.getWidth() - 12.0f, textWidth + 22.0f), (float) button.getHeight());
@@ -2848,8 +2823,7 @@ void EffectsPanel::paint (juce::Graphics& g)
     {
         const auto b = editorButtonBounds().toFloat();
         const auto hover = getMouseXYRelative().toFloat();
-        g.setColour (b.contains (hover) ? colour::bg5 : colour::bg4);
-        g.fillRoundedRectangle (b, radius::md);
+        theme::fillRoundRect (g, b, radius::md, b.contains (hover) ? colour::bg5 : colour::bg4);
         icons::draw (g, Icon::plugin, b.withWidth (22.0f).withSizeKeepingCentre (13.0f, 13.0f).translated (4.0f, 0.0f), colour::textSecondary);
         g.setColour (colour::textPrimary);
         g.setFont (font (type::small));
@@ -2873,8 +2847,7 @@ void EffectsPanel::paint (juce::Graphics& g)
                 auto fill = isBlack ? colour::bg0 : colour::bg2;
                 if (inScale && on)
                     fill = (slot.enabled ? colour::accent : colour::textDisabled).withAlpha (isBlack ? 0.85f : 0.65f);
-                g.setColour (fill);
-                g.fillRoundedRectangle (r, 2.0f);
+                theme::fillRoundRect (g, r, 2.0f, fill);
                 g.setColour (colour::gridBar);
                 g.drawRoundedRectangle (r, 2.0f, 1.0f);
                 if (inScale && ! on) // in the scale but switched off
@@ -2900,8 +2873,7 @@ void EffectsPanel::paint (juce::Graphics& g)
     {
         const auto st = vocoderState (slot);
         const auto area = bandLevelsBounds().toFloat();
-        g.setColour (colour::bg0);
-        g.fillRoundedRectangle (area, radius::sm);
+        theme::fillRoundRect (g, area, radius::sm, colour::bg0);
         const auto w = area.getWidth() / (float) st.bands;
         const auto unity = area.getBottom() - area.getHeight() / maxBandLevel;
         for (int k = 0; k < st.bands; ++k)
@@ -2921,8 +2893,7 @@ void EffectsPanel::paint (juce::Graphics& g)
     if (gate) // 32 steps = 1 bar of 4 beats
     {
         const auto area = gateStepsBounds().toFloat();
-        g.setColour (colour::bg0);
-        g.fillRoundedRectangle (area, radius::sm);
+        theme::fillRoundRect (g, area, radius::sm, colour::bg0);
         const auto w = area.getWidth() / 32.0f;
         for (int i = 0; i < 32; ++i)
         {

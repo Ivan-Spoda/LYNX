@@ -98,8 +98,9 @@ public:
     void scrollRackForSnapshot (int x) { rackViewport.setViewPosition (x, rackViewport.getViewPositionY()); }
     BrowserComponent& getBrowserForSnapshot() { return browser; }
     MixerComponent& getMixerForSnapshot() { return mixer; }
-    std::unique_ptr<juce::Component> makeQuickAddForSnapshot();
     PlaylistComponent& getPlaylistForSnapshot() { return playlist; }
+    juce::Component& getRackViewportForSnapshot() { return rackViewport; }
+    std::unique_ptr<juce::Component> makeQuickAddForSnapshot();
     PatternPicker& getPickerForSnapshot() { return picker; }
     void selectMixerTrackForSnapshot (int track, int slot = -1)
     {
