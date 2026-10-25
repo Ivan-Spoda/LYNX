@@ -18,10 +18,13 @@ namespace lynx::warmup
 //   - at least `minWallSeconds` of real time passed (work done on the plugins' own threads),
 //   - what the plugins report (latency, parameter values: `signature`) stayed the same for `stableWallSeconds`,
 // or `maxWallSeconds` passed (a plugin whose values never stop moving, e.g. a meter exposed as a parameter).
+// A plugin that reports nothing while it loads only gets the minimums (1 s), the time a real start gives it in
+// practice; one whose parameters / latency move while it loads (a bridge forwarding the restored values one by one)
+// is waited for until they stop.
 struct Settings
 {
-    double minAudioSeconds = 0.5;
-    double minWallSeconds = 0.5;
+    double minAudioSeconds = 1.0;
+    double minWallSeconds = 1.0;
     double stableWallSeconds = 0.3;
     double maxWallSeconds = 10.0;
 };

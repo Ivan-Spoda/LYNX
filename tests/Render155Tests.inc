@@ -30,6 +30,7 @@ struct LateState final : lynx::Effect
 {
     int blocks = 0;
     double atTime = -1.0;
+    double firstNewsAt = -1.0; // (bridged) from this time on the plugin reports intermediate values until it lands
     const double* clock = nullptr;
     int processed = 0;
     float gain = 1.0f; // what the plugin reports (its parameter)
@@ -42,6 +43,8 @@ struct LateState final : lynx::Effect
         const auto landed = (blocks > 0 && processed > blocks) || (atTime >= 0.0 && clock != nullptr && *clock >= atTime) || (blocks == 0 && atTime < 0.0);
         if (landed)
             gain = 0.5f;
+        else if (firstNewsAt >= 0.0 && clock != nullptr && *clock >= firstNewsAt)
+            gain = 0.75f - 0.01f * (float) (int) ((*clock - firstNewsAt) / 0.2); // one more value every 0.2 s
         for (int i = 0; i < n; ++i)
         {
             l[i] *= gain;
@@ -118,14 +121,14 @@ TEST (render155_warm_up_waits_for_a_state_applied_after_n_blocks)
 
     // with it: the state has landed before the first rendered sample
     Rig warm;
-    warm.effect->blocks = 40; // ~0.43 s at 48 kHz / 512
+    warm.effect->blocks = 60; // ~0.64 s at 48 kHz / 512
     double clock = 0.0;
     lynx::warmup::Settings settings;
     const auto result = lynx::warmup::run (
         settings, 48000.0, [&] { clock += 0.0005; return warm.discard(); }, [&] { lynx::warmup::Hash h; h.addValue (warm.effect->gain); return h.value; },
         [&] { return clock; }, [&] (double s) { clock += s; });
     CHECK (! result.timedOut && ! result.cancelled);
-    CHECK (result.blocks > 40);
+    CHECK (result.blocks > 60);
     CHECK (result.audioSeconds >= settings.minAudioSeconds);
     CHECK (result.signatureChanges == 1);
     warm.renderer.prepare (48000.0, Rig::block); // as the engine does: LYNX's own units start clean
@@ -139,19 +142,40 @@ TEST (render155_warm_up_waits_for_a_state_applied_after_n_blocks)
 TEST (render155_warm_up_waits_for_a_state_applied_late_in_real_time)
 {
     using namespace render155;
-    // a bridged plugin: the state lands 1.2 s (wall time) after creation, whatever the number of blocks
+    // a bridged plugin: the restored values arrive one by one over 2 s of wall time after creation (the first at
+    // 0.3 s, then one every 0.2 s, the last at 2.0 s), whatever the number of blocks
     Rig warm;
     double clock = 0.0;
-    warm.effect->atTime = 1.2;
+    warm.effect->atTime = 2.0;
+    warm.effect->firstNewsAt = 0.3;
     warm.effect->clock = &clock;
     lynx::warmup::Settings settings;
     const auto result = lynx::warmup::run (
         settings, 48000.0, [&] { clock += 0.001; return warm.discard(); }, [&] { lynx::warmup::Hash h; h.addValue (warm.effect->gain); return h.value; },
         [&] { return clock; }, [&] (double s) { clock += s; });
     CHECK (! result.timedOut);
-    CHECK (result.wallSeconds >= 1.2 + settings.stableWallSeconds - 0.02);
+    CHECK (result.signatureChanges >= 5); // (one per value that arrived)
+    CHECK (result.wallSeconds >= 2.0 + settings.stableWallSeconds - 0.02 && result.wallSeconds < 2.5);
     // paced: the discarded audio does not run far ahead of real time once the minimum is processed
     CHECK (result.audioSeconds <= result.wallSeconds + 0.05);
+    Rig ready;
+    const auto expected = ready.firstSample();
+    warm.renderer.prepare (48000.0, Rig::block);
+    CHECK (std::abs (warm.firstSample() - expected) < 1.0e-6f);
+}
+
+TEST (render155_warm_up_minimum_time_covers_a_silent_late_load)
+{
+    using namespace render155;
+    // a plugin that reports nothing while it loads and lands 0.8 s (wall time) after creation: the minimum real time
+    Rig warm;
+    double clock = 0.0;
+    warm.effect->atTime = 0.8;
+    warm.effect->clock = &clock;
+    const auto result = lynx::warmup::run (
+        lynx::warmup::Settings {}, 48000.0, [&] { clock += 0.001; return warm.discard(); },
+        [&] { lynx::warmup::Hash h; h.addValue (warm.effect->gain); return h.value; }, [&] { return clock; }, [&] (double s) { clock += s; });
+    CHECK (result.wallSeconds >= 1.0);
     Rig ready;
     const auto expected = ready.firstSample();
     warm.renderer.prepare (48000.0, Rig::block);

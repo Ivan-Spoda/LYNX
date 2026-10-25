@@ -43,10 +43,11 @@ needed this round, nothing copied); [model] LYNX's own design choice.
    position**: no note plays, and the rack evaluates automation clips / pattern events at that position every block,
    so the parameters the song starts with reach the plugins before the render.
 4. It stops when all of these hold:
-   - ≥ 0.5 s of audio processed (plugins that settle after a number of blocks),
-   - ≥ 0.5 s of real time passed (work on the plugins' / bridge's own threads),
+   - ≥ 1 s of audio processed (plugins that settle after a number of blocks),
+   - ≥ 1 s of real time passed (work on the plugins' / bridge's own threads),
    - what the plugins report — latency and every parameter value (quantised to 1e-5) — has not changed for 0.3 s;
-   or after 10 s (a plugin whose values never stop moving). After the minimum audio the blocks are paced to real time
+   or after 10 s (a plugin whose values never stop moving). A plugin that reports nothing while it loads only gets
+   the 1 s minimums; one whose values arrive one by one (a bridge forwarding the restored state) is waited for. After the minimum audio the blocks are paced to real time
    (sleeps of ≤ 10 ms when ahead), so the bridge gets wall time, not just blocks. The progress window's Cancel works
    during the warm-up.
 5. A latency that changed gets its new PDC plan (`publishSong`, on the message thread as the 30 Hz timer does it; the
@@ -61,17 +62,20 @@ Setting: Export window › "Plugin warm-up" (on by default; saved with the other
 pt-BR "Aquecimento dos plugins"). `LYNX --export … --no-warmup` turns it off; the `--export` report prints
 `warmup_blocks`, `warmup_ms`, `warmup_changes`, `warmup_timed_out`, `pdc_trim`.
 
-Cost: an export with hosted plugins takes ~0.5–0.8 s longer (more only while a plugin is still changing, at most 10 s).
+Cost: an export with hosted plugins takes ~1 s longer (more only while a plugin is still changing, at most 10 s).
 
 ## 3. Tests
 
 - [TEST] `render155_warm_up_waits_for_a_state_applied_after_n_blocks`: a fake plugin effect whose state (gain 0.5)
-  lands after 40 blocks, after a drone instrument, rendered through the real `RackRenderer`. Without the warm-up the
+  lands after 60 blocks, after a drone instrument, rendered through the real `RackRenderer`. Without the warm-up the
   first sample is 2× the reference (half-loaded); with it every sample of the first block equals the reference (a
   plugin whose state is in place from the start).
-- [TEST] `render155_warm_up_waits_for_a_state_applied_late_in_real_time`: the state lands 1.2 s of (simulated) wall
-  time after creation whatever the number of blocks — the yabridge case. The warm-up lasts ≥ 1.2 + 0.3 s, stays paced
-  to real time, and the first rendered samples are correct.
+- [TEST] `render155_warm_up_waits_for_a_state_applied_late_in_real_time`: the restored values arrive one by one over
+  2 s of (simulated) wall time (the first at 0.3 s, then one every 0.2 s, the last at 2.0 s), whatever the number of
+  blocks — the yabridge case. The warm-up sees every change, lasts ≥ 2.0 + 0.3 s, stays paced to real time, and the first rendered samples
+  are correct.
+- [TEST] `render155_warm_up_minimum_time_covers_a_silent_late_load`: a plugin that reports nothing and lands 0.8 s
+  after creation is covered by the 1 s minimum.
 - [TEST] `render155_warm_up_minimums_timeout_and_cancel`: minimums, the 10 s timeout for a plugin that never settles,
   Cancel, parameter quantisation.
 - [TEST] `render155_export_option_plugin_warm_up`: default on, saved and read back.
@@ -88,15 +92,15 @@ Limiter.
 
 | | warm-up on | `--no-warmup` |
 |---|---|---|
-| `warmup_blocks` / `warmup_ms` / `warmup_changes` | 45 / 505 ms / 0 | 0 / 0 / 0 |
-| render time (song 52 s) | 2058 ms | 1566 ms |
+| `warmup_blocks` / `warmup_ms` / `warmup_changes` | 88 / 1009 ms / 0 | 0 / 0 / 0 |
+| render time (song 52 s) | 1937 ms | 1566 ms |
 | `pdc_trim` | 66 samples | 66 samples |
 | peak | 0.95787 | 0.95787 |
 | two runs bit-identical | yes | yes |
 
-- The warm-up costs half a second for a plugin that is ready at once (the minimums), and nothing changed during it.
+- The warm-up costs one second for a plugin that is ready at once (the minimums), and nothing changed during it.
 - Warm vs cold files: bit-identical for the first 0.30 s, then the reverb tail differs slightly — Supermassive's
-  free-running modulation has run 0.5 s longer (as it would in a real-time start). Expected; both are deterministic.
+  free-running modulation has run 1 s longer (as it would in a real-time start). Expected; both are deterministic.
 - The CLI render runs on the message thread (no message pump available: JUCE_MODAL_LOOPS_PERMITTED is 0), so there
   the warm-up only gives wall time to the plugins' own threads; the Export window renders on its own thread, so the
   message thread (JUCE's VST3 host callbacks, yabridge's replies handled there) keeps running during the warm-up.
@@ -104,6 +108,8 @@ Limiter.
 ## Where I stopped
 
 - Landed: see the commit list in the final report.
+- Limitation: a plugin that reports nothing (no parameter / latency change) while it keeps loading for longer than
+  the 1 s minimum is not detected; there is no standard plugin API for "ready".
 - Not done: no per-plugin "needs longer warm-up" option (FL has none either); if a reporter still hears a bad start
   with a specific plugin, the next step is a longer minimum for bridged plugins only (`PluginRef::separateProcess`
   or a yabridge path in the plugin's file name) rather than for every export.
