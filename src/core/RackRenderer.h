@@ -17,6 +17,7 @@
 #include "core/VoiceLimit.h"
 #include "core/Biquad.h"
 #include "core/Effects.h"
+#include "core/HardwareOutput.h"
 #include "core/Instruments.h"
 #include "core/LiveEventQueue.h"
 #include "core/LiveInput.h"
@@ -71,6 +72,17 @@ struct RackState
     std::vector<std::shared_ptr<DelayLine>> channelDelays;
     std::vector<std::vector<std::shared_ptr<DelayLine>>> sendDelays; // [track][k] like PdcPlan::sendDelay
     std::vector<int> latencies; // channels, then slots of all tracks
+
+    // Inserts with a hardware output target (REA round 156), each delayed by what it lacks to line up with the
+    // Master output (pdc.total − outLat[track]; nullptr = no delay). Built with the PDC plan.
+    struct HwRoute
+    {
+        int track = 0;
+        int channel = 0;
+        OutputMode mode = OutputMode::stereo;
+        std::shared_ptr<DelayLine> delay;
+    };
+    std::vector<HwRoute> hwRoutes;
 
     // Current latencies of instruments and effects, in the same layout as `latencies`.
     std::vector<int> currentLatencies() const;
@@ -214,6 +226,9 @@ public:
     // External audio input (REA_rodada88): inserts with an input source hear it (per their monitor mode) and
     // meter it. The caller fills `input` before each process() call on the same thread. Set before playback.
     void setLiveInput (LiveInput* input) noexcept { liveInput = input; }
+    // Hardware output targets of the inserts (REA round 156): their post-fader output is added into `out`'s buses
+    // while `out->active`. Set before playback.
+    void setHardwareOutput (HardwareOutput* out) noexcept { hwOut = out; }
 
     // Allocates the mixer buffers: call off the audio thread.
     // Blocks larger than maxBlockSize are processed in pieces.
@@ -318,6 +333,9 @@ private:
     bool routesLiveNotes (const RackState& state, int channel) const noexcept;
     WorkerPool* workers = nullptr;
     LiveInput* liveInput = nullptr;
+    HardwareOutput* hwOut = nullptr;
+    std::vector<float> hwScratch; // 2 × blockCapacity
+    void mixHardwareOutputs (const RackState& state, int n) noexcept;
     int liveInputOffset = 0; // of the chunk within the process() block
     void mixLiveInput (const RackState& state, bool playing, int n) noexcept;
     std::atomic<bool> profiling { false };
