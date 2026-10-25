@@ -62,6 +62,7 @@ enum : std::uint32_t
     evChannelColour = 0x80,
     evChannelFilterGroup = 0x91, // u32: index into the 0xE7 names (the Channel Rack's filter group, REA round 104)
     evFilterGroupName = 0xE7,    // UTF-16 text: one per filter group, in order
+    evMixerInsertOutput = 0x93, // i32 "Audio output target" of the insert opened by the last 0xEC: -1 none, 0 first pair (REA round 156)
     evMixerInsertColour = 0x95, // u32 0x00BBGGRR; comes before the 0xEC that opens the insert
     evMixerSlotIndex = 0x62,    // u16: closes the effect slot described by the preceding events     // u32 0x00BBGGRR (also appears in mixer slots)     // i32 pan, i32 volume, i32 pitch (cents), ...
     evPlaylistTrack = 0xEE,     // u32 index (1..500), u32 colour, u32 icon, u8 enabled, ...
@@ -1035,6 +1036,11 @@ Project parseProject (std::span<const std::uint8_t> file, bool channelPreset)
                         insert.routes.push_back (target);
                     }
                 }
+                break;
+
+            case evMixerInsertOutput:
+                if (section == Section::mixer && ! project.mixer.empty())
+                    project.mixer.back().output = (int) (std::int32_t) e.value;
                 break;
 
             case evMixerInsertColour:

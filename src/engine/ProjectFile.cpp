@@ -1274,6 +1274,12 @@ juce::var mixerTrackToVar (const MixerTrack& t)
     }
     if (t.monitor != InputMonitor::automatic)
         o->setProperty ("monitor", (int) t.monitor);
+    if (t.outputChannel != outputDefault) // hardware output target (REA round 156): -1 = none, else device channel
+    {
+        o->setProperty ("output", t.outputChannel);
+        if (t.outputMode != OutputMode::stereo)
+            o->setProperty ("outputMode", t.outputMode == OutputMode::monoSum ? "mono" : t.outputMode == OutputMode::monoLeft ? "left" : "right");
+    }
     if (! (t.eq == TrackEq {})) // [gains dB, frequencies Hz, widths 0..1] of the 3 bands
         o->setProperty ("eq", juce::Array<juce::var> { t.eq.gainDb[0], t.eq.gainDb[1], t.eq.gainDb[2], t.eq.hz[0], t.eq.hz[1], t.eq.hz[2],
                                                        t.eq.width[0], t.eq.width[1], t.eq.width[2] });
@@ -1321,6 +1327,13 @@ MixerTrack mixerTrackFromVar (const juce::var& t)
     track.inputChannel = juce::jlimit (-1, 255, (int) t.getProperty ("input", -1));
     track.inputStereo = ! (bool) t.getProperty ("inputMono", false);
     track.monitor = (InputMonitor) juce::jlimit (0, 3, (int) t.getProperty ("monitor", (int) InputMonitor::automatic));
+    track.outputChannel = juce::jlimit (outputDefault, 255, (int) t.getProperty ("output", outputDefault));
+    if (const auto mode = t["outputMode"].toString(); mode == "mono")
+        track.outputMode = OutputMode::monoSum;
+    else if (mode == "left")
+        track.outputMode = OutputMode::monoLeft;
+    else if (mode == "right")
+        track.outputMode = OutputMode::monoRight;
 
     if (const auto& eq = t["eq"]; eq.isArray() && eq.size() == 9)
         for (std::size_t b = 0; b < 3; ++b)
@@ -1941,6 +1954,8 @@ juce::String mixerTrackStateToJson (const MixerTrack& track)
     state.toMaster = true;
     state.masterLevel = 1.0f;
     state.inputChannel = -1;
+    state.outputChannel = outputDefault;
+    state.outputMode = OutputMode::stereo;
     state.monitor = InputMonitor::automatic;
     state.muted = state.solo = false;
     auto root = std::make_unique<juce::DynamicObject>();

@@ -183,6 +183,7 @@ AudioEngine::AudioEngine (bool openAudioDevice)
       song (Song::makeDefault())
 {
     inputSlot.fill (-1);
+    outputSlot.fill (-1);
     publishSong();
     buildInitialGraph();
 
@@ -263,7 +264,10 @@ void AudioEngine::buildInitialGraph()
     auto rack = graph.addNode (std::make_unique<ChannelRackProcessor> (transport, rackExchange, liveEvents, midiEvents, meters, workers.get()));
     rackProcessor = dynamic_cast<ChannelRackProcessor*> (rack->getProcessor());
     if (rackProcessor != nullptr)
+    {
         rackProcessor->setLiveInput (&liveInput);
+        rackProcessor->setHardwareOutput (&hwOutput);
+    }
     auto metronome = graph.addNode (std::make_unique<Metronome> (transport));
     auto previewOwned = std::make_unique<PreviewPlayer>();
     preview = previewOwned.get();
@@ -1390,6 +1394,9 @@ void AudioEngine::setSong (Song newSong)
     if (prefetcher != nullptr && ! hasAudioInput()
         && std::any_of (song.mixer.begin(), song.mixer.end(), [] (const MixerTrack& t) { return t.inputChannel >= 0; }))
         openAudioInput();
+    // hardware output targets: their channels open with the project (the ones the device has)
+    if (prefetcher != nullptr)
+        openTargetedOutputs();
 
     publishSong();
 }
@@ -1937,6 +1944,9 @@ void AudioEngine::publishSong()
         if (traceEdits)
             platform::settingsFile ("edits.log").appendText (juce::String (juce::Time::getMillisecondCounterHiRes() - publishStart, 1) + " ms publish\n");
     } };
+    // the Master's hardware output target, read by the device callback
+    masterOutChannel.store (song.mixer.empty() ? outputDefault : song.mixer[0].outputChannel, std::memory_order_relaxed);
+    masterOutMode.store (song.mixer.empty() ? 0 : (int) song.mixer[0].outputMode, std::memory_order_relaxed);
     song.currentPattern = juce::jlimit (0, juce::jmax (0, (int) song.patterns.size() - 1), song.currentPattern);
     selectedChannel = juce::jlimit (0, juce::jmax (0, (int) song.channels.size() - 1), selectedChannel);
     {
@@ -2754,6 +2764,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
             outputs[(std::size_t) ch] = outputChannelData[ch] != nullptr ? outputChannelData[ch] + done : nullptr;
 
         player.audioDeviceIOCallbackWithContext (inputs.data(), numInputChannels, outputs.data(), numOutputChannels, n, context);
+        routeOutputs (outputs.data(), numOutputChannels, n);
 
         for (int ch = 0; ch < numOutputChannels; ++ch)
             if (outputs[(std::size_t) ch] != nullptr)
@@ -2806,11 +2817,113 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     int slot = 0;
     for (int c = 0; c < LiveInput::maxChannels; ++c)
         inputSlot[(std::size_t) c] = active[c] ? slot++ : -1;
+    // the same for the outputs (hardware output targets, REA round 156)
+    const auto activeOut = device->getActiveOutputChannels();
+    slot = 0;
+    for (int c = 0; c < HardwareOutput::maxChannels; ++c)
+        outputSlot[(std::size_t) c] = activeOut[c] ? slot++ : -1;
+    hwOutput.clear();
+    hwOutput.active.store (true);
     player.audioDeviceAboutToStart (device);
 }
 
 void AudioEngine::audioDeviceStopped()
 {
+    hwOutput.active.store (false);
     player.audioDeviceStopped();
+}
+
+// The Master's own target (its default: the graph's output as it is, on the first open pair) and the inserts'
+// hardware outputs, added into the device channels they chose. A channel that is not open drops its sound.
+void AudioEngine::routeOutputs (float* const* outputs, int numOutputs, int n) noexcept
+{
+    const auto slotOf = [this] (int c) { return c >= 0 && c < HardwareOutput::maxChannels ? outputSlot[(std::size_t) c] : -1; };
+
+    if (const auto channel = masterOutChannel.load (std::memory_order_relaxed); channel != outputDefault && numOutputs > 0 && n <= HardwareOutput::capacity)
+    {
+        auto* l = masterScratch.data();
+        auto* r = masterScratch.data() + HardwareOutput::capacity;
+        const auto* srcR = numOutputs > 1 && outputs[1] != nullptr ? outputs[1] : outputs[0];
+        if (outputs[0] == nullptr)
+            return;
+        std::copy (outputs[0], outputs[0] + n, l);
+        std::copy (srcR, srcR + n, r);
+        for (int k = 0; k < std::min (numOutputs, 2); ++k)
+            if (outputs[k] != nullptr)
+                std::fill (outputs[k], outputs[k] + n, 0.0f);
+
+        const auto mode = (OutputMode) masterOutMode.load (std::memory_order_relaxed);
+        const auto [first, count] = outputChannelsOf (channel, mode);
+        if (count > 0)
+        {
+            const auto a = slotOf (first), b = count > 1 ? slotOf (first + 1) : -1;
+            if (a >= 0 && a < numOutputs)
+                addToOutput (l, r, mode, outputs[a], b >= 0 && b < numOutputs ? outputs[b] : nullptr, n);
+        }
+    }
+
+    hwOutput.drainInto (outputs, numOutputs, slotOf, n);
+}
+
+std::vector<std::string> AudioEngine::getOutputChannelNames() const
+{
+    std::vector<std::string> names;
+
+    if (auto* device = deviceManager.getCurrentAudioDevice(); device != nullptr)
+        for (const auto& n : device->getOutputChannelNames())
+            if ((int) names.size() < HardwareOutput::maxChannels)
+                names.push_back (n.toStdString());
+
+    return names;
+}
+
+bool AudioEngine::isOutputChannelOpen (int channel) const
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+    return device != nullptr && channel >= 0 && device->getActiveOutputChannels()[channel];
+}
+
+void AudioEngine::setTrackOutput (int track, int channel, OutputMode mode)
+{
+    if (track < 0 || track >= (int) song.mixer.size())
+        return;
+
+    if (track > 0 && channel < 0) // an insert without a target: the default (the Master only), nothing saved
+        channel = outputDefault;
+
+    editSong ([=] (Song& s) {
+        s.mixer[(std::size_t) track].outputChannel = channel;
+        s.mixer[(std::size_t) track].outputMode = mode;
+    });
+
+    openTargetedOutputs();
+}
+
+void AudioEngine::openTargetedOutputs()
+{
+    auto* device = deviceManager.getCurrentAudioDevice();
+    if (device == nullptr)
+        return;
+
+    const auto available = juce::jmin ((int) HardwareOutput::maxChannels, device->getOutputChannelNames().size());
+    auto setup = deviceManager.getAudioDeviceSetup();
+    auto wanted = device->getActiveOutputChannels();
+    const auto before = wanted;
+
+    for (const auto& t : song.mixer)
+    {
+        const auto [first, count] = outputChannelsOf (t.outputChannel, t.outputMode);
+        for (int c = first; c < first + count; ++c)
+            if (c < available)
+                wanted.setBit (c);
+    }
+
+    if (wanted == before)
+        return;
+
+    setup.useDefaultOutputChannels = false;
+    setup.outputChannels = wanted;
+    deviceManager.setAudioDeviceSetup (setup, true);
+    sendChangeMessage();
 }
 } // namespace lynx

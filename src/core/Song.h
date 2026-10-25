@@ -732,6 +732,20 @@ enum class InputMonitor : std::uint8_t
 
 enum class MixerDock : std::uint8_t { left, middle, right };
 
+// How an insert's stereo output reaches its hardware output target (LYNX extra, REA round 156): a stereo pair of
+// device channels, or one channel alone fed with the sum (L+R)/2, the left side only or the right side only.
+enum class OutputMode : std::uint8_t
+{
+    stereo,
+    monoSum,
+    monoLeft,
+    monoRight
+};
+
+// MixerTrack::outputChannel values besides a device channel (0-based)
+constexpr int outputDefault = -2; // Master: the device's first output pair; inserts: none (they reach it via the Master)
+constexpr int outputNone = -1;    // no hardware output (the Master too)
+
 struct MixerTrack
 {
     std::string name;
@@ -753,6 +767,11 @@ struct MixerTrack
     int inputChannel = -1;
     bool inputStereo = true;
     InputMonitor monitor = InputMonitor::automatic;
+    // hardware output target (FL's "Audio output target" .flp 0x93; mono channels are a LYNX extra, REA round 156):
+    // outputDefault, outputNone or the first device output channel; an insert with a target still feeds the
+    // Master (and its sends) as in FL — the hardware output is a parallel path
+    int outputChannel = outputDefault;
+    OutputMode outputMode = OutputMode::stereo;
     // FL's mixer track menu "CPU › Allow threaded processing" (REA round 134): off = this insert always runs on the
     // audio thread itself (as do inserts holding a plugin whose own option is off)
     bool threaded = true;

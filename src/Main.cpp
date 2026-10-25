@@ -909,6 +909,26 @@ private:
                             && richBack->mixer[3].effects[0].state == vocodexSlot.state && richBack->mixer[3].effects[0].sidechain2 == 2
                             && richBack->markers() == rich.markers();
 
+        // hardware output targets (REA round 156): saved only when set; old projects (no field) keep the defaults
+        bool hwOutOk = false;
+        {
+            auto song = lynx::Song::makeDefault();
+            const auto plain = lynx::ProjectFile::toJson (song);
+            song.mixer[0].outputChannel = lynx::outputNone;
+            song.mixer[1].outputChannel = 2;
+            song.mixer[1].outputMode = lynx::OutputMode::monoRight;
+            song.mixer[2].outputChannel = 6;
+            song.mixer[3].outputChannel = 4;
+            song.mixer[3].outputMode = lynx::OutputMode::monoSum;
+            const auto back = lynx::ProjectFile::fromJson (lynx::ProjectFile::toJson (song), error);
+            const auto plainBack = lynx::ProjectFile::fromJson (plain, error);
+            hwOutOk = back && back->mixer[0].outputChannel == lynx::outputNone && back->mixer[1].outputChannel == 2
+                      && back->mixer[1].outputMode == lynx::OutputMode::monoRight && back->mixer[2].outputChannel == 6
+                      && back->mixer[2].outputMode == lynx::OutputMode::stereo && back->mixer[3].outputMode == lynx::OutputMode::monoSum
+                      && back->mixer[4].outputChannel == lynx::outputDefault && ! plain.contains ("\"output\"") && plainBack
+                      && plainBack->mixer[0].outputChannel == lynx::outputDefault && plainBack->mixer[1].outputChannel == lynx::outputDefault;
+        }
+
         // LYNX substitutes (round 98): a missing plugin's slot plays a built-in equivalent and the project keeps the
         // original reference byte for byte (.flp record and LYNX plugin state)
         bool substituteOk = false;
@@ -1169,7 +1189,7 @@ private:
         }
         const auto nativesOk = nativesResult == "OK";
 
-        const auto ok = audioOk && projectOk && richOk && substituteOk && patcherOk && nativesOk && undoOk && recordOk && recordUndoOk && midiOk && packageOk
+        const auto ok = audioOk && projectOk && richOk && hwOutOk && substituteOk && patcherOk && nativesOk && undoOk && recordOk && recordUndoOk && midiOk && packageOk
                         && wavpack != "ERROR" && effectsOk;
 
         juce::String report;
@@ -1177,6 +1197,7 @@ private:
                << "peak=" << peak << "\n"
                << "project=" << (projectOk ? "OK" : "ERROR " + error) << "\n"
                << "project_features=" << (richOk ? "OK" : "ERROR") << "\n"
+               << "hardware_outputs=" << (hwOutOk ? "OK" : "ERROR") << "\n"
                << "plugin_substitutes=" << (substituteOk ? "OK" : "ERROR") << "\n"
                << "patcher=" << (patcherOk ? "OK" : "ERROR") << "\n"
                << "native_engines=" << nativesResult << " (" << nativesMade << " made)\n"
