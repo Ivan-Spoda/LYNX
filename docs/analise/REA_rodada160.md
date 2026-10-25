@@ -150,6 +150,13 @@ which at 24 bits is below float resolution near full scale and was rounded away 
 - `EventBuffer::sortByOffset`: `std::stable_sort` allocates a temporary buffer — on the audio thread, every block
   with events. Now an in-place stable insertion sort (events arrive nearly sorted). [TEST]
   q160_event_sort_is_stable_and_allocation_free.
+- Audit of every built-in unit [TEST] q160_audio_thread_allocations_and_cost_of_builtin_units: all 95 effects and
+  38 instruments (all kinds but plugin, Slayer, MIDI Out, audio clip), prepared at 48 kHz, 100 blocks of 512 frames
+  (instruments: two notes retriggered every 10 blocks) with a global `operator new` counter: **0 of 133 units
+  allocate on the audio thread**. Costliest per 512-frame block (on this PC while three other builds were running, so
+  upper bounds): sampler with ~6 overlapping voices 542 µs (5.1 % of the 10.7 ms budget; FL's 24-point sinc per voice,
+  as FL), Vintage Phaser 498 µs, Prism Multiband 369 µs, LuxeVerb 245 µs, Quell 236 µs, Ember 223 µs; everything else
+  ≤ 2.1 %. Nothing there explains dropouts at her ~1–8 % average load.
 
 ## 7. WASAPI dropouts
 
@@ -164,10 +171,15 @@ hint suggests the interface's own ASIO driver (e.g. "SSL ASIO Driver 1"), then L
 
 ## 8. Not done yet (rest of the audit)
 
-- Plugin sample-rate conversion: 44.1 kHz files and plugins on a 48 kHz device (where LYNX resamples, which kernel).
-- Pan law vs FL, mixer summing.
-- CPU timings of the new stretcher (load time of a project with many stretched channels) and of the preview sinc.
-- A systematic scan of the audio thread for allocations / locks (beyond the event sort).
+- CPU timings of the new stretcher (load time of a project with many stretched channels).
+- Locks on the audio thread (the allocation scan above covers built-in units only; the engine/graph path around them,
+  the JUCE side, is not covered by build-local tests).
+- Plugin sample-rate conversion: none exists — [CODE] hosted plugins are prepared at the device rate
+  (src/engine/PluginHost.cpp, ClapFormat, Vst2Format) and sample files of another rate are read with FL's sinc
+  (sampler, audio clips) or the audio editor's Blackman-windowed sinc (16 zero crossings), so a 44.1 kHz file on her
+  48 kHz SSL goes through a proper band-limited conversion everywhere (the preview player was the one exception, §4).
+- Pan law: already matched to FL per instrument/mixer in earlier rounds (REA_rodada27 §3.1, FL's host pan laws in
+  core/FlVoiceProcessor.h); not re-measured here.
 - Audio editor time-stretch path, playlist tempo-following clips: same stretcher, not separately measured.
 
 ## Where I stopped

@@ -424,4 +424,5 @@ TEST (q160_audio_thread_allocations_and_cost_of_builtin_units)
                      rows[i].usPerBlock / 106.67);
     std::printf ("  [q160 rt] %d of %d units allocate on the audio thread\n", allocating, (int) rows.size());
     CHECK (rows.size() > 100);
+    CHECK (allocating == 0); // round 160: 0 of 133 built-in units
 }
