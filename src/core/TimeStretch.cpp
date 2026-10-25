@@ -86,33 +86,30 @@ double besselI0 (double x)
 }
 
 // Kaiser-windowed sinc resampling of the whole signal to `outFrames` (used for ratios within 0.1 % of 1, where the
-// cutoff stays at Nyquist): 64 taps, β = 9 (stop band beyond −90 dB), double-precision sums.
+// cutoff stays at Nyquist): 64 taps, β = 9 (stop band beyond −90 dB). Polyphase: the kernel is tabulated for 512
+// fractional positions (each row = the 64 taps for that position) and two neighbouring rows are blended, so each output
+// frame is two contiguous dot products (vectorised) — a 3-minute stereo take resamples in about a second.
 Planar resampleTo (const Planar& in, long outFrames)
 {
-    constexpr int half = 32;
+    constexpr int half = 32, taps = 2 * half;
+    constexpr int phases = 512;
     constexpr double beta = 9.0;
     const auto n = in.frames();
     const auto step = (double) n / (double) outFrames; // input frames per output frame
     const auto norm = 1.0 / besselI0 (beta);
 
-    // the kernel is tabulated at 1/512 of a frame and interpolated linearly
-    constexpr int phases = 512;
-    std::vector<double> table ((std::size_t) (half * phases + 2));
-    for (std::size_t i = 0; i < table.size(); ++i)
-    {
-        const auto x = (double) i / phases;
-        const auto r = x / half;
-        const auto w = r >= 1.0 ? 0.0 : besselI0 (beta * std::sqrt (1.0 - r * r)) * norm;
-        table[i] = (x == 0.0 ? 1.0 : std::sin (pi * x) / (pi * x)) * w;
-    }
     const auto kernel = [&] (double x) {
-        x = std::abs (x) * phases;
-        const auto i = (std::size_t) x;
-        if (i + 1 >= table.size())
+        const auto r = std::abs (x) / half;
+        if (r >= 1.0)
             return 0.0;
-        const auto f = x - (double) i;
-        return table[i] + (table[i + 1] - table[i]) * f;
+        const auto w = besselI0 (beta * std::sqrt (1.0 - r * r)) * norm;
+        return (x == 0.0 ? 1.0 : std::sin (pi * x) / (pi * x)) * w;
     };
+    // row p, tap k: the weight of input frame i0 − half + 1 + k for the position i0 + p / phases
+    std::vector<float> table ((std::size_t) ((phases + 1) * taps));
+    for (int p = 0; p <= phases; ++p)
+        for (int k = 0; k < taps; ++k)
+            table[(std::size_t) (p * taps + k)] = (float) kernel ((double) (k - half + 1) - (double) p / phases);
 
     Planar out;
     for (const auto& c : in.ch)
@@ -122,15 +119,33 @@ Planar resampleTo (const Planar& in, long outFrames)
         {
             const auto pos = (double) j * step;
             const auto i0 = (long) std::floor (pos);
-            const auto frac = pos - (double) i0;
-            double acc = 0.0;
-            for (long t = -half + 1; t <= half; ++t)
+            const auto phase = (pos - (double) i0) * phases;
+            const auto p = std::min (phases - 1, (int) phase);
+            const auto g = (float) (phase - (double) p);
+            const auto* k0 = table.data() + (std::size_t) (p * taps);
+            const auto* k1 = k0 + taps;
+            const auto first = i0 - half + 1;
+            float a0 = 0.0f, a1 = 0.0f;
+            if (first >= 0 && first + taps <= n)
             {
-                const auto i = i0 + t;
-                if (i >= 0 && i < n)
-                    acc += (double) c[(std::size_t) i] * kernel ((double) t - frac);
+                const auto* x = c.data() + first;
+                for (int k = 0; k < taps; ++k)
+                {
+                    a0 += x[k] * k0[k];
+                    a1 += x[k] * k1[k];
+                }
             }
-            y[(std::size_t) j] = (float) acc;
+            else
+                for (int k = 0; k < taps; ++k)
+                {
+                    const auto i = first + k;
+                    if (i >= 0 && i < n)
+                    {
+                        a0 += c[(std::size_t) i] * k0[k];
+                        a1 += c[(std::size_t) i] * k1[k];
+                    }
+                }
+            y[(std::size_t) j] = a0 + (a1 - a0) * g;
         }
         out.ch.push_back (std::move (y));
     }

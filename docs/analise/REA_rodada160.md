@@ -102,7 +102,14 @@ Energy 1.5–30 ms before each click relative to the click (click train; general
 
 The pre-roll never reaches back past the previous splice (attacks are ≥ 50 ms apart).
 
-### 2.3 Tests [TEST]
+### 2.3 Cost [MEAS]
+
+Offline, once per (file, ratio, method), in parallel on project load. On this PC (busy with other builds): the 4.9 s
+stereo vocal takes 0.57–0.63 s to stretch (≈ 0.12 × real time). The near-unity resample was rewritten after the crash
+as a polyphase table with two vectorised dot products per frame: 2 s of stereo in 13–25 ms instead of 46–84 ms (same
+error: −116 / −107 / −94 dB vs the ideal at 1 / 10 / 18 kHz), i.e. about a second for a 3-minute take.
+
+### 2.4 Tests [TEST]
 - q160_stretch_near_unity_is_a_clean_resample: 1 kHz sine at 0.99998, error vs ideal < −80 dB; ratio 1 = copy.
 - q160_stretch_keeps_clicks_sharp_and_on_time: click train × 0.8/1.5/2.0, general and drums: 10/10 clicks within
   2 samples, peak > 0.7, pre-echo < −35 dB.
@@ -171,7 +178,6 @@ hint suggests the interface's own ASIO driver (e.g. "SSL ASIO Driver 1"), then L
 
 ## 8. Not done yet (rest of the audit)
 
-- CPU timings of the new stretcher (load time of a project with many stretched channels).
 - Locks on the audio thread (the allocation scan above covers built-in units only; the engine/graph path around them,
   the JUCE side, is not covered by build-local tests).
 - Plugin sample-rate conversion: none exists — [CODE] hosted plugins are prepared at the device rate
