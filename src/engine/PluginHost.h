@@ -45,11 +45,23 @@ struct PluginCrash
 int pluginCrashCount() noexcept;
 std::vector<PluginCrash> pluginCrashes();
 
+// FL's wrapper options a hosted plugin follows while it runs (REA round 151; PluginRef has them, saved per plugin)
+struct HostedOptions
+{
+    bool releaseVelocity = true, sendBendRange = false, modXAftertouch = false, allNotesOffOnStop = true, resetOnFlush = true,
+         sendLoopPosition = true;
+    int bendRange = 12;
+    static HostedOptions of (const PluginRef& ref) noexcept
+    {
+        return { ref.releaseVelocity, ref.sendBendRange, ref.modXAftertouch, ref.allNotesOffOnStop, ref.resetOnFlush, ref.sendLoopPosition, ref.bendRange };
+    }
+};
+
 class PluginInstrument final : public Instrument
 {
 public:
     // fixedBlock > 0: FL's "Use fixed size buffers" — the plugin always gets blocks of that length (+ that much latency)
-    PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize, int fixedBlock = 0);
+    PluginInstrument (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize, int fixedBlock = 0, HostedOptions options = {});
     ~PluginInstrument() override;
 
     juce::AudioPluginInstance& getInstance() noexcept { return *plugin; }
@@ -58,6 +70,10 @@ public:
     void noteOn (int key, float velocity) noexcept override;
     void noteOff (int key) noexcept override;
     void allNotesOff() noexcept override;
+    void setNextNoteModulation (float modX, float) noexcept override { nextModX = modX; }
+    void setNextNoteRelease (float velocity) noexcept override { nextRelease = velocity; }
+    void transportStopped() noexcept override;
+    void panic() noexcept override;
     void render (float* left, float* right, int n, float gainLeft, float gainRight) noexcept override;
     void setParameter (int index, float value) noexcept override;
     int latencySamples() const noexcept override
@@ -72,7 +88,8 @@ public:
     std::optional<std::string> captureState();
     // Sets a parameter from the UI / controllers (setValueNotifyingHost), guarded like the audio calls.
     void setParameterFromUi (int index, float value);
-    void setRenderMode (bool offline) { if (! hasCrashed()) setPluginRenderMode (*plugin, offline, plugin->getBlockSize() > 0 ? plugin->getBlockSize() : blockSize); }
+    void setRenderMode (bool offline);
+    void resetForExport(); // UI thread, before an export (the audio is not running through it)
     bool usesFixedBlocks() const noexcept { return fixed != nullptr; }
     // The MIDI "parameters" (core/MidiControls.h): CC / aftertouch / pitch bend values last asked for.
     float midiControlValue (int index) const noexcept { return midiControls.value (index); }
@@ -88,6 +105,12 @@ private:
     bool producesMidi = false;
     std::array<MidiOutNote, 256> midiOut {};
     int midiOutCount = 0;
+    HostedOptions options;
+    float nextModX = 0.5f, nextRelease = 0.5f;
+    bool bendRangeSent = false;
+    std::atomic<bool> resetPending { false };     // panic with "Reset plugin": reset at the next render (audio thread)
+    std::array<std::array<std::uint64_t, 2>, 16> heldKeys {}; // per MIDI channel: the notes on (for stop without All Notes Off)
+    void hold (int channel, int key, bool on) noexcept;
 
     std::unique_ptr<juce::AudioPluginInstance> plugin;
     juce::AudioBuffer<float> buffer;
@@ -105,7 +128,7 @@ class PluginEffect final : public Effect
 {
 public:
     // fixedBlock > 0: FL's "Use fixed size buffers" — the plugin always gets blocks of that length (+ that much latency)
-    PluginEffect (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize, int fixedBlock = 0);
+    PluginEffect (std::unique_ptr<juce::AudioPluginInstance> instance, int maxBlockSize, int fixedBlock = 0, HostedOptions options = {});
     ~PluginEffect() override;
 
     juce::AudioPluginInstance& getInstance() noexcept { return *plugin; }
@@ -126,7 +149,8 @@ public:
     std::optional<std::string> captureState();
     // Sets a parameter from the UI / controllers (setValueNotifyingHost), guarded like the audio calls.
     void setParameterFromUi (int index, float value);
-    void setRenderMode (bool offline) { if (! hasCrashed()) setPluginRenderMode (*plugin, offline, plugin->getBlockSize() > 0 ? plugin->getBlockSize() : blockSize); }
+    void setRenderMode (bool offline);
+    void resetForExport(); // UI thread, before an export (the audio is not running through it)
     bool usesFixedBlocks() const noexcept { return fixed != nullptr; }
     float midiControlValue (int index) const noexcept { return midiControls.value (index); }
 
@@ -142,6 +166,7 @@ private:
     std::string name;
     std::atomic<bool> crashed { false };
     std::unique_ptr<FixedBlock> fixed;
+    HostedOptions options;
 };
 
 // Plugin formats, known-plugin list (saved in AppData) and instance creation.

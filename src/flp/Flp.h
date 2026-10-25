@@ -110,6 +110,7 @@ struct Channel
     int swingMix = 128;          // 0x61: 0..128
     int cutGroup = 0, cutBy = 0; // 0x84
     int rootNote = -1;           // 0x87 (MIDI), -1 = default (C5 = 60)
+    int fineTune = 0;            // 0x8E: Misc › Root note › Fine tune, cents (round 151)
     int maxVoices = 0;           // 0xDD: 0 = unlimited (with Mono off, the excess releases the oldest voices)
     int slideTime = 820;         // 0xDD +4: porta/slide time (0..1660; REA_rodada6 §4)
     bool monoFlag = false, portaFlag = false; // 0xDD +8: bit 0 Mono, bit 1 Porta

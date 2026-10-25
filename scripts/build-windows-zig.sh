@@ -100,6 +100,7 @@ APP_SOURCES+=(src/ui/HintBar.cpp src/ui/Toolbar.cpp)
 APP_SOURCES+=(src/core/ThreeOsc.cpp)
 # onboarding: FL Studio integration (plugin database, sample relocation), background scan, setup wizard
 APP_SOURCES+=(src/core/FlPluginDb.cpp src/engine/FlStudio.cpp src/ui/SetupWizard.cpp)
+APP_SOURCES+=(src/core/PluginCatalog.cpp src/ui/PluginPicker.cpp)
 APP_SOURCES+=(src/core/MissingFiles.cpp src/core/ProjectSafety.cpp src/ui/MissingFilesDialog.cpp src/ui/SettingsDialog.cpp)
 # LYNX substitutes for missing third-party plugins (round 98)
 APP_SOURCES+=(src/core/PluginSubstitutes.cpp)

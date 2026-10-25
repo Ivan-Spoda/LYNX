@@ -2535,6 +2535,13 @@ public:
                          },
                          [trackingOf] (const ChannelDef& d) { return (double) trackingOf (d).mid; },
                          [tracking] (ChannelDef& d, double v) { tracking (d).mid = juce::roundToInt (v); }, TR_NOOP ("Mid"));
+        // FL's tracking Mod X / Y (round 151): the notes' Mod X / Y follow the velocity / key like their pan
+        trackModX = knob ([name] { return ui::panSpec (name() + " - " + tr ("Tracking: Mod X (the note's filter cutoff / a plugin's MOD X)")); },
+                          [trackingOf] (const ChannelDef& d) { return (double) trackingOf (d).modX; },
+                          [tracking] (ChannelDef& d, double v) { tracking (d).modX = (float) v; }, TR_NOOP ("Mod X"));
+        trackModY = knob ([name] { return ui::panSpec (name() + " - " + tr ("Tracking: Mod Y (the note's filter resonance)")); },
+                          [trackingOf] (const ChannelDef& d) { return (double) trackingOf (d).modY; },
+                          [tracking] (ChannelDef& d, double v) { tracking (d).modY = (float) v; }, TR_NOOP ("Mod Y"));
         // Echo delay / fat mode
         echoFeed = knob ([name] { return ui::percentSpec (name() + " - " + tr ("Delay feedback (100% = the echoes as loud as the note)"), 0.0); },
                          [] (const ChannelDef& d) { return (double) d.misc.echo.feedback / 2.0; },
@@ -2542,6 +2549,12 @@ public:
         echoPan = knob ([name] { return ui::panSpec (name() + " - " + tr ("Delay pan: each echo moves this much")); },
                         [] (const ChannelDef& d) { return (double) d.misc.echo.pan; }, [] (ChannelDef& d, double v) { d.misc.echo.pan = (float) v; },
                         TR_NOOP ("Pan"));
+        echoModX = knob ([name] { return ui::panSpec (name() + " - " + tr ("Delay Mod X: each echo moves the note's Mod X this much")); },
+                         [] (const ChannelDef& d) { return (double) d.misc.echo.modX; }, [] (ChannelDef& d, double v) { d.misc.echo.modX = (float) v; },
+                         TR_NOOP ("Mod X"));
+        echoModY = knob ([name] { return ui::panSpec (name() + " - " + tr ("Delay Mod Y: each echo moves the note's Mod Y this much")); },
+                         [] (const ChannelDef& d) { return (double) d.misc.echo.modY; }, [] (ChannelDef& d, double v) { d.misc.echo.modY = (float) v; },
+                         TR_NOOP ("Mod Y"));
         echoPitch = knob ([name] {
                               ui::ValueSpec s;
                               s.name = name() + " - " + tr ("Delay pitch: each echo moves this many cents");
@@ -2584,6 +2597,19 @@ public:
         addToKey.setButtonText (tr ("Add to key"));
         addToKey.setTooltip (tr ("Add to key: the notes are played the root note's distance from C5 away (instruments that are not samplers)"));
         addToKey.onClick = [this] { edit ([on = addToKey.getToggleState()] (ChannelDef& d) { d.misc.addToKey = on; }); };
+        // FL's Root note › Fine tune (round 151 [DATA: .flp event 0x8E, cents]): every note of the channel this many
+        // cents away
+        fineTune = knob ([name] {
+                             ui::ValueSpec s;
+                             s.name = name() + " - " + tr ("Fine tuning");
+                             s.minimum = -100.0;
+                             s.maximum = 100.0;
+                             s.interval = 1.0;
+                             s.toText = [] (double v) { return tr ("{0} cents", { (v > 0.0 ? "+" : "") + juce::String (juce::roundToInt (v)) }); };
+                             return s;
+                         },
+                         [] (const ChannelDef& d) { return (double) d.misc.fineTune; }, [] (ChannelDef& d, double v) { d.misc.fineTune = (float) v; },
+                         TR_NOOP ("Fine tune"));
         rootReset.setButtonText (tr ("Reset"));
         rootReset.setTooltip (tr ("Reset the root note to C5"));
         rootReset.onClick = [this] { if (rootKeys.onPick) rootKeys.onPick (60); };
@@ -2742,7 +2768,7 @@ public:
             const auto title = sections.back().first;
             trackVol.setBounds (title.getRight() - 84, title.getY() + 2, 38, 16);
             trackKey.setBounds (title.getRight() - 44, title.getY() + 2, 38, 16);
-            row (track, { trackPan, trackMid });
+            row (track, { trackPan, trackModX, trackModY, trackMid });
         }
         area.removeFromTop (6);
         auto bottom = area.removeFromTop (130);
@@ -2768,7 +2794,13 @@ public:
         bottom.removeFromLeft (6);
         {
             auto echo = section (bottom, tr ("Echo delay / fat mode"));
-            row (echo, { echoFeed, echoPan, echoPitch, echoTime, echoCount });
+            {
+                // seven knobs (round 151 added Mod X / Y): narrower when the window is
+                auto line = echo.removeFromTop (knobH);
+                const auto w = juce::jmin (knobW, line.getWidth() / 7);
+                for (auto* k : { echoFeed, echoPan, echoModX, echoModY, echoPitch, echoTime, echoCount })
+                    k->setBounds (line.removeFromLeft (w));
+            }
             auto toggles = echo.removeFromTop (22);
             pingPong.setBounds (toggles.removeFromLeft (100));
             fatMode.setBounds (toggles.removeFromLeft (100));
@@ -2782,6 +2814,8 @@ public:
             auto line = toggles.removeFromTop (22);
             rootReset.setBounds (line.removeFromRight (50).reduced (0, 1));
             addToKey.setBounds (line);
+            auto fine = rootRow.removeFromLeft (58);
+            row (fine, { fineTune });
             rootKeys.setBounds (rootRow.reduced (4, 2));
         }
     }
@@ -2875,7 +2909,8 @@ private:
     FrameKnob *pan = nullptr, *volume = nullptr, *maxPoly = nullptr, *slide = nullptr, *swing = nullptr, *cut = nullptr, *cutBy = nullptr,
               *arpRange = nullptr, *arpGate = nullptr, *arpRepeat = nullptr, *modX = nullptr, *modY = nullptr, *timeGate = nullptr,
               *timeShift = nullptr, *trackPan = nullptr, *trackMid = nullptr, *echoFeed = nullptr, *echoPan = nullptr, *echoPitch = nullptr,
-              *echoTime = nullptr, *echoCount = nullptr;
+              *echoTime = nullptr, *echoCount = nullptr, *trackModX = nullptr, *trackModY = nullptr, *echoModX = nullptr, *echoModY = nullptr,
+              *fineTune = nullptr;
     juce::ToggleButton porta, mono, fullPorta, pingPong, fatMode, mainPitch, arpSlide, addToKey;
     RootKeyboard rootKeys;
     juce::TextButton rootReset;

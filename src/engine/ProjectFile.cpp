@@ -268,6 +268,21 @@ juce::var pluginToVar (const PluginRef& p)
         o->setProperty ("notifyRender", false);
     if (p.latencyOverrideMs >= 0.0f)
         o->setProperty ("latencyMs", p.latencyOverrideMs);
+    // the round-151 wrapper options, when not FL's defaults
+    if (! p.releaseVelocity)
+        o->setProperty ("releaseVelocity", false);
+    if (p.sendBendRange)
+        o->setProperty ("sendBendRange", true);
+    if (p.bendRange != 12)
+        o->setProperty ("bendRange", p.bendRange);
+    if (p.modXAftertouch)
+        o->setProperty ("modXAftertouch", true);
+    if (! p.allNotesOffOnStop)
+        o->setProperty ("allNotesOffOnStop", false);
+    if (! p.resetOnFlush)
+        o->setProperty ("resetOnFlush", false);
+    if (! p.sendLoopPosition)
+        o->setProperty ("sendLoopPosition", false);
     return juce::var (o.release());
 }
 
@@ -289,6 +304,13 @@ PluginRef pluginFromVar (const juce::var& v)
     p.midiOutPort = juce::jlimit (-1, 255, (int) v.getProperty ("midiOutPort", -1));
     p.notifyRender = (bool) v.getProperty ("notifyRender", true);
     p.latencyOverrideMs = v.hasProperty ("latencyMs") ? juce::jlimit (0.0f, 2000.0f, (float) (double) v["latencyMs"]) : -1.0f;
+    p.releaseVelocity = (bool) v.getProperty ("releaseVelocity", true);
+    p.sendBendRange = (bool) v.getProperty ("sendBendRange", false);
+    p.bendRange = juce::jlimit (1, 48, (int) v.getProperty ("bendRange", 12));
+    p.modXAftertouch = (bool) v.getProperty ("modXAftertouch", false);
+    p.allNotesOffOnStop = (bool) v.getProperty ("allNotesOffOnStop", true);
+    p.resetOnFlush = (bool) v.getProperty ("resetOnFlush", true);
+    p.sendLoopPosition = (bool) v.getProperty ("sendLoopPosition", true);
     return p;
 }
 
@@ -363,6 +385,14 @@ juce::var patcherToVar (const PatcherDoc& doc)
             tracks.add (t);
         o->setProperty ("outputTracks", tracks);
     }
+    if (! doc.surface.empty()) // the Surface tab (round 151): [kind, name, value, value Y, x, y]
+    {
+        juce::Array<juce::var> controls;
+        for (const auto& c : doc.surface)
+            controls.add (juce::Array<juce::var> { (int) c.kind, juce::String::fromUTF8 (c.name.c_str()), c.value, c.valueY, c.x, c.y });
+        o->setProperty ("surface", controls);
+        o->setProperty ("surfaceAt", juce::Array<juce::var> { doc.surfaceX, doc.surfaceY });
+    }
     return juce::var (o.release());
 }
 
@@ -404,7 +434,7 @@ PatcherDoc patcherFromVar (const juce::var& v, const Song& song)
             {
                 PatchWire wire;
                 wire.kind = (PatchWire::Kind) juce::jlimit (0, 2, (int) w[0]);
-                wire.from = juce::jlimit (patchToHost, count - 1, (int) w[1]);
+                wire.from = juce::jlimit (patchSurface, count - 1, (int) w[1]); // (the Surface node, round 151)
                 wire.fromPort = juce::jmax (0, (int) w[2]);
                 wire.to = juce::jlimit (patchToHost, count - 1, (int) w[3]);
                 wire.toPort = juce::jmax (0, (int) w[4]);
@@ -412,7 +442,7 @@ PatcherDoc patcherFromVar (const juce::var& v, const Song& song)
                 wire.enabled = (bool) w[6];
                 for (int k = 7; k < w.size(); ++k)
                     wire.curve.push_back (juce::jlimit (0.0f, 1.0f, (float) (double) w[k]));
-                if (wire.from != patchToHost && wire.to != patchFromHost)
+                if (wire.from != patchToHost && wire.to != patchFromHost && (wire.from != patchSurface || wire.kind == PatchWire::Kind::control))
                     doc.wires.push_back (std::move (wire));
             }
     if (const auto& io = v["io"]; io.isArray() && io.size() == 4)
@@ -437,6 +467,26 @@ PatcherDoc patcherFromVar (const juce::var& v, const Song& song)
     if (auto* tracks = v["outputTracks"].getArray())
         for (const auto& t : *tracks)
             doc.outputTracks.push_back (juce::jlimit (-1, maxMixerTracks - 1, (int) t));
+    if (auto* controls = v["surface"].getArray())
+        for (const auto& c : *controls)
+            if (c.isArray() && c.size() >= 6)
+            {
+                SurfaceControl s;
+                s.kind = (SurfaceControl::Kind) juce::jlimit (0, 4, (int) c[0]);
+                s.name = c[1].toString().toStdString();
+                s.value = juce::jlimit (0.0f, 1.0f, (float) (double) c[2]);
+                s.valueY = juce::jlimit (0.0f, 1.0f, (float) (double) c[3]);
+                s.x = (float) (double) c[4];
+                s.y = (float) (double) c[5];
+                doc.surface.push_back (std::move (s));
+            }
+    if (const auto& at = v["surfaceAt"]; at.isArray() && at.size() == 2)
+    {
+        doc.surfaceX = (float) (double) at[0];
+        doc.surfaceY = (float) (double) at[1];
+    }
+    // a Surface cable whose control is gone
+    std::erase_if (doc.wires, [&doc] (const PatchWire& w) { return w.from == patchSurface && w.fromPort >= doc.surfaceOutputs(); });
     return doc;
 }
 
@@ -807,6 +857,8 @@ juce::var channelToVar (const ChannelDef& c)
         misc->setProperty ("mainPitch", m.mainPitch);
         misc->setProperty ("rootNote", m.rootNote);
         misc->setProperty ("addToKey", m.addToKey);
+        if (m.fineTune != 0.0f)
+            misc->setProperty ("fineTune", m.fineTune);
         o->setProperty ("misc", juce::var (misc.release()));
     }
     if (c.cutGroup != 0 || c.cutBy != 0)
@@ -1055,6 +1107,7 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
         m.mainPitch = (bool) misc.getProperty ("mainPitch", true);
         m.rootNote = juce::jlimit (0, 127, (int) misc.getProperty ("rootNote", 60));
         m.addToKey = (bool) misc.getProperty ("addToKey", false);
+        m.fineTune = juce::jlimit (-100.0f, 100.0f, (float) (double) misc.getProperty ("fineTune", 0.0));
     }
 
     if (const auto& cut = c["cut"]; cut.isArray() && cut.size() == 2)

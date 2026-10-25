@@ -74,14 +74,43 @@ class PatcherEditor final : public juce::Component, private juce::Timer
 public:
     PatcherEditor (AudioEngine& e, Target t) : engine (e), target (t)
     {
+        // FL's Map / Surface tabs (round 151); on the Surface: Edit (move / rename / delete the controls) and "+"
+        for (auto* b : { &mapTab, &surfaceTab, &editButton, &addButton })
+        {
+            b->setWantsKeyboardFocus (false);
+            addAndMakeVisible (b);
+        }
+        mapTab.setClickingTogglesState (false);
+        surfaceTab.setClickingTogglesState (false);
+        mapTab.onClick = [this] { showSurface (false); };
+        surfaceTab.onClick = [this] { showSurface (true); };
+        editButton.setClickingTogglesState (true);
+        editButton.setTooltip (tr ("Edit the Surface: drag to move a control, right-click to rename or delete it"));
+        editButton.onClick = [this] { repaint(); };
+        addButton.setTooltip (tr ("Add a control to the Surface (it becomes an output of the Map's Surface node)"));
+        addButton.onClick = [this] { showAddControlMenu ({ 60.0f, 60.0f }); };
+        showSurface (false);
         setSize (900, 560);
         setWantsKeyboardFocus (true);
         startTimerHz (10);
         fit();
     }
 
+    void resized() override
+    {
+        mapTab.setBounds (6, 4, 64, 22);
+        surfaceTab.setBounds (72, 4, 74, 22);
+        editButton.setBounds (156, 4, 56, 22);
+        addButton.setBounds (216, 4, 28, 22);
+    }
+
     void paint (juce::Graphics& g) override
     {
+        if (surfaceView)
+        {
+            paintSurface (g);
+            return;
+        }
         g.fillAll (col::bg0);
         const auto* doc = currentDoc();
         if (doc == nullptr)
@@ -108,6 +137,7 @@ public:
         // nodes
         drawHost (g, *doc, true);
         drawHost (g, *doc, false);
+        drawBox (g, nodeBounds (*doc, patchSurface), tr ("Surface"), selectedNode == patchSurface, true, doc->surface.empty());
         for (int n = 0; n < (int) doc->nodes.size(); ++n)
             drawNode (g, *doc, n);
         for (const auto& p : pins)
@@ -120,6 +150,8 @@ public:
             drawCurve (g, toScreen (dragFrom.at), dragPoint, 2.0f);
         }
 
+        paintMinimap (g, *doc);
+
         g.setColour (col::textSecondary);
         g.setFont (theme::type::small);
         g.drawText (tr ("Right-click: add a plugin. Drag from an output to an input to connect. Double-click a node: its editor."),
@@ -128,10 +160,21 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
+        if (surfaceView)
+        {
+            surfaceDown (e);
+            return;
+        }
         grabKeyboardFocus();
         const auto* doc = currentDoc();
         if (doc == nullptr)
             return;
+        if (! e.mods.isPopupMenu() && minimapArea().contains (e.position) && ! minimapWorld (*doc).isEmpty())
+        {
+            dragging = Drag::minimap;
+            centreViewOn (minimapToWorld (*doc, e.position));
+            return;
+        }
         const auto world = toWorld (e.position);
         if (e.mods.isPopupMenu())
         {
@@ -173,6 +216,17 @@ public:
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (surfaceView)
+        {
+            surfaceDrag (e);
+            return;
+        }
+        if (dragging == Drag::minimap)
+        {
+            if (const auto* doc = currentDoc())
+                centreViewOn (minimapToWorld (*doc, e.position));
+            return;
+        }
         if (dragging == Drag::wire)
             dragPoint = e.position;
         else if (dragging == Drag::node)
@@ -184,6 +238,11 @@ public:
 
     void mouseUp (const juce::MouseEvent& e) override
     {
+        if (surfaceView)
+        {
+            surfaceUp();
+            return;
+        }
         const auto mode = std::exchange (dragging, Drag::none);
         const auto* doc = currentDoc();
         if (doc == nullptr)
@@ -202,6 +261,12 @@ public:
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
+        if (surfaceView)
+        {
+            if (const auto c = controlAt (e.position); c >= 0)
+                renameControl (c);
+            return;
+        }
         if (const auto* doc = currentDoc())
             if (const auto n = nodeAt (*doc, toWorld (e.position)); n >= 0)
                 openNodeEditor (n);
@@ -209,6 +274,8 @@ public:
 
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
     {
+        if (surfaceView)
+            return;
         const auto before = toWorld (e.position);
         zoom = std::clamp (zoom * (wheel.deltaY > 0 ? 1.1f : 1.0f / 1.1f), 0.25f, 3.0f);
         offset = before - e.position / zoom;
@@ -241,7 +308,292 @@ public:
     }
 
 private:
-    enum class Drag { none, wire, node, view };
+    // --- the Surface tab (FL's Patcher › Surface, round 151) ---------------------------------------------------
+    juce::TextButton mapTab { tr ("Map") }, surfaceTab { tr ("Surface") }, editButton { tr ("Edit") }, addButton { "+" };
+    bool surfaceView = false;
+    int surfaceDrag_ = -1;          // the control being turned / moved
+    bool surfaceMoving = false;
+    juce::Point<float> surfaceGrab; // where it was taken (move: offset from its corner)
+    float grabValue = 0.0f, grabValueY = 0.0f;
+
+    void showSurface (bool on)
+    {
+        surfaceView = on;
+        mapTab.setToggleState (! on, juce::dontSendNotification);
+        surfaceTab.setToggleState (on, juce::dontSendNotification);
+        editButton.setVisible (on);
+        addButton.setVisible (on);
+        repaint();
+    }
+
+    static juce::Rectangle<float> controlBounds (const SurfaceControl& c)
+    {
+        switch (c.kind)
+        {
+            case SurfaceControl::Kind::knob: return { c.x, c.y, 56.0f, 70.0f };
+            case SurfaceControl::Kind::slider: return { c.x, c.y, 40.0f, 140.0f };
+            case SurfaceControl::Kind::button: return { c.x, c.y, 80.0f, 30.0f };
+            case SurfaceControl::Kind::checkBox: return { c.x, c.y, 110.0f, 24.0f };
+            case SurfaceControl::Kind::xy: return { c.x, c.y, 140.0f, 158.0f };
+        }
+        return { c.x, c.y, 56.0f, 70.0f };
+    }
+
+    int controlAt (juce::Point<float> p) const
+    {
+        if (const auto* d = currentDoc())
+            for (int i = (int) d->surface.size() - 1; i >= 0; --i)
+                if (controlBounds (d->surface[(std::size_t) i]).contains (p))
+                    return i;
+        return -1;
+    }
+
+    void paintSurface (juce::Graphics& g)
+    {
+        g.fillAll (col::bg1);
+        const auto* d = currentDoc();
+        g.setColour (col::gridStep);
+        for (int x = 20; x < getWidth(); x += 20)
+            for (int y = 40; y < getHeight(); y += 20)
+                g.fillRect ((float) x, (float) y, 1.0f, 1.0f);
+        if (d == nullptr)
+            return;
+        if (d->surface.empty())
+        {
+            g.setColour (col::textSecondary);
+            g.setFont (theme::type::body);
+            g.drawText (tr ("The Surface is empty. \"+\" adds a knob, a slider, a button, a check box or an XY pad; each one becomes an output "
+                            "of the Map's Surface node, to cable to any parameter."),
+                        getLocalBounds().reduced (40), juce::Justification::centred, true);
+        }
+        const auto editing = editButton.getToggleState();
+        for (int i = 0; i < (int) d->surface.size(); ++i)
+        {
+            const auto& c = d->surface[(std::size_t) i];
+            const auto r = controlBounds (c);
+            const auto name = juce::String::fromUTF8 (c.name.c_str());
+            const auto active = surfaceDrag_ == i;
+            g.setFont (theme::type::caption);
+            switch (c.kind)
+            {
+                case SurfaceControl::Kind::knob:
+                    theme::drawKnob (g, r.withHeight (56.0f).reduced (4.0f), c.value, false, active ? col::accent : col::knobArc, active);
+                    g.setColour (col::textSecondary);
+                    g.drawText (name, r.withTrimmedTop (56.0f), juce::Justification::centred, true);
+                    break;
+                case SurfaceControl::Kind::slider:
+                {
+                    const auto track = r.withTrimmedBottom (16.0f).withSizeKeepingCentre (6.0f, r.getHeight() - 26.0f);
+                    g.setColour (col::bg0);
+                    g.fillRoundedRectangle (track, 3.0f);
+                    const auto y = track.getBottom() - c.value * track.getHeight();
+                    g.setColour (active ? col::accent : col::knobArc);
+                    g.fillRoundedRectangle (track.withTop (y), 3.0f);
+                    g.setColour (col::textPrimary);
+                    g.fillRoundedRectangle (juce::Rectangle<float> (24.0f, 10.0f).withCentre ({ track.getCentreX(), y }), 3.0f);
+                    g.setColour (col::textSecondary);
+                    g.drawText (name, r.withTop (r.getBottom() - 16.0f), juce::Justification::centred, true);
+                    break;
+                }
+                case SurfaceControl::Kind::button:
+                    g.setColour (c.value > 0.5f ? col::accent : col::bg4);
+                    g.fillRoundedRectangle (r, 4.0f);
+                    g.setColour (c.value > 0.5f ? col::onAccent : col::textPrimary);
+                    g.drawText (name, r, juce::Justification::centred, true);
+                    break;
+                case SurfaceControl::Kind::checkBox:
+                {
+                    const auto box = r.withWidth (20.0f).reduced (2.0f);
+                    g.setColour (col::bg0);
+                    g.fillRoundedRectangle (box, 3.0f);
+                    if (c.value > 0.5f)
+                    {
+                        g.setColour (col::accent);
+                        g.fillRoundedRectangle (box.reduced (3.0f), 2.0f);
+                    }
+                    g.setColour (col::textPrimary);
+                    g.drawText (name, r.withTrimmedLeft (26.0f), juce::Justification::centredLeft, true);
+                    break;
+                }
+                case SurfaceControl::Kind::xy:
+                {
+                    const auto pad = r.withHeight (140.0f);
+                    g.setColour (col::bg0);
+                    g.fillRoundedRectangle (pad, 4.0f);
+                    g.setColour (col::border);
+                    g.drawHorizontalLine ((int) pad.getCentreY(), pad.getX(), pad.getRight());
+                    g.drawVerticalLine ((int) pad.getCentreX(), pad.getY(), pad.getBottom());
+                    const auto dot = juce::Point<float> (pad.getX() + c.value * pad.getWidth(), pad.getBottom() - c.valueY * pad.getHeight());
+                    g.setColour (active ? col::accent : col::knobArc);
+                    g.fillEllipse (juce::Rectangle<float> (12.0f, 12.0f).withCentre (dot));
+                    g.setColour (col::textSecondary);
+                    g.drawText (name, r.withTop (pad.getBottom()), juce::Justification::centred, true);
+                    break;
+                }
+            }
+            if (editing)
+            {
+                g.setColour (col::accent.withAlpha (0.6f));
+                g.drawRect (r.expanded (2.0f), 1.0f);
+            }
+        }
+    }
+
+    void setControlValue (int i, float v, float vy)
+    {
+        edit ([i, v, vy] (PatcherDoc& d) {
+            if (i >= 0 && i < (int) d.surface.size())
+            {
+                d.surface[(std::size_t) i].value = std::clamp (v, 0.0f, 1.0f);
+                d.surface[(std::size_t) i].valueY = std::clamp (vy, 0.0f, 1.0f);
+            }
+        });
+    }
+
+    void surfaceDown (const juce::MouseEvent& e)
+    {
+        grabKeyboardFocus();
+        const auto* d = currentDoc();
+        if (d == nullptr)
+            return;
+        const auto i = controlAt (e.position);
+        if (e.mods.isPopupMenu())
+        {
+            if (i >= 0)
+                showControlMenu (i);
+            else
+                showAddControlMenu (e.position);
+            return;
+        }
+        if (i < 0)
+            return;
+        surfaceDrag_ = i;
+        const auto& c = d->surface[(std::size_t) i];
+        grabValue = c.value;
+        grabValueY = c.valueY;
+        surfaceMoving = editButton.getToggleState();
+        surfaceGrab = surfaceMoving ? e.position - juce::Point<float> (c.x, c.y) : e.position;
+        if (surfaceMoving)
+            return;
+        switch (c.kind)
+        {
+            case SurfaceControl::Kind::button: setControlValue (i, 1.0f, c.valueY); break; // held while pressed
+            case SurfaceControl::Kind::checkBox: setControlValue (i, c.value > 0.5f ? 0.0f : 1.0f, c.valueY); break;
+            case SurfaceControl::Kind::xy: surfaceDrag (e); break;
+            default: break;
+        }
+        repaint();
+    }
+
+    void surfaceDrag (const juce::MouseEvent& e)
+    {
+        const auto* d = currentDoc();
+        if (d == nullptr || surfaceDrag_ < 0 || surfaceDrag_ >= (int) d->surface.size())
+            return;
+        const auto i = surfaceDrag_;
+        const auto& c = d->surface[(std::size_t) i];
+        if (surfaceMoving)
+        {
+            const auto at = e.position - surfaceGrab;
+            const auto x = std::max (0.0f, std::round (at.x / 10.0f) * 10.0f), y = std::max (30.0f, std::round (at.y / 10.0f) * 10.0f);
+            edit ([i, x, y] (PatcherDoc& doc) {
+                if (i < (int) doc.surface.size())
+                    doc.surface[(std::size_t) i].x = x, doc.surface[(std::size_t) i].y = y;
+            });
+            return;
+        }
+        const auto r = controlBounds (c);
+        switch (c.kind)
+        {
+            case SurfaceControl::Kind::knob:
+            case SurfaceControl::Kind::slider:
+            {
+                // up = more; 200 px for the whole range (fine with Shift)
+                const auto range = e.mods.isShiftDown() ? 1000.0f : 200.0f;
+                setControlValue (i, grabValue + (surfaceGrab.y - e.position.y) / range, c.valueY);
+                break;
+            }
+            case SurfaceControl::Kind::xy:
+            {
+                const auto pad = r.withHeight (140.0f);
+                setControlValue (i, (e.position.x - pad.getX()) / pad.getWidth(), (pad.getBottom() - e.position.y) / pad.getHeight());
+                break;
+            }
+            default: break;
+        }
+        repaint();
+    }
+
+    void surfaceUp()
+    {
+        const auto* d = currentDoc();
+        if (d != nullptr && surfaceDrag_ >= 0 && surfaceDrag_ < (int) d->surface.size() && ! surfaceMoving
+            && d->surface[(std::size_t) surfaceDrag_].kind == SurfaceControl::Kind::button)
+            setControlValue (surfaceDrag_, 0.0f, d->surface[(std::size_t) surfaceDrag_].valueY); // released
+        surfaceDrag_ = -1;
+        surfaceMoving = false;
+        repaint();
+    }
+
+    void showAddControlMenu (juce::Point<float> at)
+    {
+        juce::PopupMenu menu;
+        menu.addSectionHeader (tr ("Add control"));
+        const std::pair<SurfaceControl::Kind, const char*> kinds[] = { { SurfaceControl::Kind::knob, TR_NOOP ("Knob") },
+                                                                       { SurfaceControl::Kind::slider, TR_NOOP ("Slider") },
+                                                                       { SurfaceControl::Kind::button, TR_NOOP ("Button") },
+                                                                       { SurfaceControl::Kind::checkBox, TR_NOOP ("Check box") },
+                                                                       { SurfaceControl::Kind::xy, TR_NOOP ("XY pad") } };
+        for (const auto& [kind, name] : kinds)
+            menu.addItem (tr (name), [this, kind = kind, english = juce::String (name), at] {
+                edit ([kind, english, at] (PatcherDoc& d) {
+                    int same = 1;
+                    for (const auto& c : d.surface)
+                        same += c.kind == kind ? 1 : 0;
+                    SurfaceControl c;
+                    c.kind = kind;
+                    c.name = (english + " " + juce::String (same)).toStdString(); // FL: "Knob 1"
+                    c.value = kind == SurfaceControl::Kind::knob || kind == SurfaceControl::Kind::slider ? 0.5f : 0.0f;
+                    c.valueY = 0.5f;
+                    c.x = std::round (at.x / 10.0f) * 10.0f;
+                    c.y = std::max (40.0f, std::round (at.y / 10.0f) * 10.0f);
+                    patcher::addSurfaceControl (d, c);
+                });
+            });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    }
+
+    void showControlMenu (int i)
+    {
+        juce::PopupMenu menu;
+        menu.addItem (tr ("Rename..."), [this, i] { renameControl (i); });
+        menu.addItem (tr ("Delete"), [this, i] { edit ([i] (PatcherDoc& d) { patcher::removeSurfaceControl (d, i); }); });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
+    }
+
+    void renameControl (int i)
+    {
+        const auto* d = currentDoc();
+        if (d == nullptr || i < 0 || i >= (int) d->surface.size())
+            return;
+        auto* window = new juce::AlertWindow (tr ("Rename"), {}, juce::MessageBoxIconType::NoIcon);
+        window->addTextEditor ("name", juce::String::fromUTF8 (d->surface[(std::size_t) i].name.c_str()));
+        window->addButton (tr ("OK"), 1, juce::KeyPress (juce::KeyPress::returnKey));
+        window->addButton (tr ("Cancel"), 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        juce::Component::SafePointer<PatcherEditor> safe (this);
+        window->enterModalState (true, juce::ModalCallbackFunction::create ([safe, window, i] (int result) {
+            if (result != 1 || safe == nullptr)
+                return;
+            const auto name = window->getTextEditorContents ("name").trim().toStdString();
+            if (! name.empty())
+                safe->edit ([i, name] (PatcherDoc& doc) {
+                    if (i < (int) doc.surface.size())
+                        doc.surface[(std::size_t) i].name = name;
+                });
+        }), true);
+    }
+
+    enum class Drag { none, wire, node, view, minimap };
     static constexpr int noNode = -100;
 
     AudioEngine& engine;
@@ -276,6 +628,72 @@ private:
         repaint();
     }
 
+    // --- minimap (FL's Patcher map overview, round 151) ----------------------------------------------------------
+    // A small overview of the whole map in the bottom-right corner: every node as a block, the part on screen as a
+    // frame; click or drag in it to move the view there.
+    juce::Rectangle<float> minimapArea() const
+    {
+        return { (float) getWidth() - 190.0f, (float) getHeight() - 24.0f - 124.0f, 180.0f, 118.0f };
+    }
+
+    // the world the minimap shows: every node and the view, with a margin (empty: nothing to show)
+    juce::Rectangle<float> minimapWorld (const PatcherDoc& d) const
+    {
+        auto box = nodeBounds (d, patchFromHost).getUnion (nodeBounds (d, patchToHost)).getUnion (nodeBounds (d, patchSurface));
+        for (int n = 0; n < (int) d.nodes.size(); ++n)
+            box = box.getUnion (nodeBounds (d, n));
+        const auto view = juce::Rectangle<float> (toWorld ({ 0.0f, 0.0f }), toWorld ({ (float) getWidth(), (float) getHeight() - 24.0f }));
+        return box.getUnion (view).expanded (20.0f);
+    }
+
+    // world → minimap: the world box fitted into the area, centred
+    juce::AffineTransform minimapTransform (const PatcherDoc& d) const
+    {
+        const auto world = minimapWorld (d);
+        const auto area = minimapArea().reduced (4.0f);
+        const auto scale = std::min (area.getWidth() / world.getWidth(), area.getHeight() / world.getHeight());
+        const auto used = juce::Point<float> (world.getWidth(), world.getHeight()) * scale;
+        const auto origin = area.getCentre() - used / 2.0f;
+        return juce::AffineTransform::translation (-world.getX(), -world.getY()).scaled (scale).translated (origin.x, origin.y);
+    }
+
+    juce::Point<float> minimapToWorld (const PatcherDoc& d, juce::Point<float> screen) const
+    {
+        return screen.transformedBy (minimapTransform (d).inverted());
+    }
+
+    void centreViewOn (juce::Point<float> world)
+    {
+        offset = world - juce::Point<float> ((float) getWidth(), (float) getHeight() - 24.0f) / (2.0f * zoom);
+        repaint();
+    }
+
+    void paintMinimap (juce::Graphics& g, const PatcherDoc& d) const
+    {
+        const auto area = minimapArea();
+        if (area.getX() < 200.0f || area.getY() < 60.0f) // a small window: the map itself is the overview
+            return;
+        g.setColour (col::bg1.withAlpha (0.92f));
+        g.fillRoundedRectangle (area, 4.0f);
+        g.setColour (col::border);
+        g.drawRoundedRectangle (area.reduced (0.5f), 4.0f, 1.0f);
+        const auto t = minimapTransform (d);
+        juce::Graphics::ScopedSaveState save (g);
+        g.reduceClipRegion (area.reduced (2.0f).toNearestInt());
+        auto block = [&] (int n, juce::Colour c) {
+            g.setColour (c);
+            g.fillRect (nodeBounds (d, n).transformedBy (t));
+        };
+        block (patchFromHost, col::bg5);
+        block (patchToHost, col::bg5);
+        block (patchSurface, col::bg5);
+        for (int n = 0; n < (int) d.nodes.size(); ++n)
+            block (n, n == selectedNode ? col::accent : (d.nodes[(std::size_t) n].generator ? col::info : col::knobArc).withAlpha (0.8f));
+        const auto view = juce::Rectangle<float> (toWorld ({ 0.0f, 0.0f }), toWorld ({ (float) getWidth(), (float) getHeight() - 24.0f })).transformedBy (t);
+        g.setColour (col::textPrimary.withAlpha (0.75f));
+        g.drawRect (view, 1.0f);
+    }
+
     // --- geometry ----------------------------------------------------------------------------------------------
     juce::Point<float> toScreen (juce::Point<float> world) const { return (world - offset) * zoom; }
     juce::Point<float> toWorld (juce::Point<float> screen) const { return screen / zoom + offset; }
@@ -286,6 +704,8 @@ private:
             return { d.inputX, d.inputY };
         if (n == patchToHost)
             return { d.outputX, d.outputY };
+        if (n == patchSurface)
+            return { d.surfaceX, d.surfaceY };
         return { d.nodes[(std::size_t) n].x, d.nodes[(std::size_t) n].y };
     }
     juce::Point<float> nodePosition (const PatcherDoc& d, int n) const
@@ -300,6 +720,8 @@ private:
             d.inputX = p.x, d.inputY = p.y;
         else if (n == patchToHost)
             d.outputX = p.x, d.outputY = p.y;
+        else if (n == patchSurface)
+            d.surfaceX = p.x, d.surfaceY = p.y;
         else if (n >= 0 && n < (int) d.nodes.size())
             d.nodes[(std::size_t) n].x = p.x, d.nodes[(std::size_t) n].y = p.y;
     }
@@ -406,9 +828,34 @@ private:
         return pins;
     }
 
+    // the Surface node (round 151): one control output per Surface control (an XY pad two)
+    std::vector<Pin> surfacePins (const PatcherDoc& d) const
+    {
+        std::vector<Pin> pins;
+        const auto at = nodePosition (d, patchSurface);
+        auto y = at.y + headerHeight + pinSpacing * 0.5f;
+        int port = 0;
+        for (const auto& c : d.surface)
+            for (int k = 0; k < c.outputs(); ++k)
+            {
+                Pin p;
+                p.node = patchSurface;
+                p.output = true;
+                p.kind = PatchWire::Kind::control;
+                p.port = port++;
+                p.at = { at.x + nodeWidth, y };
+                p.label = juce::String::fromUTF8 (c.name.c_str()) + (c.outputs() > 1 ? (k == 0 ? " X" : " Y") : "");
+                pins.push_back (p);
+                y += pinSpacing;
+            }
+        return pins;
+    }
+
     std::vector<Pin> allPins (const PatcherDoc& d) const
     {
         auto pins = hostPins (d, true);
+        for (auto& p : surfacePins (d))
+            pins.push_back (p);
         for (auto& p : hostPins (d, false))
             pins.push_back (p);
         for (int n = 0; n < (int) d.nodes.size(); ++n)
@@ -425,6 +872,8 @@ private:
             rows = target.channel ? 1 : 2;
         else if (n == patchToHost)
             rows = extraOutputs (d) + 2 + (target.channel ? (int) midiPorts (d).size() + 1 : 0);
+        else if (n == patchSurface)
+            rows = std::max (1, d.surfaceOutputs());
         else
         {
             const auto ports = patcher::nodePorts (d.nodes[(std::size_t) n]);
@@ -438,7 +887,7 @@ private:
         for (int n = (int) d.nodes.size() - 1; n >= 0; --n)
             if (nodeBounds (d, n).contains (world))
                 return n;
-        for (const auto host : { patchFromHost, patchToHost })
+        for (const auto host : { patchFromHost, patchToHost, patchSurface })
             if (nodeBounds (d, host).contains (world))
                 return host;
         return noNode;
@@ -756,7 +1205,7 @@ private:
             n.effect.kind = EffectKind::plugin;
             n.effect.plugin = ref;
             addNode (n, at);
-        });
+        }, this);
         addPluginItems (pluginInstruments, engine, true, [this, at] (PluginRef ref) {
             PatchNode n;
             n.generator = true;
@@ -764,7 +1213,7 @@ private:
             n.channel.name = ref.name;
             n.channel.plugin = ref;
             addNode (n, at);
-        });
+        }, this);
         juce::PopupMenu menu;
         menu.addSubMenu (tr ("Add effect"), effects);
         menu.addSubMenu (tr ("Add plugin effect (VST/VST3/CLAP)"), pluginEffects);

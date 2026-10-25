@@ -1422,6 +1422,10 @@ int translateWavesCla2a (const std::vector<std::uint8_t>& state, EffectSlot& slo
 // (2:1 Compressor) to −19.9 dB. Other settings move around that point by the manual's laws [model]: the input level
 // moves the threshold and the wet gain dB for dB, the output the wet gain, attack 800 → 20 µs and release
 // 1100 → 50 ms log-spaced over the knobs 1 … 7, the ratio buttons as labelled; the mix becomes the slot's dry / wet.
+// Round 148 (the Waves trial in full, no demo mutes; REA_rodada148 §5): her state re-rendered on her three whole takes
+// and Crest refitted on them (Nelder–Mead on the waveform null): threshold −55.4 dB, 2.8:1 (all buttons), knee 24.8 dB,
+// range 31.5 dB, attack 1.56 ms, release 2.5 s (Crest's longest: the reference's all-buttons release is slow) — null
+// go / kwe / lu −13.0 / −7.9 / −10.2 → −25.4 / −19.2 / −21.8 dB, 1/3-octave error 3.3–3.9 → 0.5–1.0 dB.
 int translateWavesCla76 (const std::vector<std::uint8_t>& state, EffectSlot& slot)
 {
     namespace c = dyn::crest;
@@ -1434,20 +1438,20 @@ int translateWavesCla76 (const std::vector<std::uint8_t>& state, EffectSlot& slo
     const auto attackKnob = std::clamp (at (2, 3.0), 1.0, 7.0), releaseKnob = std::clamp (at (3, 4.0), 1.0, 7.0);
     const auto attackLaw = [] (double k) { return 0.8 * std::pow (0.02 / 0.8, (k - 1.0) / 6.0); };
     const auto releaseLaw = [] (double k) { return 1100.0 * std::pow (50.0 / 1100.0, (k - 1.0) / 6.0); };
-    static constexpr double ratios[5] { 20.0, 12.0, 8.0, 4.0, 7.1 };
+    static constexpr double ratios[5] { 20.0, 12.0, 8.0, 4.0, 2.8 };
     const int ratioIndex = std::clamp ((int) std::lround (at (59, 3.0)), 0, 4);
     auto& p = slot.params;
     p[c::style] = c::styleValue (c::Style::bus);
-    p[c::threshold] = linNorm (-43.7 - (inDb + 8.7), -60.0, 0.0);
+    p[c::threshold] = linNorm (-55.4 - (inDb + 8.7), -60.0, 0.0);
     p[c::ratio] = c::ratioValue (ratios[ratioIndex]);
-    p[c::knee] = linNorm (9.3, 0.0, 72.0);
-    p[c::range] = linNorm (31.9, 0.0, 60.0);
-    p[c::attack] = c::attackValue (5.91 * attackLaw (attackKnob) / attackLaw (4.3));
-    p[c::release] = c::releaseValue (97.0 * releaseLaw (releaseKnob) / releaseLaw (4.31));
+    p[c::knee] = linNorm (24.8, 0.0, 72.0);
+    p[c::range] = linNorm (31.5, 0.0, 60.0);
+    p[c::attack] = c::attackValue (1.56 * attackLaw (attackKnob) / attackLaw (4.3));
+    p[c::release] = c::releaseValue (std::min (2500.0, 2500.0 * releaseLaw (releaseKnob) / releaseLaw (4.31)));
     p[c::autoRelease] = 0.0f;
     p[c::autoGain] = 0.0f;
     p[c::mix] = 1.0f;
-    p[c::output] = linNorm (31.6 + (inDb + 8.7) + (outDb + 16.9), -36.0, 36.0);
+    p[c::output] = linNorm (31.5 + (inDb + 8.7) + (outDb + 16.9), -36.0, 36.0);
     slot.mix = (float) std::clamp (at (103, 100.0) / 100.0, 0.0, 1.0);
     return 11;
 }

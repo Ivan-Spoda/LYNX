@@ -1,4 +1,6 @@
 #include "ui/PianoRollComponent.h"
+#include "ui/UiTrace.h"
+#include "ui/TextCache.h"
 
 #include "core/EditorPolish.h"
 #include "core/EventEdit.h"
@@ -635,6 +637,7 @@ void PianoRollComponent::paintOverview (juce::Graphics& g, juce::Rectangle<float
 
 void PianoRollComponent::paint (juce::Graphics& g)
 {
+    const uitrace::Scope trace ("PianoRollComponent paint", true, g.getClipBounds());
     const auto& song = engine.getSong();
     const auto& pattern = currentPattern (song);
     const auto channel = engine.getSelectedChannel();
@@ -799,7 +802,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
             {
                 g.setColour (fill.getPerceivedBrightness() > 0.55f ? bg0.withAlpha (0.85f) : textPrimary.withAlpha (0.9f));
                 g.setFont (theme::font (gesture::labelHeight (rowHeight) - 1.0f));
-                g.drawText (keyName (n.key), r.reduced (n.slide || n.porta ? 11.0f : 4.0f, 0.0f), juce::Justification::centredLeft, true);
+                textcache::drawText (g, keyName (n.key), r.reduced (n.slide || n.porta ? 11.0f : 4.0f, 0.0f), juce::Justification::centredLeft, true);
             }
         }
 
@@ -898,13 +901,13 @@ void PianoRollComponent::paint (juce::Graphics& g)
             {
                 g.setColour (textDisabled);
                 g.setFont (theme::font (theme::type::small));
-                g.drawText (tr ("No events yet: draw them here"), lane.reduced (8, 4), juce::Justification::centredLeft, true);
+                textcache::drawText (g, tr ("No events yet: draw them here"), lane.reduced (8, 4), juce::Justification::centredLeft, true);
             }
         }
         // the lane's name in it, as FL writes it next to "Control" (round 149: the box on the left is narrow)
         g.setColour (theme::colour::textSecondary.withAlpha (0.8f));
         g.setFont (theme::font (theme::type::caption, true));
-        g.drawText (laneBox.getText(), lane.reduced (8, 3).removeFromTop (14), juce::Justification::topLeft, true);
+        textcache::drawText (g, laneBox.getText(), lane.reduced (8, 3).removeFromTop (14), juce::Justification::topLeft, true);
 
         for (int i = 0; i < (int) pattern.notes.size() && ! eventLaneTarget(); ++i)
         {
@@ -952,7 +955,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
             const auto x = (int) tickToX ((double) (b * bar));
             g.setColour (textSecondary);
             g.drawVerticalLine (x, (float) rulerTop + 10.0f, (float) headerHeight);
-            g.drawText (juce::String (b + 1), x + 3, rulerTop + 2, 40, timelineHeight - 4, juce::Justification::centredLeft);
+            textcache::drawText (g, juce::String (b + 1), x + 3, rulerTop + 2, 40, timelineHeight - 4, juce::Justification::centredLeft);
         }
 
         if (playheadTick >= 0.0)
@@ -1013,7 +1016,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
                 g.setColour (pressed ? onAccent : black ? textPrimary : isC ? bg0 : bg0.withAlpha (0.55f));
                 const auto area = black ? juce::Rectangle<int> (2, y, blackWidth - 4, rowHeight)
                                         : juce::Rectangle<int> (blackWidth, y, keyboardWidth - blackWidth - 5, rowHeight);
-                g.drawText (keyName (key), area, black ? juce::Justification::centredLeft : juce::Justification::centredRight, false);
+                textcache::drawText (g, keyName (key), area, black ? juce::Justification::centredLeft : juce::Justification::centredRight, false);
             }
 
             // a key label (FL 2026's custom key labels) replaces the name on the white part of the key
@@ -1056,7 +1059,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
         g.fillRoundedRectangle (4.0f, (float) toolbarHeight + 6.0f, 3.0f, (float) (headerHeight - toolbarHeight) - 12.0f, 1.0f);
         g.setColour (textPrimary);
         g.setFont (theme::font (theme::type::caption, true));
-        g.drawFittedText (juce::String::fromUTF8 (ch.name.c_str()), 11, toolbarHeight, keyboardWidth - 14, headerHeight - toolbarHeight,
+        textcache::drawFittedText (g, juce::String::fromUTF8 (ch.name.c_str()), 11, toolbarHeight, keyboardWidth - 14, headerHeight - toolbarHeight,
                           juce::Justification::centredLeft, 2, 0.8f);
     }
 }
