@@ -136,7 +136,7 @@ saved settings are translated and the original stays in the project byte for byt
 | Type | Exact | Near-exact | Close | Approximate | Placeholder | Entries |
 |---|---:|---:|---:|---:|---:|---:|
 | Generators | 12 | 10 | 7 | 1 | 2 | 32 |
-| Effects | 34 | 10 | 1 | 8 | 1 | 54 |
+| Effects | 37 | 10 | 1 | 6 | 1 | 55 |
 
 (Some entries cover several FL plugins that share one LYNX engine, e.g. the sampler or Parametric EQ / EQ 2.)
 
@@ -220,6 +220,9 @@ instruments (built-in synth, sampler, drums) or any VST3/CLAP plugin.
 | Love Philter | Fruity Love Philter | Import | Exact | all 86 states, live and export |
 | Pitch Shifter | Pitch Shifter | Import | Exact | all 15 states and 70 random ones |
 | EQUO | EQUO | Import | Exact | the send output to another track is not routed |
+| Low Lifter | Low Lifter | Insert | Exact | the library's Faust engine (crossovers, look-ahead limiter, Chebyshev harmonics, diffuser, low cut): all 11 installation states and 12 random ones at 44.1–96 kHz bit-identical, FL's one-second silence gate included (round 154) |
+| Frequency Shifter | Frequency Shifter | Insert | Exact | bit-identical on the installation's 14 states and on random ones with control changes at 44.1–96 kHz, except the Tempo range at 48/96 kHz (−85 dB); while the song plays the Tempo range gets the song position in beats (FL's unit not confirmed); the ring modulator's side chain is not routed (round 154) |
+| Emphasizer | Emphasizer | Insert | Exact | every state, 22.05–96 kHz, with control changes; against FL's own renders 98–99.97 % of the 16-bit samples identical (FL's warm-up before a render varies) (round 154) |
 | Gross Beat | Gross Beat | Import | Exact | all 41 states; MIDI control of the slots and spline curves missing |
 | Squeeze | Fruity Squeeze | Import | Near-exact | within 5·10⁻⁹ of the reference model, which is bit-exact with FL |
 | Effector | Effector | Insert | Near-exact | all 12 algorithms; reverb −100 dB |
@@ -237,9 +240,7 @@ instruments (built-in synth, sampler, drums) or any VST3/CLAP plugin.
 | Delay | Fruity Delay (v1) | Insert | Approximate | |
 | Chorus | Fruity Phaser | Insert | Approximate | |
 | Utility | Fruity Center, Fruity Phase Inverter | Insert | Approximate | |
-| Pitch shift / Frequency shifter | Frequency Shifter | Insert | Approximate | |
 | Limiter | Emphasis | Insert | Approximate | not ported yet |
-| Parametric EQ | Low Lifter | Insert | Approximate | harmonics generator missing; not ported yet |
 
 **Windows.** Every native effect opens its own window (double-click its Mixer slot, or the **Editor** button over its
 knobs). For the plugins studied so far — Fruity Limiter, Parametric EQ 2, Delay 3, Multiband Compressor, Reeverb 2,

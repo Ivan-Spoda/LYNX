@@ -14,6 +14,9 @@
 #include "core/LuxeVerb.h"
 #include "core/ConvolverFx.h"
 #include "core/VintagePhaser.h"
+#include "core/EmphasizerFx.h"
+#include "core/FreqShifterFl.h"
+#include "core/LowLifterFl.h"
 #include "core/Vocodex.h"
 #include "core/FruityVocoder.h"
 #include "core/MaximusFx.h"
@@ -2847,6 +2850,31 @@ const EffectInfo& effectInfo (EffectKind kind)
         case EffectKind::geminiDoubler: return voicetools::geminiInfo();
         case EffectKind::formulaController: return formulaControllerInfo;
         case EffectKind::voiceShift: return voiceshift::info();
+        case EffectKind::emphasizer:
+        {
+            static const EffectInfo info { "Emphasizer", { { "Input gain", 0.0f }, { "Emphasis", 0.5013f }, { "Soft clipping", 0.0f },
+                                                           { "Level matching", 0.0f }, { "Bypass", 0.0f }, { "Output", 1.0f } } };
+            return info;
+        }
+        case EffectKind::flFrequencyShifter:
+        {
+            // FL's controls and defaults (a new instance: Mix 100 %, Frequency shifter, +200 Hz in the 200 Hz range)
+            static const EffectInfo info { "Frequency Shifter", { { "Mix", 1.0f }, { "Type", 0.5f }, { "Frequency", 1.0f },
+                                                                  { "L/R phase offset", 0.0f }, { "L shape", 1.0f }, { "R shape", 1.0f },
+                                                                  { "Feedback", 0.5f }, { "Mono/stereo", 1.0f }, { "Range", 0.5f },
+                                                                  { "Left phase offset", 0.5f } } };
+            return info;
+        }
+        case EffectKind::flLowLifter:
+        {
+            // FL's controls; defaults = the plug-in's Default preset (as a new instance in FL)
+            static const EffectInfo info { "Low Lifter", { { "On", 1.0f }, { "Dry/Wet", 1.0f }, { "Low band gain", 0.4999f },
+                                                           { "Slope", 0.6993f }, { "Look-ahead", 1.0f }, { "Invert polarity", 0.0f },
+                                                           { "Pre gain", 0.4998f }, { "Diffuser mix", 0.0f }, { "Diffuser depth", 0.5f },
+                                                           { "High band gain", 1.0f }, { "Crossover", 0.892f }, { "Low cut", 0.0f },
+                                                           { "Multiband", 0.0f }, { "High band", 1.0f }, { "Low band", 1.0f } } };
+            return info;
+        }
     }
     return eq;
 }
@@ -3296,6 +3324,12 @@ std::string formatEffectParam (EffectKind kind, int param, float v, double bpm)
             return voicetools::paramText (kind, param, v);
         case EffectKind::voiceShift:
             return voiceshift::paramText (param, v);
+        case EffectKind::emphasizer:
+            return emphasizer::paramText (param, v);
+        case EffectKind::flFrequencyShifter:
+            return fsfl::paramText (param, v);
+        case EffectKind::flLowLifter:
+            return lowlifter::paramText (param, v);
 
         case EffectKind::fruityDelay2:
             return fldelay::delay2ParamText (param, v);
@@ -3403,6 +3437,8 @@ std::unique_ptr<Effect> makeEffect (const EffectSlot& slot)
         return std::make_unique<ParametricEq> (slot.params);
     if (slot.kind == EffectKind::frequencySplitter)
         return fsplit::make (slot.params);
+    if (slot.kind == EffectKind::flLowLifter) // its look-ahead (latency) known before the first block (round 154)
+        return lowlifter::make (slot.params[4] >= 0.5f);
     if (slot.kind == EffectKind::hushDeEsser) // its look-ahead (latency) known before the first block (round 128)
         return mixsuite::makeHush (&slot.params);
     if (slot.kind == EffectKind::facetEq) // its phase mode (latency) known before the first block
@@ -3524,6 +3560,9 @@ std::unique_ptr<Effect> makeEffect (EffectKind kind)
         case EffectKind::geminiDoubler: return voicetools::make (kind); // LYNX's voice tools (REA_rodada119)
         case EffectKind::formulaController: return formula::makeEffect ({});
         case EffectKind::voiceShift: return voiceshift::make(); // round 135
+        case EffectKind::emphasizer: return emphasizer::make(); // round 154
+        case EffectKind::flFrequencyShifter: return fsfl::make(); // round 154
+        case EffectKind::flLowLifter: return lowlifter::make(); // round 154
         case EffectKind::plugin: break; // created by the app (RackState::Factories)
     }
     return std::make_unique<Eq>();
