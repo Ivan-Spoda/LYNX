@@ -156,4 +156,13 @@ FL's own renders (FL renders 16-bit, hence the −82…−87 dB floor):
 
 ## Where I stopped
 
-RESULT_PLACEHOLDER
+- Done: decoder swapped (JUCE's MP3 reader no longer compiled), FL timing measured and matched, caches re-keyed,
+  new channels no longer routed into effect buses. build-local with the FL Data dir: 1748607 checks, 0 failures;
+  Windows build OK, exports checked against FL's renders (§5).
+- Her `recovered…lynx`/TWIN SWAG: the RODEIOS channel already saved on Insert 2 stays there (a saved routing is the
+  project's); she has to move it to a free insert once (or delete and re-add the sample). New channels pick a free one.
+- Not done: FL-exact behaviour for its own failure cases (free format → silence, two ID3v2 → gapless) is deliberately
+  not copied; LYNX plays those files. MP3 seeking for streamed files is whole-file decode (an MP3 is decoded once into
+  memory / the streamed-sample cache); a 10-minute 48 kHz stereo file takes ~230 MB as float until cached.
+- Not checked on her laptop (read-only access, nothing installed there): she should confirm with v0.1.16 that her
+  MP3s sound right and that new samples land on a clean insert.
