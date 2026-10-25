@@ -107,8 +107,29 @@ first 40 lines (anonymised, never file names). Opened with `Process::openDocumen
 
 ## 6. Results
 
-(filled in below)
+- [TEST] tests/CrashReport159Tests.inc (8 tests: JSON schema, anonymiser, size cap, GitHub URL length / encoding /
+  dropdown labels) pass in build-local with the FL Data dir (see the landing log).
+- [RUN] 2026-10-25, Windows build of feature/report159 merged with origin/main (fa8f2601):
+  `LYNX.exe --send-test-report test1.txt` → `result=OK`, 1307 bytes, id 74f1cc87-…; the JSON had kind "crash" (the
+  newest autosave\crash file), Windows 11 25H2 build 26200, Ryzen 5 3600, RTX 3060 + driver 32.0.16.1692, both screens;
+  no user name, machine name or e-mail anywhere in it (grep). Audio was empty, as expected for a CLI run that opened no
+  device.
+- [SRV] `crash-fetch.sh --tests --no-symbols` listed it (version 0.1.15, kind crash, GPU, last step);
+  `--delete-tests` deleted it on the server; a second list showed 0 reports. Local test copies removed from
+  /mnt/d/lynx-work/crash-reports.
+- [SRV] negative checks: GET → 405; POST `{"schema":1}` → `{"ok":false,"error":"bad id"}`; POST garbage with
+  `Content-Encoding: gzip` → `{"ok":false,"error":"not JSON"}`.
+- The .github/ISSUE_TEMPLATE/bug_report.yml now on main (feature/issuetpl) has exactly the ids and dropdown labels
+  `githubIssueUrl` uses (version, os, os-details, audio, kind, steps, plugins, logs; "Windows 11", "LYNX closed
+  (crash)", "LYNX froze (not responding)").
+- Last-minute fix: Settings › Crash reports note box 32 → 46 px (its two lines were clipped).
 
 ## Where I stopped
 
-(filled in below)
+Done and landed (after the BSOD resume): server deployed, client + dialog + settings + GitHub URL, end-to-end test
+with the live server, test reports deleted. Not done / for later:
+- website/index.html has a "Crash reports" privacy paragraph (EN + pt-BR) that is NOT deployed yet: deploy with
+  scripts/deploy-site.sh together with the 0.1.16 release (it describes a 0.1.16 feature).
+- The dialogs were not re-screenshotted after the resume (only the CLI path was re-run); the Settings note height fix
+  is a layout-only change.
+- Server: a bad gzip body answers "not JSON" rather than "bad gzip" (harmless).
