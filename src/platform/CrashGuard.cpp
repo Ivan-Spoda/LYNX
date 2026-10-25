@@ -1,5 +1,6 @@
 #include "platform/CrashGuard.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -86,7 +87,9 @@ namespace
 std::mutex sessionLock;
 std::string sessionFile, sessionHeader;
 std::deque<std::string> sessionSteps;
-constexpr std::size_t maxSteps = 10;
+std::vector<std::pair<std::string, std::string>> sessionInfo; // "info.<key>=value" lines (round 159)
+std::vector<std::string> sessionPlugins;                       // "plugin=" lines: third-party plugins loaded
+constexpr std::size_t maxSteps = 60; // (round 159: the crash report sends the last 60; was 10)
 
 std::FILE* openUtf8 (const std::string& path, const char* mode)
 {
@@ -110,6 +113,10 @@ void writeSession() // sessionLock held
     if (sessionFile.empty())
         return;
     std::string text = sessionHeader;
+    for (const auto& [key, value] : sessionInfo)
+        text += "info." + key + "=" + value + "\n";
+    for (const auto& p : sessionPlugins)
+        text += "plugin=" + p + "\n";
     for (const auto& s : sessionSteps)
         text += "step=" + s + "\n";
     if (auto* f = openUtf8 (sessionFile, "wb"))
@@ -128,6 +135,8 @@ void beginSession (const std::string& fileUtf8, const std::string& header) noexc
         sessionFile = fileUtf8;
         sessionHeader = header;
         sessionSteps.clear();
+        sessionInfo.clear();
+        sessionPlugins.clear();
         writeSession();
     }
     catch (...) {}
@@ -151,6 +160,55 @@ void note (const std::string& step) noexcept
         sessionSteps.push_back (std::move (line));
         while (sessionSteps.size() > maxSteps)
             sessionSteps.pop_front();
+        writeSession();
+    }
+    catch (...) {}
+}
+
+namespace
+{
+std::string oneLine (std::string text)
+{
+    for (auto& c : text)
+        if (c == '\n' || c == '\r')
+            c = ' ';
+    return text;
+}
+} // namespace
+
+void setSessionInfo (const std::string& key, const std::string& value) noexcept
+{
+    try
+    {
+        const std::lock_guard<std::mutex> lock (sessionLock);
+        if (sessionFile.empty())
+            return;
+        const auto line = oneLine (value);
+        for (auto& [k, v] : sessionInfo)
+            if (k == key)
+            {
+                if (v != line)
+                {
+                    v = line;
+                    writeSession();
+                }
+                return;
+            }
+        sessionInfo.emplace_back (oneLine (key), line);
+        writeSession();
+    }
+    catch (...) {}
+}
+
+void notePlugin (const std::string& description) noexcept
+{
+    try
+    {
+        const std::lock_guard<std::mutex> lock (sessionLock);
+        const auto line = oneLine (description);
+        if (sessionFile.empty() || sessionPlugins.size() >= 300 || std::find (sessionPlugins.begin(), sessionPlugins.end(), line) != sessionPlugins.end())
+            return;
+        sessionPlugins.push_back (line);
         writeSession();
     }
     catch (...) {}

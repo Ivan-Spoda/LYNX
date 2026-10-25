@@ -600,6 +600,10 @@ html.shot .ft,html.shot .cl,html.shot .cl-vh,html.shot .cl-alt{opacity:1!importa
         <h3 data-i18n="sig.privacy">Privacy</h3>
         <p data-i18n="sig.pp">This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. <a href="https://github.com/Ka1-S/LYNX/blob/main/PRIVACY.md">Privacy policy</a></p>
       </div>
+      <div id="crash-reports">
+        <h3 data-i18n="sig.crash">Crash reports</h3>
+        <p data-i18n="sig.cr">Opt-in only. After a crash or freeze LYNX asks before sending a report (Settings › General › Crash reports: Ask / Always send / Never). A report holds the LYNX version, operating system, CPU, graphics card and driver, audio device, the crash or freeze file and the last steps; user names in paths become &lt;user&gt; and file names are dropped. No audio, no projects, no machine name, no IP address is stored. Reports are kept only to fix bugs. To have one deleted, <a href="https://github.com/Ka1-S/LYNX/issues/new">open an issue</a> with its id (LYNX shows it after sending; every sent id is also listed in <code>crash-reports/sent.log</code> in LYNX's settings folder).</p>
+      </div>
     </div>
   </div>
 </section>
@@ -650,6 +654,7 @@ const PT = {
  'sig.p1':'Assinatura de código gratuita fornecida por <a href="https://about.signpath.io">SignPath.io</a>, certificado da <a href="https://signpath.org">SignPath Foundation</a>.',
  'sig.p2':'Os arquivos de cada versão são compilados a partir do código público pelo <a href="https://github.com/Ka1-S/LYNX/blob/main/.github/workflows/release.yml">GitHub Actions</a>, e cada pedido de assinatura é aprovado manualmente.',
  'sig.team':'Funções da equipe','sig.roles':'Autores, revisores e aprovadores: <a href="https://github.com/Ka1-S">Ka1-S</a> (dono do repositório).',
+ 'sig.crash':'Relatórios de falha','sig.cr':'Só com o seu consentimento. Depois de uma falha ou travamento o LYNX pergunta antes de enviar um relatório (Configurações › Geral › Relatórios de falha: Perguntar / Sempre enviar / Nunca). O relatório contém a versão do LYNX, sistema operacional, CPU, placa de vídeo e driver, dispositivo de áudio, o arquivo da falha ou do travamento e os últimos passos; nomes de usuário nos caminhos viram &lt;user&gt; e nomes de arquivos são removidos. Nenhum áudio, projeto, nome do computador ou endereço IP é guardado. Os relatórios são guardados só para corrigir bugs. Para apagar um, <a href="https://github.com/Ka1-S/LYNX/issues/new">abra uma issue</a> com o id dele (o LYNX mostra ao enviar; todo id enviado também fica em <code>crash-reports/sent.log</code> na pasta de configurações do LYNX).',
  'sig.privacy':'Privacidade','sig.pp':'Este programa não transfere nenhuma informação para outros sistemas em rede, a menos que isso seja solicitado especificamente pelo usuário ou pela pessoa que o instala ou opera. <a href="https://github.com/Ka1-S/LYNX/blob/main/PRIVACY.md">Política de privacidade</a>',
  'nav.plugins':'Plugins','pl.title':'Plugins nativos, refeitos do zero.','pl.lead':'Cada motor é escrito nativamente no LYNX, inspirado num plugin do FL Studio e conferido contra o original rodando sem modificação. Exato significa saída idêntica bit a bit.',
  'pl.all':'Todos','pl.gen':'Geradores','pl.fx':'Efeitos','pl.x':'Exato','pl.n':'Quase exato','pl.c':'Próximo','pl.a':'Aproximado','pl.p':'Só estado','pl.o':'Original do LYNX',

@@ -134,6 +134,8 @@ APP_SOURCES+=(src/core/ExportOptions.cpp src/core/Mp3Encoder.cpp src/core/Mp3Dec
 APP_SOURCES+=(src/ui/NewProjectDialog.cpp src/ui/ClipProperties.cpp src/ui/PluginMonitorWindow.cpp src/ui/TouchKeyboard.cpp)
 # native plugin editors in FL's arrangement (round 93)
 APP_SOURCES+=(src/core/PluginLayout.cpp src/core/StateParams.cpp src/ui/PluginEditors.cpp src/ui/PatcherEditor.cpp)
+# crash / freeze reports: consent, anonymiser, upload, GitHub form (round 159)
+APP_SOURCES+=(src/core/CrashReport.cpp src/ui/CrashReporter.cpp)
 
 echo "WavPack (decoder, C)..."
 mkdir -p "$OUT/wavpack"
@@ -163,10 +165,16 @@ for f in third_party/lame/src/*.c; do
     fi
 done
 
+# the commit the build comes from (crash reports name it)
+COMMIT="$(git rev-parse --short=10 HEAD 2>/dev/null || true)"
+[[ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]] && COMMIT="$COMMIT-dirty"
+printf '#pragma once\n#define LYNX_GIT_COMMIT "%s"\n' "$COMMIT" > "$OUT/lynx_build.h"
+
 echo "Compiling the app..."
 printf '%s\n' "${APP_SOURCES[@]}" | xargs -P "$JOBS" -I{} bash -c '
     src={}; obj="$OUT/app/$(echo "$src" | tr / _).o"
     extra=""; [[ "$src" == src/platform/CrashGuard.cpp ]] && extra="-fms-extensions"
+    [[ "$src" == src/ui/CrashReporter.cpp ]] && extra="-iquote $OUT"
     $ZIG c++ $COMMON_STR $extra -Wall -Wextra -c "$src" -o "$obj"'
 
 echo "Resources (manifest, icons, version $VERSION)..."
