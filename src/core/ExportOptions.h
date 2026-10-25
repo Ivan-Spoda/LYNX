@@ -80,6 +80,10 @@ struct Options
     // FL's "HQ for all plugins" (REA round 134): engines with a separate render quality use it and HQ switches are
     // forced on; off = the export uses the same (draft) quality as playback, so it matches what was heard
     bool hqAllPlugins = true;
+    // "Plugin warm-up" (round 155): hosted plugins get silent, discarded audio before the render until they have
+    // settled (fresh instances: bridged plugins / background loading apply their state late), so the file does not
+    // start with half-loaded effects
+    bool pluginWarmUp = true;
     bool showWhenDone = false;       // FL's "Show file(s) when complete": the file manager opens on the result
     // FL's "Disable maximum polyphony" (on by default; REA round 139, FLEngine FUN_00d1a…: every channel's Max
     // polyphony is set to 0 for the render): the channels' polyphony limits are lifted in the exported song

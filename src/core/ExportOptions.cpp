@@ -252,6 +252,7 @@ std::string toText (const Options& o)
       << "masterEffects=" << (o.masterEffects ? 1 : 0) << "\n"
       << "trimPdc=" << (o.trimPdc ? 1 : 0) << "\n"
       << "hqAllPlugins=" << (o.hqAllPlugins ? 1 : 0) << "\n"
+      << "pluginWarmUp=" << (o.pluginWarmUp ? 1 : 0) << "\n"
       << "showWhenDone=" << (o.showWhenDone ? 1 : 0) << "\n"
       << "disableMaxPolyphony=" << (o.disableMaxPolyphony ? 1 : 0) << "\n"
       << "moreFormats=" << o.moreFormats << "\n"
@@ -282,6 +283,7 @@ Options fromText (const std::string& text)
     o.masterEffects = toInt (kv, "masterEffects", d.masterEffects ? 1 : 0) != 0;
     o.trimPdc = toInt (kv, "trimPdc", d.trimPdc ? 1 : 0) != 0;
     o.hqAllPlugins = toInt (kv, "hqAllPlugins", d.hqAllPlugins ? 1 : 0) != 0;
+    o.pluginWarmUp = toInt (kv, "pluginWarmUp", d.pluginWarmUp ? 1 : 0) != 0;
     o.showWhenDone = toInt (kv, "showWhenDone", d.showWhenDone ? 1 : 0) != 0;
     o.disableMaxPolyphony = toInt (kv, "disableMaxPolyphony", d.disableMaxPolyphony ? 1 : 0) != 0;
     o.moreFormats = (std::uint32_t) std::clamp (toInt (kv, "moreFormats", 0), 0, 15);

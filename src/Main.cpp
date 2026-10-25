@@ -2321,6 +2321,9 @@ private:
                 const auto loaded = juce::Time::getMillisecondCounterHiRes();
                 // .mp3: the Export window's MP3 (320 kbps); everything else as before
                 auto options = settings.toOptions();
+                // --no-warmup: the export's plugin warm-up off (round 155: compare the start of the file)
+                if (juce::JUCEApplication::getCommandLineParameters().contains ("--no-warmup"))
+                    options.pluginWarmUp = false;
                 if (output.hasFileExtension ("mp3"))
                 {
                     options.format = lynx::exportopts::Format::mp3;
@@ -2380,6 +2383,11 @@ private:
                        << "render_ms=" << juce::roundToInt (juce::Time::getMillisecondCounterHiRes() - prepared) << "\n"
                        << "graph_ms=" << juce::roundToInt (job.getEngine().getLastRenderStats().graphMs) << "\n"
                        << "write_ms=" << juce::roundToInt (job.getEngine().getLastRenderStats().writeMs) << "\n"
+                       << "warmup_blocks=" << job.getEngine().getLastRenderStats().warmUp.blocks << "\n"
+                       << "warmup_ms=" << juce::roundToInt (job.getEngine().getLastRenderStats().warmUp.wallSeconds * 1000.0) << "\n"
+                       << "warmup_changes=" << job.getEngine().getLastRenderStats().warmUp.signatureChanges << "\n"
+                       << "warmup_timed_out=" << (job.getEngine().getLastRenderStats().warmUp.timedOut ? 1 : 0) << "\n"
+                       << "pdc_trim=" << job.getEngine().getLastRenderStats().trimmedSamples << "\n"
                        << "song_seconds=" << job.getMusicSeconds() << "\n"
                        << "peak=" << job.getPeak() << "\n"
                        << "final_progress=" << lastPercent << "\n"

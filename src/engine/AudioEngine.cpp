@@ -307,19 +307,27 @@ float AudioEngine::renderOffline (const RenderOptions& options)
     if (rackProcessor != nullptr)
         rackProcessor->setMetering (false); // nobody looks at the meters during the render
 
+    lastRenderStats = {};
+    // FL's init list first (play() would do it at the first block), so the plugins settle on those values too
+    resetToInitialValues();
+    int latency = getLatencySamples();
+    if (options.pluginWarmUp)
+        lastRenderStats.warmUp = warmUpPlugins (options.warmUp, sampleRate, blockSize, progress, latency);
+
     play();
 
     juce::AudioBuffer<float> buffer (2, blockSize);
     juce::MidiBuffer midi;
     float peak = 0.0f;
-    const auto trim = (std::int64_t) juce::jmax (0, trimSamples);
+    // PDC trim with the latency the plugins report once they have settled
+    const auto trim = (std::int64_t) juce::jmax (0, trimSamples + (options.trimPdc ? latency : 0));
+    lastRenderStats.trimmedSamples = (int) trim;
     const auto musicSamples = (std::int64_t) (seconds * sampleRate) + trim;
     const auto totalSamples = musicSamples + (std::int64_t) (juce::jmax (0.0, tailSeconds) * sampleRate);
     std::int64_t quietSamples = 0;
-    bool cancelled = false;
-    lastRenderStats = {};
+    bool cancelled = lastRenderStats.warmUp.cancelled;
 
-    for (std::int64_t done = 0; done < totalSamples; done += blockSize)
+    for (std::int64_t done = 0; done < totalSamples && ! cancelled; done += blockSize)
     {
         const auto n = (int) juce::jmin<std::int64_t> (blockSize, totalSamples - done);
         juce::AudioBuffer<float> view (buffer.getArrayOfWritePointers(), 2, n);
@@ -379,6 +387,124 @@ float AudioEngine::renderOffline (const RenderOptions& options)
     setOfflineRendering (false);
     setHqForAllPlugins (false);
     return cancelled ? -1.0f : peak;
+}
+
+warmup::Result AudioEngine::warmUpPlugins (const warmup::Settings& settings, double sampleRate, int blockSize,
+                                           const std::function<bool (double)>& progress, int& latency)
+{
+    // the hosted plugins, collected once: the timer may republish the song meanwhile (the instances stay the same)
+    std::vector<juce::AudioPluginInstance*> hosted;
+    forEachHostedPlugin ([&hosted] (juce::AudioPluginInstance& p, bool) { hosted.push_back (&p); });
+    if (hosted.empty())
+        return {}; // LYNX's own engines are ready as soon as they are created: nothing to wait for
+
+    // keeps the units alive whatever the timer publishes during the warm-up
+    std::vector<std::shared_ptr<Instrument>> keepInstruments;
+    std::vector<std::shared_ptr<Effect>> keepEffects;
+    for (std::size_t i = 0; i < song.channels.size(); ++i)
+        keepInstruments.push_back (getChannelInstrument ((int) i));
+    for (std::size_t t = 0; t < song.mixer.size(); ++t)
+        for (std::size_t s = 0; s < song.mixer[t].effects.size(); ++s)
+            keepEffects.push_back (getEffect ((int) t, (int) s));
+
+    juce::AudioBuffer<float> buffer (2, blockSize);
+    juce::MidiBuffer midi;
+    int blocks = 0;
+
+    // transport stopped at the start position: no note plays, and the automation / pattern events at that position
+    // reach the plugins (the rack evaluates them every block), so they settle on the values the song starts with
+    const auto result = warmup::run (
+        settings, sampleRate,
+        [&]() -> int {
+            if (progress && ++blocks % 32 == 0 && ! progress (0.0))
+                return -1;
+            buffer.clear();
+            midi.clear();
+            graph.processBlock (buffer, midi);
+            return blockSize;
+        },
+        [&hosted] {
+            warmup::Hash h;
+            for (auto* p : hosted)
+            {
+                h.add ((std::uint64_t) (std::int64_t) p->getLatencySamples());
+                for (auto* param : p->getParameters())
+                    h.addValue (param->getValue());
+            }
+            return h.value;
+        },
+        [] { return juce::Time::getMillisecondCounterHiRes() * 0.001; },
+        [] (double s) { juce::Thread::sleep (juce::jlimit (1, 20, (int) std::lround (s * 1000.0))); });
+
+    // a latency that changed (reported late) gets its PDC plan before the render, on the message thread as the
+    // timer does it (renders from the Export window run on a thread of their own)
+    auto republish = [this] {
+        if (lastPublishedShape.currentLatencies() != lastPublishedShape.latencies)
+        {
+            ++latencyRepublishes;
+            publishSong();
+        }
+        return getLatencySamples();
+    };
+    auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+    if (mm == nullptr || mm->isThisTheMessageThread())
+        latency = republish();
+    else
+    {
+        struct Reply
+        {
+            juce::WaitableEvent done;
+            std::atomic<int> latency { 0 };
+        };
+        auto reply = std::make_shared<Reply>();
+        reply->latency = getLatencySamples();
+        juce::MessageManager::callAsync ([this, reply, republish] {
+            reply->latency = republish();
+            reply->done.signal();
+        });
+        reply->done.wait (3000);
+        latency = reply->latency.load();
+    }
+
+    // LYNX's own units start the render from a clean state, as without the warm-up (free-running LFOs, the delay
+    // compensation's lines); the hosted plugins are not reset: they keep what they settled on (a reset re-activates
+    // them, which is what they had to settle from)
+    if (rackProcessor != nullptr)
+        rackProcessor->prepareToPlay (sampleRate, blockSize);
+    return result;
+}
+
+void AudioEngine::forEachHostedPlugin (const std::function<void (juce::AudioPluginInstance&, bool notifyRender)>& visit) const
+{
+    for (std::size_t i = 0; i < song.channels.size(); ++i)
+        if (auto* p = dynamic_cast<PluginInstrument*> (getChannelInstrument ((int) i).get()); p != nullptr && ! p->hasCrashed())
+            visit (p->getInstance(), song.channels[i].plugin.notifyRender);
+
+    for (std::size_t t = 0; t < song.mixer.size(); ++t)
+        for (std::size_t s = 0; s < song.mixer[t].effects.size(); ++s)
+            if (auto* p = dynamic_cast<PluginEffect*> (getEffect ((int) t, (int) s).get()); p != nullptr && ! p->hasCrashed())
+                visit (p->getInstance(), song.mixer[t].effects[s].plugin.notifyRender);
+
+    std::function<void (patcher::Graph*)> inGraph = [&] (patcher::Graph* graph) {
+        if (graph == nullptr)
+            return;
+        for (int n = 0; n < graph->nodeCount(); ++n)
+        {
+            auto effect = graph->effectAt (n);
+            auto instrument = graph->instrumentAt (n);
+            if (auto* p = dynamic_cast<PluginEffect*> (effect.get()); p != nullptr && ! p->hasCrashed())
+                visit (p->getInstance(), true);
+            if (auto* p = dynamic_cast<PluginInstrument*> (instrument.get()); p != nullptr && ! p->hasCrashed())
+                visit (p->getInstance(), true);
+            inGraph (patcher::graphOf (effect.get()));
+            inGraph (patcher::graphOf (instrument.get()));
+        }
+    };
+    for (std::size_t i = 0; i < song.channels.size(); ++i)
+        inGraph (patcher::graphOf (getChannelInstrument ((int) i).get()));
+    for (std::size_t t = 0; t < song.mixer.size(); ++t)
+        for (std::size_t s = 0; s < song.mixer[t].effects.size(); ++s)
+            inGraph (patcher::graphOf (getEffect ((int) t, (int) s).get()));
 }
 
 ProcessTimes* AudioEngine::getProcessTimes() noexcept
