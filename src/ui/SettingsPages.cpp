@@ -273,7 +273,7 @@ private:
 
         r.section (reportsTitle);
         crashBox.setBounds (r.row (crashLabel, 260));
-        crashNote.setBounds (r.full (32).translated (0, -6));
+        crashNote.setBounds (r.full (46).translated (0, -6));
         displayTitle.setVisible (false);
         return r.bottom();
     }
