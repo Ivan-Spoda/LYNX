@@ -3934,11 +3934,8 @@ void open (AudioEngine& engine, int track, int slot)
         NewtoneWindows::open (engine, track, slot);
         return;
     }
-    if (kind == EffectKind::parametricEq) // its own editor (response curve with handles)
-    {
-        ParametricEqWindows::open (engine, track, slot);
-        return;
-    }
+    // (the Parametric EQ opens here, in its layout editor: ParametricEqWindows::open forwards to this function, so
+    // forwarding back to it was an endless loop — every way of opening the Parametric EQ froze LYNX; round 157a)
     if (kind == EffectKind::facetEq) // its own editor (analyser, nodes, dynamics; REA round 103)
     {
         FacetEqWindows::open (engine, track, slot);
