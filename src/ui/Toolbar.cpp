@@ -558,6 +558,9 @@ ui::Hint PerformanceMeter::hintAt (juce::Point<int> p)
                                   { juce::String ((juce::int64) overDeadline), juce::String ((juce::int64) lateCalls) });
         if (! heaviest.isEmpty())
             h.text << "  " << tr ("Heaviest: {0}", { heaviest.joinIntoString (", ") });
+        if (underruns > 0 && driverTip.isNotEmpty())
+            h.text << "  " << tr ("Tip: Windows Audio (shared) drops out more easily; choose the ASIO driver \"{0}\" in Options > Audio settings.",
+                                  { driverTip });
         h.value = juce::String (cpu * 100.0, 1) + "%" + (peakLoad > 0.0 ? "  (" + tr ("peak {0}%", { juce::String (juce::roundToInt (peakLoad * 100.0)) }) + ")" : juce::String());
     }
     else if (p.x < getWidth() * 58 / 100)

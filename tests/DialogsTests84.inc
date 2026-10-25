@@ -172,11 +172,12 @@ TEST (export_dither_without_noise_shaping)
     flat.process (b.data(), (int) b.size(), 0);
     double e = 0.0;
     for (std::size_t i = 0; i < b.size(); ++i)
-        e = std::max (e, std::abs ((double) b[i] - 0.25 * std::sin ((double) i * 0.05)));
+        e = std::max (e, std::abs ((double) b[i] - flat.writerBias() - 0.25 * std::sin ((double) i * 0.05)));
     CHECK (e <= 1.5 / 32768.0); // plain TPDF: at most 1.5 LSB away
     CHECK (a != b);
     // both land on the 16-bit grid
-    CHECK (std::abs (b[100] * 32768.0f - std::round (b[100] * 32768.0f)) < 1e-3f);
+    const auto steps = (b[100] - flat.writerBias()) * 32768.0f;
+    CHECK (std::abs (steps - std::round (steps)) < 1e-3f);
 }
 
 TEST (export_mp3_encoder_frames)

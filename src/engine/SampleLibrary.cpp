@@ -183,9 +183,10 @@ std::unique_ptr<juce::AudioFormatReader> SampleLibrary::createReader (const juce
     return nullptr;
 }
 
-std::shared_ptr<const SampleData> SampleLibrary::loadStretched (const juce::String& path, double ratio)
+std::shared_ptr<const SampleData> SampleLibrary::loadStretched (const juce::String& path, double ratio, StretchMethod method)
 {
-    const auto key = path + "|" + juce::String (ratio, 4);
+    // 10 significant digits: ratios within 0.1 % of 1 are resampled to the exact length, so 4 decimals were too coarse
+    const auto key = path + "|" + juce::String (ratio, 10) + "|" + juce::String ((int) method);
     auto& shared = sharedCache();
 
     {
@@ -199,7 +200,7 @@ std::shared_ptr<const SampleData> SampleLibrary::loadStretched (const juce::Stri
     if (original == nullptr)
         return nullptr;
 
-    std::shared_ptr<const SampleData> stretched = timeStretch (*original, ratio);
+    std::shared_ptr<const SampleData> stretched = timeStretch (*original, ratio, method);
 
     // only one length per file is kept (changing the BPM replaces the stretched one)
     const std::scoped_lock l (shared.stretchLock);

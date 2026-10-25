@@ -190,6 +190,11 @@ struct ChannelLfo
 
 enum LfoTarget { lfoPan, lfoVolume, lfoCutoff, lfoPitch, lfoTargets };
 
+// How a pitch-preserving stretch is computed (core/TimeStretch, REA_rodada160): general = polyphonic material and full
+// mixes (FL's élastique Pro / E3 generic / Auto), transients = drums and loops (FL's E2 transient, slice modes), mono =
+// a single voice or instrument (FL's E3 mono, E2 mono / speech).
+enum class StretchMethod : int { general = 0, transients = 1, mono = 2 };
+
 struct SamplerSettings
 {
     float pitch = 0.0f;   // semitones, -24..24
@@ -200,7 +205,8 @@ struct SamplerSettings
     bool reverse = false;
     bool cut = false;     // a new note cuts the previous one ("cut itself")
     float stretchBeats = 0.0f; // > 0: the whole sample lasts this long (in beats), following the BPM
-    bool keepPitch = false;    // with stretch: stretches without changing pitch (WSOLA); otherwise resamples
+    bool keepPitch = false;    // with stretch: stretches without changing pitch (core/TimeStretch); otherwise resamples
+    StretchMethod stretchMethod = StretchMethod::general; // with keepPitch: the stretcher's preset
     float regionStart = 0.0f;  // played region of the sample (fractions 0..1)
     float regionEnd = 1.0f;
     std::vector<float> slices; // slices (starts as fractions): key 60 + i plays slice i, at the original pitch

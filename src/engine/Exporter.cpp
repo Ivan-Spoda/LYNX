@@ -117,6 +117,7 @@ bool ExportJob::run (const std::function<bool (double)>& progress, juce::String&
         const auto expected = (std::size_t) ((musicSeconds + render.tailSeconds) * options.sampleRate) + 4096;
         left.reserve (expected);
         right.reserve (expected);
+        render.keepOvers = true; // normalising comes after; each file's writer / dither clamps what still goes over
         render.capture = [&left, &right] (const float* l, const float* r, int n) {
             left.insert (left.end(), l, l + n);
             right.insert (right.end(), r, r + n);
@@ -169,6 +170,7 @@ bool ExportJob::run (const std::function<bool (double)>& progress, juce::String&
     stream.release(); // now owned by the writer
     render.output = writer.get();
     render.ditherBits = usesDither (options) ? bits : 0;
+    render.keepOvers = options.format == exportopts::Format::wav && bits == 32; // 32-bit float WAV keeps overs, as FL
     render.ditherShaping = options.dither == DitherMode::shaped;
     peak = engine->renderOffline (render);
     writer.reset(); // closes the file (the WAV header is finalized here)

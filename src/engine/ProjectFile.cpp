@@ -945,6 +945,8 @@ juce::var channelToVar (const ChannelDef& c)
         sampler->setProperty ("release", c.sampler.release);
         sampler->setProperty ("stretchBeats", c.sampler.stretchBeats);
         sampler->setProperty ("keepPitch", c.sampler.keepPitch);
+        if (c.sampler.stretchMethod != StretchMethod::general)
+            sampler->setProperty ("stretchMethod", (int) c.sampler.stretchMethod);
         sampler->setProperty ("region", juce::Array<juce::var> { c.sampler.regionStart, c.sampler.regionEnd });
 
         if (! c.sampler.slices.empty())
@@ -1197,6 +1199,7 @@ ChannelDef channelFromVar (const juce::var& c, const Song& song)
         def.sampler.sustain = juce::jlimit (0.0f, 1.0f, (float) (double) s.getProperty ("sustain", 1.0));
         def.sampler.stretchBeats = juce::jmax (0.0f, (float) (double) s.getProperty ("stretchBeats", 0.0));
         def.sampler.keepPitch = (bool) s.getProperty ("keepPitch", false);
+        def.sampler.stretchMethod = (StretchMethod) juce::jlimit (0, 2, (int) s.getProperty ("stretchMethod", 0));
 
         if (auto* slices = s["slices"].getArray())
             for (const auto& v : *slices)

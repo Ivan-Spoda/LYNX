@@ -359,6 +359,7 @@ private:
     int midiInputTicks = 0;
     toolbar::OutputMonitor output { engine };
     int meterTicks = 0;
+    juce::String driverTipType; // the device type the ASIO suggestion was worked out for
 
     // hint bar: what the control under the mouse does, its live value, and markers for
     // "can be automated" and "has a right-click menu"

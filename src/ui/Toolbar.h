@@ -134,6 +134,8 @@ public:
     // `deviceUnderruns`: the driver's own count (−1: it does not report one), shown like FL's "N underruns".
     void setRealtime (std::uint64_t overDeadline, std::uint64_t lateCalls, double peakLoad, const juce::StringArray& heaviest,
                       int deviceUnderruns = -1);
+    // After dropouts on Windows shared mode: the ASIO driver to suggest (round 160; empty = none)
+    void setDriverTip (const juce::String& asioDriver) { driverTip = asioDriver; }
     void paint (juce::Graphics& g) override;
     ui::Hint hintAt (juce::Point<int> position) override;
 
@@ -142,6 +144,7 @@ public:
 private:
     std::uint64_t overDeadline = 0, lateCalls = 0, underruns = 0;
     int deviceUnderruns = -1;
+    juce::String driverTip;
     double peakLoad = 0.0;
     juce::StringArray heaviest;
     juce::uint32 lastGlitchAt = 0; // ms counter of the last new over-deadline callback (0 = none)

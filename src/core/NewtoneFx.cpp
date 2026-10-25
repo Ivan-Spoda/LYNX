@@ -957,7 +957,7 @@ std::shared_ptr<SampleData> renderWarp (const SampleData& source, const WarpMap&
         const auto ratio = (double) (wantEnd - wantStart) / (double) (b - a);
         std::shared_ptr<SampleData> stretched;
         if (std::abs (ratio - 1.0) > 1e-6)
-            stretched = timeStretch (piece, ratio);
+            stretched = timeStretch (piece, ratio, StretchMethod::mono); // Newtone edits monophonic material
         const auto& src = stretched != nullptr ? *stretched : piece;
         // each piece lands exactly where its markers say (the stretcher's length is trimmed / padded)
         const auto length = (std::size_t) (wantEnd - wantStart);

@@ -32,6 +32,7 @@
 #include "core/PoiZone.h"
 #include "core/Toxic.h"
 #include "core/ThreeOsc.h"
+#include "core/TimeStretch.h"
 #include "core/HarmlessFx.h"
 #include "core/SytrusEngine.h"
 #include "core/PhysicalModels.h"
@@ -1767,6 +1768,7 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         {
             def.sampler.stretchBeats = (float) (c.stretchTime / 192.0 * std::pow (2.0, c.stretchMul / 10000.0));
             def.sampler.keepPitch = c.stretchMode != 0; // only FL's "Resample" changes the pitch
+            def.sampler.stretchMethod = stretchMethodForFlMode (c.stretchMode);
         }
         // report: what happened to this channel's generator/sample
         if (options.report != nullptr)
