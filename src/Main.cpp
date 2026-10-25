@@ -68,6 +68,7 @@
 #include "ui/WindowOwner.h"
 #include "ui/ToolWindow.h"
 #include "platform/CrashGuard.h"
+#include "ui/CrashReporter.h"
 
 #include <atomic>
 #include <chrono>
@@ -130,6 +131,7 @@ juce::File sessionsFolder()
 // Sessions of earlier runs whose process is gone without closing (a fail-fast, a crash, a forced end): each is appended
 // to %APPDATA%\LYNX\crash-history.log and its file removed. Returns the last step of the newest one ("" when none).
 juce::StringArray uncleanSteps; // the newest unclean session's steps (without their times)
+juce::String uncleanSessionText; // the newest unclean session's whole file (round 159: the crash report reads it)
 
 // What the newest unclean session tells (round 157a): the plugin whose editor was opening / shown when it ended, and
 // whether its crash file blames a graphics driver
@@ -214,6 +216,7 @@ juce::String collectUncleanSessions()
         {
             newest = modified;
             lastStep = steps.isEmpty() ? juce::String ("start-up") : steps[steps.size() - 1].fromFirstOccurrenceOf (" ", false, false);
+            uncleanSessionText = text;
             uncleanSteps.clear();
             for (const auto& step : steps)
                 uncleanSteps.add (step.fromFirstOccurrenceOf (" ", false, false));
@@ -609,6 +612,35 @@ public:
             return;
         }
 
+        if (args.contains ("--send-test-report"))
+        {
+            // LYNX.exe --send-test-report out.txt [--dry]: builds a crash report marked "test" from the newest crash /
+            // hang file and this computer's facts, writes its JSON to out.txt.json and (without --dry) sends it to
+            // lynx-share.com (LYNX_CRASH_ENDPOINT overrides); out.txt gets "id=…" and "result=OK" or the error (round 159)
+            const auto i = args.indexOf ("--send-test-report");
+            const juce::File out (args[i + 1].unquoted());
+            lynx::crashreporter::Session session;
+            session.version = getApplicationVersion();
+            for (const auto* pattern : { "crash *.txt", "hang *.txt" })
+            {
+                auto files = lynx::platform::settingsFile ("autosave").findChildFiles (juce::File::findFiles, false, pattern);
+                std::sort (files.begin(), files.end(), [] (const juce::File& a, const juce::File& b) { return a.getLastModificationTime() > b.getLastModificationTime(); });
+                if (! files.isEmpty())
+                    (juce::String (pattern).startsWith ("crash") ? session.crashFile : session.hangFile) = files[0];
+            }
+            session.steps = { "00:00:01 test report (LYNX.exe --send-test-report)", "00:00:02 opening project " + out.getFileName() };
+            auto input = lynx::crashreporter::makeInput (session, session.crashFile.existsAsFile() ? "crash" : "manual", nullptr);
+            input.test = true;
+            const auto json = lynx::crashreporter::buildJson (input, false);
+            out.withFileExtension (out.getFileExtension() + ".json").replaceWithText (json);
+            const auto error = args.contains ("--dry") ? juce::String() : lynx::crashreporter::sendNow (json);
+            out.replaceWithText ("id=" + juce::String::fromUTF8 (input.id.c_str()) + "\nendpoint=" + lynx::crashreporter::endpoint() + "\nbytes="
+                                 + juce::String (json.getNumBytesAsUTF8()) + "\nresult=" + (error.isEmpty() ? juce::String ("OK") : error) + "\n");
+            setApplicationReturnValue (error.isEmpty() ? 0 : 1);
+            quit();
+            return;
+        }
+
         if (args.contains ("--symbolize"))
         {
             // LYNX.exe --symbolize "crash … .txt" out.txt: names the LYNX.exe+offset frames of a user's crash / hang file
@@ -812,6 +844,7 @@ public:
         engine = std::make_unique<lynx::AudioEngine>();
         startupTrace.mark ("audio engine + device");
         crashEngine = engine.get();
+        lynx::crashreporter::watchAudioDevice (engine->getDeviceManager()); // (the session file names the device: crash reports)
         addDriverFileDeviceType();
 
         if (startupOptions.sound)
@@ -841,48 +874,72 @@ public:
         startupTrace.mark ("main window built");
     }
 
-    // the previous run ended without closing (see collectUncleanSessions): say so once, with its last step
+    // the previous run ended without closing (see collectUncleanSessions): say so once, with its last step — and, as
+    // Settings › General › "Crash reports" says (round 159), ask whether to send a report, send it unasked, or not
     void showUncleanNotice()
     {
         if (uncleanLastStep.isEmpty())
+        {
+            lynx::crashreporter::retryPending(); // (reports an earlier run could not send: once more)
             return;
-        const auto message = lynx::tr ("The last session ended without closing normally. Last step: {0}. Backup copies of your project are in "
-                                       "LYNX's autosave folder; details in crash-history.log.",
-                                       { uncleanLastStep });
+        }
+        auto message = lynx::tr ("The last session ended without closing normally. Last step: {0}. Backup copies of your project are in "
+                                 "LYNX's autosave folder; details in crash-history.log.",
+                                 { uncleanLastStep });
         uncleanLastStep.clear();
         const auto cause = uncleanCause();
         // round 157a: a plugin's editor was opening — it crashed (often in the graphics driver, inside the plugin's own
         // OpenGL window): offer to keep that plugin in its own process, where a crash takes only the plugin down
+        juce::String separatePlugin;
         if (cause.editorPlugin.isNotEmpty() && ! lynx::pluginSandboxEnabled() && ! lynx::pluginAlwaysSeparate (cause.editorPlugin))
+            separatePlugin = cause.editorPlugin;
+        // LYNX's own drawing crashed in the graphics driver (Direct2D / Direct3D): draw with the CPU from now on
+        else if (cause.gpuDriver && lynx::gpuRenderingEnabled())
         {
-            const auto plugin = cause.editorPlugin;
+            lynx::setGpuRenderingEnabled (false);
+            message << "\n\n"
+                    << lynx::tr ("The crash was in the graphics driver ({0}). LYNX now draws its windows without the GPU; you can turn GPU "
+                                 "rendering back on in Options > General settings (after a driver update, for example).",
+                                 { cause.driverModule });
+        }
+
+        const auto session = lynx::crashreporter::parseSession (uncleanSessionText);
+        auto* devices = engine != nullptr ? &engine->getDeviceManager() : nullptr;
+        const auto action = lynx::crashreport::actionFor (lynx::crashreporter::consent());
+        lynx::crashreporter::retryPending();
+        if (action == lynx::crashreport::Action::askUser)
+        {
+            if (separatePlugin.isNotEmpty())
+                message << "\n\n"
+                        << lynx::tr ("It happened while the window of {0} was opening{1}.",
+                                     { separatePlugin, cause.gpuDriver ? lynx::tr (" (in the graphics driver, {0})", { cause.driverModule }) : juce::String() });
+            lynx::crashreporter::showStartupDialog (session, message, separatePlugin, [separatePlugin] { lynx::setPluginAlwaysSeparate (separatePlugin, true); },
+                                                    devices);
+            return;
+        }
+        if (action == lynx::crashreport::Action::sendSilently)
+        {
+            const auto input = lynx::crashreporter::makeInput (session, session.kind(), devices);
+            lynx::crashreporter::send (lynx::crashreporter::buildJson (input, false), juce::String::fromUTF8 (input.id.c_str()));
+            message << "\n\n" << lynx::tr ("A crash report is being sent to help fix it (Options > General settings > Crash reports).");
+        }
+        if (separatePlugin.isNotEmpty())
+        {
             juce::AlertWindow::showOkCancelBox (
                 juce::MessageBoxIconType::WarningIcon, lynx::tr ("LYNX closed unexpectedly"),
                 message + "\n\n"
                     + lynx::tr ("It happened while the window of {0} was opening{1}. Run {0} in a separate process from now on? If it "
                                 "crashes again, only the plugin stops and LYNX keeps running (Plugin wrapper menu: \"Always run in a "
                                 "separate process\").",
-                                { plugin, cause.gpuDriver ? lynx::tr (" (in the graphics driver, {0})", { cause.driverModule }) : juce::String() }),
+                                { separatePlugin, cause.gpuDriver ? lynx::tr (" (in the graphics driver, {0})", { cause.driverModule }) : juce::String() }),
                 lynx::tr ("Run separately"), lynx::tr ("No"), nullptr,
-                juce::ModalCallbackFunction::create ([plugin] (int result) {
+                juce::ModalCallbackFunction::create ([separatePlugin] (int result) {
                     if (result != 0)
-                        lynx::setPluginAlwaysSeparate (plugin, true);
+                        lynx::setPluginAlwaysSeparate (separatePlugin, true);
                 }));
             return;
         }
-        // LYNX's own drawing crashed in the graphics driver (Direct2D / Direct3D): draw with the CPU from now on
-        if (cause.gpuDriver && lynx::gpuRenderingEnabled())
-        {
-            lynx::setGpuRenderingEnabled (false);
-            juce::AlertWindow::showMessageBoxAsync (
-                juce::MessageBoxIconType::WarningIcon, lynx::tr ("LYNX closed unexpectedly"),
-                message + "\n\n"
-                    + lynx::tr ("The crash was in the graphics driver ({0}). LYNX now draws its windows without the GPU; you can turn GPU "
-                                "rendering back on in Options > General settings (after a driver update, for example).",
-                                { cause.driverModule }));
-            return;
-        }
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, lynx::tr ("LYNX closed unexpectedly"), message);
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, lynx::tr ("LYNX closed unexpectedly"), message);
     }
 
     void openStartupFile()
@@ -904,6 +961,7 @@ public:
         engine = nullptr;
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         heartbeat.stopTimer();
+        lynx::crashreporter::shutdown(); // (an upload in flight gets a moment, never long)
         lynx::crashguard::stopHangWatch();
         lynx::crashguard::endSession(); // a clean exit: no breadcrumb left behind
 
@@ -3772,6 +3830,8 @@ private:
             saveAlert (lynx::makeRecordChoiceDialog(), "-record-dialog.png");
             saveAlert (lynx::makeMidiImportDialog(), "-midi-import-dialog.png"); // File › Import › MIDI file (REA round 143)
             saveWindow (lynx::makeSetupWizardContent (offline, {}, {}), "-setup.png");
+            saveWindow (lynx::crashreporter::makeDialogForSnapshot (false), "-crash-report.png"); // round 159
+            saveWindow (lynx::crashreporter::makeDialogForSnapshot (true), "-report-problem.png");
             saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 0, 1), "-missing-files.png");
             saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 1), "-missing-plugins.png");
             saveWindow (lynx::makeMissingFilesPanel (lynx::missingFilesSnapshotInfo(), 2), "-missing-found.png");

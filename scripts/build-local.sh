@@ -65,6 +65,8 @@ CORE="$CORE src/core/MidiControls.cpp src/core/FormulaController.cpp"
 CORE="$CORE src/core/VoiceShift.cpp"
 # FL engines usable in native projects (round 142, issue #5)
 CORE="$CORE src/core/NativeEngines.cpp"
+# crash / freeze reports: consent, anonymiser, report JSON, GitHub issue URL (round 159)
+CORE="$CORE src/core/CrashReport.cpp"
 # WavPack decoder (C)
 if [[ -z "${CC:-}" ]]; then
     case "$CXX" in

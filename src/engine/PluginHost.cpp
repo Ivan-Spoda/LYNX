@@ -1769,6 +1769,10 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance (const Plu
     // the block size the plugin is told (FL's wrapper, REA rounds 134/139): with fixed size buffers it is only ever
     // called with that block, so it is prepared for it — unless "Use maximum buffer size from host" is on
     const auto preparedBlock = ref.fixedBuffers && ! ref.hostMaxBuffer ? fixedPluginBlock (ref.maxSizeBuffers) : maxBlockSize;
+    // the session's plugin list (round 159: an opt-in crash report names the third-party plugins that were loaded)
+    crashguard::notePlugin ((description->name + "|" + description->manufacturerName + "|" + description->pluginFormatName + "|" + description->version
+                             + (pluginSandboxEnabled() || ref.separateProcess || pluginAlwaysSeparate (description->name) ? "|separate process" : ""))
+                                .toStdString());
     if (pluginSandboxEnabled() || ref.separateProcess || pluginAlwaysSeparate (description->name))
     {
         // separate process (for every plugin, or this one only — FL's "Make bridged"): the child prepares the plugin and applies the state
