@@ -319,6 +319,8 @@ LYNX.exe --scantest folder rep.txt             scan a folder for plugins (separa
 LYNX.exe --fldb rep.txt [project.flp] [--scan] FL Studio found here, its plugin database, a project's plugin matches
 LYNX.exe --devices rep.txt                     list audio drivers and outputs
 LYNX.exe --devicetest "ASIO" "driver" rep.txt  open a driver for 1 s of silence and report it
+LYNX --uiperf project.flp rep.txt             time the UI drawing: Mixer, Playlist, Channel Rack, playing and scrolling
+LYNX.AppImage --menu-entry on|off             Linux AppImage: add to / remove from the applications menu
 ```
 
 ## Shortcuts
