@@ -15991,6 +15991,7 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Rea153Tests.inc"
 #include "Render155Tests.inc"
 #include "HwOut156Tests.inc"
+#include "SoundFont158Tests.inc"
 #include "Mp3157Tests.inc"
 #include "Quality160Tests.inc"
 #include "CrashReport159Tests.inc"

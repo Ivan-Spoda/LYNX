@@ -15,6 +15,7 @@
 #include "core/SimSynth.h"
 #include "core/Wasp.h"
 #include "core/Plucked.h"
+#include "core/SoundFont.h"
 #include "core/BeepMap.h"
 #include "core/Sawer.h"
 #include "core/Drumaxx.h"
@@ -260,6 +261,7 @@ private:
             case InstrumentKind::slayer:
             case InstrumentKind::fruitydance:
             case InstrumentKind::directwave:
+            case InstrumentKind::soundfont:
                 break;
         }
 
@@ -2630,6 +2632,8 @@ std::unique_ptr<Instrument> makeInstrument (InstrumentKind kind, std::shared_ptr
         return makeSlayerInstrument();
     if (kind == InstrumentKind::directwave)
         return dw::makeDirectWaveInstrument ({}); // samples come from RackRenderer
+    if (kind == InstrumentKind::soundfont)
+        return sf::makeInstrument (nullptr); // the font comes from RackRenderer
 
     return std::make_unique<DrumInstrument> (kind);
 }

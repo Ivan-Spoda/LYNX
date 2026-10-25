@@ -176,6 +176,7 @@ instruments (built-in synth, sampler, drums) or any VST3/CLAP plugin.
 | Morphine engine † | Morphine | Close | model within −60 dB on 7/7 demo channels; release loops and unison not modelled |
 | Sakura / Drumpad models | Sakura, Drumpad | Close | physical models rebuilt from the engines; Sakura's resonators within −72 dB; no CC sources |
 | Sampler (FL voice) | Channel sampler, FPC, Slicex, Fruity Slicer, Wave Traveller | Near-exact | FL's interpolators and sampler voice (within one 16-bit code of FL's renders); per-plugin extras partly; WAV loop points not read |
+| LYNX Soundfont | Fruity Soundfont Player (SoundFont Player) | Close | own SF2 / SF3 player (TinySoundFont parsing, LYNX voices): FL's state read (font, preset, envelope / LFO / cut-off overrides, send levels, options; REA_rodada158); preset search over all SoundFonts in the user's folders; "send to" a mixer insert, mod-wheel knob and FL's built-in reverb / chorus sound not reproduced (LYNX's own reverb / chorus) |
 | Built-in synth | FLEX | Approximate | FLEX packs are encrypted and never opened: a synth patch chosen by preset name |
 | Silent channel | Wasp / Wasp XT | Placeholder | silent in FL Studio 2026 (64-bit placeholder); state kept |
 | Silent channel | Fruity Dance | Placeholder | a visual plugin; state kept |

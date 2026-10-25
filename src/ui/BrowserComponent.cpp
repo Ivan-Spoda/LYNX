@@ -22,6 +22,7 @@
 #include "ui/AutomationUi.h"
 #include "ui/ChannelRackComponent.h"
 #include "ui/MixerComponent.h"
+#include "ui/SoundFontEditor.h"
 
 namespace lynx
 {
@@ -34,7 +35,7 @@ bool isAudio (const juce::File& f)
 
 bool isListed (const juce::File& f)
 {
-    return f.hasFileExtension ("wav;flac;ogg;mp3;aif;aiff;wv;mid;midi;lynx;flp;fst");
+    return f.hasFileExtension ("wav;flac;ogg;mp3;aif;aiff;wv;mid;midi;lynx;flp;fst;sf2;sf3");
 }
 
 constexpr int maxResults = 500;
@@ -153,7 +154,7 @@ Icon iconFor (const juce::File& f, bool folder)
         return Icon::pianoRoll;
     if (f.hasFileExtension ("lynx;flp"))
         return Icon::project;
-    if (f.hasFileExtension ("fst"))
+    if (f.hasFileExtension ("fst;sf2;sf3"))
         return Icon::preset;
     return Icon::file;
 }
@@ -172,6 +173,8 @@ juce::String rowHint (const juce::File& f, bool folder, bool expanded)
         return tr ("Project: [2xLMB] open it");
     if (f.hasFileExtension ("fst"))
         return tr ("Preset: [2xLMB] new channel with it (FL synth presets)  drag onto a mixer insert: effect preset");
+    if (f.hasFileExtension ("sf2;sf3"))
+        return tr ("SoundFont: [LMB] preview its first preset  [2xLMB] new LYNX Soundfont channel (or into the selected one)  drag to the Channel Rack");
     return {};
 }
 
@@ -2205,6 +2208,13 @@ void BrowserComponent::fileSelected (const juce::File& file, bool preview)
             resized();
     }
 
+    if (preview && file.hasFileExtension ("sf2;sf3") && file.existsAsFile())
+    {
+        int bank = 0, program = 0;
+        if (firstSoundFontPreset (file.getFullPathName().toStdString(), bank, program))
+            previewSoundFontPreset (engine, file.getFullPathName().toStdString(), bank, program);
+        return;
+    }
     if (! isAudio (file))
         return;
 
@@ -2268,6 +2278,15 @@ void BrowserComponent::showFileMenu (const juce::File& file)
         menu.addItem (tr ("Open MIDI file"), onOpenProject != nullptr, false, [this, file] { onOpenProject (file); });
     else if (file.hasFileExtension ("fst;gmsynth"))
         menu.addItem (tr ("Open in a new channel"), [this, file] { openFile (file); });
+    else if (file.hasFileExtension ("sf2;sf3"))
+    {
+        const auto selected = engine.getSelectedChannel();
+        const auto& song = engine.getSong();
+        const auto selectedIsFont = selected >= 0 && selected < (int) song.channels.size()
+                                    && song.channels[(std::size_t) selected].instrument == InstrumentKind::soundfont;
+        menu.addItem (tr ("Open in a new channel"), [this, file] { openSoundFontFile (engine, file); });
+        menu.addItem (tr ("Send to the selected channel"), selectedIsFont, false, [this, file, selected] { openSoundFontFile (engine, file, selected); });
+    }
 
     addSystemItems (menu, file);
     menu.addSeparator();
@@ -2496,6 +2515,13 @@ void BrowserComponent::loadSelected()
     if (! file.existsAsFile())
         return;
 
+    if (file.hasFileExtension ("sf2;sf3"))
+    {
+        // Enter: into the selected LYNX Soundfont channel, else a new one
+        if (! openSoundFontFile (engine, file, engine.getSelectedChannel()))
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Load SoundFont"), tr ("This file is not a SoundFont LYNX can read."));
+        return;
+    }
     if (! onLoadIntoChannel || ! onLoadIntoChannel (file))
         openFile (file);
 }
@@ -2531,6 +2557,12 @@ int BrowserComponent::draggedPattern (const juce::DragAndDropTarget::SourceDetai
 
 void BrowserComponent::openFile (const juce::File& file)
 {
+    if (file.hasFileExtension ("sf2;sf3"))
+    {
+        if (! openSoundFontFile (engine, file))
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, tr ("Load SoundFont"), tr ("This file is not a SoundFont LYNX can read."));
+        return;
+    }
     if (isAudio (file))
     {
         const auto path = file.getFullPathName().toStdString();
