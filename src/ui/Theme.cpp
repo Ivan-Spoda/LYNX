@@ -1,5 +1,8 @@
 #include "ui/Theme.h"
 
+#include <algorithm>
+#include <unordered_map>
+
 #include "ui/Icons.h"
 #include "ui/PluginSkin.h"
 
@@ -18,8 +21,7 @@ juce::Font uiFont (float size, bool bold = false)
 
 void fillRounded (juce::Graphics& g, juce::Rectangle<float> r, float corner, juce::Colour c)
 {
-    g.setColour (c);
-    g.fillRoundedRectangle (r, corner);
+    fillRoundRect (g, r, corner, c);
 }
 
 void outlineRounded (juce::Graphics& g, juce::Rectangle<float> r, float corner, juce::Colour c, float thickness = 1.0f)
@@ -49,7 +51,217 @@ private:
 };
 } // namespace
 
+namespace
+{
+// Software rendering (the Linux build draws every frame on the CPU; round 161): filling a path rasterises it into an
+// edge table each time, which made the rounded plates, step buttons and knobs most of a Mixer or Channel rack frame.
+// There, small shapes are drawn once into a sprite (a rounded rectangle in its colour, a knob) and blitted afterwards; the result is the same pixels, at most 1/16 pixel apart. Windows (Direct2D) and macOS
+// (Core Graphics) keep drawing the paths directly.
+#if JUCE_LINUX || JUCE_BSD
+constexpr bool useSprites = true;
+#else
+constexpr bool useSprites = false;
+#endif
+
+// The context's physical pixel scale when it is a whole number (1 or 2 on HiDPI); 0 = draw directly
+int spriteScale (juce::Graphics& g)
+{
+    const auto s = g.getInternalContext().getPhysicalPixelScaleFactor();
+    const auto whole = std::round (s);
+    return whole >= 1.0f && whole <= 3.0f && std::abs (s - whole) < 1.0e-4f ? (int) whole : 0;
+}
+
+struct SpriteCache
+{
+    std::unordered_map<std::uint64_t, juce::Image> images;
+
+    juce::Image* find (std::uint64_t key)
+    {
+        const auto it = images.find (key);
+        return it != images.end() ? &it->second : nullptr;
+    }
+
+    juce::Image& add (std::uint64_t key, juce::Image image)
+    {
+        if (images.size() >= 3000) // (sizes, values and colours seen in a session stay far below this)
+            images.clear();
+        return images[key] = std::move (image);
+    }
+};
+
+std::uint64_t mix (std::uint64_t h, std::uint64_t v) { return (h ^ v) * 0x100000001b3ull; }
+int eighth (float v) { return juce::roundToInt (v * 8.0f); }
+
+// Where a sprite goes in physical pixels: its whole-pixel origin and the fractional rest (in eighths of a pixel)
+struct SpritePlace
+{
+    int x, y, fx, fy;
+    SpritePlace (juce::Rectangle<float> r, int scale)
+    {
+        const auto px = r.getX() * (float) scale, py = r.getY() * (float) scale;
+        x = (int) std::floor (px);
+        y = (int) std::floor (py);
+        fx = eighth (px - (float) x);
+        fy = eighth (py - (float) y);
+        if (fx == 8) // (0.9375 and up: the next pixel)
+            ++x, fx = 0;
+        if (fy == 8)
+            ++y, fy = 0;
+    }
+};
+
+void blit (juce::Graphics& g, const juce::Image& sprite, const SpritePlace& at, int scale, bool mask)
+{
+    if (scale == 1)
+        g.drawImageAt (sprite, at.x, at.y, mask);
+    else
+        g.drawImage (sprite, juce::Rectangle<float> ((float) at.x / (float) scale, (float) at.y / (float) scale, (float) sprite.getWidth() / (float) scale,
+                                                     (float) sprite.getHeight() / (float) scale), juce::RectanglePlacement::stretchToFit, mask);
+}
+
+void drawKnobDirect (juce::Graphics& g, juce::Rectangle<float> bounds, float value01, bool bipolar, juce::Colour arcColour, bool hover);
+} // namespace
+
+void fillRoundRect (juce::Graphics& g, juce::Rectangle<float> r, float corner, juce::Colour colour)
+{
+    g.setColour (colour);
+    if (r.isEmpty() || ! g.clipRegionIntersects (r.getSmallestIntegerContainer()))
+        return;
+    if (! useSprites || corner <= 0.0f)
+    {
+        g.fillRoundedRectangle (r, corner);
+        return;
+    }
+
+    // the clip doesn't reach a corner (a meter or a playhead repainted over a big plate): the visible part is a rectangle
+    const auto c = juce::jmin (corner, r.getWidth() * 0.5f, r.getHeight() * 0.5f) + 1.0f;
+    const auto corners = { r.withSize (c, c), r.withLeft (r.getRight() - c).withHeight (c), r.withTop (r.getBottom() - c).withWidth (c),
+                           r.withLeft (r.getRight() - c).withTop (r.getBottom() - c) };
+    if (std::none_of (corners.begin(), corners.end(), [&g] (juce::Rectangle<float> k) { return g.clipRegionIntersects (k.getSmallestIntegerContainer()); }))
+    {
+        g.fillRect (r);
+        return;
+    }
+
+    const auto scale = spriteScale (g);
+    if (scale == 0)
+    {
+        g.fillRoundedRectangle (r, corner);
+        return;
+    }
+
+    static SpriteCache cache;
+    const auto s = (float) scale;
+    const auto rad = juce::jmin (corner, r.getWidth() * 0.5f, r.getHeight() * 0.5f) * s; // (the path clamps it the same way)
+    const auto xl = r.getX() * s, xr = r.getRight() * s, yt = r.getY() * s, yb = r.getBottom() * s;
+    const auto k = (int) std::ceil (rad) + 2; // a corner's square, in physical pixels
+    const auto x0 = (int) std::floor (xl), y0 = (int) std::floor (yt), xa = x0 + k, ya = y0 + k;
+    const auto xb = (int) std::ceil (xr) - k, yc = (int) std::ceil (yb) - k;
+
+    // small: the whole shape as one mask
+    if (xb < xa || yc < ya || (xr - xl) * (yb - yt) <= 48.0f * 48.0f)
+    {
+        if ((xr - xl) > 1024.0f || (yb - yt) > 1024.0f)
+        {
+            g.fillRoundedRectangle (r, corner);
+            return;
+        }
+        const SpritePlace at (r, scale);
+        auto key = mix (mix (mix (0xcbf29ce484222325ull, (std::uint64_t) eighth (xr - xl)), (std::uint64_t) eighth (yb - yt)), (std::uint64_t) eighth (corner * s));
+        key = mix (mix (mix (key, (std::uint64_t) (at.fx * 16 + at.fy)), (std::uint64_t) scale), (std::uint64_t) colour.getARGB());
+        auto* sprite = cache.find (key);
+        if (sprite == nullptr)
+        {
+            const auto sw = (float) eighth (xr - xl) * 0.125f, sh = (float) eighth (yb - yt) * 0.125f; // (the size the key holds)
+            const auto w = (float) at.fx * 0.125f + sw, h = (float) at.fy * 0.125f + sh;
+            juce::Image mask (juce::Image::ARGB, (int) std::ceil (w) + 1, (int) std::ceil (h) + 1, true, juce::SoftwareImageType());
+            {
+                juce::Graphics mg (mask);
+                mg.setColour (colour);
+                mg.fillRoundedRectangle ({ (float) at.fx * 0.125f, (float) at.fy * 0.125f, sw, sh }, (float) eighth (corner * s) * 0.125f);
+            }
+            sprite = &cache.add (key, std::move (mask));
+        }
+        blit (g, *sprite, at, scale, false);
+        return;
+    }
+
+    // large (a strip's plate): nine pieces — the four corners from small masks, the rest plain rectangles whose inner
+    // edges fall on whole pixels, so nothing overlaps or leaves a seam
+    // pa / pb: where the corner's vertical / horizontal edge lies in its square, in eighths of a pixel
+    auto cornerMask = [&] (int which, int pa, int pb) -> const juce::Image& {
+        const auto key = mix (mix (mix (mix (0x9e3779b97f4a7c15ull, (std::uint64_t) (which * 1000000 + pa * 1000 + pb)), (std::uint64_t) eighth (rad)), (std::uint64_t) k),
+                              (std::uint64_t) colour.getARGB());
+        if (auto* found = cache.find (key))
+            return *found;
+        juce::Image mask (juce::Image::ARGB, k, k, true, juce::SoftwareImageType());
+        {
+            // a big rounded rectangle whose corner `which` (0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right) lies in
+            // this square, its two edges at the same sub-pixel places as the shape's own
+            const auto big = (float) (4 * k);
+            const auto ex = (float) pa * 0.125f - ((which & 1) == 0 ? 0.0f : big);
+            const auto ey = (float) pb * 0.125f - ((which & 2) == 0 ? 0.0f : big);
+            juce::Graphics mg (mask);
+            mg.setColour (colour);
+            mg.fillRoundedRectangle ({ ex, ey, big, big }, rad);
+        }
+        return cache.add (key, std::move (mask));
+    };
+    const auto put = [&] (const juce::Image& mask, int x, int y) {
+        if (scale == 1)
+            g.drawImageAt (mask, x, y);
+        else
+            g.drawImage (mask, juce::Rectangle<float> ((float) x / s, (float) y / s, (float) k / s, (float) k / s), juce::RectanglePlacement::stretchToFit);
+    };
+    const auto rect = [&] (float x1, float y1, float x2, float y2) {
+        if (x2 > x1 && y2 > y1)
+            g.fillRect (juce::Rectangle<float> (x1 / s, y1 / s, (x2 - x1) / s, (y2 - y1) / s));
+    };
+    const auto pl = eighth (xl - (float) x0), pr = eighth (xr - (float) xb), pt = eighth (yt - (float) y0), pbot = eighth (yb - (float) yc);
+    put (cornerMask (0, pl, pt), x0, y0);
+    put (cornerMask (1, pr, pt), xb, y0);
+    put (cornerMask (2, pl, pbot), x0, yc);
+    put (cornerMask (3, pr, pbot), xb, yc);
+    rect ((float) xa, yt, (float) xb, (float) ya);  // top band
+    rect ((float) xa, (float) yc, (float) xb, yb);  // bottom band
+    rect (xl, (float) ya, xr, (float) yc);          // middle, full width
+}
+
 void drawKnob (juce::Graphics& g, juce::Rectangle<float> bounds, float value01, bool bipolar, juce::Colour arcColour, bool hover)
+{
+    if (! g.clipRegionIntersects (bounds.getSmallestIntegerContainer().expanded (1)))
+        return;
+    const auto scale = useSprites ? spriteScale (g) : 0;
+    if (scale == 0 || bounds.getWidth() * (float) scale > 256.0f || bounds.getHeight() * (float) scale > 256.0f)
+    {
+        drawKnobDirect (g, bounds, value01, bipolar, arcColour, hover);
+        return;
+    }
+
+    static SpriteCache cache;
+    const SpritePlace at (bounds, scale);
+    const auto value = juce::roundToInt (juce::jlimit (0.0f, 1.0f, value01) * 1440.0f); // (a sixteenth of a degree of the ring)
+    auto key = mix (mix (0x84222325cbf29ce4ull, (std::uint64_t) eighth (bounds.getWidth() * (float) scale)), (std::uint64_t) eighth (bounds.getHeight() * (float) scale));
+    key = mix (mix (mix (key, (std::uint64_t) value), (std::uint64_t) arcColour.getARGB()), (std::uint64_t) ((at.fx * 16 + at.fy) * 64 + scale * 4 + (bipolar ? 2 : 0) + (hover ? 1 : 0)));
+    auto* sprite = cache.find (key);
+    if (sprite == nullptr)
+    {
+        const auto w = (float) at.fx * 0.125f + bounds.getWidth() * (float) scale, h = (float) at.fy * 0.125f + bounds.getHeight() * (float) scale;
+        juce::Image image (juce::Image::ARGB, (int) std::ceil (w) + 1, (int) std::ceil (h) + 1, true, juce::SoftwareImageType());
+        {
+            juce::Graphics ig (image);
+            ig.addTransform (juce::AffineTransform::scale ((float) scale).translated ((float) at.fx * 0.125f, (float) at.fy * 0.125f));
+            drawKnobDirect (ig, { (float) eighth (bounds.getWidth() * (float) scale) * 0.125f / (float) scale,
+                                  (float) eighth (bounds.getHeight() * (float) scale) * 0.125f / (float) scale }, (float) value / 1440.0f, bipolar, arcColour, hover);
+        }
+        sprite = &cache.add (key, std::move (image));
+    }
+    blit (g, *sprite, at, scale, false);
+}
+
+namespace
+{
+void drawKnobDirect (juce::Graphics& g, juce::Rectangle<float> bounds, float value01, bool bipolar, juce::Colour arcColour, bool hover)
 {
     const auto size = juce::jmin (bounds.getWidth(), bounds.getHeight()) - 2.0f;
     if (size <= 4.0f)
@@ -105,6 +317,7 @@ void drawKnob (juce::Graphics& g, juce::Rectangle<float> bounds, float value01, 
                     centre.y - std::cos (to) * outer, juce::jlimit (1.5f, 2.5f, size * 0.05f));
     }
 }
+} // namespace
 
 LookAndFeel::LookAndFeel()
     : juce::LookAndFeel_V4 (juce::LookAndFeel_V4::ColourScheme { bg1, bg2, bg3, borderStrong, textPrimary, bg4, onAccent, accent, textPrimary })

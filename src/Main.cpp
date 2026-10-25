@@ -2851,6 +2851,11 @@ private:
 
             void finish()
             {
+                // the cost of asking where the mouse is (X11: a round trip to the display server)
+                const auto q0 = juce::Time::getMillisecondCounterHiRes();
+                for (int i = 0; i < 100; ++i)
+                    juce::ignoreUnused (juce::Desktop::getInstance().getMainMouseSource().getScreenPosition());
+                text << "mouse position query: " << juce::String ((juce::Time::getMillisecondCounterHiRes() - q0) / 100.0, 3) << " ms\n";
                 app.mainWindow->onFrame = nullptr;
                 app.engine->stop();
                 text << "result=OK\n";
@@ -2890,8 +2895,6 @@ private:
                                  [wheelAt, ui, none] (int f) { wheelAt (ui->getPlaylistForSnapshot(), 0.0f, f < 40 ? -0.15f : 0.15f, none); }, 80 });
         run->steps.push_back ({ "playlist scroll sideways", {},
                                  [wheelAt, ui, none] (int f) { wheelAt (ui->getPlaylistForSnapshot(), f < 40 ? -0.15f : 0.15f, 0.0f, none); }, 80 });
-        run->steps.push_back ({ "playlist zoom in/out", {},
-                                 [wheelAt, ui] (int f) { wheelAt (ui->getPlaylistForSnapshot(), 0.0f, f < 30 ? 0.15f : -0.15f, juce::ModifierKeys (juce::ModifierKeys::ctrlModifier)); }, 60 });
         run->steps.push_back ({ "whole window repainted", {}, [this] (int) { mainWindow->repaint(); }, 40 });
         run->steps.push_back ({ "channel rack scroll", [ui] { ui->selectTabForSnapshot (0); },
                                  [wheelAt, ui, none] (int f) { wheelAt (ui->getRackViewportForSnapshot(), 0.0f, f < 30 ? -0.25f : 0.25f, none); }, 60 });

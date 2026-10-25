@@ -158,6 +158,10 @@ inline juce::String caps (const juce::String& text)
     return out;
 }
 
+// g.setColour (colour) + g.fillRoundedRectangle, faster where the frame is drawn on the CPU (Linux): nothing outside the
+// clip, a plain rectangle when the clip misses the corners, the shape (or a big one's corners) from a cached sprite.
+void fillRoundRect (juce::Graphics& g, juce::Rectangle<float> r, float corner, juce::Colour colour);
+
 // Draws a rotary value arc in the LYNX style (used by custom-painted knobs too).
 void drawKnob (juce::Graphics& g, juce::Rectangle<float> bounds, float value01, bool bipolar, juce::Colour arc, bool hover = false);
 

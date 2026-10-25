@@ -465,8 +465,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
 
             const auto hoverStepHere = hoverArea == Area::grid && hoverRow == row && hoverStep == step && paintMode == PaintMode::none;
             const auto fill = any ? (onGrid ? stepOn : stepNote) : theme::stepOff (step);
-            g.setColour (hoverStepHere ? fill.brighter (any ? 0.15f : 0.35f) : fill);
-            g.fillRoundedRectangle (r.toFloat(), theme::radius::sm);
+            theme::fillRoundRect (g, r.toFloat(), theme::radius::sm, hoverStepHere ? fill.brighter (any ? 0.15f : 0.35f) : fill);
 
             if (hoverStepHere)
             {
@@ -484,9 +483,8 @@ void ChannelRackComponent::paint (juce::Graphics& g)
 
     if (playheadStep >= 0 && playheadStep < steps)
     {
-        g.setColour (playhead.withAlpha (0.28f));
-        g.fillRoundedRectangle (juce::Rectangle<float> ((float) (gridLeft() + playheadStep * stepWidth), 2.0f, (float) stepWidth - 2.0f,
-                                                        (float) addY - 2.0f), theme::radius::sm);
+        theme::fillRoundRect (g, juce::Rectangle<float> ((float) (gridLeft() + playheadStep * stepWidth), 2.0f, (float) stepWidth - 2.0f,
+                                                        (float) addY - 2.0f), theme::radius::sm, playhead.withAlpha (0.28f));
     }
 
     // the controls column stays put while the steps scroll sideways (FL's rack keeps the channel buttons in
@@ -535,8 +533,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
 
             // small box with the mixer insert ("-" = straight to Master)
             const auto routeArea = controlBounds (Area::route, row).toFloat();
-            g.setColour (hovered (Area::route) || (touched && knobDrag == Area::route) ? bg4 : bg0);
-            g.fillRoundedRectangle (routeArea, theme::radius::sm);
+            theme::fillRoundRect (g, routeArea, theme::radius::sm, hovered (Area::route) || (touched && knobDrag == Area::route) ? bg4 : bg0);
 
             if (hovered (Area::route))
             {
@@ -556,8 +553,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
                 auto plate = row == primary ? bg6 : hovered (Area::name) ? bg5 : bg4;
                 if (channel.colour != 0)
                     plate = plate.interpolatedWith (theme::tame (juce::Colour (channel.colour)), row == primary ? 0.42f : 0.32f);
-                g.setColour (plate);
-                g.fillRoundedRectangle (nameArea, theme::radius::md);
+                theme::fillRoundRect (g, nameArea, theme::radius::md, plate);
             }
 
             if (row == primary)
@@ -566,8 +562,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
                 g.drawRoundedRectangle (nameArea.reduced (0.5f), theme::radius::md, 1.0f);
             }
 
-            g.setColour (channel.colour != 0 ? theme::tame (juce::Colour (channel.colour)) : bg6.brighter (0.2f));
-            g.fillRoundedRectangle (nameArea.withWidth (4.0f).reduced (0.0f, 3.0f).translated (3.0f, 0.0f), 1.5f);
+            theme::fillRoundRect (g, nameArea.withWidth (4.0f).reduced (0.0f, 3.0f).translated (3.0f, 0.0f), 1.5f, channel.colour != 0 ? theme::tame (juce::Colour (channel.colour)) : bg6.brighter (0.2f));
 
             g.setColour (channel.muted ? textDisabled : textPrimary);
             textcache::drawText (g, juce::String::fromUTF8 (channel.name.c_str()), nameArea.withTrimmedLeft (14).withTrimmedRight (6).toNearestInt(),
@@ -575,8 +570,7 @@ void ChannelRackComponent::paint (juce::Graphics& g)
 
             // selector: a slim pill, lit when the row is selected
             const auto pill = juce::Rectangle<float> ((float) selectLeft() + 3.0f, (float) y + 7.0f, (float) selectWidth - 6.0f, (float) rowHeight - 14.0f);
-            g.setColour (selected ? (hovered (Area::select) ? accentHover : accent) : hovered (Area::select) ? textDisabled : ledOff);
-            g.fillRoundedRectangle (pill, 3.0f);
+            theme::fillRoundRect (g, pill, 3.0f, selected ? (hovered (Area::select) ? accentHover : accent) : hovered (Area::select) ? textDisabled : ledOff);
         }
 
         paintLane (g);
@@ -611,8 +605,7 @@ void ChannelRackComponent::paintNotePreview (juce::Graphics& g, int row, const P
     const auto area = juce::Rectangle<float> ((float) gridLeft() + 1.0f, (float) rowY (row) + 4.0f, (float) (steps * stepWidth) - 3.0f,
                                               (float) rowHeight - 8.0f);
     const auto hoveredHere = hoverArea == Area::grid && hoverRow == row;
-    g.setColour (hoveredHere ? bg4 : bg1);
-    g.fillRoundedRectangle (area, theme::radius::sm);
+    theme::fillRoundRect (g, area, theme::radius::sm, hoveredHere ? bg4 : bg1);
 
     for (int beat = 4; beat < steps; beat += 4) // beat lines, bars a little stronger
     {
@@ -1036,8 +1029,7 @@ void ChannelRackComponent::paintLane (juce::Graphics& g)
     for (int l = 0; l < notetools::levelCount; ++l)
     {
         const auto r = levelButtonBounds (l).toFloat();
-        g.setColour (l == graphLevel ? accent : bg4);
-        g.fillRoundedRectangle (r, theme::radius::sm);
+        theme::fillRoundRect (g, r, theme::radius::sm, l == graphLevel ? accent : bg4);
         g.setColour (l == graphLevel ? onAccent : textSecondary);
         g.setFont (theme::font (theme::type::caption, l == graphLevel));
         textcache::drawFittedText (g, tr (notetools::levelName ((notetools::Level) l)), r.toNearestInt(), juce::Justification::centred, 1, 0.8f);
