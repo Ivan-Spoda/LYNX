@@ -1,0 +1,113 @@
+name: Bug report
+description: Something crashes, freezes, sounds wrong or doesn't work as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing LYNX! The more of this you fill in, the faster we can fix it.
+        Sound differences against a plugin or FL Studio have their own template ("Sound / plugin difference").
+
+  - type: input
+    id: version
+    attributes:
+      label: LYNX version
+      description: Help › About, or the file name you downloaded.
+      placeholder: "0.1.16-alpha"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS (Apple silicon)
+        - macOS (Intel)
+        - Linux (AppImage)
+        - Linux (tar.gz)
+    validations:
+      required: true
+
+  - type: input
+    id: os-details
+    attributes:
+      label: System details
+      description: OS version / distro, CPU, graphics card (e.g. "Intel + RTX 3050 laptop"), screen scaling.
+      placeholder: "Windows 11 24H2, i7-12650H, Intel Iris Xe + RTX 3050, 125 %"
+
+  - type: input
+    id: audio
+    attributes:
+      label: Audio device
+      description: Options › Audio settings — driver, device, sample rate and buffer size.
+      placeholder: "ASIO / SSL 2 MKII, 48000 Hz, 256 samples — or PipeWire/JACK/ALSA on Linux"
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What happened?
+      options:
+        - LYNX closed (crash)
+        - LYNX froze (not responding)
+        - Wrong or bad sound
+        - A project / file doesn't open correctly
+        - A plugin doesn't load or work
+        - Something in the interface is wrong
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What you clicked or opened, in order.
+      placeholder: |
+        1. Open my project (FL Studio .flp)
+        2. Double-click the EQ on mixer insert 1
+        3. LYNX freezes
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected and what happened instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: plugins
+    attributes:
+      label: Plugins involved
+      description: Name, vendor, format (VST3 / VST2 / CLAP / AU / LV2) and version, if a plugin is involved. On Linux, say if it runs through yabridge.
+      placeholder: "Auto-Tune Pro 11 (VST3, Antares)"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Crash / freeze files and logs
+      description: |
+        Drag the newest files here (they contain no personal data apart from file paths):
+        - **Windows:** `%APPDATA%\LYNX\autosave\crash *.txt` and `hang *.txt`, plus `%APPDATA%\LYNX\crash-history.log`
+        - **macOS:** `~/Library/Application Support/LYNX/autosave/` (crash / hang files) and `crash-history.log`
+        - **Linux:** `~/.config/LYNX/autosave/` (crash / hang files) and `~/.config/LYNX/crash-history.log`
+        For slowness, start LYNX with `LYNX_TRACE_UI=1` and attach `ui.log` from the same folder.
+      placeholder: Attach the files or paste their contents.
+
+  - type: textarea
+    id: files
+    attributes:
+      label: Project or audio file (optional)
+      description: If a specific project or audio file shows the problem, attach it (zip it if needed) or a small one that shows the same thing.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before sending
+      options:
+        - label: I checked that this still happens in the latest release.
+        - label: I searched the existing issues.

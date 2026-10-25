@@ -2697,7 +2697,7 @@ private:
         quit();
     }
 
-    // LYNX.exe --export project.(flp|lynx) output.(wav|flac|ogg|mp3) [--pattern] [--insert N]
+    // LYNX.exe --export project.(flp|lynx) output.(wav|flac|ogg|mp3) [--pattern] [--insert N] [--rate N]
     // Same path as "Export" in the UI: the whole song (or the current pattern) with its tail.
     void runExport (const juce::String& inputPath, const juce::String& outputPath, bool patternOnly, int insert)
     {
@@ -2765,6 +2765,10 @@ private:
                 // --no-warmup: the export's plugin warm-up off (round 155: compare the start of the file)
                 if (juce::JUCEApplication::getCommandLineParameters().contains ("--no-warmup"))
                     options.pluginWarmUp = false;
+                // --rate N: render at another sample rate (round 157b: samples resampled as at a 48 kHz device)
+                if (const auto args = juce::JUCEApplication::getCommandLineParameterArray(); args.contains ("--rate"))
+                    if (const auto rate = args[args.indexOf ("--rate") + 1].getDoubleValue(); rate >= 8000.0 && rate <= 384000.0)
+                        options.sampleRate = rate;
                 if (output.hasFileExtension ("mp3"))
                 {
                     options.format = lynx::exportopts::Format::mp3;
