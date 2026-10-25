@@ -77,6 +77,9 @@ public:
     // YIN's absolute threshold (0.05 strict … 0.3 relaxed) and the RMS level under which the signal counts as silent
     void setThreshold (float t) noexcept { threshold = t; }
     void setGate (float rms) noexcept { gate = rms; }
+    // Round 157: prefer a clearly deeper dip at 1.5 / 2 / 3 / 4 times the first one when it continues the last voiced
+    // period (harmonic errors on strong formants). Off by default (LYNX Tune turns it on).
+    void setHarmonicGuard (bool on) noexcept { harmonicGuard = on; }
 
     // Feeds one sample; returns true when a new estimate is ready (then read estimate()).
     bool push (float x) noexcept;
@@ -106,6 +109,9 @@ private:
     int phase = 0, hopCount = 0;
     std::int64_t written = 0, writtenDec = 0;
     float threshold = 0.15f, gate = 0.0005f;
+    bool harmonicGuard = false;
+    double lastTau = 0.0;               // the last voiced estimate's lag (decimated samples)
+    int sinceVoiced = 1 << 20, guardMemory = 16; // estimates since then; the guard remembers it this long
     std::array<Biquad, 2> lp {};
     std::vector<float> full, deci, diff;
     PitchEstimate est;

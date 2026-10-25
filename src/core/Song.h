@@ -768,6 +768,10 @@ struct MixerTrack
     int inputChannel = -1;
     bool inputStereo = true;
     InputMonitor monitor = InputMonitor::automatic;
+    // an FL project's input (.flp 0x9A, REA round 157c): the index in FL's list of its own device's inputs, which only
+    // the open device can turn into a channel — AudioEngine::setSong resolves it (flInputSource) when the project opens,
+    // if inputChannel is still -1. -1 = none. Not saved.
+    int flInput = -1;
     // hardware output target (FL's "Audio output target" .flp 0x93; mono channels are a LYNX extra, REA round 156):
     // outputDefault, outputNone or the first device output channel; an insert with a target still feeds the
     // Master (and its sends) as in FL — the hardware output is a parallel path

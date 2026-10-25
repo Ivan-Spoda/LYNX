@@ -1884,6 +1884,14 @@ Song importFlp (const flp::Project& input, const FlpImportOptions& options)
         // set to none (the project would play silent)
         if (insert.output == 0 && insert.index > 0)
             track.outputChannel = 0;
+        // 0x9A "Audio input source" (REA round 157c): resolved against the open device when the project opens
+        // (AudioEngine::setSong). FL plays an insert's input through it whether the insert is armed or not, stopped or
+        // playing ([FL] FL Studio 2026, meters of unarmed inserts with an input): monitoring On
+        if (insert.input >= 0)
+        {
+            track.flInput = insert.input;
+            track.monitor = InputMonitor::on;
+        }
 
         if (insert.index > 0 && insert.hasRoutes)
         {

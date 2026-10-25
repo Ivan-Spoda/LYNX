@@ -52,6 +52,25 @@ inline std::string inputSourceName (int channel, bool stereo, const std::vector<
     return stereo ? nameOf (channel) + " - " + nameOf (channel + 1) : nameOf (channel);
 }
 
+// An FL project's insert input (.flp 0x9A) on a device with `deviceChannels` inputs. FL numbers the entries of its own
+// input list, which is inputSources()'s order (REA round 157c [FL]: on a two-input device 0 = "In 1 - In 2", 1 = "In 1",
+// 2 = "In 2"): the stereo pairs first, then every channel alone. An index past this device's list (FL had a device with
+// more inputs) gives the first channel alone, the usual microphone input. -1 for none.
+inline InputSource flInputSource (int flIndex, int deviceChannels)
+{
+    if (flIndex < 0)
+        return {};
+
+    const auto n = deviceChannels > 0 ? deviceChannels : 2;
+    const auto pairs = n / 2;
+
+    if (flIndex < pairs)
+        return { 2 * flIndex, true, {} };
+    if (flIndex - pairs < n)
+        return { flIndex - pairs, false, {} };
+    return { 0, false, {} };
+}
+
 // Whether an insert hears its external input now.
 inline bool inputMonitored (InputMonitor mode, bool armed, bool playing, bool recording) noexcept
 {

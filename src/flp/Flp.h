@@ -316,6 +316,8 @@ struct MixerInsert
     std::vector<int> routes;      // destination tracks (0 = Master)
     bool hasRoutes = false;
     int output = -2;              // 0x93 "Audio output target": -1 = none, 0 = the device's first pair; -2 = not in the file
+    int input = -1;               // 0x9A "Audio input source": -1 = none; k = entry k of FL's list for its device (stereo
+                                  // pairs first, then every channel alone: REA round 157c)
 
     struct Slot
     {
