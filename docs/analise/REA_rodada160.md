@@ -190,6 +190,10 @@ hint suggests the interface's own ASIO driver (e.g. "SSL ASIO Driver 1"), then L
 
 ## Where I stopped
 
-- 2026-10-25 (resumed after the BSOD): WIP committed as ab89628b and pushed to origin/wip/quality160; event-sort test
-  fixed (used private members), preview-interpolation test added, PreviewPlayer comment corrected (1.5 dB, not 2.1).
-  Numbers in §2.1, §3, §4 re-measured. Next: build-local green → commit → Windows build → land batch 1; then §8.
+- 2026-10-25 (resumed after the BSOD): WIP committed as ab89628b and pushed to origin/wip/quality160. Fixed what the
+  salvaged code's own tests caught (event-sort test used private members; stretch pre-echo −29 dB → 15 ms pre-roll;
+  dither bias a quarter LSB → half), regenerated I18nData.h, added the preview-interpolation and RT-audit tests,
+  rewrote the near-unity resampler (polyphase), merged origin/main (361c6903). Numbers in §2–§7 re-measured.
+- Build-local of the merge: in progress; then a final build-local + Windows build of b9db574c+ and land batch 1
+  (`land.sh quality160`). Then the "Sound quality" section of notes-0.1.16.md.
+- Next (§8): locks on the engine side of the audio thread; anything else measured goes in a batch 2.
