@@ -41,6 +41,18 @@ void toggleArm (AudioEngine& engine, int track, juce::Component* target);
 void explain (const AudioEngine::RecordingNotice& notice);
 } // namespace mixerinput
 
+// Hardware output targets (REA round 156; LYNX extra): an insert can also go straight to device outputs, a stereo
+// pair or one channel alone (mono: sum / left / right). Optional: by default inserts reach the device via the Master.
+namespace mixeroutput
+{
+// "(none)", "Out 1 - Out 2", "Out 3 (mono)", "... (missing)" — translated. `compact`: the strip badge ("→ 3 m").
+juce::String label (const AudioEngine& engine, int track, bool compact = false);
+// Whether the track has a target other than its default (inserts: any target; Master: not the first pair).
+bool isCustom (const AudioEngine& engine, int track);
+// The output target menu of a track.
+void showMenu (AudioEngine& engine, int track, juce::Component* target, juce::Rectangle<int> screenArea);
+} // namespace mixeroutput
+
 // FL-style mixer: one compact vertical strip per track (Master first).
 //  - header: record arm, number, name (once), effect count; drag it sideways to reorder inserts
 //  - pan, stereo separation and fader: the shared control contract (ui/ValueControl.h): drag
