@@ -127,6 +127,9 @@ add_library(lynx_core STATIC
     src/core/Patcher.cpp
     src/core/ThreeOsc.cpp
     src/core/Plucked.cpp
+    src/core/SoundFont.cpp
+    src/core/SoundFontLoad.cpp
+    src/core/SoundFontIndex.cpp
     src/core/HardcoreFx.cpp
     src/core/FacetEq.cpp
     src/core/ApexLimiter.cpp

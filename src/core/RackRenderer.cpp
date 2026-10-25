@@ -11,6 +11,7 @@
 #include "core/Denormals.h"
 #include "core/FlKeys.h"
 #include "core/DirectWave.h"
+#include "core/SoundFont.h"
 #include "core/NewtoneFx.h"
 
 #include <algorithm>
@@ -144,6 +145,15 @@ std::shared_ptr<Instrument> buildInstrument (const ChannelDef& channel, double s
         return instrument;
     }
 
+    // LYNX Soundfont (REA_rodada158): the font is loaded on a background thread and shared by the channels playing it
+    if (kind == InstrumentKind::soundfont)
+    {
+        std::shared_ptr<Instrument> instrument = sf::makeInstrument (channel.samplePath.empty() ? nullptr : sf::FontLibrary::instance().get (channel.samplePath));
+        instrument->prepare (sampleRate);
+        instrument->configure (channel, bpm);
+        return instrument;
+    }
+
     // multi-sample sampler: one zone per sample (DirectWave, FPC layers...)
     if (kind == InstrumentKind::sampler && ! channel.zones.empty())
     {
@@ -261,6 +271,8 @@ std::unique_ptr<const RackState> RackState::build (Song song,
         if (previous != nullptr && i < previous->song.channels.size() && i < previous->instruments.size()
             && previous->song.channels[i].instrument == kind && kind != InstrumentKind::patcher
             && (kind != InstrumentKind::granulizer || previous->song.channels[i].samplePath == channel.samplePath)
+            && (kind != InstrumentKind::soundfont
+                || (previous->song.channels[i].samplePath == channel.samplePath && previous->sampleRate == sampleRate))
             && (kind != InstrumentKind::directwave
                 || (previous->song.channels[i].zones == channel.zones && previous->song.channels[i].modelParams == channel.modelParams
                     && previous->song.channels[i].pluginState == channel.pluginState && previous->sampleRate == sampleRate))
