@@ -42,6 +42,10 @@ void quietCrashReports() noexcept;
 void beginSession (const std::string& fileUtf8, const std::string& header) noexcept;
 void note (const std::string& step) noexcept; // no-op without a session
 void endSession() noexcept;                   // removes the file
+// Round 159 (crash reports): facts of the session kept in its file as "info.<key>=value" (e.g. the audio device, set
+// again when it changes) and the third-party plugins it loaded as "plugin=name|vendor|format|version" (each once).
+void setSessionInfo (const std::string& key, const std::string& value) noexcept;
+void notePlugin (const std::string& nameVendorFormatVersion) noexcept;
 std::uint32_t processId() noexcept;
 std::uint64_t processStartTime() noexcept; // Windows: creation FILETIME; 0 elsewhere
 // The process `pid` still runs and (where known) started at `startTime`: not a reused id.

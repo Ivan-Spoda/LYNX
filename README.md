@@ -417,7 +417,7 @@ docs/         architecture, status, roadmap and the behavioural analysis of FL S
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | project phases |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | how the engine and the UI are organised |
 | [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md) | how releases are built and code-signed (SignPath) |
-| [`PRIVACY.md`](PRIVACY.md) | privacy policy: LYNX makes no network connections of its own |
+| [`PRIVACY.md`](PRIVACY.md) | privacy policy: no network connections of its own except an opt-in, anonymised crash report |
 | [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md) | a script for listening to and poking at what the automated tests don't cover |
 | [`docs/analise/`](docs/analise) | FL Studio's behaviour, documented round by round (clean-room) |
 
@@ -448,6 +448,13 @@ Developer ID, not notarized); Linux packages are not signed.
 
 **Privacy:** This program will not transfer any information to other networked systems unless specifically
 requested by the user or the person installing or operating it. See [`PRIVACY.md`](PRIVACY.md).
+
+**Crash reports (opt-in):** after a crash or freeze LYNX asks before sending a report to lynx-share.com (*Send* /
+*Show what will be sent* / *Don't send*, or *Report on GitHub instead*); Settings › General › Crash reports sets *Ask*
+(default), *Always send* or *Never send*, and Help › Report a problem… sends one by hand. A report has the LYNX
+version, OS, CPU, graphics card and driver, audio device, the crash or freeze file, the last steps and the loaded
+third-party plugins — no audio, projects, file names, user or machine name, and the server stores no IP address.
+Details and how to have a report deleted: [`PRIVACY.md`](PRIVACY.md#crash-reports-opt-in).
 
 ## License
 

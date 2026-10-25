@@ -66,6 +66,12 @@ out-of-process plugin sandbox. macOS adds Audio Units, Linux LV2; drivers Core A
   crash and a "did not close properly — open the newest backup?" prompt at the next start, File › Save new version
   (Song_2, Song_3…), Revert to last backup, Export project with samples (.zip, opened back by Open), Collect project
   samples into a folder; samples are found next to a moved project (REA round 118; `%APPDATA%\LYNX\autosave`).
+- **Crash / freeze reports (opt-in, round 159):** after LYNX closed unexpectedly the next start asks "Send the report
+  to help fix it?" (Send / Show what will be sent / Don't send, "Always send without asking", "Report on GitHub
+  instead" with the bug form prefilled, "Open the folder with the report"); Help › Report a problem… for manual
+  reports; Settings › General › Crash reports: Ask / Always send / Never. Anonymised JSON (no user or machine name,
+  no file names unless ticked, no audio / projects) gzip-POSTed to lynx-share.com/api/crash.php in the background,
+  retried once at the next start when offline (docs/analise/REA_rodada159.md, PRIVACY.md).
 - **Opening FL projects** behind a progress panel (round 112): samples decoded in parallel off the UI thread, hosted
   plugins created one by one with their names shown ("Loading Auto-Tune Pro... 3/12"), no repeated plugin searches,
   missing drives probed once; phase times in `%APPDATA%\LYNX\load.log` and in the `--export` report.
