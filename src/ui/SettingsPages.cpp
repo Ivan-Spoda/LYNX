@@ -94,7 +94,8 @@ public:
                                                                  &wavesLabel, &wavesBox, &stereoWaves, &pluginStyleLabel, &pluginStyleBox, &reducedEffects, &gpuRendering, &splash, &startupSound, &scanAtStart,
                                                                  &typingPiano, &keepEditors, &rememberSeek, &editInLabel, &editInBox, &undoLabel,
                                                                  &undoBox, &autosaveLabel, &autosaveBox, &keepLabel, &keepBox, &openBackups, &unusedTakes,
-                                                                 &sandbox, &sandboxNote, &substitutes, &substitutesNote, &managePlugins, &manageShortcuts, &shortcutsNote })
+                                                                 &sandbox, &sandboxNote, &substitutes, &substitutesNote, &managePlugins, &manageShortcuts, &shortcutsNote,
+                                                                 &reportsTitle, &crashLabel, &crashBox, &crashNote })
             add (*c);
 
         styleLabel (languageLabel, tr ("Language"));
@@ -205,7 +206,17 @@ public:
         };
         styleNote (shortcutsNote, tr ("See, search and change every keyboard shortcut."));
 
-        for (auto* b : { &languageBox, &scaleBox, &wavesBox, &pluginStyleBox, &editInBox, &undoBox, &autosaveBox, &keepBox })
+        styleLabel (crashLabel, tr ("Crash reports"));
+        crashBox.addItem (tr ("Ask after a crash or freeze"), 1);
+        crashBox.addItem (tr ("Always send"), 2);
+        crashBox.addItem (tr ("Never send"), 3);
+        crashBox.setSelectedId (juce::jlimit (0, 2, options.crashReports) + 1, juce::dontSendNotification);
+        crashBox.onChange = [this] { change ([&] { options.crashReports = crashBox.getSelectedId() - 1; }); };
+        styleNote (crashNote, tr ("A report holds LYNX's version, your system and audio device, the crash or freeze file and the last steps, without "
+                                  "your name, file names or projects. It goes to lynx-share.com only with your consent (Help > Report a problem... "
+                                  "sends one by hand)."));
+
+        for (auto* b : { &languageBox, &scaleBox, &wavesBox, &pluginStyleBox, &editInBox, &undoBox, &autosaveBox, &keepBox, &crashBox })
             styleCombo (*b);
         juce::ignoreUnused (engine, persistent);
     }
@@ -259,6 +270,10 @@ private:
             row.removeFromLeft (12);
             shortcutsNote.setBounds (row.withTrimmedTop (6));
         }
+
+        r.section (reportsTitle);
+        crashBox.setBounds (r.row (crashLabel, 260));
+        crashNote.setBounds (r.full (46).translated (0, -6));
         displayTitle.setVisible (false);
         return r.bottom();
     }
@@ -291,9 +306,9 @@ private:
     bool persistent;
     GeneralOptions options;
     SectionTitle languageTitle { tr ("Language and display") }, displayTitle, startupTitle { tr ("Startup") }, editingTitle { tr ("Editing") },
-        backupTitle { tr ("Backup") }, pluginsTitle { tr ("Plugins and shortcuts") };
-    juce::Label languageLabel, languageNote, scaleLabel, wavesLabel, pluginStyleLabel, editInLabel, undoLabel, autosaveLabel, keepLabel, sandboxNote, substitutesNote, shortcutsNote;
-    juce::ComboBox languageBox, scaleBox, wavesBox, pluginStyleBox, editInBox, undoBox, autosaveBox, keepBox;
+        backupTitle { tr ("Backup") }, pluginsTitle { tr ("Plugins and shortcuts") }, reportsTitle { tr ("Crash reports") };
+    juce::Label languageLabel, languageNote, scaleLabel, wavesLabel, pluginStyleLabel, editInLabel, undoLabel, autosaveLabel, keepLabel, sandboxNote, substitutesNote, shortcutsNote, crashLabel, crashNote;
+    juce::ComboBox crashBox, languageBox, scaleBox, wavesBox, pluginStyleBox, editInBox, undoBox, autosaveBox, keepBox;
     juce::ToggleButton stereoWaves, reducedEffects, gpuRendering, splash, startupSound, scanAtStart, typingPiano, keepEditors, rememberSeek, sandbox, substitutes, unusedTakes;
     juce::TextButton openBackups { tr ("Open backup folder") }, managePlugins { tr ("Plugin manager...") }, manageShortcuts { tr ("Manage shortcuts...") };
 };

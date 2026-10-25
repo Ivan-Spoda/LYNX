@@ -182,6 +182,10 @@ target_sources(lynx_core PRIVATE
     src/core/PlaylistOps.cpp
     src/core/TempoDetect.cpp)
 
+# crash / freeze reports: consent, anonymiser, report JSON, GitHub issue URL (round 159)
+target_sources(lynx_core PRIVATE
+    src/core/CrashReport.cpp)
+
 # LAME's libmp3lame (LGPL; third_party/lame, encoder only, configured by third_party/lame/src/config.h)
 file(GLOB LAME_SOURCES third_party/lame/src/*.c)
 add_library(lame_encoder STATIC ${LAME_SOURCES})
@@ -336,9 +340,15 @@ if(LYNX_BUILD_APP)
         src/ui/PluginMonitorWindow.cpp
         src/ui/TouchKeyboard.cpp
         src/ui/QuickAddPalette.cpp
-        src/ui/PluginPicker.cpp)
+        src/ui/PluginPicker.cpp
+        src/ui/CrashReporter.cpp)
 
     target_include_directories(LYNX PRIVATE third_party/clap/include)
+    # the commit the build comes from (crash reports name it, round 159)
+    execute_process(COMMAND git rev-parse --short=10 HEAD WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                    OUTPUT_VARIABLE LYNX_GIT_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/lynx_build/lynx_build.h "#pragma once\n#define LYNX_GIT_COMMIT \"${LYNX_GIT_COMMIT}\"\n")
+    target_include_directories(LYNX PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/lynx_build)
 
     target_compile_definitions(LYNX PRIVATE
         JUCE_WEB_BROWSER=0

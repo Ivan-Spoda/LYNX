@@ -2,6 +2,7 @@
 #include "ui/UiTrace.h"
 #include "core/LoadTrace.h"
 #include "ui/MainComponent.h"
+#include "ui/CrashReporter.h"
 #include "engine/AudioLogger.h"
 #include "ui/PluginSkin.h"
 #include "platform/Paths.h"
@@ -3310,6 +3311,7 @@ void MainComponent::openSettings (int page)
         o.askUnusedRecordings = safe->askUnusedRecordings;
         o.pluginSandbox = pluginSandboxEnabled();
         o.pluginSubstitutes = pluginSubstitutesEnabled();
+        o.crashReports = (int) crashreporter::consent();
         return o;
     };
     hooks.setGeneral = [safe] (const GeneralOptions& o) {
@@ -3345,6 +3347,8 @@ void MainComponent::openSettings (int page)
             setPluginSandboxEnabled (o.pluginSandbox);
         if (o.pluginSubstitutes != pluginSubstitutesEnabled())
             setPluginSubstitutesEnabled (o.pluginSubstitutes);
+        if (o.crashReports != (int) crashreporter::consent())
+            crashreporter::setConsent ((crashreport::Consent) juce::jlimit (0, 2, o.crashReports));
         ChannelRackComponent::keepEditorsOpen = o.keepEditorsOpen;
         EditorGlobals::get().rememberSeek = o.rememberSeek;
         PlaylistComponent::editPatternsIn = juce::jlimit (0, 2, o.editPatternsIn);
@@ -3963,6 +3967,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int barIndex, const juce::String
         menu.addItem (tr ("Built-in plugins (online list)..."), [] {
             juce::URL ("https://github.com/Ka1-S/LYNX/blob/main/docs/PLUGINS.md").launchInDefaultBrowser();
         });
+        menu.addItem (tr ("Report a problem..."), [this] { crashreporter::showManualReport (&engine.getDeviceManager()); });
         menu.addItem (tr ("About LYNX"), [] {
             auto* window = makeAboutWindow().release();
             window->enterModalState (true, nullptr, true);

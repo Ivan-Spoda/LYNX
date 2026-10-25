@@ -142,6 +142,7 @@
 #include "core/Templates.h"
 #include "flp/Flp.h"
 #include "ui/I18nData.h"
+#include "core/CrashReport.h"
 
 namespace
 {
@@ -15992,3 +15993,4 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "Tune157Tests.inc"
 #include "HwOut156Tests.inc"
 #include "Mp3157Tests.inc"
+#include "CrashReport159Tests.inc"
