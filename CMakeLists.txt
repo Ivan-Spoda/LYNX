@@ -176,6 +176,7 @@ target_sources(lynx_core PRIVATE
 target_sources(lynx_core PRIVATE
     src/core/ExportOptions.cpp
     src/core/Mp3Encoder.cpp
+    src/core/Mp3Decoder.cpp
     src/core/PluginMonitor.cpp
     src/core/ProjectContents.cpp
     src/core/PlaylistOps.cpp
@@ -263,6 +264,7 @@ if(LYNX_BUILD_APP)
         src/engine/Metronome.cpp
         src/engine/SampleLibrary.cpp
     src/engine/WavPackFormat.cpp
+    src/engine/Mp3Format.cpp
         src/engine/ProjectFile.cpp
         src/engine/ProjectPackage.cpp
         src/engine/PluginHost.cpp
@@ -352,7 +354,8 @@ if(LYNX_BUILD_APP)
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_PLUGINHOST_VST3=1
-        JUCE_USE_MP3AUDIOFORMAT=1
+        # MP3 is read by LYNX (src/engine/Mp3Format, minimp3; round 157b), not by JUCE's MP3AudioFormat
+        JUCE_USE_MP3AUDIOFORMAT=0
         JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:LYNX,JUCE_PRODUCT_NAME>"
         JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:LYNX,JUCE_VERSION>")
 

@@ -1,8 +1,9 @@
 #pragma once
 
-// Minimal WAV reader (PCM 8/16/24/32 and float 32, WavPack, and FL's Ogg Vorbis: Ogg-in-WAV and .ogg, decoded as
-// the app decodes them, core/OggVorbis.h) for the tools and tests. The app uses JUCE's readers for the rest (FLAC…).
+// Minimal WAV reader (PCM 8/16/24/32 and float 32, WavPack, FL's Ogg Vorbis: Ogg-in-WAV and .ogg, and MP3, decoded as
+// the app decodes them, core/OggVorbis.h and core/Mp3Decoder.h) for the tools and tests. The app uses JUCE's readers for the rest (FLAC…).
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -12,6 +13,7 @@
 #include <vector>
 
 #include "core/Instruments.h"
+#include "core/Mp3Decoder.h"
 #include "core/OggVorbis.h"
 #include "core/WavPack.h"
 
@@ -51,6 +53,19 @@ inline std::shared_ptr<const SampleData> readWav (const std::string& path)
         out->left = std::move (audio.data[0]);
         if (audio.data.size() > 1)
             out->right = std::move (audio.data[1]);
+        return out;
+    }
+
+    // MP3 (round 157b: the app's reader, with FL's timing)
+    if (mp3::looksLikeMp3 (d.data(), std::min<std::size_t> (d.size(), 1 << 16)))
+    {
+        mp3::Decoded audio;
+        if (! mp3::decode (d.data(), d.size(), audio))
+            return nullptr;
+        auto out = std::make_shared<SampleData>();
+        out->sampleRate = audio.info.sampleRate;
+        out->left = std::move (audio.left);
+        out->right = std::move (audio.right);
         return out;
     }
 
