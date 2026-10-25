@@ -19,6 +19,12 @@
 #else
  #include <signal.h>
  #include <unistd.h>
+ #include <pthread.h>
+ #include <dlfcn.h>
+ #if defined(__GLIBC__) || defined(__APPLE__)
+  #include <execinfo.h>
+  #define LYNX_EXECINFO 1
+ #endif
 #endif
 
 namespace lynx::crashguard
@@ -257,7 +263,13 @@ std::string symbolOf (DWORD64 address)
     static std::mutex lock;
     std::call_once (once, [] {
         SymSetOptions (SymGetOptions() | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
-        SymInitialize (GetCurrentProcess(), nullptr, TRUE);
+        // the search path: the exe's folder first (a LYNX.pdb put next to LYNX.exe names LYNX's own frames)
+        wchar_t exe[MAX_PATH] = {};
+        GetModuleFileNameW (nullptr, exe, MAX_PATH);
+        std::wstring folder (exe);
+        if (const auto slash = folder.find_last_of (L"\\/"); slash != std::wstring::npos)
+            folder.resize (slash);
+        SymInitializeW (GetCurrentProcess(), (folder + L";.").c_str(), TRUE);
     });
     const std::lock_guard<std::mutex> l (lock); // (dbghelp is single-threaded)
     alignas (SYMBOL_INFO) char buffer[sizeof (SYMBOL_INFO) + 256] = {};
@@ -358,6 +370,23 @@ std::string describeAddress (const void* address)
     char offset[40];
     std::snprintf (offset, sizeof (offset), "+0x%llx", (unsigned long long) ((std::uintptr_t) address - (std::uintptr_t) module));
     return narrow (name) + offset;
+#elif defined(LYNX_EXECINFO)
+    Dl_info info {};
+    if (dladdr (address, &info) == 0 || info.dli_fname == nullptr)
+    {
+        char text[40];
+        std::snprintf (text, sizeof (text), "0x%llx", (unsigned long long) (std::uintptr_t) address);
+        return text;
+    }
+    std::string name = info.dli_fname;
+    if (const auto slash = name.find_last_of ('/'); slash != std::string::npos)
+        name = name.substr (slash + 1);
+    char offset[40];
+    std::snprintf (offset, sizeof (offset), "+0x%llx", (unsigned long long) ((std::uintptr_t) address - (std::uintptr_t) info.dli_fbase));
+    name += offset;
+    if (info.dli_sname != nullptr)
+        name += std::string ("  (") + info.dli_sname + ")";
+    return name;
 #else
     (void) address;
     return {};
@@ -373,6 +402,13 @@ std::string moduleBacktrace (int skip)
         const auto n = RtlCaptureStackBackTrace ((DWORD) (skip + 1), 96, raw, nullptr);
         std::vector<std::uintptr_t> frames;
         for (USHORT i = 0; i < n; ++i)
+            frames.push_back ((std::uintptr_t) raw[i]);
+        return formatFrames (frames);
+#elif defined(LYNX_EXECINFO)
+        void* raw[96] = {};
+        const auto n = backtrace (raw, 96);
+        std::vector<std::uintptr_t> frames;
+        for (int i = skip + 1; i < n; ++i)
             frames.push_back ((std::uintptr_t) raw[i]);
         return formatFrames (frames);
 #else
@@ -423,6 +459,8 @@ struct HangWatch
     int stallMs = 2000;
 #if defined(_WIN32)
     HANDLE uiThread = nullptr;
+#else
+    pthread_t uiThread {};
 #endif
 };
 HangWatch& hangWatch()
@@ -435,6 +473,31 @@ std::int64_t nowMs()
 {
     return std::chrono::duration_cast<std::chrono::milliseconds> (std::chrono::steady_clock::now().time_since_epoch()).count();
 }
+
+#if defined(LYNX_EXECINFO)
+// the message thread records its own frames in a signal handler (backtrace() was called once beforehand, so it
+// allocates nothing here); the watcher waits for them
+std::atomic<int> sampledCount { -1 };
+void* sampledFrames[64];
+void onSampleSignal (int)
+{
+    sampledCount.store (backtrace (sampledFrames, 64), std::memory_order_release);
+}
+
+std::vector<std::uintptr_t> sampleThread (pthread_t thread)
+{
+    sampledCount.store (-1);
+    if (pthread_kill (thread, SIGPROF) != 0)
+        return {};
+    for (int i = 0; i < 100 && sampledCount.load (std::memory_order_acquire) < 0; ++i)
+        std::this_thread::sleep_for (std::chrono::milliseconds (5));
+    const auto n = sampledCount.load (std::memory_order_acquire);
+    std::vector<std::uintptr_t> frames;
+    for (int i = 2; i < n; ++i) // (the handler and the signal trampoline first)
+        frames.push_back ((std::uintptr_t) sampledFrames[i]);
+    return frames;
+}
+#endif
 
 std::string timeStamp (const char* format)
 {
@@ -482,7 +545,7 @@ void watchLoop()
         }
         ++samples;
         std::string text;
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(LYNX_EXECINFO)
         text = formatFrames (sampleThread (w.uiThread));
 #endif
         const auto header = "LYNX UI thread not responding for " + std::to_string (stalled) + " ms (sample " + std::to_string (samples) + ")\n";
@@ -519,6 +582,19 @@ void startHangWatch (const std::string& folderUtf8, int stallMs) noexcept
 #if defined(_WIN32)
         DuplicateHandle (GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &w.uiThread,
                          THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, 0);
+#else
+        w.uiThread = pthread_self();
+ #if defined(LYNX_EXECINFO)
+        {
+            void* warm[4];
+            backtrace (warm, 4); // (loads the unwinder now, not inside the signal handler)
+            struct sigaction action {};
+            action.sa_handler = onSampleSignal;
+            sigemptyset (&action.sa_mask);
+            action.sa_flags = SA_RESTART;
+            sigaction (SIGPROF, &action, nullptr);
+        }
+ #endif
 #endif
         w.thread = std::thread (watchLoop);
     }
@@ -550,6 +626,33 @@ void stopHangWatch() noexcept
 #endif
     }
     catch (...) {}
+}
+
+std::string symbolizeOwnFrames (const std::string& text)
+{
+    std::string out;
+#if defined(_WIN32)
+    const auto base = (std::uintptr_t) GetModuleHandleW (nullptr);
+    std::size_t start = 0;
+    while (start < text.size())
+    {
+        auto end = text.find ('\n', start);
+        if (end == std::string::npos)
+            end = text.size();
+        auto line = text.substr (start, end - start);
+        if (const auto at = line.find ("LYNX.exe+0x"); at != std::string::npos && line.find ("  (") == std::string::npos)
+        {
+            const auto offset = std::strtoull (line.c_str() + at + 11, nullptr, 16);
+            if (const auto symbol = symbolOf ((DWORD64) (base + offset)); ! symbol.empty())
+                line += "  (" + symbol + ")";
+        }
+        out += line + "\n";
+        start = end + 1;
+    }
+#else
+    out = text;
+#endif
+    return out;
 }
 
 std::string lastHangFile()

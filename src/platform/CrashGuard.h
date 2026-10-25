@@ -63,12 +63,16 @@ std::string describeAddress (const void* address);
 // UI hang watch (round 157a). A frozen message thread leaves no crash file: Windows shows "not responding" and the
 // user closes LYNX. startHangWatch (on the message thread) starts a watcher thread; heartbeat() (the message thread,
 // from a timer, several times a second) proves the UI is alive. When no heartbeat arrives for `stallMs`, the watcher
-// samples the message thread's stack (Windows x64: suspended for a moment, unwound without symbols), writes it to
+// samples the message thread's stack (Windows x64: suspended for a moment, unwound without symbols;
+// Linux / macOS: SIGPROF to that thread, which records its own frames), writes it to
 // `folderUtf8`/hang <time>.txt and adds a session step ("UI not responding ..."); a second sample follows if the stall
 // lasts, and "UI responding again after N s" when it ends. stopHangWatch ends the thread (before quitting).
 void startHangWatch (const std::string& folderUtf8, int stallMs = 2000) noexcept;
 void heartbeat() noexcept;
 void stopHangWatch() noexcept;
+// --symbolize: the "LYNX.exe+0x…" frames of a crash / hang file named with this very build's symbols (LYNX.pdb of
+// the same build next to LYNX.exe; CI keeps it as the "LYNX-symbols" artifact). Other lines unchanged.
+std::string symbolizeOwnFrames (const std::string& text);
 // Test: the last hang file written by this process ("" when none)
 std::string lastHangFile();
 } // namespace lynx::crashguard

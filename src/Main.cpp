@@ -609,6 +609,17 @@ public:
             return;
         }
 
+        if (args.contains ("--symbolize"))
+        {
+            // LYNX.exe --symbolize "crash … .txt" out.txt: names the LYNX.exe+offset frames of a user's crash / hang file
+            // (needs this build's LYNX.pdb next to LYNX.exe — the release's "LYNX-symbols" CI artifact; round 157a)
+            const auto i = args.indexOf ("--symbolize");
+            const auto text = juce::File (args[i + 1].unquoted()).loadFileAsString();
+            juce::File (args[i + 2].unquoted()).replaceWithText (juce::String::fromUTF8 (lynx::crashguard::symbolizeOwnFrames (text.toStdString()).c_str()));
+            quit();
+            return;
+        }
+
         if (args.contains ("--opentest"))
         {
             // LYNX.exe --opentest report.txt [--visible]: every built-in effect and instrument window opened as the mixer /
@@ -1465,6 +1476,8 @@ private:
             juce::String current;
             std::mutex currentLock;
             int opened = 0, painted = 0;
+            // LYNX_OPENTEST_TIMEOUT (seconds): longer for sanitizer builds
+            const std::int64_t timeoutMs = 1000 * juce::jmax (5, juce::SystemStats::getEnvironmentVariable ("LYNX_OPENTEST_TIMEOUT", "20").getIntValue());
 
             static std::int64_t now() { return (std::int64_t) juce::Time::getMillisecondCounter(); }
 
@@ -1480,18 +1493,23 @@ private:
             void start()
             {
                 lastStep = now();
+                // the UI hang watch runs during the whole test (5 s): a slow step leaves its stack next to the report
+                const auto folder = juce::File (reportPath).getParentDirectory().getChildFile ("opentest-hang");
+                folder.deleteRecursively();
+                folder.createDirectory();
+                lynx::crashguard::startHangWatch (folder.getFullPathName().replaceCharacter ('\\', '/').toStdString(), 5000);
                 watchdog = std::thread ([this] {
                     while (! finished)
                     {
                         std::this_thread::sleep_for (std::chrono::milliseconds (200));
-                        if (now() - lastStep.load() > 15000)
+                        if (now() - lastStep.load() > timeoutMs)
                         {
                             juce::String at;
                             {
                                 const std::lock_guard<std::mutex> l (currentLock);
                                 at = current;
                             }
-                            juce::File (reportPath).replaceWithText (report + "HANG at " + at + " (no progress for 15 s)\nresult=HANG\n");
+                            juce::File (reportPath).replaceWithText (report + "HANG at " + at + " (no progress for " + juce::String (timeoutMs / 1000) + " s; stack in opentest-hang)\nresult=HANG\n");
                             lynx::crashguard::exitNow (3);
                         }
                     }
@@ -1531,24 +1549,24 @@ private:
                     stopTimer();
                     lynx::NativeEffectWindows::closeAll();
                     lynx::closeChannelSettings();
-                    // the UI hang watch itself: the message thread spins for 3 s; the watcher must write the stack
+                    // the UI hang watch itself: the message thread spins past the stall time; the watcher must write the stack
                     {
-                        const auto folder = juce::File (reportPath).getParentDirectory().getChildFile ("opentest-hang");
-                        folder.deleteRecursively();
-                        folder.createDirectory();
-                        lynx::crashguard::startHangWatch (folder.getFullPathName().replaceCharacter ('\\', '/').toStdString(), 1000);
-                        for (const auto until = now() + 3000; now() < until;)
+                        const auto before = lynx::crashguard::lastHangFile();
+                        for (const auto until = now() + 7000; now() < until;)
                             lastStep = now(); // (busy: no heartbeat; the test's own watchdog stays quiet)
+                        for (const auto until = now() + 1500; now() < until && lynx::crashguard::lastHangFile() == before;)
+                            std::this_thread::sleep_for (std::chrono::milliseconds (20));
                         lynx::crashguard::stopHangWatch();
                         const juce::File hang (juce::String::fromUTF8 (lynx::crashguard::lastHangFile().c_str()));
                         const auto text = hang.loadFileAsString();
                         const auto frames = juce::StringArray::fromLines (text).size() - 2;
                        #if JUCE_WINDOWS
-                        const auto hangOk = hang.existsAsFile() && text.contains ("LYNX.exe+0x") && frames >= 3;
+                        const auto hangOk = lynx::crashguard::lastHangFile() != before && hang.existsAsFile() && text.contains ("LYNX.exe+0x") && frames >= 3;
                        #else
-                        const auto hangOk = hang.existsAsFile();
+                        const auto hangOk = lynx::crashguard::lastHangFile() != before && hang.existsAsFile() && frames >= 3;
                        #endif
-                        report << "hang watch: " << (hangOk ? "OK" : "FAIL") << " (" << hang.getFileName() << ", " << frames << " lines)\n";
+                        report << "hang watch: " << (hangOk ? "OK" : "FAIL") << " (" << hang.getFileName() << ", " << frames << " lines"
+                               << (before.empty() ? juce::String() : "; a step stalled > 5 s earlier: " + juce::String::fromUTF8 (before.c_str())) << ")\n";
                         ok = ok && hangOk;
                     }
                     report << "windows opened: " << opened << ", paints: " << painted << "\nresult=" << (ok ? "OK" : "FAIL") << "\n";
@@ -1565,6 +1583,7 @@ private:
                 }
                 fn();
                 lastStep = now();
+                lynx::crashguard::heartbeat();
             }
         };
 
