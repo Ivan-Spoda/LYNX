@@ -50,21 +50,25 @@ References [REF]: 90 fresh takes of 2026-10-24 (her FL session, each through the
 plus 129 phrases from four older projects (TWIN SWAG, kwe, game over, lu), all in `D:\lynx-work\tune157\ref`.
 LYNX renders [RUN] with the same states translated by `PluginSubstitutes` (v0.1.15 release, main, this round).
 
-- Pitch: LYNX Tune is as tight as the trial (median 5.1–5.4 cents from the scale vs 7.4), bands within ±0.5 dB,
+- Pitch: LYNX Tune is as tight as the trial (median 5.1–5.4 cents from the scale vs the trial's 7.4), bands within ±0.5 dB,
   harmonics-to-noise 32.5 dB vs 33.1 (dry 33.9). Not the problem.
 - Artifacts: the audible difference is rough bursts / clicks inside held notes. Counted as spectral-flux bursts that
-  are not in the dry take: trial 29.5 / min, v0.1.15 53 / min, main 50.8 / min. Two causes from a trace of the
-  detector on the worst takes:
-  1. **Voicing dropouts** of 3–35 ms inside sung notes (YIN clarity median 0.77 there, vs 0.42 at real unvoiced
-     sounds). Each switched the shifter to plain overlap-add and back. Fix (`src/core/LynxTune.cpp`): a gap up to
-     35 ms with clarity ≥ 0.7 keeps the last period. → 47.2 / min.
-  2. **Harmonic errors**: on her strong ~870 Hz formant the detector read 1.5×, 2× or 3× f0 for a few frames and the
-     grains shrank. Fix (`src/core/VocalPitch.cpp`, `PitchDetector::setHarmonicGuard`, on in LYNX Tune only): when a
-     dip at m·τ (m = 1.5, 2, 3, 4) is clearly deeper and continues the last voiced period (or, at a note start, is
-     much deeper), the longer period wins. → **40.5 / min** (−20 % vs main), pitch and HNR unchanged.
-- [TEST] `tune_harmonic_guard_holds_the_fundamental_round157` (f0 290 Hz on an 870 Hz formant: no frame on a
-  multiple; round-95 accuracy kept with the guard on), `tune_short_voicing_dropout_is_bridged_round157` (20 ms noisy
-  patch in a flat held note: on target right after it, no level burst).
+  are not in the dry take (all 219 takes, 22.7 minutes of singing): trial 29.8 / min, v0.1.15 45.5 / min.
+- [RUN] Cause, from a trace of the detector on the worst takes: **harmonic errors**. On her strong ~870 Hz formant
+  YIN's first dip under the threshold is a harmonic's, so the detector read 1.5×, 2× or 3× f0 for a few estimates and
+  the PSOLA grains shrank to a fraction of a period (the vertical streaks in v0.1.15's spectrograms, e.g.
+  `ab\lu_i9_c13\spectrogram.png`). Fix (`src/core/VocalPitch.cpp`, `PitchDetector::setHarmonicGuard`, on in LYNX
+  Tune only): a dip at m·τ (m = 1.5, 2, 3, 4) that is clearly deeper (< 0.6× and at least 0.03 below the first dip)
+  wins when it continues the last voiced period, or, at a phrase's start, when it is much deeper (< 0.35×).
+- Result per project (bursts / min, trial · v0.1.15 · round 157): 24-10 session 28.3 · 47.1 · 43.9; TWIN SWAG
+  26.0 · 38.2 · 37.8; kwe 23.8 · 28.6 · 29.3; game over 38.1 · 50.7 · 47.5; lu 27.7 · 50.7 · 42.6. Overall
+  45.5 → **42.3 / min (−7 %)**; pitch accuracy (median 5.3 → 5.1 cents) and harmonics-to-noise unchanged.
+- Tried and dropped [RUN]: bridging 3–35 ms voicing dropouts inside notes (keeping the last period while YIN clarity
+  ≥ 0.7). It helped one session (50.8 → 47.2 / min) but made TWIN SWAG and kwe worse and pitch-marked the start of
+  consonants (round-95 transparency test, −60 dB residual) — not landed.
+- [TEST] `tune_harmonic_guard_holds_the_fundamental_round157`: f0 290 Hz on a narrow 870 Hz formant, no frame on a
+  multiple; the round-95 accuracy (82–700 Hz, three rates, < 1 cent) holds with the guard on; the round-147b range
+  test (a clean 450 Hz tone) needed the 0.03 margin.
 
 ## 4. Listening files
 
@@ -73,9 +77,10 @@ LYNX renders [RUN] with the same states translated by `PluginSubstitutes` (v0.1.
 
 ## Where I stopped
 
-- Landed: dropout bridge, harmonic guard, the Master double-monitoring warning, `--rtstress --log`.
-- Remaining gap to the trial: ~11 bursts / min more, mostly at note onsets with fast scoops and on low notes
-  (180–260 Hz, up to −3 dB there). Next: onset handling of the PSOLA marks; low-note grain size.
+- Landed: harmonic guard, the Master double-monitoring warning, `--rtstress --log`.
+- Remaining gap to the trial: ~12 bursts / min more, mostly at note onsets with fast scoops and the short voicing
+  dropouts (needs a better unvoiced decision than YIN clarity, not a bridge), and on low notes (180–260 Hz, up to
+  −3 dB there). Next: onset handling of the PSOLA marks; low-note grain size.
 - Not done: importing FL's insert input (event 0x9A) into LYNX projects; a warning when a substitute replaces a plugin
   FL would simply skip; `--insert` export still lets master-direct channels through (minor, CLI only).
 - Ask the user: did she hear it while singing (live) or on playback? Which Master input did she set, and why two ASIO
