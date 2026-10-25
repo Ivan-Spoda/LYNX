@@ -1,15 +1,21 @@
 #include "platform/CrashGuard.h"
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <deque>
 #include <mutex>
+#include <thread>
+#include <vector>
 
 #if defined(_WIN32)
  #define WIN32_LEAN_AND_MEAN
  #define NOMINMAX
  #include <windows.h>
+ #include <dbghelp.h>
 #else
  #include <signal.h>
  #include <unistd.h>
@@ -227,5 +233,329 @@ const char* describe (std::uint32_t code) noexcept
         case 0xE06D7363u: case 0x20474343u: return "C++ exception";
         default: return "exception";
     }
+}
+
+// --- module backtraces and the UI hang watch (round 157a) ---------------------------------------------------------
+
+namespace
+{
+#if defined(_WIN32)
+std::string narrow (const wchar_t* w)
+{
+    const auto n = WideCharToMultiByte (CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
+    if (n <= 1)
+        return {};
+    std::string s ((std::size_t) n - 1, '\0');
+    WideCharToMultiByte (CP_UTF8, 0, w, -1, s.data(), n, nullptr, nullptr);
+    return s;
+}
+
+// the nearest exported / public symbol (dbghelp; a release LYNX.exe has none of its own, other modules have exports)
+std::string symbolOf (DWORD64 address)
+{
+    static std::once_flag once;
+    static std::mutex lock;
+    std::call_once (once, [] {
+        SymSetOptions (SymGetOptions() | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+        SymInitialize (GetCurrentProcess(), nullptr, TRUE);
+    });
+    const std::lock_guard<std::mutex> l (lock); // (dbghelp is single-threaded)
+    alignas (SYMBOL_INFO) char buffer[sizeof (SYMBOL_INFO) + 256] = {};
+    auto* info = reinterpret_cast<SYMBOL_INFO*> (buffer);
+    info->SizeOfStruct = sizeof (SYMBOL_INFO);
+    info->MaxNameLen = 255;
+    DWORD64 displacement = 0;
+    if (! SymFromAddr (GetCurrentProcess(), address, &displacement, info))
+        return {};
+    char text[320];
+    std::snprintf (text, sizeof (text), "%s + 0x%llx", info->Name, (unsigned long long) displacement);
+    return text;
+}
+#endif
+
+std::string formatFrames (const std::vector<std::uintptr_t>& frames)
+{
+    std::string text;
+    int index = 0;
+    for (const auto address : frames)
+    {
+        auto line = describeAddress (reinterpret_cast<const void*> (address));
+#if defined(_WIN32)
+        if (const auto symbol = symbolOf ((DWORD64) address); ! symbol.empty())
+            line += "  (" + symbol + ")";
+#endif
+        text += std::to_string (index++) + ": " + (line.empty() ? std::string ("?") : line) + "\n";
+    }
+    return text;
+}
+#if defined(_WIN32) && (defined(_M_X64) || defined(__x86_64__))
+ #define LYNX_UNWIND 1
+// Frames from a thread context, unwound with the modules' own unwind tables (no symbols, no allocation: the thread
+// being sampled may hold the heap lock)
+int unwind (CONTEXT context, std::uintptr_t* frames, int capacity)
+{
+    int count = 0;
+    for (; count < capacity && context.Rip != 0; ++count)
+    {
+        frames[count] = (std::uintptr_t) context.Rip;
+        DWORD64 imageBase = 0;
+        auto* function = RtlLookupFunctionEntry (context.Rip, &imageBase, nullptr);
+        if (function == nullptr)
+        {
+            // a leaf function: the return address is on top of the stack
+            if (context.Rsp == 0 || IsBadReadPtr (reinterpret_cast<void*> (context.Rsp), 8))
+            {
+                ++count;
+                break;
+            }
+            context.Rip = *reinterpret_cast<DWORD64*> (context.Rsp);
+            context.Rsp += 8;
+            continue;
+        }
+        void* handlerData = nullptr;
+        DWORD64 establisher = 0;
+        RtlVirtualUnwind (UNW_FLAG_NHANDLER, imageBase, context.Rip, function, &context, &handlerData, &establisher, nullptr);
+    }
+    return count;
+}
+
+std::vector<std::uintptr_t> sampleThread (HANDLE thread)
+{
+    std::uintptr_t frames[64] = {};
+    int count = 0;
+    if (thread == nullptr || SuspendThread (thread) == (DWORD) -1)
+        return {};
+    CONTEXT context {};
+    context.ContextFlags = CONTEXT_FULL;
+    if (GetThreadContext (thread, &context))
+        count = unwind (context, frames, 64);
+    ResumeThread (thread);
+    return std::vector<std::uintptr_t> (frames, frames + count);
+}
+#elif defined(_WIN32)
+std::vector<std::uintptr_t> sampleThread (HANDLE) { return {}; }
+#endif
+
+} // namespace
+
+std::string describeAddress (const void* address)
+{
+#if defined(_WIN32)
+    HMODULE module = nullptr;
+    if (! GetModuleHandleExW (GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                              static_cast<LPCWSTR> (address), &module) || module == nullptr)
+    {
+        char text[40];
+        std::snprintf (text, sizeof (text), "0x%llx", (unsigned long long) (std::uintptr_t) address);
+        return text;
+    }
+    wchar_t path[MAX_PATH] = {};
+    GetModuleFileNameW (module, path, MAX_PATH);
+    const wchar_t* name = path;
+    for (const wchar_t* c = path; *c != 0; ++c)
+        if (*c == L'\\' || *c == L'/')
+            name = c + 1;
+    char offset[40];
+    std::snprintf (offset, sizeof (offset), "+0x%llx", (unsigned long long) ((std::uintptr_t) address - (std::uintptr_t) module));
+    return narrow (name) + offset;
+#else
+    (void) address;
+    return {};
+#endif
+}
+
+std::string moduleBacktrace (int skip)
+{
+    try
+    {
+#if defined(_WIN32)
+        void* raw[96] = {};
+        const auto n = RtlCaptureStackBackTrace ((DWORD) (skip + 1), 96, raw, nullptr);
+        std::vector<std::uintptr_t> frames;
+        for (USHORT i = 0; i < n; ++i)
+            frames.push_back ((std::uintptr_t) raw[i]);
+        return formatFrames (frames);
+#else
+        (void) skip;
+        return {};
+#endif
+    }
+    catch (...) { return {}; }
+}
+
+std::string exceptionBacktrace (void* exceptionPointers)
+{
+    try
+    {
+#if defined(LYNX_UNWIND)
+        auto* ep = static_cast<EXCEPTION_POINTERS*> (exceptionPointers);
+        if (ep == nullptr || ep->ContextRecord == nullptr)
+            return {};
+        std::string text;
+        if (ep->ExceptionRecord != nullptr)
+        {
+            char head[160];
+            std::snprintf (head, sizeof (head), "exception 0x%08lx (%s) at ", (unsigned long) ep->ExceptionRecord->ExceptionCode,
+                           describe ((std::uint32_t) ep->ExceptionRecord->ExceptionCode));
+            text = head + describeAddress (ep->ExceptionRecord->ExceptionAddress) + "\n";
+        }
+        std::uintptr_t frames[96] = {};
+        const auto n = unwind (*ep->ContextRecord, frames, 96);
+        return text + formatFrames (std::vector<std::uintptr_t> (frames, frames + n));
+#else
+        (void) exceptionPointers;
+        return {};
+#endif
+    }
+    catch (...) { return {}; }
+}
+
+namespace
+{
+struct HangWatch
+{
+    std::mutex lock;
+    std::condition_variable wake;
+    std::thread thread;
+    bool quit = false;
+    std::atomic<std::int64_t> lastBeat { 0 };
+    std::string folder, lastFile;
+    int stallMs = 2000;
+#if defined(_WIN32)
+    HANDLE uiThread = nullptr;
+#endif
+};
+HangWatch& hangWatch()
+{
+    static HangWatch w;
+    return w;
+}
+
+std::int64_t nowMs()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds> (std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+std::string timeStamp (const char* format)
+{
+    char stamp[40] = {};
+    const auto now = std::time (nullptr);
+    if (const auto* t = std::localtime (&now))
+        std::strftime (stamp, sizeof (stamp), format, t);
+    return stamp;
+}
+
+void watchLoop()
+{
+    auto& w = hangWatch();
+    std::int64_t reportedStallStart = -1;
+    int samples = 0;
+    std::string file;
+    for (;;)
+    {
+        {
+            std::unique_lock<std::mutex> l (w.lock);
+            w.wake.wait_for (l, std::chrono::milliseconds (250), [&w] { return w.quit; });
+            if (w.quit)
+                return;
+        }
+        const auto beat = w.lastBeat.load();
+        const auto stalled = nowMs() - beat;
+        if (stalled < w.stallMs)
+        {
+            if (reportedStallStart >= 0)
+            {
+                note ("UI responding again after " + std::to_string ((nowMs() - reportedStallStart) / 1000) + " s");
+                reportedStallStart = -1;
+                samples = 0;
+            }
+            continue;
+        }
+        // a stall: one sample at the start, another later (a loop shows the same frames, a wait another)
+        const bool first = reportedStallStart < 0;
+        if (! first && (samples >= 2 || stalled < 4 * (std::int64_t) w.stallMs))
+            continue;
+        if (first)
+        {
+            reportedStallStart = beat;
+            file = w.folder + "/hang " + timeStamp ("%Y-%m-%d %H-%M-%S") + ".txt";
+        }
+        ++samples;
+        std::string text;
+#if defined(_WIN32)
+        text = formatFrames (sampleThread (w.uiThread));
+#endif
+        const auto header = "LYNX UI thread not responding for " + std::to_string (stalled) + " ms (sample " + std::to_string (samples) + ")\n";
+        if (auto* f = openUtf8 (file, first ? "wb" : "ab"))
+        {
+            const auto all = header + (text.empty() ? std::string ("(no stack on this system)\n") : text) + "\n";
+            std::fwrite (all.data(), 1, all.size(), f);
+            std::fclose (f);
+        }
+        {
+            const std::lock_guard<std::mutex> l (w.lock);
+            w.lastFile = file;
+        }
+        if (first)
+        {
+            const auto slash = file.find_last_of ('/');
+            note ("UI not responding: stack in autosave\\" + file.substr (slash == std::string::npos ? 0 : slash + 1));
+        }
+    }
+}
+} // namespace
+
+void startHangWatch (const std::string& folderUtf8, int stallMs) noexcept
+{
+    try
+    {
+        auto& w = hangWatch();
+        if (w.thread.joinable())
+            return;
+        w.folder = folderUtf8;
+        w.stallMs = stallMs;
+        w.quit = false;
+        w.lastBeat = nowMs();
+#if defined(_WIN32)
+        DuplicateHandle (GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &w.uiThread,
+                         THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, 0);
+#endif
+        w.thread = std::thread (watchLoop);
+    }
+    catch (...) {}
+}
+
+void heartbeat() noexcept
+{
+    hangWatch().lastBeat.store (nowMs());
+}
+
+void stopHangWatch() noexcept
+{
+    try
+    {
+        auto& w = hangWatch();
+        if (! w.thread.joinable())
+            return;
+        {
+            const std::lock_guard<std::mutex> l (w.lock);
+            w.quit = true;
+        }
+        w.wake.notify_all();
+        w.thread.join();
+#if defined(_WIN32)
+        if (w.uiThread != nullptr)
+            CloseHandle (w.uiThread);
+        w.uiThread = nullptr;
+#endif
+    }
+    catch (...) {}
+}
+
+std::string lastHangFile()
+{
+    auto& w = hangWatch();
+    const std::lock_guard<std::mutex> l (w.lock);
+    return w.lastFile;
 }
 } // namespace lynx::crashguard

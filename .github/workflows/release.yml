@@ -185,6 +185,15 @@ jobs:
           Get-Content selftest.txt
           if ($p.ExitCode -ne 0 -or -not (Select-String -Path selftest.txt -Pattern '^result=OK' -Quiet)) { throw "self-test failed (exit $($p.ExitCode))" }
 
+      # every built-in effect / instrument window opened as the mixer and Channel rack open them, with old-project and
+      # random states; fails on a crash or a frozen UI (round 157a: the Parametric EQ froze LYNX when opened)
+      - name: Editor windows test
+        shell: pwsh
+        run: |
+          $p = Start-Process bin\LYNX.exe -ArgumentList '--opentest', "$PWD\opentest.txt" -Wait -PassThru
+          Get-Content opentest.txt -Tail 5
+          if ($p.ExitCode -ne 0 -or -not (Select-String -Path opentest.txt -Pattern '^result=OK' -Quiet)) { Get-Content opentest.txt | Select-String -Pattern 'FAIL|HANG'; throw "editor windows test failed (exit $($p.ExitCode))" }
+
       - name: Portable package and installer
         shell: pwsh
         run: |
@@ -272,6 +281,9 @@ jobs:
           xvfb-run -a "$bin" --selftest "$PWD/selftest.txt" "$PWD/selftest-demo.lynx" || true
           cat selftest.txt
           grep -q '^result=OK' selftest.txt
+          xvfb-run -a "$bin" --opentest "$PWD/opentest.txt" || true
+          tail -3 opentest.txt; grep -E 'FAIL|HANG' opentest.txt || true
+          grep -q '^result=OK' opentest.txt
           xvfb-run -a "$bin" --showcase "$PWD/Demo.lynx" || true
           test -s Demo.lynx
 

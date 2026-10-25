@@ -414,6 +414,7 @@ public:
           plugin (p)
     {
         setUsingNativeTitleBar (true);
+        useClassicRendering();
 
         crashguard::note (("opening the editor of " + plugin.getName()).toStdString()); // session breadcrumb (round 111)
         juce::AudioProcessorEditor* editor = plugin.createEditorIfNeeded();
@@ -430,7 +431,28 @@ public:
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
         keepAboveMainWindow (*this);
+        crashguard::note (("editor shown: " + plugin.getName()).toStdString()); // (its OpenGL / GPU setup runs when shown)
         plugin.addListener (this); // the editor's gestures: Last tweaked, automation recording (REA round 143)
+    }
+
+    // round 157a: the window that holds a third-party editor draws LYNX's few pixels with GDI, not Direct2D (JUCE 8's
+    // default). A plugin's OpenGL child window then sits in a classic redirected top-level window, as in every other
+    // host — a Direct2D / DXGI swap-chain parent is where Intel's OpenGL driver crashed in SetPixelFormat (her
+    // Auto-Tune Pro editor, 2026-10-25). (Re-applied whenever the native window is re-created.)
+    void addToDesktop (int styleFlags, void* nativeWindowToAttachTo) override
+    {
+        DocumentWindow::addToDesktop (styleFlags, nativeWindowToAttachTo);
+        useClassicRendering();
+    }
+
+    void useClassicRendering()
+    {
+        getProperties().set ("lynxGdi", true);
+       #if JUCE_WINDOWS
+        if (auto* peer = getPeer())
+            if (const auto engines = peer->getAvailableRenderingEngines(); engines.size() > 1 && peer->getCurrentRenderingEngine() != 0)
+                peer->setCurrentRenderingEngine (0); // "Software Renderer" (GDI)
+       #endif
     }
 
     ~PluginWindow() override
@@ -598,6 +620,20 @@ juce::PopupMenu pluginProcessingMenu (AudioEngine& engine, const PluginRef& curr
     const auto all = pluginSandboxEnabled();
     menu.addItem (all ? tr ("Run in a separate process (on for all plugins in Options)") : tr ("Run in a separate process"), ! all,
                   all || current.separateProcess, [toggle] { toggle (&PluginRef::separateProcess); });
+    // round 157a: this plugin always in its own process, in every project (e.g. after its editor crashed LYNX)
+    if (! all && ! current.name.empty())
+    {
+        const auto name = juce::String::fromUTF8 (current.name.c_str());
+        const auto always = pluginAlwaysSeparate (name);
+        menu.addItem (tr ("Always run {0} in a separate process", { name }), true, always, [&engine, find, instance, name, always] {
+            if (instance != nullptr)
+                PluginWindows::close (*instance);
+            engine.capturePluginStates();
+            setPluginAlwaysSeparate (name, ! always);
+            // this instance follows at once (a changed option re-creates it); others when their project opens
+            engine.editSong ([find, on = ! always] (Song& song) { if (auto* ref = find (song)) ref->separateProcess = on; });
+        });
+    }
     // FL's "Allow threaded processing" (on by default): off keeps this plugin on the audio thread itself, for plugins
     // that misbehave when called from several threads. Nothing is re-created.
     menu.addItem (tr ("Allow threaded processing"), true, current.threaded, [&engine, find] {

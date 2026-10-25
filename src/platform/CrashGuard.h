@@ -49,4 +49,26 @@ bool processRunning (std::uint32_t pid, std::uint64_t startTime) noexcept;
 
 // Short English description of an exception code ("access violation", ...), or "exception".
 const char* describe (std::uint32_t code) noexcept;
+
+// The calling thread's stack as "module+0xoffset" lines, every frame (round 157a): JUCE's backtrace leaves out frames
+// it has no symbol for — every frame of a release LYNX.exe — so a crash file could not say where LYNX was. With the
+// build's map / PDB the offsets give the functions. Empty where not supported.
+std::string moduleBacktrace (int skip = 0);
+// The faulting thread's frames from a crash handler's exception pointers (Windows: EXCEPTION_POINTERS*, what JUCE's
+// crash handler receives), with the exception code and address on top; "" where not supported
+std::string exceptionBacktrace (void* exceptionPointers);
+// "module+0xoffset" of one code address ("" when unknown)
+std::string describeAddress (const void* address);
+
+// UI hang watch (round 157a). A frozen message thread leaves no crash file: Windows shows "not responding" and the
+// user closes LYNX. startHangWatch (on the message thread) starts a watcher thread; heartbeat() (the message thread,
+// from a timer, several times a second) proves the UI is alive. When no heartbeat arrives for `stallMs`, the watcher
+// samples the message thread's stack (Windows x64: suspended for a moment, unwound without symbols), writes it to
+// `folderUtf8`/hang <time>.txt and adds a session step ("UI not responding ..."); a second sample follows if the stall
+// lasts, and "UI responding again after N s" when it ends. stopHangWatch ends the thread (before quitting).
+void startHangWatch (const std::string& folderUtf8, int stallMs = 2000) noexcept;
+void heartbeat() noexcept;
+void stopHangWatch() noexcept;
+// Test: the last hang file written by this process ("" when none)
+std::string lastHangFile();
 } // namespace lynx::crashguard

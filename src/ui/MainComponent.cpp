@@ -3295,6 +3295,7 @@ void MainComponent::openSettings (int page)
         o.waveSpectral = ui::WaveformCache::spectral;
         o.waveStereo = ui::WaveformCache::stereo;
         o.reducedEffects = skin::reducedEffects();
+        o.gpuRendering = gpuRenderingEnabled();
         o.pluginStyle = skin::forcedStyle();
         o.splash = safe->startup.splash;
         o.startupSound = safe->startup.sound;
@@ -3328,6 +3329,8 @@ void MainComponent::openSettings (int page)
             for (int i = 0; i < juce::Desktop::getInstance().getNumComponents(); ++i) // open editors redraw at once
                 if (auto* c = juce::Desktop::getInstance().getComponent (i)) c->repaint();
         }
+        if (o.gpuRendering != gpuRenderingEnabled())
+            setGpuRenderingEnabled (o.gpuRendering);
         if (o.waveSpectral != ui::WaveformCache::spectral || o.waveStereo != ui::WaveformCache::stereo)
         {
             ui::WaveformCache::spectral = o.waveSpectral;

@@ -30,6 +30,34 @@ void setPluginSandboxEnabled (bool enabled)
 
 namespace
 {
+juce::File separateListFile() { return PluginHost::settingsFolder().getChildFile ("separate-process.txt"); }
+juce::StringArray separateList()
+{
+    auto lines = juce::StringArray::fromLines (separateListFile().loadFileAsString());
+    lines.trim();
+    lines.removeEmptyStrings();
+    return lines;
+}
+} // namespace
+
+bool pluginAlwaysSeparate (const juce::String& name)
+{
+    return name.isNotEmpty() && separateList().contains (name.trim(), true);
+}
+
+void setPluginAlwaysSeparate (const juce::String& name, bool on)
+{
+    if (name.trim().isEmpty())
+        return;
+    auto list = separateList();
+    list.removeString (name.trim(), true);
+    if (on)
+        list.add (name.trim());
+    separateListFile().replaceWithText (list.joinIntoString ("\n") + (list.isEmpty() ? "" : "\n"));
+}
+
+namespace
+{
 std::atomic<bool> showAlerts { true };
 
 int processTag()
