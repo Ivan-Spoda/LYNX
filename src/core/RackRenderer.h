@@ -153,7 +153,7 @@ struct RackState
     using PluginEffectFactory = std::function<std::shared_ptr<Effect> (const PluginRef&, double sampleRate)>;
 
     // Sample stretched without changing pitch (ratio = new / original duration); cached in the app.
-    using StretchedSampleProvider = std::function<std::shared_ptr<const SampleData> (const std::string& path, double ratio)>;
+    using StretchedSampleProvider = std::function<std::shared_ptr<const SampleData> (const std::string& path, double ratio, StretchMethod method)>;
 
     struct Factories
     {

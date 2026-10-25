@@ -482,6 +482,9 @@ countries: br
 "0 = off. Otherwise the whole sample lasts this many beats and follows the BPM (by resampling, like FL's Resample mode)" = "0 = desligado. Caso contrário, o sample inteiro dura essa quantidade de beats e segue o BPM (por reamostragem, como o modo Resample do FL)"
 "0 = the whole sample plays (one-shot), like FL's steps" = "0 = o sample toca inteiro (one-shot), como nos steps do FL"
 "Stretch keeping pitch" = "Stretch mantendo o pitch"
+"Drums / transients" = "Bateria / transientes"
+"Vocal / mono" = "Voz / mono"
+"How the stretch keeping pitch is computed: General for full mixes and chords, Drums for loops and percussive sounds (attacks kept sharp), Vocal for a single voice or instrument" = "Como o stretch mantendo o pitch é calculado: Geral para mixes completas e acordes, Bateria para loops e sons percussivos (ataques nítidos), Voz para uma única voz ou instrumento"
 "With \"Stretch\": changes the length without changing the pitch (like FL's Stretch modes)" = "Com \"Stretch\": muda a duração sem mudar o pitch (como os modos Stretch do FL)"
 "Reverse" = "Reverso"
 "Cut itself" = "Corta a si mesmo"
@@ -4449,6 +4452,7 @@ countries: br
 "No" = "Não"
 "The crash was in the graphics driver ({0}). LYNX now draws its windows without the GPU; you can turn GPU rendering back on in Options > General settings (after a driver update, for example)." = "A falha foi no driver de vídeo ({0}). Agora o LYNX desenha as janelas sem a GPU; você pode religar a renderização pela GPU em Opções > Configurações gerais (depois de atualizar o driver, por exemplo)."
 "Draw with the GPU (Direct2D). Turn off if LYNX crashes in the graphics driver or the screen flickers" = "Desenhar com a GPU (Direct2D). Desligue se o LYNX travar no driver de vídeo ou a tela piscar"
+"Tip: Windows Audio (shared) drops out more easily; choose the ASIO driver \"{0}\" in Options > Audio settings." = "Dica: o Windows Audio (compartilhado) falha com mais facilidade; escolha o driver ASIO \"{0}\" em Opções > Configurações de áudio."
 
 # LYNX Soundfont (round 158, issue #6)
 "Mod wheel" = "Roda de modulação"

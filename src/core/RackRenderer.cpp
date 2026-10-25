@@ -183,7 +183,7 @@ std::shared_ptr<Instrument> buildInstrument (const ChannelDef& channel, double s
         const auto target = channel.sampler.stretchBeats * 60.0 / std::max (1.0, bpm);
         const auto ratio = target / ((double) sample->frames() / sample->sampleRate);
 
-        if (auto stretched = factories.stretchedSamples (channel.samplePath, ratio))
+        if (auto stretched = factories.stretchedSamples (channel.samplePath, ratio, channel.sampler.stretchMethod))
             sample = std::move (stretched);
     }
 
@@ -282,6 +282,7 @@ std::unique_ptr<const RackState> RackState::build (Song song,
                     && previous->song.channels[i].sampler.keepPitch == channel.sampler.keepPitch
                     && (! channel.sampler.keepPitch
                         || (previous->song.channels[i].sampler.stretchBeats == channel.sampler.stretchBeats
+                            && previous->song.channels[i].sampler.stretchMethod == channel.sampler.stretchMethod
                             && previous->song.bpm == song.bpm))))
             && (kind != InstrumentKind::plugin
                 || (previous->song.channels[i].plugin.id == channel.plugin.id && previous->sampleRate == sampleRate

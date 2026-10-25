@@ -3295,14 +3295,14 @@ TEST (flp_paths_resolve_and_samplers_import)
     CHECK (s.channels[1].instrument == lynx::InstrumentKind::hat); // no file: built-in instrument
 }
 
-TEST (soft_clip_is_transparent_below_knee_and_bounded)
+TEST (output_protection_is_transparent_up_to_full_scale)
 {
-    float s[] = { 0.5f, -0.89f, 1.5f, -3.0f, 0.95f };
-    lynx::softClip (s, 5);
-    CHECK (s[0] == 0.5f && s[1] == -0.89f);
-    CHECK (s[2] > 0.9f && s[2] <= 1.0f);
-    CHECK (s[3] < -0.9f && s[3] >= -1.0f);
-    CHECK (s[4] > 0.9f && s[4] < 0.95f);
+    // round 160: no more soft knee at 0.9 — FL leaves the mix untouched up to 0 dBFS
+    float s[] = { 0.5f, -0.89f, 1.5f, -3.0f, 0.95f, 0.999f, std::nanf (""), -1.0f };
+    lynx::clipOvers (s, 8);
+    CHECK (s[0] == 0.5f && s[1] == -0.89f && s[4] == 0.95f && s[5] == 0.999f && s[7] == -1.0f);
+    CHECK (s[2] == 1.0f && s[3] == -1.0f);
+    CHECK (s[6] == 0.0f);
 }
 
 TEST (song_scheduler_plays_clips_with_offset_and_cut)
@@ -5280,7 +5280,7 @@ TEST (dither_quantizes_to_lsb_grid_with_small_error)
     bool onGrid = true;
     for (std::size_t i = 0; i < x.size(); ++i)
     {
-        const auto steps = y[i] * 32768.0f;
+        const auto steps = (y[i] - d.writerBias()) * 32768.0f; // half an LSB above the grid point (round 160)
         onGrid = onGrid && std::abs (steps - std::round (steps)) < 1e-3f;
         errorSum += std::abs (y[i] - x[i]);
     }
@@ -15994,4 +15994,5 @@ TEST (fl_low_lifter_matches_fl_engine)
 #include "HwOut156Tests.inc"
 #include "SoundFont158Tests.inc"
 #include "Mp3157Tests.inc"
+#include "Quality160Tests.inc"
 #include "CrashReport159Tests.inc"

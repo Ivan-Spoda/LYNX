@@ -381,6 +381,8 @@ public:
         // processed and thrown away before the render until the plugins have settled
         bool pluginWarmUp = true;
         warmup::Settings warmUp;
+        // false: samples above 0 dBFS are clamped to ±1 before the dither / the file (integer formats, Ogg)
+        bool keepOvers = false;
     };
 
     float renderOffline (const RenderOptions& options);

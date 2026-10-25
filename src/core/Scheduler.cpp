@@ -15,12 +15,25 @@ void EventBuffer::add (const NoteEvent& e) noexcept
 
 void EventBuffer::sortByOffset() noexcept
 {
-    // "off" before "on" on the same sample, so a repeated note isn't cut
-    std::stable_sort (events.begin(), events.begin() + count, [] (const NoteEvent& a, const NoteEvent& b) {
+    // "off" before "on" on the same sample, so a repeated note isn't cut. A stable insertion sort in place: this runs
+    // on the audio thread for every block with events, and std::stable_sort allocates a temporary buffer (round 160);
+    // the events arrive nearly in order, so it is close to linear.
+    const auto before = [] (const NoteEvent& a, const NoteEvent& b) {
         if (a.sampleOffset != b.sampleOffset)
             return a.sampleOffset < b.sampleOffset;
         return a.type != NoteEvent::Type::on && b.type == NoteEvent::Type::on;
-    });
+    };
+    for (int i = 1; i < count; ++i)
+    {
+        const auto e = events[(std::size_t) i];
+        auto j = i;
+        while (j > 0 && before (e, events[(std::size_t) j - 1]))
+        {
+            events[(std::size_t) j] = events[(std::size_t) j - 1];
+            --j;
+        }
+        events[(std::size_t) j] = e;
+    }
 }
 
 namespace

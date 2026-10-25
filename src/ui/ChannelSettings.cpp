@@ -1548,6 +1548,13 @@ public:
         keepPitch.onClick = [this] { apply(); };
         addAndMakeVisible (keepPitch);
 
+        stretchMethod.addItem (tr ("General"), 1);
+        stretchMethod.addItem (tr ("Drums / transients"), 2);
+        stretchMethod.addItem (tr ("Vocal / mono"), 3);
+        stretchMethod.setTooltip (tr ("How the stretch keeping pitch is computed: General for full mixes and chords, Drums for loops and percussive sounds (attacks kept sharp), Vocal for a single voice or instrument"));
+        stretchMethod.onChange = [this] { apply(); };
+        addAndMakeVisible (stretchMethod);
+
         reverse.setButtonText (tr ("Reverse"));
         cut.setButtonText (tr ("Cut itself"));
         porta.setButtonText ("Porta");
@@ -1597,7 +1604,9 @@ public:
                 label->setBounds (column.removeFromTop (18));
                 slider->setBounds (column);
             }
-            keepPitch.setBounds (top.withSizeKeepingCentre (juce::jmin (top.getWidth(), 130), 40));
+            auto column = top.withSizeKeepingCentre (juce::jmin (top.getWidth(), 140), juce::jmin (top.getHeight(), 64));
+            keepPitch.setBounds (column.removeFromTop (column.getHeight() / 2));
+            stretchMethod.setBounds (column.withSizeKeepingCentre (column.getWidth(), juce::jmin (column.getHeight(), 24)));
         }
         area.removeFromTop (6);
         auto envelope = area.removeFromTop (110);
@@ -1661,6 +1670,8 @@ private:
             sustain.setValue (c->sampler.sustain, juce::dontSendNotification);
             stretch.setValue (c->sampler.stretchBeats, juce::dontSendNotification);
             keepPitch.setToggleState (c->sampler.keepPitch, juce::dontSendNotification);
+            stretchMethod.setSelectedId ((int) c->sampler.stretchMethod + 1, juce::dontSendNotification);
+            stretchMethod.setEnabled (c->sampler.keepPitch);
             regionStart.setValue (c->sampler.regionStart, juce::dontSendNotification);
             regionEnd.setValue (c->sampler.regionEnd, juce::dontSendNotification);
             cutoff.setValue (c->sampler.cutoff, juce::dontSendNotification);
@@ -1696,6 +1707,8 @@ private:
         s.sustain = (float) sustain.getValue();
         s.stretchBeats = (float) stretch.getValue();
         s.keepPitch = keepPitch.getToggleState();
+        s.stretchMethod = (StretchMethod) juce::jlimit (0, 2, stretchMethod.getSelectedId() - 1);
+        stretchMethod.setEnabled (s.keepPitch);
         s.regionStart = (float) regionStart.getValue();
         s.regionEnd = (float) regionEnd.getValue();
         s.release = (float) release.getValue();
@@ -1744,7 +1757,7 @@ private:
     juce::Label pitchLabel, gainLabel, attackLabel, releaseLabel, decayLabel, sustainLabel, stretchLabel, regionStartLabel, regionEndLabel,
         cutoffLabel, resonanceLabel;
     juce::ToggleButton reverse, cut, keepPitch, porta;
-    juce::ComboBox filterType;
+    juce::ComboBox filterType, stretchMethod;
     juce::TextButton modulationButton;
     ui::WaveformDisplay wave;
 };

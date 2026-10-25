@@ -2,6 +2,9 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include <array>
+
+#include "core/FlResampler.h"
 #include "core/Instruments.h"
 
 namespace lynx
@@ -52,6 +55,8 @@ private:
     std::shared_ptr<const SampleData> retired;  // released by the UI (audio never deallocates)
     double position = 0.0;
     double deviceRate = 44100.0;
+    flrs::Kernel kernel;                       // FL's sampler interpolation (audio thread)
+    std::array<float, 1024> tapL {}, tapR {};  // taps at the edges / around a loop
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PreviewPlayer)
 };

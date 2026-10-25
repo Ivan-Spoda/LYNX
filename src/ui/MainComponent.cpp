@@ -8,6 +8,7 @@
 #include "platform/Paths.h"
 #include "ui/SetupWizard.h"
 #include "core/FlPluginDb.h"
+#include "core/Preferences.h"
 
 #include "core/EditorPolish.h"
 
@@ -2570,6 +2571,17 @@ void MainComponent::timerCallback()
         auto* device = engine.getDeviceManager().getCurrentAudioDevice();
         perfMeter.setRealtime (rt.overBudget, rt.lateCalls, engine.getRtStats().takeWindowMaxLoad(), heaviest,
                                device != nullptr ? device->getXRunCount() : -1);
+        // dropouts on Windows shared mode: suggest the interface's ASIO driver (round 160), worked out once per device type
+        if (device != nullptr && (rt.overBudget > 0 || rt.lateCalls > 0) && device->getTypeName() != driverTipType)
+        {
+            driverTipType = device->getTypeName();
+            std::vector<std::string> asio;
+            for (auto* type : engine.getDeviceManager().getAvailableDeviceTypes())
+                if (type->getTypeName() == "ASIO")
+                    for (const auto& name : type->getDeviceNames())
+                        asio.push_back (name.toStdString());
+            perfMeter.setDriverTip (juce::String::fromUTF8 (prefs::suggestedAsioDriver (driverTipType.toStdString(), asio).c_str()));
+        }
     }
 
     if (++midiInputTicks % 30 == 1) // the open MIDI inputs, once a second

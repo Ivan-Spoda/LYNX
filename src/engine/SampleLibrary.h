@@ -25,8 +25,8 @@ public:
     // The file changed on disk (the audio editor saved over it): the next load() reads it again.
     void forget (const juce::String& path);
 
-    // The sample time-stretched without changing pitch (WSOLA), cached by (path, ratio).
-    std::shared_ptr<const SampleData> loadStretched (const juce::String& path, double ratio);
+    // The sample time-stretched without changing pitch (core/TimeStretch), cached by (path, ratio, method).
+    std::shared_ptr<const SampleData> loadStretched (const juce::String& path, double ratio, StretchMethod method = StretchMethod::general);
 
     // Above this, audio goes to a memory-mapped disk cache instead of staying entirely
     // in RAM ("disk streaming"). The cache is reused across sessions.

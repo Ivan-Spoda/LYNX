@@ -15,6 +15,7 @@
 #include "core/FlpImport.h"
 #include "core/LoadTrace.h"
 #include "core/Instruments.h"
+#include "core/Denormals.h"
 #include "core/Dither.h"
 #include "core/ProjectSafety.h"
 #include "core/SoftClip.h"
@@ -341,8 +342,9 @@ float AudioEngine::renderOffline (const RenderOptions& options)
         const auto afterGraph = juce::Time::getMillisecondCounterHiRes();
         lastRenderStats.graphMs += afterGraph - before;
 
-        for (int ch = 0; ch < view.getNumChannels(); ++ch)
-            softClip (view.getWritePointer (ch), n);
+        if (! options.keepOvers) // float WAV and the buffered export (normalize) keep what goes above 0 dBFS, like FL
+            for (int ch = 0; ch < view.getNumChannels(); ++ch)
+                clipOvers (view.getWritePointer (ch), n);
 
         const auto blockPeak = view.getMagnitude (0, n);
         peak = juce::jmax (peak, blockPeak);
@@ -1754,6 +1756,7 @@ void AudioEngine::prepareFlpImport (const juce::File& file, const std::map<std::
         {
             std::string path;
             double ratio;
+            StretchMethod method;
         };
         std::vector<Stretch> stretches;
         for (const auto& c : out.song.channels)
@@ -1763,8 +1766,9 @@ void AudioEngine::prepareFlpImport (const juce::File& file, const std::map<std::
                 {
                     const auto target = c.sampler.stretchBeats * 60.0 / std::max (1.0, out.song.bpm);
                     const auto ratio = target / ((double) data->frames() / data->sampleRate);
-                    if (std::none_of (stretches.begin(), stretches.end(), [&] (const Stretch& x) { return x.path == c.samplePath && x.ratio == ratio; }))
-                        stretches.push_back ({ c.samplePath, ratio });
+                    const auto method = c.sampler.stretchMethod;
+                    if (std::none_of (stretches.begin(), stretches.end(), [&] (const Stretch& x) { return x.path == c.samplePath && x.ratio == ratio && x.method == method; }))
+                        stretches.push_back ({ c.samplePath, ratio, method });
                 }
         if (! stretches.empty())
         {
@@ -1772,7 +1776,7 @@ void AudioEngine::prepareFlpImport (const juce::File& file, const std::map<std::
             std::atomic<std::size_t> nextStretch { 0 };
             auto stretchWorker = [&] {
                 for (auto i = nextStretch++; i < stretches.size(); i = nextStretch++)
-                    library.loadStretched (juce::String::fromUTF8 (stretches[i].path.c_str()), stretches[i].ratio);
+                    library.loadStretched (juce::String::fromUTF8 (stretches[i].path.c_str()), stretches[i].ratio, stretches[i].method);
             };
             std::vector<std::thread> helpers;
             for (std::size_t i = 1; i < juce::jmin (threads, stretches.size()); ++i)
@@ -2007,9 +2011,9 @@ void AudioEngine::publishSong()
         const loadtrace::Scope timing ("rack_samples");
         return samples.load (juce::String::fromUTF8 (path.c_str()));
     };
-    factories.stretchedSamples = [this] (const std::string& path, double ratio) {
+    factories.stretchedSamples = [this] (const std::string& path, double ratio, StretchMethod method) {
         const loadtrace::Scope timing ("rack_stretch");
-        return samples.loadStretched (juce::String::fromUTF8 (path.c_str()), ratio);
+        return samples.loadStretched (juce::String::fromUTF8 (path.c_str()), ratio, method);
     };
     factories.pluginInstruments = [this] (const PluginRef& ref, double sr) { return plugins.makeInstrument (ref, sr); };
     factories.pluginEffects = [this] (const PluginRef& ref, double sr) { return plugins.makeEffect (ref, sr); };
@@ -2667,6 +2671,9 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
                                                     int numSamples,
                                                     const juce::AudioIODeviceCallbackContext& context)
 {
+    // FTZ/DAZ for the whole callback (round 160): the rack had it, but the metronome, the preview player and the
+    // hosted plugins' graph nodes around it ran without
+    const ScopedFlushDenormals noDenormals;
     // real-time health: how long this callback took against its deadline (the buffer's duration)
     const auto callbackStart = juce::Time::getMillisecondCounterHiRes();
     struct Measure
@@ -2784,7 +2791,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
 
         for (int ch = 0; ch < numOutputChannels; ++ch)
             if (outputs[(std::size_t) ch] != nullptr)
-                softClip (outputs[(std::size_t) ch], n);
+                clipOvers (outputs[(std::size_t) ch], n);
 
         // oscilloscope: average of both sides into the ring buffer
         if (numOutputChannels > 0 && outputs[0] != nullptr)

@@ -132,6 +132,31 @@ double bufferLatencyMs (int bufferSamples, double sampleRate)
     return sampleRate > 0.0 ? 1000.0 * bufferSamples / sampleRate : 0.0;
 }
 
+std::string suggestedAsioDriver (const std::string& currentTypeName, const std::vector<std::string>& asioDevices)
+{
+    const auto kind = driverKind (currentTypeName);
+    if ((kind != DriverKind::wasapiShared && kind != DriverKind::wasapiLowLatency && kind != DriverKind::directSound) || asioDevices.empty())
+        return {};
+
+    const auto lower = [] (std::string t) {
+        for (auto& c : t)
+            c = (char) std::tolower ((unsigned char) c);
+        return t;
+    };
+    const auto isWrapper = [&] (const std::string& name) {
+        const auto n = lower (name);
+        return n.find ("asio4all") != std::string::npos || n.find ("fl studio asio") != std::string::npos
+               || n.find ("generic low latency") != std::string::npos || n.find ("lynx") != std::string::npos;
+    };
+    for (const auto& d : asioDevices)
+        if (! isWrapper (d))
+            return d;
+    for (const auto& d : asioDevices)
+        if (lower (d).find ("lynx") != std::string::npos)
+            return d;
+    return asioDevices.front();
+}
+
 DriverKind driverKind (const std::string& typeName)
 {
     if (typeName == "Windows Audio")

@@ -71,6 +71,12 @@ DriverKind driverKind (const std::string& typeName);
 // lower the latency and only risk clicks. Other kinds (low-latency mode lists real engine periods): `offered` unchanged.
 std::vector<int> usableBufferSizes (DriverKind kind, const std::vector<int>& offered, int devicePeriod);
 
+// After dropouts on a Windows shared-mode or DirectSound device (round 160): the ASIO driver worth suggesting, from the
+// ASIO type's device names. The interface's own driver first (e.g. "SSL ASIO Driver 1"), then LYNX ASIO, then any;
+// wrappers (ASIO4ALL, FL Studio ASIO, Generic Low Latency) only when nothing else is there. Empty when the current
+// type already is ASIO / exclusive / not Windows, or no ASIO driver exists.
+std::string suggestedAsioDriver (const std::string& currentTypeName, const std::vector<std::string>& asioDevices);
+
 // --- MIDI (MIDI page) -------------------------------------------------------------------------------------------
 // How a played note's velocity reaches the instrument.
 enum class VelocityCurve

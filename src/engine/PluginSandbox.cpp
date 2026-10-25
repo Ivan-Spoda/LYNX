@@ -7,6 +7,7 @@
 
 #include <juce_gui_extra/juce_gui_extra.h>
 
+#include "core/Denormals.h"
 #include "engine/PluginHost.h"
 #include "ui/I18n.h"
 #include "ui/Theme.h"
@@ -658,6 +659,8 @@ private:
 
     void run() override
     {
+        // the sandbox's audio thread gets the same FTZ/DAZ as LYNX's own audio threads (round 160: it had none)
+        const lynx::ScopedFlushDenormals noDenormals;
         while (! threadShouldExit())
         {
             if (WaitForSingleObject (request, 100) != WAIT_OBJECT_0)

@@ -1651,7 +1651,9 @@ public:
         // FL's read speed: the rate ratio at the original pitch, else exp(cents·ln2/1200)·ratio
         target->rate = stretched ? base : flrs::speedFor ((float) (semitones * 100.0), base);
         target->reversed = backwards;
-        target->kernel.setQuality (quality);
+        // the render quality is read at each note (round 160): the export engine prepares its instruments before it
+        // switches to offline rendering, so a value taken in prepare() kept the playback quality in most exports
+        target->kernel.setQuality (offlineRendering() ? flrs::renderQuality : quality);
 
         // portamento (channel porta, inverted by the note): starts from the previous note's pitch
         if (! clipMode && (porta.load() != nextPorta) && lastRate != 0.0 && ! stretched)
